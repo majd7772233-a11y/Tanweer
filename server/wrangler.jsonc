@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tanweer-backend",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tanweer-db",
+      "database_id": "TANWEER_D1_DATABASE_ID",
+      "migrations_dir": "src/db/migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT",
+        "class_name": "GroupChatDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GroupChatDO"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
