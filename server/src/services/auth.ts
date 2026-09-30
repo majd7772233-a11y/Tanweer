@@ -1,10 +1,15 @@
 import { Env } from '../env';
-import { hashString, generateRecoveryCode, generateRandomToken } from '../lib/crypto';
+import { hashPassword, verifyPassword, hashString, generateRecoveryCode, generateRandomToken } from '../lib/crypto';
 import { generateId } from '../lib/ids';
 import { validateArabicFullName, validateYemenPhoneNumber, evaluatePasswordStrength, isValidGradeSection } from '../lib/validation';
 import { errorResponse, jsonResponse } from '../lib/response';
 
 export async function handleRegister(request: Request, env: Env): Promise<Response> {
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح التشفير السري غير مهيأ في الخادم', 500);
+  }
+
   const body = await request.json() as {
     phoneNumber?: string;
     password?: string;
@@ -52,9 +57,9 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
 
   const userId = generateId('user');
   const now = Date.now();
-  const passwordHash = await hashString(body.password, env.SESSION_PEPPER || 'tanweer-pepper');
+  const { hash: passwordHash } = await hashPassword(body.password, pepper);
   const recoveryCode = generateRecoveryCode();
-  const recoveryCodeHash = await hashString(recoveryCode.replace(/[\s\-]/g, '').toUpperCase(), env.SESSION_PEPPER || 'tanweer-pepper');
+  const recoveryCodeHash = await hashString(recoveryCode.replace(/[\s\-]/g, '').toUpperCase(), pepper);
 
   await env.DB.prepare(
     `INSERT INTO users (id, phone_number, password_hash, full_name, grade_id, section_id, email, recovery_code_hash, role, last_seen, created_at, updated_at)
@@ -99,9 +104,8 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
      VALUES (?, ?, 'MEMBER', 'ACTIVE', ?)`
   ).bind(classGroupId, userId, now).run();
 
-  // Create Session Token
   const token = generateRandomToken();
-  const tokenHash = await hashString(token, env.SESSION_PEPPER || 'tanweer-pepper');
+  const tokenHash = await hashString(token, pepper);
   const sessionId = generateId('sess');
   const deviceId = body.deviceId || generateId('dev');
   const expiresAt = now + 90 * 24 * 3600 * 1000;
@@ -128,6 +132,11 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
 }
 
 export async function handleLogin(request: Request, env: Env): Promise<Response> {
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح التشفير السري غير مهيأ في الخادم', 500);
+  }
+
   const body = await request.json() as {
     phoneNumber?: string;
     password?: string;
@@ -141,7 +150,6 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
 
   const phoneVal = validateYemenPhoneNumber(body.phoneNumber);
   const normalizedPhone = phoneVal.isValid ? phoneVal.normalized : body.phoneNumber.trim();
-  const passwordHash = await hashString(body.password, env.SESSION_PEPPER || 'tanweer-pepper');
 
   const user = await env.DB.prepare(
     `SELECT id, phone_number, full_name, grade_id, section_id, role, password_hash
@@ -156,15 +164,26 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
     password_hash: string;
   }>();
 
-  if (!user || user.password_hash !== passwordHash) {
+  if (!user) {
     return errorResponse('INVALID_CREDENTIALS', 'رقم الهاتف أو كلمة المرور غير صحيحة');
+  }
+
+  const isPasswordValid = await verifyPassword(body.password, user.password_hash, pepper);
+  if (!isPasswordValid) {
+    return errorResponse('INVALID_CREDENTIALS', 'رقم الهاتف أو كلمة المرور غير صحيحة');
+  }
+
+  // Transparently upgrade legacy SHA-256 hash to PBKDF2
+  if (!user.password_hash.startsWith('pbkdf2$')) {
+    const { hash: newPbkdf2Hash } = await hashPassword(body.password, pepper);
+    await env.DB.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).bind(newPbkdf2Hash, user.id).run();
   }
 
   const now = Date.now();
   await env.DB.prepare(`UPDATE users SET last_seen = ? WHERE id = ?`).bind(now, user.id).run();
 
   const token = generateRandomToken();
-  const tokenHash = await hashString(token, env.SESSION_PEPPER || 'tanweer-pepper');
+  const tokenHash = await hashString(token, pepper);
   const sessionId = generateId('sess');
   const deviceId = body.deviceId || generateId('dev');
   const expiresAt = now + 90 * 24 * 3600 * 1000;
@@ -192,6 +211,11 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
 }
 
 export async function handleLoginWithRecoveryCode(request: Request, env: Env): Promise<Response> {
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح التشفير السري غير مهيأ في الخادم', 500);
+  }
+
   const body = await request.json() as {
     recoveryCode?: string;
     deviceId?: string;
@@ -202,7 +226,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
   }
 
   const cleanCode = body.recoveryCode.replace(/[\s\-]/g, '').toUpperCase();
-  const recoveryHash = await hashString(cleanCode, env.SESSION_PEPPER || 'tanweer-pepper');
+  const recoveryHash = await hashString(cleanCode, pepper);
 
   const user = await env.DB.prepare(
     `SELECT id, phone_number, full_name, grade_id, section_id, role
@@ -224,7 +248,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
   await env.DB.prepare(`UPDATE users SET last_seen = ? WHERE id = ?`).bind(now, user.id).run();
 
   const token = generateRandomToken();
-  const tokenHash = await hashString(token, env.SESSION_PEPPER || 'tanweer-pepper');
+  const tokenHash = await hashString(token, pepper);
   const sessionId = generateId('sess');
   const deviceId = body.deviceId || generateId('dev');
   const expiresAt = now + 90 * 24 * 3600 * 1000;

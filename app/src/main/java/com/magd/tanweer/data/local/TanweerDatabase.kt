@@ -18,9 +18,13 @@ import androidx.room.RoomDatabase
         IssueEntity::class,
         IssueCommentEntity::class,
         BookEntity::class,
-        ChatMessageEntity::class
+        ChatMessageEntity::class,
+        BookReadingStateEntity::class,
+        BookBookmarkEntity::class,
+        BookNoteEntity::class,
+        BookVocabularyEntity::class
     ],
-    version = 2,
+    version = 5,
     exportSchema = false
 )
 abstract class TanweerDatabase : RoomDatabase() {
@@ -34,6 +38,7 @@ abstract class TanweerDatabase : RoomDatabase() {
     abstract fun issueDao(): IssueDao
     abstract fun bookDao(): BookDao
     abstract fun chatDao(): ChatDao
+    abstract fun bookReadingDao(): BookReadingDao
 
     companion object {
         @Volatile

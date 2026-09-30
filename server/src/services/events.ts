@@ -1,8 +1,13 @@
 import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
+import { mapSchoolEvent } from '../lib/mappers';
+import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 
-export async function handleGetEvents(groupId: string, env: Env): Promise<Response> {
+export async function handleGetEvents(groupId: string, user: UserContext, env: Env): Promise<Response> {
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
+
   const events = await env.DB.prepare(
     `SELECT id, group_id, event_date, time_str, title, description, category, location, created_at
      FROM events
@@ -12,7 +17,7 @@ export async function handleGetEvents(groupId: string, env: Env): Promise<Respon
 
   return jsonResponse({
     success: true,
-    events: events.results,
+    events: (events.results || []).map(mapSchoolEvent),
   });
 }
 
@@ -30,6 +35,9 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
   if (!body.groupId || !body.eventDate || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد عنوان الحدث وتاريخه');
   }
+
+  const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
+  if (memberCheck) return memberCheck;
 
   const eventId = generateId('evt');
   await env.DB.prepare(
@@ -51,6 +59,6 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
   return jsonResponse({
     success: true,
     eventId,
-    message: 'تم إضافة الحدث بنجاح',
+    message: 'تمت إضافة الحدث بنجاح',
   });
 }

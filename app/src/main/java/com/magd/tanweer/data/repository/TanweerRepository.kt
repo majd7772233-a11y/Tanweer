@@ -15,6 +15,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
 
 sealed class SyncResult {
     data class Success(val count: Int = 0) : SyncResult()
@@ -973,7 +976,8 @@ class TanweerRepository(
                     subjectName = it.subjectName,
                     subjectIcon = it.subjectIcon,
                     colorHex = it.colorHex,
-                    media = parseMediaJson(it.mediaUrlsJson)
+                    media = parseMediaJson(it.mediaUrlsJson),
+                    syncStatus = it.syncStatus
                 )
             }
         }
@@ -1004,7 +1008,8 @@ class TanweerRepository(
                         subjectIcon = it.subjectIcon,
                         colorHex = it.colorHex,
                         isCompleted = completedIds.contains(it.id),
-                        createdAt = it.createdAt
+                        createdAt = it.createdAt,
+                        syncStatus = it.syncStatus
                     )
                 }
             }
@@ -1024,7 +1029,8 @@ class TanweerRepository(
                     notes = it.notes,
                     subjectName = it.subjectName,
                     subjectIcon = it.subjectIcon,
-                    colorHex = it.colorHex
+                    colorHex = it.colorHex,
+                    syncStatus = it.syncStatus
                 )
             }
         }
@@ -1042,7 +1048,8 @@ class TanweerRepository(
                     description = it.description,
                     category = it.category,
                     location = it.location,
-                    createdAt = it.createdAt
+                    createdAt = it.createdAt,
+                    syncStatus = it.syncStatus
                 )
             }
         }
@@ -1065,7 +1072,8 @@ class TanweerRepository(
                     subjectName = it.subjectName,
                     subjectIcon = it.subjectIcon,
                     commentsCount = it.commentsCount,
-                    createdAt = it.createdAt
+                    createdAt = it.createdAt,
+                    syncStatus = it.syncStatus
                 )
             }
         }
@@ -1088,7 +1096,8 @@ class TanweerRepository(
                     subjectName = it.subjectName,
                     subjectIcon = it.subjectIcon,
                     commentsCount = it.commentsCount,
-                    createdAt = it.createdAt
+                    createdAt = it.createdAt,
+                    syncStatus = it.syncStatus
                 )
             }
         }
@@ -1104,7 +1113,8 @@ class TanweerRepository(
                     authorName = it.authorName,
                     comment = it.comment,
                     isBestAnswer = it.isBestAnswer,
-                    createdAt = it.createdAt
+                    createdAt = it.createdAt,
+                    syncStatus = it.syncStatus
                 )
             }
         }
@@ -1325,7 +1335,7 @@ class TanweerRepository(
         authorName: String,
         authorGradeSection: String,
         pages: List<ProcessedPageResult>
-    ) = withContext(Dispatchers.IO) {
+    ): Result<String> = withContext(Dispatchers.IO) {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
         val subject = gradeSubjects.find { it.id == subjectId }
@@ -1333,7 +1343,8 @@ class TanweerRepository(
 
         val id = "cnt_${System.currentTimeMillis()}"
 
-        val mediaItems = pages.mapIndexed { index, page ->
+        // 1. Initial optimistic media list with local paths
+        val initialMediaItems = pages.mapIndexed { index, page ->
             MediaItem(
                 id = "media_${System.currentTimeMillis()}_$index",
                 pageOrder = index + 1,
@@ -1359,22 +1370,81 @@ class TanweerRepository(
             subjectName = subject?.name ?: subjectId,
             subjectIcon = subject?.icon ?: "📚",
             colorHex = subject?.colorHex ?: "#00E5FF",
-            mediaUrlsJson = serializeMediaList(mediaItems)
+            mediaUrlsJson = serializeMediaList(initialMediaItems),
+            syncStatus = "SYNCING"
         )
         db.contentDao().insertContent(entity)
 
+        // 2. Upload actual images to server via multipart
+        val uploadedMediaItems = mutableListOf<MediaItem>()
+        var anyUploadFailed = false
+
+        for ((index, page) in pages.withIndex()) {
+            var remoteUrl: String? = null
+            try {
+                if (page.file.exists() && page.file.length() > 0) {
+                    val reqFile = page.file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                    val part = MultipartBody.Part.createFormData("file", "page_${index + 1}_${page.file.name}", reqFile)
+                    val uploadRes = api.uploadMedia(part)
+                    if (uploadRes.isSuccessful && uploadRes.body() != null) {
+                        val body = uploadRes.body()!!
+                        remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
+                            if (rel.startsWith("http")) rel else "https://tanweer.magd.workers.dev/${rel.removePrefix("/")}"
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("TanweerRepository", "Upload failed for page $index: ${e.message}")
+            }
+
+            if (remoteUrl != null) {
+                uploadedMediaItems.add(
+                    MediaItem(
+                        id = "media_${System.currentTimeMillis()}_$index",
+                        pageOrder = index + 1,
+                        url = remoteUrl,
+                        mimeType = "image/jpeg",
+                        fileSize = page.sizeBytes.toInt()
+                    )
+                )
+            } else {
+                anyUploadFailed = true
+                uploadedMediaItems.add(
+                    MediaItem(
+                        id = "media_${System.currentTimeMillis()}_$index",
+                        pageOrder = index + 1,
+                        url = page.file.absolutePath,
+                        mimeType = "image/jpeg",
+                        fileSize = page.sizeBytes.toInt()
+                    )
+                )
+            }
+        }
+
+        // 3. Post lesson content with remote URLs
         try {
-            api.createContent(
+            val res = api.createContent(
                 CreateContentRequest(
                     groupId = groupId,
                     studyDate = date,
                     subjectId = subjectId,
                     title = title,
                     description = description,
-                    media = mediaItems
+                    media = uploadedMediaItems
                 )
             )
-        } catch (_: Exception) {}
+            if (res.isSuccessful && !anyUploadFailed) {
+                db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), "SYNCED")
+                Result.success(id)
+            } else {
+                val status = if (anyUploadFailed) "FAILED" else "LOCAL"
+                db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), status)
+                Result.failure(Exception("فشل إرسال الدرس أو رفع بعض الصفحات للسيرفر"))
+            }
+        } catch (e: Exception) {
+            db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), "FAILED")
+            Result.failure(e)
+        }
     }
 
     suspend fun addHomework(
@@ -1387,7 +1457,7 @@ class TanweerRepository(
         pageNumbers: String?,
         questionNumbers: String?,
         taskType: String = "HOMEWORK"
-    ) = withContext(Dispatchers.IO) {
+    ): Result<String> = withContext(Dispatchers.IO) {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
         val subject = gradeSubjects.find { it.id == subjectId }
@@ -1407,12 +1477,13 @@ class TanweerRepository(
             subjectName = subject?.name ?: subjectId,
             subjectIcon = subject?.icon ?: "📝",
             colorHex = subject?.colorHex ?: "#00E5FF",
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            syncStatus = "SYNCING"
         )
         db.homeworkDao().insertHomework(entity)
 
         try {
-            api.createHomework(
+            val res = api.createHomework(
                 CreateHomeworkRequest(
                     groupId = groupId,
                     studyDate = studyDate,
@@ -1425,7 +1496,47 @@ class TanweerRepository(
                     taskType = taskType
                 )
             )
-        } catch (_: Exception) {}
+            if (res.isSuccessful) {
+                db.homeworkDao().updateSyncStatus(id, "SYNCED")
+                Result.success(id)
+            } else {
+                db.homeworkDao().updateSyncStatus(id, "FAILED")
+                Result.failure(Exception(res.message() ?: "فشل حفظ الواجب في السيرفر"))
+            }
+        } catch (e: Exception) {
+            db.homeworkDao().updateSyncStatus(id, "FAILED")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun retrySyncHomework(homeworkId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val hw = db.homeworkDao().getHomeworkById(homeworkId) ?: return@withContext Result.failure(Exception("الواجب غير موجود"))
+        db.homeworkDao().updateSyncStatus(homeworkId, "SYNCING")
+        try {
+            val res = api.createHomework(
+                CreateHomeworkRequest(
+                    groupId = hw.groupId,
+                    studyDate = hw.studyDate,
+                    dueDate = hw.dueDate,
+                    subjectId = hw.subjectId,
+                    title = hw.title,
+                    details = hw.details,
+                    pageNumbers = hw.pageNumbers,
+                    questionNumbers = hw.questionNumbers,
+                    taskType = hw.taskType
+                )
+            )
+            if (res.isSuccessful) {
+                db.homeworkDao().updateSyncStatus(homeworkId, "SYNCED")
+                Result.success(Unit)
+            } else {
+                db.homeworkDao().updateSyncStatus(homeworkId, "FAILED")
+                Result.failure(Exception(res.message() ?: "فشل المزامنة"))
+            }
+        } catch (e: Exception) {
+            db.homeworkDao().updateSyncStatus(homeworkId, "FAILED")
+            Result.failure(e)
+        }
     }
 
     suspend fun toggleHomeworkCompletion(homeworkId: String, currentStatus: Boolean) = withContext(Dispatchers.IO) {
@@ -1447,7 +1558,7 @@ class TanweerRepository(
         title: String,
         requiredChapters: String?,
         notes: String?
-    ) = withContext(Dispatchers.IO) {
+    ): Result<String> = withContext(Dispatchers.IO) {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
         val subject = gradeSubjects.find { it.id == subjectId }
@@ -1463,12 +1574,13 @@ class TanweerRepository(
             notes = notes,
             subjectName = subject?.name ?: subjectId,
             subjectIcon = subject?.icon ?: "🔴",
-            colorHex = subject?.colorHex ?: "#FF3366"
+            colorHex = subject?.colorHex ?: "#FF3366",
+            syncStatus = "SYNCING"
         )
         db.examDao().insertExam(entity)
 
         try {
-            api.createExam(
+            val res = api.createExam(
                 CreateExamRequest(
                     groupId = groupId,
                     examDate = examDate,
@@ -1478,7 +1590,17 @@ class TanweerRepository(
                     notes = notes
                 )
             )
-        } catch (_: Exception) {}
+            if (res.isSuccessful) {
+                db.examDao().updateSyncStatus(id, "SYNCED")
+                Result.success(id)
+            } else {
+                db.examDao().updateSyncStatus(id, "FAILED")
+                Result.failure(Exception(res.message() ?: "فشل حفظ الاختبار في السيرفر"))
+            }
+        } catch (e: Exception) {
+            db.examDao().updateSyncStatus(id, "FAILED")
+            Result.failure(e)
+        }
     }
 
     suspend fun addEvent(
@@ -1488,7 +1610,7 @@ class TanweerRepository(
         timeStr: String?,
         category: String,
         description: String?
-    ) = withContext(Dispatchers.IO) {
+    ): Result<String> = withContext(Dispatchers.IO) {
         val id = "evt_${System.currentTimeMillis()}"
         val entity = EventEntity(
             id = id,
@@ -1499,12 +1621,13 @@ class TanweerRepository(
             description = description,
             category = category,
             location = null,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            syncStatus = "SYNCING"
         )
         db.eventDao().insertEvent(entity)
 
         try {
-            api.createEvent(
+            val res = api.createEvent(
                 CreateEventRequest(
                     groupId = groupId,
                     eventDate = eventDate,
@@ -1514,7 +1637,17 @@ class TanweerRepository(
                     category = category
                 )
             )
-        } catch (_: Exception) {}
+            if (res.isSuccessful) {
+                db.eventDao().updateSyncStatus(id, "SYNCED")
+                Result.success(id)
+            } else {
+                db.eventDao().updateSyncStatus(id, "FAILED")
+                Result.failure(Exception(res.message() ?: "فشل حفظ الفعالية في السيرفر"))
+            }
+        } catch (e: Exception) {
+            db.eventDao().updateSyncStatus(id, "FAILED")
+            Result.failure(e)
+        }
     }
 
     suspend fun syncIssueDetails(issueId: String): SyncResult = withContext(Dispatchers.IO) {
@@ -1574,19 +1707,40 @@ class TanweerRepository(
             authorName = user.fullName,
             comment = comment,
             isBestAnswer = false,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            syncStatus = "SYNCING"
         )
         db.issueDao().insertComment(entity)
 
         try {
             val res = api.addIssueComment(issueId, AddCommentRequest(comment))
             if (res.isSuccessful) {
+                db.issueDao().updateCommentSyncStatus(commentId, "SYNCED")
                 Result.success(Unit)
             } else {
-                Result.success(Unit)
+                db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
+                Result.failure(Exception(res.message() ?: "فشل إرسال التعليق إلى السيرفر"))
             }
         } catch (e: Exception) {
-            Result.success(Unit)
+            db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun retrySyncIssueComment(issueId: String, commentId: String, commentText: String): Result<Unit> = withContext(Dispatchers.IO) {
+        db.issueDao().updateCommentSyncStatus(commentId, "SYNCING")
+        try {
+            val res = api.addIssueComment(issueId, AddCommentRequest(commentText))
+            if (res.isSuccessful) {
+                db.issueDao().updateCommentSyncStatus(commentId, "SYNCED")
+                Result.success(Unit)
+            } else {
+                db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
+                Result.failure(Exception("فشل إرسال التعليق"))
+            }
+        } catch (e: Exception) {
+            db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
+            Result.failure(e)
         }
     }
 
@@ -1594,10 +1748,14 @@ class TanweerRepository(
         db.issueDao().setBestAnswer(issueId, commentId)
         db.issueDao().markIssueSolved(issueId, commentId)
         try {
-            api.markBestAnswer(issueId, commentId)
-            Result.success(Unit)
+            val res = api.markBestAnswer(issueId, commentId)
+            if (res.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("فشل اعتماد أفضل إجابة في السيرفر"))
+            }
         } catch (e: Exception) {
-            Result.success(Unit)
+            Result.failure(e)
         }
     }
 
@@ -1609,7 +1767,7 @@ class TanweerRepository(
         authorName: String,
         homeworkId: String? = null,
         examId: String? = null
-    ) = withContext(Dispatchers.IO) {
+    ): Result<String> = withContext(Dispatchers.IO) {
         val subject = DefaultSubjects.find { it.id == subjectId }
         val id = "iss_${System.currentTimeMillis()}"
         val entity = IssueEntity(
@@ -1626,12 +1784,13 @@ class TanweerRepository(
             subjectName = subject?.name,
             subjectIcon = subject?.icon,
             commentsCount = 0,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            syncStatus = "SYNCING"
         )
         db.issueDao().insertIssue(entity)
 
         try {
-            api.createIssue(
+            val res = api.createIssue(
                 CreateIssueRequest(
                     groupId = groupId,
                     subjectId = subjectId,
@@ -1641,7 +1800,17 @@ class TanweerRepository(
                     description = description
                 )
             )
-        } catch (_: Exception) {}
+            if (res.isSuccessful) {
+                db.issueDao().updateSyncStatus(id, "SYNCED")
+                Result.success(id)
+            } else {
+                db.issueDao().updateSyncStatus(id, "FAILED")
+                Result.failure(Exception(res.message() ?: "فشل إنشاء الاستفسار في السيرفر"))
+            }
+        } catch (e: Exception) {
+            db.issueDao().updateSyncStatus(id, "FAILED")
+            Result.failure(e)
+        }
     }
 
     suspend fun voteUsefulContent(contentId: String) = withContext(Dispatchers.IO) {

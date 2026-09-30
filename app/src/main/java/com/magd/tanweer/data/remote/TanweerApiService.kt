@@ -5,7 +5,9 @@ import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.Interceptor
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Response
 import retrofit2.Retrofit
@@ -222,6 +224,19 @@ data class GenericResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class UploadMediaResponse(
+    val success: Boolean,
+    val id: String? = null,
+    val url: String? = null,
+    val relativeUrl: String? = null,
+    val fileSize: Int? = null,
+    val mimeType: String? = null,
+    val checksum: String? = null,
+    val message: String? = null,
+    val error: ApiError? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class ProfileResponse(
     val success: Boolean,
     val user: User? = null
@@ -289,6 +304,12 @@ interface TanweerApiService {
         @Path("date") date: String,
         @Query("groupId") groupId: String
     ): Response<DayDetailResponse>
+
+    @Multipart
+    @POST("api/v1/media/upload")
+    suspend fun uploadMedia(
+        @Part file: MultipartBody.Part
+    ): Response<UploadMediaResponse>
 
     @POST("api/v1/content")
     suspend fun createContent(@Body req: CreateContentRequest): Response<GenericResponse>

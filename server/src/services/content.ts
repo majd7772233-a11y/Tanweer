@@ -1,5 +1,6 @@
 import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
+import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 
 export async function handleCreateContent(user: UserContext, request: Request, env: Env): Promise<Response> {
@@ -12,9 +13,13 @@ export async function handleCreateContent(user: UserContext, request: Request, e
     description?: string;
     media?: Array<{
       url: string;
+      pageOrder?: number;
+      page_order?: number;
       objectKey?: string;
       mimeType?: string;
+      mime_type?: string;
       fileSize?: number;
+      file_size?: number;
       checksum?: string;
     }>;
   };
@@ -22,6 +27,9 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   if (!body.groupId || !body.studyDate || !body.subjectId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد المجموعة، تاريخ الحصة، المادة وعنوان الدرس');
   }
+
+  const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
+  if (memberCheck) return memberCheck;
 
   // Check duplicate checksum if media provided
   if (body.media && body.media.length > 0 && body.media[0].checksum) {
@@ -71,9 +79,10 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   ).run();
 
   if (body.media && body.media.length > 0) {
-    let pageOrder = 1;
+    let order = 1;
     for (const m of body.media) {
       const mediaId = generateId('med');
+      const pageOrder = m.pageOrder || m.page_order || order;
       await env.DB.prepare(
         `INSERT INTO content_media (id, content_id, page_order, object_key, url, mime_type, file_size, checksum, is_primary, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -83,13 +92,13 @@ export async function handleCreateContent(user: UserContext, request: Request, e
         pageOrder,
         m.objectKey || '',
         m.url,
-        m.mimeType || 'image/jpeg',
-        m.fileSize || 0,
+        m.mimeType || m.mime_type || 'image/jpeg',
+        m.fileSize || m.file_size || 0,
         m.checksum || null,
-        pageOrder === 1 ? 1 : 0,
+        order === 1 ? 1 : 0,
         now
       ).run();
-      pageOrder++;
+      order++;
     }
   }
 
@@ -101,6 +110,14 @@ export async function handleCreateContent(user: UserContext, request: Request, e
 }
 
 export async function handleVoteUseful(contentId: string, user: UserContext, env: Env): Promise<Response> {
+  const content = await env.DB.prepare(`SELECT group_id FROM contents WHERE id = ?`).bind(contentId).first<{ group_id: string }>();
+  if (!content) {
+    return errorResponse('CONTENT_NOT_FOUND', 'الدرس غير موجود');
+  }
+
+  const memberCheck = await requireGroupMember(user, content.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
   await env.DB.prepare(`UPDATE contents SET useful_count = useful_count + 1 WHERE id = ?`).bind(contentId).run();
   return jsonResponse({ success: true, message: 'شكرًا لمساهمتك' });
 }

@@ -60,7 +60,8 @@ data class ContentEntity(
     val subjectName: String,
     val subjectIcon: String,
     val colorHex: String,
-    val mediaUrlsJson: String = "[]"
+    val mediaUrlsJson: String = "[]",
+    val syncStatus: String = "SYNCED"
 )
 
 @Entity(tableName = "cached_homeworks")
@@ -78,7 +79,8 @@ data class HomeworkEntity(
     val subjectName: String,
     val subjectIcon: String,
     val colorHex: String,
-    val createdAt: Long
+    val createdAt: Long,
+    val syncStatus: String = "SYNCED"
 )
 
 @Entity(tableName = "cached_homework_completions", primaryKeys = ["homeworkId", "userId"])
@@ -99,7 +101,8 @@ data class ExamEntity(
     val notes: String?,
     val subjectName: String,
     val subjectIcon: String,
-    val colorHex: String
+    val colorHex: String,
+    val syncStatus: String = "SYNCED"
 )
 
 @Entity(tableName = "cached_events")
@@ -112,7 +115,8 @@ data class EventEntity(
     val description: String?,
     val category: String,
     val location: String?,
-    val createdAt: Long
+    val createdAt: Long,
+    val syncStatus: String = "SYNCED"
 )
 
 @Entity(tableName = "cached_issues")
@@ -130,7 +134,8 @@ data class IssueEntity(
     val subjectName: String?,
     val subjectIcon: String?,
     val commentsCount: Int,
-    val createdAt: Long
+    val createdAt: Long,
+    val syncStatus: String = "SYNCED"
 )
 
 @Entity(tableName = "cached_issue_comments")
@@ -141,7 +146,8 @@ data class IssueCommentEntity(
     val authorName: String,
     val comment: String,
     val isBestAnswer: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val syncStatus: String = "SYNCED"
 )
 
 @Entity(tableName = "cached_books")

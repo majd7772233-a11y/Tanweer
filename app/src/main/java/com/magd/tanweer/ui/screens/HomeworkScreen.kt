@@ -258,6 +258,7 @@ fun HomeworkScreen(
                         isOverdue = isOverdue,
                         isDueToday = isDueToday,
                         onToggle = { viewModel.toggleHomework(hw.id, hw.isCompleted) },
+                        onRetrySync = { viewModel.retrySyncHomework(hw.id) },
                         onAskQuestion = {
                             viewModel.addIssue(
                                 title = "استفسار حول واجب ${hw.subjectName}: ${hw.title}",
@@ -302,6 +303,7 @@ fun HomeworkCard(
     isOverdue: Boolean = false,
     isDueToday: Boolean = false,
     onToggle: () -> Unit,
+    onRetrySync: (() -> Unit)? = null,
     onAskQuestion: () -> Unit
 ) {
     val borderColor = when {
@@ -447,6 +449,37 @@ fun HomeworkCard(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+
+            if (homework.syncStatus != "SYNCED") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (homework.syncStatus == "FAILED") Color(0xFF3E1F24)
+                            else Color(0xFF1E2D3D)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (homework.syncStatus == "FAILED") "⚠️ لم يُرفع للسيرفر (محلي)" else "🔄 جاري المزامنة مع السيرفر...",
+                        fontSize = 11.sp,
+                        color = if (homework.syncStatus == "FAILED") Color(0xFFFF8A80) else CyanAccent
+                    )
+                    if (homework.syncStatus == "FAILED" && onRetrySync != null) {
+                        Text(
+                            text = "إعادة المحاولة 🔁",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CyanAccent,
+                            modifier = Modifier.clickable { onRetrySync() }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),

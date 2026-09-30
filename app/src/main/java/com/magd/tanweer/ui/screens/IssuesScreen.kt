@@ -267,6 +267,15 @@ fun IssueListItemCard(
                 )
             }
 
+            if (issue.syncStatus != "SYNCED") {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (issue.syncStatus == "FAILED") "⚠️ محفوظ محلياً فقط (لم يُرفع للسيرفر)" else "🔄 جاري المزامنة مع السيرفر...",
+                    fontSize = 10.sp,
+                    color = if (issue.syncStatus == "FAILED") Color(0xFFFF8A80) else CyanAccent
+                )
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             Row(
@@ -565,6 +574,32 @@ fun IssueDetailView(
                                     color = TextPrimary,
                                     lineHeight = 20.sp
                                 )
+
+                                if (comment.syncStatus != "SYNCED") {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (comment.syncStatus == "FAILED") "⚠️ لم يتم الإرسال للسيرفر (محلي)" else "🔄 جاري الإرسال...",
+                                            fontSize = 10.sp,
+                                            color = if (comment.syncStatus == "FAILED") Color(0xFFFF8A80) else CyanAccent
+                                        )
+                                        if (comment.syncStatus == "FAILED") {
+                                            Text(
+                                                text = "إعادة المحاولة 🔁",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = CyanAccent,
+                                                modifier = Modifier.clickable {
+                                                    viewModel.retrySyncComment(issueId, comment.id, comment.comment)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

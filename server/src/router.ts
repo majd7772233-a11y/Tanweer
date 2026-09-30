@@ -3,17 +3,29 @@ import { authenticateRequest } from './middleware/auth';
 import { errorResponse, jsonResponse } from './lib/response';
 import { handleLogin, handleRegister, handleLoginWithRecoveryCode } from './services/auth';
 import { handleGetGroups, handleJoinGroupRequest } from './services/groups';
-import { handleGetSchedule, handleProposeScheduleChange } from './services/schedule';
+import {
+  handleGetSchedule,
+  handleCreateScheduleSlot,
+  handleDeleteScheduleSlot,
+  handleProposeScheduleChange,
+} from './services/schedule';
 import { handleGetCalendarOverview, handleGetDayDetail } from './services/calendar';
 import { handleCreateContent, handleVoteUseful } from './services/content';
 import { handleCreateHomework, handleGetHomeworks, handleToggleHomeworkCompletion } from './services/homework';
 import { handleCreateExam, handleGetExams } from './services/exams';
 import { handleCreateEvent, handleGetEvents } from './services/events';
-import { handleAddIssueComment, handleCreateIssue, handleGetIssueDetails, handleGetIssues, handleMarkBestAnswer } from './services/issues';
+import {
+  handleAddIssueComment,
+  handleCreateIssue,
+  handleGetIssueDetails,
+  handleGetIssues,
+  handleMarkBestAnswer,
+} from './services/issues';
 import { handleRequestDeletion, handleVote } from './services/voting';
 import { handleGetBooks } from './services/books';
 import { handleGetGroupMessages, handlePostGroupMessage } from './services/chat';
 import { handleGetProfile, handleUpdateProfile } from './services/users';
+import { handleGetMedia, handleUploadMedia } from './services/media';
 
 export async function handleApiRoute(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -29,6 +41,12 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
   if (path === '/api/v1/auth/recovery-login' && method === 'POST') {
     return handleLoginWithRecoveryCode(request, env);
+  }
+
+  // Public Media Serving (for images loaded by Coil / browsers)
+  if (path.startsWith('/api/v1/media/') && method === 'GET') {
+    const mediaId = path.split('/')[4];
+    return handleGetMedia(mediaId, env);
   }
 
   // Health check
@@ -61,17 +79,29 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path.startsWith('/api/v1/groups/') && path.endsWith('/messages')) {
     const groupId = path.split('/')[4];
     if (method === 'GET') {
-      return handleGetGroupMessages(groupId, env);
+      return handleGetGroupMessages(groupId, user, env);
     }
     if (method === 'POST') {
       return handlePostGroupMessage(groupId, user, request, env);
     }
   }
 
-  // Schedule
+  // Schedule CRUD
+  if (path.startsWith('/api/v1/schedule/') && path.endsWith('/slots') && method === 'POST') {
+    const groupId = path.split('/')[4];
+    return handleCreateScheduleSlot(groupId, user, request, env);
+  }
+  if (path.startsWith('/api/v1/schedule/') && path.includes('/slots/') && method === 'DELETE') {
+    // /api/v1/schedule/{groupId}/slots/{dayOfWeek}/{slotOrder}
+    const parts = path.split('/');
+    const groupId = parts[4];
+    const dayOfWeek = parseInt(parts[6]);
+    const slotOrder = parseInt(parts[7]);
+    return handleDeleteScheduleSlot(groupId, dayOfWeek, slotOrder, user, env);
+  }
   if (path.startsWith('/api/v1/schedule/') && method === 'GET') {
     const groupId = path.split('/')[4];
-    return handleGetSchedule(groupId, env);
+    return handleGetSchedule(groupId, user, env);
   }
   if (path === '/api/v1/schedule/proposals' && method === 'POST') {
     return handleProposeScheduleChange(user, request, env);
@@ -81,15 +111,18 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path === '/api/v1/calendar' && method === 'GET') {
     const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
     const month = url.searchParams.get('month') || '';
-    return handleGetCalendarOverview(groupId, month, env);
+    return handleGetCalendarOverview(groupId, month, user, env);
   }
   if (path.startsWith('/api/v1/day/') && method === 'GET') {
     const date = path.split('/')[4];
     const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
-    return handleGetDayDetail(groupId, date, env);
+    return handleGetDayDetail(groupId, date, user, env);
   }
 
-  // Content / Lessons
+  // Content / Lessons & Media Upload
+  if (path === '/api/v1/media/upload' && method === 'POST') {
+    return handleUploadMedia(user, request, env);
+  }
   if (path === '/api/v1/content' && method === 'POST') {
     return handleCreateContent(user, request, env);
   }
@@ -114,7 +147,7 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   // Exams
   if (path === '/api/v1/exams' && method === 'GET') {
     const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
-    return handleGetExams(groupId, env);
+    return handleGetExams(groupId, user, env);
   }
   if (path === '/api/v1/exams' && method === 'POST') {
     return handleCreateExam(user, request, env);
@@ -123,7 +156,7 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   // Events
   if (path === '/api/v1/events' && method === 'GET') {
     const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
-    return handleGetEvents(groupId, env);
+    return handleGetEvents(groupId, user, env);
   }
   if (path === '/api/v1/events' && method === 'POST') {
     return handleCreateEvent(user, request, env);
@@ -132,7 +165,7 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   // Issues
   if (path === '/api/v1/issues' && method === 'GET') {
     const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
-    return handleGetIssues(groupId, env);
+    return handleGetIssues(groupId, user, env);
   }
   if (path === '/api/v1/issues' && method === 'POST') {
     return handleCreateIssue(user, request, env);
@@ -143,7 +176,7 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
   if (path.startsWith('/api/v1/issues/') && method === 'GET') {
     const issueId = path.split('/')[4];
-    return handleGetIssueDetails(issueId, env);
+    return handleGetIssueDetails(issueId, user, env);
   }
   if (path.startsWith('/api/v1/issues/') && path.includes('/best-answer/') && method === 'POST') {
     const issueId = path.split('/')[4];

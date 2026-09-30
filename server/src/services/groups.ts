@@ -1,10 +1,12 @@
 import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
+import { mapGroup } from '../lib/mappers';
 import { errorResponse, jsonResponse } from '../lib/response';
 
 export async function handleGetGroups(user: UserContext, env: Env): Promise<Response> {
   const userGroups = await env.DB.prepare(
-    `SELECT g.id, g.name, g.type, g.description, g.icon, gm.role, gm.status
+    `SELECT g.id, g.name, g.type, g.description, g.icon, gm.role, gm.status,
+            (SELECT COUNT(*) FROM group_members WHERE group_id = g.id AND status = 'ACTIVE') as member_count
      FROM groups g
      JOIN group_members gm ON g.id = gm.group_id
      WHERE gm.user_id = ? AND gm.status = 'ACTIVE'`
@@ -15,14 +17,14 @@ export async function handleGetGroups(user: UserContext, env: Env): Promise<Resp
             (SELECT COUNT(*) FROM group_members WHERE group_id = g.id AND status = 'ACTIVE') as member_count
      FROM groups g
      WHERE g.type = 'OPTIONAL' AND g.id NOT IN (
-       SELECT group_id FROM group_members WHERE user_id = ?
+       SELECT group_id FROM group_members WHERE user_id = ? AND status = 'ACTIVE'
      )`
   ).bind(user.userId).all();
 
   return jsonResponse({
     success: true,
-    myGroups: userGroups.results,
-    discoverGroups: publicClubs.results,
+    myGroups: (userGroups.results || []).map(g => mapGroup(g, (g as any).role || 'MEMBER')),
+    discoverGroups: (publicClubs.results || []).map(g => mapGroup(g, 'DISCOVER')),
   });
 }
 
@@ -37,7 +39,10 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
   ).bind(groupId, user.userId).first<{ status: string }>();
 
   if (existing) {
-    return errorResponse('ALREADY_REQUESTED', 'أنت مسجل أو طلبت الانضمام مسبقًا لهذه المجموعة');
+    if (existing.status === 'ACTIVE') {
+      return errorResponse('ALREADY_MEMBER', 'أنت عضو مسجل بالفعل في هذه المجموعة');
+    }
+    return errorResponse('ALREADY_REQUESTED', 'طلب الانضمام قيد المراجعة');
   }
 
   const initialStatus = group.type === 'OPTIONAL' ? 'ACTIVE' : 'PENDING';
@@ -49,6 +54,6 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
   return jsonResponse({
     success: true,
     status: initialStatus,
-    message: initialStatus === 'ACTIVE' ? 'تم الانضمام بنجاح' : 'تم إرسال طلب الانضمام إلى المشرفين',
+    message: initialStatus === 'ACTIVE' ? 'تم الانضمام إلى المجموعة بنجاح' : 'تم إرسال طلب الانضمام إلى المشرفين',
   });
 }

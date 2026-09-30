@@ -183,7 +183,8 @@ data class ContentItem(
     val subjectName: String = "",
     val subjectIcon: String = "📚",
     val colorHex: String = "#00E5FF",
-    val media: List<MediaItem> = emptyList()
+    val media: List<MediaItem> = emptyList(),
+    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
 )
 
 @JsonClass(generateAdapter = true)
@@ -211,7 +212,8 @@ data class HomeworkItem(
     val subjectIcon: String = "📝",
     val colorHex: String = "#00E5FF",
     val isCompleted: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
 )
 
 @JsonClass(generateAdapter = true)
@@ -225,7 +227,8 @@ data class ExamItem(
     val notes: String? = null,
     val subjectName: String = "",
     val subjectIcon: String = "🔴",
-    val colorHex: String = "#FF3366"
+    val colorHex: String = "#FF3366",
+    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
 )
 
 @JsonClass(generateAdapter = true)
@@ -238,7 +241,8 @@ data class SchoolEventItem(
     val description: String? = null,
     val category: String = "ACTIVITY", // 'ACTIVITY', 'COMPETITION', 'TRIP', 'ANNOUNCEMENT', 'HOLIDAY'
     val location: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
 )
 
 @JsonClass(generateAdapter = true)
@@ -256,7 +260,8 @@ data class IssueItem(
     val subjectName: String? = null,
     val subjectIcon: String? = null,
     val commentsCount: Int = 0,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
 )
 
 @JsonClass(generateAdapter = true)
@@ -267,7 +272,8 @@ data class IssueCommentItem(
     val authorName: String,
     val comment: String,
     val isBestAnswer: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
 )
 
 @JsonClass(generateAdapter = true)

@@ -1,22 +1,29 @@
 import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
+import { mapHomework } from '../lib/mappers';
+import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 
 export async function handleGetHomeworks(groupId: string, user: UserContext, env: Env): Promise<Response> {
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
+
   const homeworks = await env.DB.prepare(
     `SELECT h.id, h.group_id, h.study_date, h.due_date, h.subject_id, h.title, h.details,
             h.page_numbers, h.question_numbers, h.task_type, h.created_at,
-            s.name_ar as subject_name, s.icon as subject_icon, s.color_hex,
+            COALESCE(s.name_ar, h.subject_id) as subject_name,
+            COALESCE(s.icon, '📝') as subject_icon,
+            s.color_hex,
             (SELECT 1 FROM homework_completions hc WHERE hc.homework_id = h.id AND hc.user_id = ?) as is_completed
      FROM homeworks h
-     JOIN subjects s ON h.subject_id = s.id
+     LEFT JOIN subjects s ON h.subject_id = s.id
      WHERE h.group_id = ?
      ORDER BY h.due_date ASC, h.created_at DESC`
   ).bind(user.userId, groupId).all();
 
   return jsonResponse({
     success: true,
-    homeworks: homeworks.results,
+    homeworks: (homeworks.results || []).map(mapHomework),
   });
 }
 
@@ -36,6 +43,9 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
   if (!body.groupId || !body.dueDate || !body.subjectId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى ملء تفاصيل الواجب وتاريخ التسليم');
   }
+
+  const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
+  if (memberCheck) return memberCheck;
 
   const hwId = generateId('hw');
   const now = Date.now();
@@ -60,11 +70,19 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
   return jsonResponse({
     success: true,
     homeworkId: hwId,
-    message: 'تم إضافة الواجب بنجاح',
+    message: 'تمت إضافة الواجب بنجاح',
   });
 }
 
 export async function handleToggleHomeworkCompletion(homeworkId: string, user: UserContext, env: Env): Promise<Response> {
+  const hw = await env.DB.prepare(`SELECT group_id FROM homeworks WHERE id = ?`).bind(homeworkId).first<{ group_id: string }>();
+  if (!hw) {
+    return errorResponse('HOMEWORK_NOT_FOUND', 'الواجب غير موجود');
+  }
+
+  const memberCheck = await requireGroupMember(user, hw.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
   const existing = await env.DB.prepare(
     `SELECT 1 FROM homework_completions WHERE homework_id = ? AND user_id = ?`
   ).bind(homeworkId, user.userId).first();

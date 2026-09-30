@@ -648,6 +648,18 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun retrySyncHomework(homeworkId: String) {
+        viewModelScope.launch {
+            repository.retrySyncHomework(homeworkId)
+        }
+    }
+
+    fun retrySyncComment(issueId: String, commentId: String, commentText: String) {
+        viewModelScope.launch {
+            repository.retrySyncIssueComment(issueId, commentId, commentText)
+        }
+    }
+
     fun joinGroup(groupId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
         viewModelScope.launch {
             val result = repository.joinGroup(groupId)

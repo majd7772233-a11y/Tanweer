@@ -1,11 +1,16 @@
 import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
+import { mapIssue, mapIssueComment } from '../lib/mappers';
+import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 
-export async function handleGetIssues(groupId: string, env: Env): Promise<Response> {
+export async function handleGetIssues(groupId: string, user: UserContext, env: Env): Promise<Response> {
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
+
   const issues = await env.DB.prepare(
     `SELECT i.id, i.group_id, i.subject_id, i.homework_id, i.exam_id, i.title, i.description,
-            i.status, i.author_name, i.created_at, i.updated_at,
+            i.status, i.best_comment_id, i.author_name, i.created_at, i.updated_at,
             s.name_ar as subject_name, s.icon as subject_icon,
             (SELECT COUNT(*) FROM issue_comments ic WHERE ic.issue_id = i.id) as comments_count
      FROM issues i
@@ -16,11 +21,11 @@ export async function handleGetIssues(groupId: string, env: Env): Promise<Respon
 
   return jsonResponse({
     success: true,
-    issues: issues.results,
+    issues: (issues.results || []).map(mapIssue),
   });
 }
 
-export async function handleGetIssueDetails(issueId: string, env: Env): Promise<Response> {
+export async function handleGetIssueDetails(issueId: string, user: UserContext, env: Env): Promise<Response> {
   const issue = await env.DB.prepare(
     `SELECT i.id, i.group_id, i.subject_id, i.homework_id, i.exam_id, i.title, i.description,
             i.status, i.best_comment_id, i.author_name, i.created_by, i.created_at,
@@ -34,17 +39,29 @@ export async function handleGetIssueDetails(issueId: string, env: Env): Promise<
     return errorResponse('ISSUE_NOT_FOUND', 'الاستفسار غير موجود');
   }
 
+  const memberCheck = await requireGroupMember(user, (issue as any).group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
   const comments = await env.DB.prepare(
-    `SELECT id, user_id, author_name, comment, is_best_answer, created_at
+    `SELECT id, issue_id, user_id, author_name, comment, is_best_answer, created_at
      FROM issue_comments
      WHERE issue_id = ?
      ORDER BY is_best_answer DESC, created_at ASC`
   ).bind(issueId).all();
 
+  const countRow = await env.DB.prepare(
+    `SELECT COUNT(*) as c FROM issue_comments WHERE issue_id = ?`
+  ).bind(issueId).first<{ c: number }>();
+
+  const mappedIssue = mapIssue({
+    ...issue,
+    comments_count: countRow?.c || 0,
+  });
+
   return jsonResponse({
     success: true,
-    issue,
-    comments: comments.results,
+    issue: mappedIssue,
+    comments: (comments.results || []).map(mapIssueComment),
   });
 }
 
@@ -61,6 +78,9 @@ export async function handleCreateIssue(user: UserContext, request: Request, env
   if (!body.groupId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى كتابة عنوان الاستفسار');
   }
+
+  const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
+  if (memberCheck) return memberCheck;
 
   const issueId = generateId('iss');
   const now = Date.now();
@@ -89,6 +109,14 @@ export async function handleCreateIssue(user: UserContext, request: Request, env
 }
 
 export async function handleAddIssueComment(issueId: string, user: UserContext, request: Request, env: Env): Promise<Response> {
+  const issue = await env.DB.prepare(`SELECT group_id FROM issues WHERE id = ?`).bind(issueId).first<{ group_id: string }>();
+  if (!issue) {
+    return errorResponse('ISSUE_NOT_FOUND', 'الاستفسار غير موجود');
+  }
+
+  const memberCheck = await requireGroupMember(user, issue.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
   const body = await request.json() as { comment?: string };
   if (!body.comment || !body.comment.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى كتابة نص الإجابة أو التعليق');
@@ -97,8 +125,8 @@ export async function handleAddIssueComment(issueId: string, user: UserContext, 
   const commentId = generateId('com');
   const now = Date.now();
   await env.DB.prepare(
-    `INSERT INTO issue_comments (id, issue_id, user_id, author_name, comment, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT INTO issue_comments (id, issue_id, user_id, author_name, comment, is_best_answer, created_at)
+     VALUES (?, ?, ?, ?, ?, 0, ?)`
   ).bind(
     commentId,
     issueId,
@@ -121,10 +149,17 @@ export async function handleAddIssueComment(issueId: string, user: UserContext, 
 
 export async function handleMarkBestAnswer(issueId: string, commentId: string, user: UserContext, env: Env): Promise<Response> {
   const issue = await env.DB.prepare(
-    `SELECT created_by FROM issues WHERE id = ?`
-  ).bind(issueId).first<{ created_by: string }>();
+    `SELECT group_id, created_by FROM issues WHERE id = ?`
+  ).bind(issueId).first<{ group_id: string; created_by: string }>();
 
-  if (!issue || (issue.created_by !== user.userId && user.role !== 'ADMIN')) {
+  if (!issue) {
+    return errorResponse('ISSUE_NOT_FOUND', 'الاستفسار غير موجود');
+  }
+
+  const memberCheck = await requireGroupMember(user, issue.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
+  if (issue.created_by !== user.userId && user.role !== 'ADMIN') {
     return errorResponse('FORBIDDEN', 'صاحب الاستفسار فقط يستطيع تحديد أفضل إجابة');
   }
 
@@ -135,6 +170,6 @@ export async function handleMarkBestAnswer(issueId: string, commentId: string, u
 
   return jsonResponse({
     success: true,
-    message: 'تم تمييز الإجابة كأفضل إجابة وحل الاستفسار ⭐',
+    message: 'تم اعتماد الإجابة كحل معتمد للاستفسار ⭐',
   });
 }

@@ -74,6 +74,15 @@ interface ContentDao {
     @Query("DELETE FROM cached_contents WHERE id = :id")
     suspend fun deleteContentById(id: String)
 
+    @Query("UPDATE cached_contents SET syncStatus = :status WHERE id = :id")
+    suspend fun updateSyncStatus(id: String, status: String)
+
+    @Query("UPDATE cached_contents SET mediaUrlsJson = :mediaJson, syncStatus = :status WHERE id = :id")
+    suspend fun updateMediaAndSyncStatus(id: String, mediaJson: String, status: String)
+
+    @Query("SELECT * FROM cached_contents WHERE id = :id LIMIT 1")
+    suspend fun getContentById(id: String): ContentEntity?
+
     @Query("DELETE FROM cached_contents WHERE groupId = :groupId")
     suspend fun clearContents(groupId: String)
 }
@@ -91,6 +100,12 @@ interface HomeworkDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertHomework(homework: HomeworkEntity)
+
+    @Query("UPDATE cached_homeworks SET syncStatus = :status WHERE id = :id")
+    suspend fun updateSyncStatus(id: String, status: String)
+
+    @Query("SELECT * FROM cached_homeworks WHERE id = :id LIMIT 1")
+    suspend fun getHomeworkById(id: String): HomeworkEntity?
 
     @Query("SELECT * FROM cached_homework_completions WHERE userId = :userId")
     fun getCompletionsForUser(userId: String): Flow<List<HomeworkCompletionEntity>>
@@ -122,6 +137,9 @@ interface ExamDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExam(exam: ExamEntity)
 
+    @Query("UPDATE cached_exams SET syncStatus = :status WHERE id = :id")
+    suspend fun updateSyncStatus(id: String, status: String)
+
     @Query("DELETE FROM cached_exams WHERE id = :id")
     suspend fun deleteExamById(id: String)
 
@@ -142,6 +160,9 @@ interface EventDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvent(event: EventEntity)
+
+    @Query("UPDATE cached_events SET syncStatus = :status WHERE id = :id")
+    suspend fun updateSyncStatus(id: String, status: String)
 
     @Query("DELETE FROM cached_events WHERE groupId = :groupId")
     suspend fun clearEvents(groupId: String)
@@ -167,11 +188,17 @@ interface IssueDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertIssue(issue: IssueEntity)
 
+    @Query("UPDATE cached_issues SET syncStatus = :status WHERE id = :id")
+    suspend fun updateSyncStatus(id: String, status: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertComments(comments: List<IssueCommentEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertComment(comment: IssueCommentEntity)
+
+    @Query("UPDATE cached_issue_comments SET syncStatus = :status WHERE id = :id")
+    suspend fun updateCommentSyncStatus(id: String, status: String)
 
     @Query("UPDATE cached_issue_comments SET isBestAnswer = (id = :commentId) WHERE issueId = :issueId")
     suspend fun setBestAnswer(issueId: String, commentId: String)

@@ -1,20 +1,27 @@
 import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
+import { mapExam } from '../lib/mappers';
+import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 
-export async function handleGetExams(groupId: string, env: Env): Promise<Response> {
+export async function handleGetExams(groupId: string, user: UserContext, env: Env): Promise<Response> {
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
+
   const exams = await env.DB.prepare(
     `SELECT e.id, e.group_id, e.exam_date, e.subject_id, e.title, e.required_chapters, e.notes, e.study_package_info,
-            s.name_ar as subject_name, s.icon as subject_icon, s.color_hex
+            COALESCE(s.name_ar, e.subject_id) as subject_name,
+            COALESCE(s.icon, '🔴') as subject_icon,
+            s.color_hex
      FROM exams e
-     JOIN subjects s ON e.subject_id = s.id
+     LEFT JOIN subjects s ON e.subject_id = s.id
      WHERE e.group_id = ?
      ORDER BY e.exam_date ASC`
   ).bind(groupId).all();
 
   return jsonResponse({
     success: true,
-    exams: exams.results,
+    exams: (exams.results || []).map(mapExam),
   });
 }
 
@@ -31,6 +38,9 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
   if (!body.groupId || !body.examDate || !body.subjectId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد تفاصيل الاختبار والمادة وتاريخه');
   }
+
+  const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
+  if (memberCheck) return memberCheck;
 
   const examId = generateId('exm');
   await env.DB.prepare(
@@ -51,6 +61,6 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
   return jsonResponse({
     success: true,
     examId,
-    message: 'تم جدول الاختبار وإضافته للتقويم الدراسي',
+    message: 'تمت جدولة الاختبار وإضافته للتقويم الدراسي بنجاح',
   });
 }

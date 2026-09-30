@@ -1,8 +1,13 @@
 import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
+import { mapChatMessage } from '../lib/mappers';
+import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 
-export async function handleGetGroupMessages(groupId: string, env: Env): Promise<Response> {
+export async function handleGetGroupMessages(groupId: string, user: UserContext, env: Env): Promise<Response> {
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
+
   const messages = await env.DB.prepare(
     `SELECT id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp
      FROM chat_messages
@@ -12,7 +17,7 @@ export async function handleGetGroupMessages(groupId: string, env: Env): Promise
 
   return jsonResponse({
     success: true,
-    messages: messages.results,
+    messages: (messages.results || []).map(mapChatMessage),
   });
 }
 
@@ -22,6 +27,9 @@ export async function handlePostGroupMessage(
   request: Request,
   env: Env
 ): Promise<Response> {
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
+
   const body = await request.json() as { text?: string };
   if (!body.text || !body.text.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى كتابة نص الرسالة');
@@ -34,6 +42,7 @@ export async function handlePostGroupMessage(
   };
   const senderGradeSection = `${gradeNameMap[user.gradeId] || user.gradeId} — ${user.sectionId}`;
 
+  // Server-authoritative sender identity from UserContext
   await env.DB.prepare(
     `INSERT INTO chat_messages (id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -47,36 +56,34 @@ export async function handlePostGroupMessage(
     now
   ).run();
 
-  // Forward to Durable Object for live WebSocket broadcast if available
+  const messagePayload = {
+    id: messageId,
+    groupId,
+    senderId: user.userId,
+    senderName: user.fullName,
+    senderGradeSection,
+    text: body.text.trim(),
+    timestamp: now,
+    status: 'SENT',
+  };
+
+  // Forward to Durable Object for live WebSocket broadcast
   try {
     const doId = env.CHAT.idFromName(groupId);
     const doStub = env.CHAT.get(doId);
     await doStub.fetch(new Request('http://internal/broadcast', {
       method: 'POST',
       body: JSON.stringify({
-        id: messageId,
-        groupId,
-        senderId: user.userId,
-        senderName: user.fullName,
-        senderGradeSection,
-        text: body.text.trim(),
-        timestamp: now,
+        type: 'chat_message',
+        ...messagePayload,
       }),
     }));
   } catch {
-    // Durable object broadcast fallback
+    // Durable object fallback
   }
 
   return jsonResponse({
     success: true,
-    message: {
-      id: messageId,
-      groupId,
-      senderId: user.userId,
-      senderName: user.fullName,
-      senderGradeSection,
-      text: body.text.trim(),
-      timestamp: now,
-    },
+    message: messagePayload,
   });
 }
