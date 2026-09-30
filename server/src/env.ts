@@ -3,6 +3,7 @@ export interface Env {
   CHAT: DurableObjectNamespace;
   JWT_SECRET?: string;
   SESSION_PEPPER?: string;
+  PASSWORD_PEPPER?: string;
   ENVIRONMENT?: string;
 }
 

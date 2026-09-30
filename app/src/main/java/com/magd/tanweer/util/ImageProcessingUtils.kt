@@ -60,10 +60,16 @@ object ImageProcessingUtils {
                 bitmap = applyColorFilters(bitmap, autoEnhance, contrast, brightness, blackAndWhite)
             }
 
-            // 4. Compress to JPEG
+            // 4. Compress to JPEG with strict size guard (< 1.4MB)
             val stream = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
-            val bytes = stream.toByteArray()
+            var bytes = stream.toByteArray()
+
+            if (bytes.size > 1_400_000) {
+                val reducedStream = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 68, reducedStream)
+                bytes = reducedStream.toByteArray()
+            }
 
             // 5. Calculate SHA-256 Checksum
             val checksum = calculateSha256(bytes)

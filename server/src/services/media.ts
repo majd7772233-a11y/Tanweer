@@ -11,8 +11,9 @@ export async function handleUploadMedia(user: UserContext, request: Request, env
     const formData = await request.formData();
     const file = formData.get('file') || formData.get('image');
     if (file && typeof file !== 'string') {
-      mediaBuffer = await file.arrayBuffer();
-      mimeType = file.type || 'image/jpeg';
+      const fileObj = file as unknown as File;
+      mediaBuffer = await fileObj.arrayBuffer();
+      mimeType = fileObj.type || 'image/jpeg';
     }
   } else if (contentType.includes('application/json')) {
     const body = await request.json() as { base64?: string; mimeType?: string };
@@ -37,9 +38,13 @@ export async function handleUploadMedia(user: UserContext, request: Request, env
     return errorResponse('INVALID_FILE', 'لم يتم استلام أي ملف صورة صالح');
   }
 
+  const fileSize = mediaBuffer.byteLength;
+  if (fileSize > 1_800_000) {
+    return errorResponse('FILE_TOO_LARGE', 'حجم الصورة يتجاوز الحد الأقصى المسموح به (1.8 ميجابايت)');
+  }
+
   const mediaId = generateId('med');
   const now = Date.now();
-  const fileSize = mediaBuffer.byteLength;
 
   // Compute SHA-256 Checksum
   const digestBuffer = await crypto.subtle.digest('SHA-256', mediaBuffer);

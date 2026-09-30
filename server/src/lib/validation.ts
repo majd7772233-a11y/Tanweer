@@ -1,7 +1,7 @@
 // Arabic and English character patterns
 const ARABIC_NAME_PATTERN = /^[\u0621-\u064A\u0671-\u06D3]+$/;
 const ENGLISH_NAME_PATTERN = /^[a-zA-Z]+$/;
-const FORBIDDEN_CHARS = /[0-9\p{So}\p{Sk}\p{Sm}\p{Sc}\p{Punct}□♡£■€¡¤{}<>[\]_+=|\\/@#$%^&*~`!?,:;"']/u;
+const FORBIDDEN_CHARS = /[0-9\p{So}\p{Sk}\p{Sm}\p{Sc}\p{P}□♡£■€¡¤{}<>[\]_+=|\\/@#$%^&*~`!?,:;"']/u;
 
 export function validateArabicFullName(name: string): { isValid: boolean; error?: string } {
   if (!name || typeof name !== 'string') {
