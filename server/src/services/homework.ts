@@ -10,7 +10,7 @@ export async function handleGetHomeworks(groupId: string, user: UserContext, env
 
   const homeworks = await env.DB.prepare(
     `SELECT h.id, h.group_id, h.study_date, h.due_date, h.subject_id, h.title, h.details,
-            h.page_numbers, h.question_numbers, h.task_type, h.created_at,
+            h.page_numbers, h.question_numbers, h.task_type, h.media_urls, h.created_at,
             COALESCE(s.name_ar, h.subject_id) as subject_name,
             COALESCE(s.icon, '📝') as subject_icon,
             s.color_hex,
@@ -38,6 +38,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     pageNumbers?: string;
     questionNumbers?: string;
     taskType?: string;
+    mediaUrls?: string[];
   };
 
   if (!body.groupId || !body.dueDate || !body.subjectId || !body.title) {
@@ -49,9 +50,13 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
 
   const hwId = generateId('hw');
   const now = Date.now();
+  const mediaUrlsJson = (body.mediaUrls && Array.isArray(body.mediaUrls) && body.mediaUrls.length > 0)
+    ? JSON.stringify(body.mediaUrls)
+    : null;
+
   await env.DB.prepare(
-    `INSERT INTO homeworks (id, group_id, study_date, due_date, subject_id, title, details, page_numbers, question_numbers, task_type, created_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO homeworks (id, group_id, study_date, due_date, subject_id, title, details, page_numbers, question_numbers, task_type, media_urls, created_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     hwId,
     body.groupId,
@@ -63,6 +68,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     body.pageNumbers?.trim() || null,
     body.questionNumbers?.trim() || null,
     body.taskType || 'HOMEWORK',
+    mediaUrlsJson,
     user.userId,
     now
   ).run();

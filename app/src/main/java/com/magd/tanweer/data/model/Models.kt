@@ -211,6 +211,7 @@ data class HomeworkItem(
     val subjectName: String = "",
     val subjectIcon: String = "📝",
     val colorHex: String = "#00E5FF",
+    val mediaUrls: List<String> = emptyList(),
     val isCompleted: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'

@@ -39,6 +39,17 @@ export function mapHomework(r: any) {
     subjectName: r.subject_name ?? r.subjectName ?? '',
     subjectIcon: r.subject_icon ?? r.subjectIcon ?? '📝',
     colorHex: r.color_hex ?? r.colorHex ?? '#00E5FF',
+    mediaUrls: (() => {
+      if (Array.isArray(r.media_urls)) return r.media_urls;
+      if (Array.isArray(r.mediaUrls)) return r.mediaUrls;
+      if (typeof r.media_urls === 'string' && r.media_urls.trim()) {
+        try { return JSON.parse(r.media_urls); } catch { return []; }
+      }
+      if (typeof r.mediaUrls === 'string' && r.mediaUrls.trim()) {
+        try { return JSON.parse(r.mediaUrls); } catch { return []; }
+      }
+      return [];
+    })(),
     isCompleted: Boolean(r.is_completed ?? r.isCompleted ?? false),
     createdAt: Number(r.created_at ?? r.createdAt ?? Date.now()),
   };

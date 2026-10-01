@@ -112,7 +112,7 @@ fun ExamsScreen(
                 item {
                     EmptyStateGlass(
                         title = "جدول الاختبارات فارغ",
-                        subtitle = "لم يتم تسجيل أي اختبارات حتى الآن. يمكنك إضافة اختبار جديد إلى الجدول.",
+                        subtitle = "يمكنك إضافة موعد اختبار وتحديد الفصول المطلوبة",
                         icon = "📋",
                         actionButtonText = "إضافة اختبار جديد",
                         onActionClick = { isAddExamModalOpen = true }

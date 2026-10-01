@@ -85,6 +85,12 @@ fun ScheduleScreen(
     val filledSlotsCount = allSlots.size
     val currentGradeName = SchoolHierarchy.getGradeName(currentUser?.gradeId ?: 10)
 
+    LaunchedEffect(activeGroupId) {
+        if (activeGroupId.isNotBlank()) {
+            viewModel.syncSchedule(activeGroupId, isRefresh = false)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()

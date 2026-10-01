@@ -319,6 +319,9 @@ class TanweerRepository(
             if (groupId.isNotBlank()) {
                 syncSchedule(groupId)
                 syncDay(groupId, todayDate)
+                syncHomeworks(groupId)
+                syncExams(groupId)
+                syncIssues(groupId)
             }
             SyncResult.Success()
         } catch (e: Exception) {
@@ -420,6 +423,7 @@ class TanweerRepository(
                     )
                 }
                 if (slots.isNotEmpty()) {
+                    db.scheduleDao().clearSlots(groupId)
                     db.scheduleDao().insertSlots(slots)
                 }
                 SyncResult.Success(slots.size)
@@ -479,6 +483,7 @@ class TanweerRepository(
                             subjectName = it.subjectName,
                             subjectIcon = it.subjectIcon,
                             colorHex = it.colorHex,
+                            mediaUrlsJson = serializeStringList(it.mediaUrls),
                             createdAt = it.createdAt
                         )
                     }
@@ -551,6 +556,7 @@ class TanweerRepository(
                         subjectName = it.subjectName,
                         subjectIcon = it.subjectIcon,
                         colorHex = it.colorHex,
+                        mediaUrlsJson = serializeStringList(it.mediaUrls),
                         createdAt = it.createdAt
                     )
                 }
@@ -916,6 +922,30 @@ class TanweerRepository(
         db.scheduleDao().deleteSlotById(slotId)
     }
 
+    private val recentMessageIds = java.util.Collections.synchronizedSet(java.util.LinkedHashSet<String>())
+
+    private fun parseStringListJson(jsonStr: String?): List<String> {
+        if (jsonStr.isNullOrBlank() || jsonStr == "[]") return emptyList()
+        return try {
+            val array = JSONArray(jsonStr)
+            val list = mutableListOf<String>()
+            for (i in 0 until array.length()) {
+                val s = array.optString(i)
+                if (!s.isNullOrBlank()) list.add(s)
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun serializeStringList(list: List<String>): String {
+        if (list.isEmpty()) return "[]"
+        val array = JSONArray()
+        list.forEach { if (it.isNotBlank()) array.put(it) }
+        return array.toString()
+    }
+
     private fun parseMediaJson(jsonStr: String?): List<MediaItem> {
         if (jsonStr.isNullOrBlank() || jsonStr == "[]") return emptyList()
         return try {
@@ -1007,6 +1037,7 @@ class TanweerRepository(
                         subjectName = it.subjectName,
                         subjectIcon = it.subjectIcon,
                         colorHex = it.colorHex,
+                        mediaUrls = parseStringListJson(it.mediaUrlsJson),
                         isCompleted = completedIds.contains(it.id),
                         createdAt = it.createdAt,
                         syncStatus = it.syncStatus
@@ -1203,26 +1234,37 @@ class TanweerRepository(
 
         chatManager.connect(groupId) { json ->
             try {
-                val id = json.optString("id", "msg_${System.currentTimeMillis()}")
+                val id = json.optString("id", "")
                 val senderId = json.optString("senderId", "")
                 val senderName = json.optString("senderName", "")
                 val senderGradeSection = json.optString("senderGradeSection", "")
                 val text = json.optString("text", "")
                 val timestamp = json.optLong("timestamp", System.currentTimeMillis())
 
-                if (text.isNotBlank()) {
-                    val entity = ChatMessageEntity(
-                        id = id,
-                        groupId = groupId,
-                        senderId = senderId,
-                        senderName = senderName,
-                        senderGradeSection = senderGradeSection,
-                        text = text,
-                        timestamp = timestamp,
-                        status = "SENT"
-                    )
-                    CoroutineScope(Dispatchers.IO).launch {
-                        db.chatDao().insertMessage(entity)
+                if (text.isNotBlank() && id.isNotBlank()) {
+                    if (senderId == myUserId) {
+                        // My own message echo from server broadcast: mark as SENT without duplicate insert
+                        recentMessageIds.add(id)
+                        CoroutineScope(Dispatchers.IO).launch {
+                            db.chatDao().updateMessageStatus(id, "SENT")
+                        }
+                    } else {
+                        // Message from another member: insert if not already received
+                        if (recentMessageIds.add(id)) {
+                            val entity = ChatMessageEntity(
+                                id = id,
+                                groupId = groupId,
+                                senderId = senderId,
+                                senderName = senderName,
+                                senderGradeSection = senderGradeSection,
+                                text = text,
+                                timestamp = timestamp,
+                                status = "SENT"
+                            )
+                            CoroutineScope(Dispatchers.IO).launch {
+                                db.chatDao().insertMessage(entity)
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -1231,6 +1273,9 @@ class TanweerRepository(
         }
     }
 
+    private var lastSentMessageSignature: String? = null
+    private var lastSentMessageTime: Long = 0L
+
     suspend fun sendChatMessage(
         groupId: String,
         senderId: String,
@@ -1238,15 +1283,28 @@ class TanweerRepository(
         senderGradeSection: String,
         text: String
     ) = withContext(Dispatchers.IO) {
+        val cleanText = text.trim()
+        if (cleanText.isBlank()) return@withContext
+
+        // Debounce exact duplicate sends within 1.5s
         val now = System.currentTimeMillis()
-        val msgId = "msg_$now"
+        val sig = "$groupId|$senderId|$cleanText"
+        if (sig == lastSentMessageSignature && (now - lastSentMessageTime < 1500L)) {
+            return@withContext
+        }
+        lastSentMessageSignature = sig
+        lastSentMessageTime = now
+
+        val msgId = "msg_${now}_${(1000..9999).random()}"
+        recentMessageIds.add(msgId)
+
         val localMsg = ChatMessageEntity(
             id = msgId,
             groupId = groupId,
             senderId = senderId,
             senderName = senderName,
             senderGradeSection = senderGradeSection,
-            text = text,
+            text = cleanText,
             timestamp = now,
             status = "SENDING"
         )
@@ -1258,22 +1316,24 @@ class TanweerRepository(
             put("senderId", senderId)
             put("senderName", senderName)
             put("senderGradeSection", senderGradeSection)
-            put("text", text)
+            put("text", cleanText)
             put("timestamp", now)
         }
         val wsSent = chatManager.sendMessage(json)
 
-        try {
-            val res = api.postGroupMessage(groupId, PostMessageRequest(text = text))
-            if (res.isSuccessful || wsSent) {
-                db.chatDao().updateMessageStatus(msgId, "SENT")
-            } else {
-                db.chatDao().updateMessageStatus(msgId, "FAILED")
-            }
-        } catch (_: Exception) {
-            if (wsSent) {
-                db.chatDao().updateMessageStatus(msgId, "SENT")
-            } else {
+        if (wsSent) {
+            // Sent successfully via real-time WebSocket, mark as SENT immediately
+            db.chatDao().updateMessageStatus(msgId, "SENT")
+        } else {
+            // Fallback to HTTP REST endpoint only if WebSocket is disconnected
+            try {
+                val res = api.postGroupMessage(groupId, PostMessageRequest(id = msgId, text = cleanText))
+                if (res.isSuccessful) {
+                    db.chatDao().updateMessageStatus(msgId, "SENT")
+                } else {
+                    db.chatDao().updateMessageStatus(msgId, "FAILED")
+                }
+            } catch (_: Exception) {
                 db.chatDao().updateMessageStatus(msgId, "FAILED")
             }
         }
@@ -1291,17 +1351,17 @@ class TanweerRepository(
             put("timestamp", msg.timestamp)
         }
         val wsSent = chatManager.sendMessage(json)
-        try {
-            val res = api.postGroupMessage(msg.groupId, PostMessageRequest(text = msg.text))
-            if (res.isSuccessful || wsSent) {
-                db.chatDao().updateMessageStatus(msg.id, "SENT")
-            } else {
-                db.chatDao().updateMessageStatus(msg.id, "FAILED")
-            }
-        } catch (_: Exception) {
-            if (wsSent) {
-                db.chatDao().updateMessageStatus(msg.id, "SENT")
-            } else {
+        if (wsSent) {
+            db.chatDao().updateMessageStatus(msg.id, "SENT")
+        } else {
+            try {
+                val res = api.postGroupMessage(msg.groupId, PostMessageRequest(id = msg.id, text = msg.text))
+                if (res.isSuccessful) {
+                    db.chatDao().updateMessageStatus(msg.id, "SENT")
+                } else {
+                    db.chatDao().updateMessageStatus(msg.id, "FAILED")
+                }
+            } catch (_: Exception) {
                 db.chatDao().updateMessageStatus(msg.id, "FAILED")
             }
         }
@@ -1456,7 +1516,8 @@ class TanweerRepository(
         details: String?,
         pageNumbers: String?,
         questionNumbers: String?,
-        taskType: String = "HOMEWORK"
+        taskType: String = "HOMEWORK",
+        mediaUrls: List<String> = emptyList()
     ): Result<String> = withContext(Dispatchers.IO) {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
@@ -1477,6 +1538,7 @@ class TanweerRepository(
             subjectName = subject?.name ?: subjectId,
             subjectIcon = subject?.icon ?: "📝",
             colorHex = subject?.colorHex ?: "#00E5FF",
+            mediaUrlsJson = serializeStringList(mediaUrls),
             createdAt = System.currentTimeMillis(),
             syncStatus = "SYNCING"
         )
@@ -1493,7 +1555,8 @@ class TanweerRepository(
                     details = details,
                     pageNumbers = pageNumbers,
                     questionNumbers = questionNumbers,
-                    taskType = taskType
+                    taskType = taskType,
+                    mediaUrls = mediaUrls
                 )
             )
             if (res.isSuccessful) {
@@ -1505,6 +1568,115 @@ class TanweerRepository(
             }
         } catch (e: Exception) {
             db.homeworkDao().updateSyncStatus(id, "FAILED")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun addHomeworkWithImages(
+        groupId: String,
+        studyDate: String,
+        dueDate: String,
+        subjectId: String,
+        title: String,
+        details: String?,
+        pageNumbers: String?,
+        questionNumbers: String?,
+        taskType: String = "HOMEWORK",
+        pages: List<ProcessedPageResult> = emptyList()
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val user = db.userDao().getUserSync()
+        val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
+        val subject = gradeSubjects.find { it.id == subjectId }
+            ?: DefaultSubjects.find { it.id == subjectId }
+        val id = "hw_${System.currentTimeMillis()}"
+
+        val localUrls = pages.map { it.file.absolutePath }
+        val entity = HomeworkEntity(
+            id = id,
+            groupId = groupId,
+            studyDate = studyDate,
+            dueDate = dueDate,
+            subjectId = subjectId,
+            title = title,
+            details = details,
+            pageNumbers = pageNumbers,
+            questionNumbers = questionNumbers,
+            taskType = taskType,
+            subjectName = subject?.name ?: subjectId,
+            subjectIcon = subject?.icon ?: "📝",
+            colorHex = subject?.colorHex ?: "#00E5FF",
+            mediaUrlsJson = serializeStringList(localUrls),
+            createdAt = System.currentTimeMillis(),
+            syncStatus = "SYNCING"
+        )
+        db.homeworkDao().insertHomework(entity)
+
+        val uploadedUrls = mutableListOf<String>()
+        var anyUploadFailed = false
+
+        for ((index, page) in pages.withIndex()) {
+            var remoteUrl: String? = null
+            try {
+                if (page.file.exists() && page.file.length() > 0) {
+                    val reqFile = page.file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                    val part = MultipartBody.Part.createFormData("file", "hw_${index + 1}_${page.file.name}", reqFile)
+                    val uploadRes = api.uploadMedia(part)
+                    if (uploadRes.isSuccessful && uploadRes.body() != null) {
+                        val body = uploadRes.body()!!
+                        remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
+                            if (rel.startsWith("http")) rel else "https://tanweer.magd.workers.dev/${rel.removePrefix("/")}"
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("TanweerRepository", "Upload failed for homework page $index: ${e.message}")
+            }
+
+            if (remoteUrl != null) {
+                uploadedUrls.add(remoteUrl)
+            } else {
+                uploadedUrls.add(page.file.absolutePath)
+                anyUploadFailed = true
+            }
+        }
+
+        try {
+            val res = api.createHomework(
+                CreateHomeworkRequest(
+                    groupId = groupId,
+                    studyDate = studyDate,
+                    dueDate = dueDate,
+                    subjectId = subjectId,
+                    title = title,
+                    details = details,
+                    pageNumbers = pageNumbers,
+                    questionNumbers = questionNumbers,
+                    taskType = taskType,
+                    mediaUrls = uploadedUrls
+                )
+            )
+            if (res.isSuccessful) {
+                val updatedEntity = entity.copy(
+                    mediaUrlsJson = serializeStringList(uploadedUrls),
+                    syncStatus = "SYNCED"
+                )
+                db.homeworkDao().insertHomework(updatedEntity)
+                Result.success(id)
+            } else {
+                val status = if (anyUploadFailed) "FAILED" else "LOCAL"
+                val updatedEntity = entity.copy(
+                    mediaUrlsJson = serializeStringList(uploadedUrls),
+                    syncStatus = status
+                )
+                db.homeworkDao().insertHomework(updatedEntity)
+                Result.failure(Exception("فشل إرسال الواجب أو رفع الصور للسيرفر"))
+            }
+        } catch (e: Exception) {
+            val updatedEntity = entity.copy(
+                mediaUrlsJson = serializeStringList(uploadedUrls),
+                syncStatus = "FAILED"
+            )
+            db.homeworkDao().insertHomework(updatedEntity)
             Result.failure(e)
         }
     }

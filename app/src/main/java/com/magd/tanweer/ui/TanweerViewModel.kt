@@ -1,6 +1,7 @@
 package com.magd.tanweer.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.magd.tanweer.data.local.TanweerDatabase
@@ -30,13 +31,81 @@ enum class SubScreen {
     SCHEDULE,
     TIMELINE,
     PROFILE,
+    SETTINGS,
     SEARCH,
     WHAT_DID_I_MISS
 }
 
 class TanweerViewModel(application: Application) : AndroidViewModel(application) {
+    private val prefs = application.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
     private val db = TanweerDatabase.getInstance(application)
     val repository = TanweerRepository(db)
+
+    // App Settings State (Persisted in SharedPreferences)
+    // Default Font Scale is 1.0f (Base 12sp default)
+    private val _fontSizeScale = MutableStateFlow(prefs.getFloat("font_size_scale", 1.0f))
+    val fontSizeScale: StateFlow<Float> = _fontSizeScale.asStateFlow()
+
+    private val _appTheme = MutableStateFlow(prefs.getString("app_theme", "DARK") ?: "DARK")
+    val appTheme: StateFlow<String> = _appTheme.asStateFlow()
+
+    private val _autoSyncEnabled = MutableStateFlow(prefs.getBoolean("auto_sync_enabled", true))
+    val autoSyncEnabled: StateFlow<Boolean> = _autoSyncEnabled.asStateFlow()
+
+    private val _imageQualitySetting = MutableStateFlow(prefs.getString("image_quality", "BALANCED") ?: "BALANCED")
+    val imageQualitySetting: StateFlow<String> = _imageQualitySetting.asStateFlow()
+
+    private val _notifyHomework = MutableStateFlow(prefs.getBoolean("notify_homework", true))
+    val notifyHomework: StateFlow<Boolean> = _notifyHomework.asStateFlow()
+
+    private val _notifySchedule = MutableStateFlow(prefs.getBoolean("notify_schedule", true))
+    val notifySchedule: StateFlow<Boolean> = _notifySchedule.asStateFlow()
+
+    private val _notifyExams = MutableStateFlow(prefs.getBoolean("notify_exams", true))
+    val notifyExams: StateFlow<Boolean> = _notifyExams.asStateFlow()
+
+    private val _hapticsEnabled = MutableStateFlow(prefs.getBoolean("haptics_enabled", true))
+    val hapticsEnabled: StateFlow<Boolean> = _hapticsEnabled.asStateFlow()
+
+    fun setFontScale(scale: Float) {
+        _fontSizeScale.value = scale
+        prefs.edit().putFloat("font_size_scale", scale).apply()
+    }
+
+    fun setAppTheme(theme: String) {
+        _appTheme.value = theme
+        prefs.edit().putString("app_theme", theme).apply()
+    }
+
+    fun setAutoSyncEnabled(enabled: Boolean) {
+        _autoSyncEnabled.value = enabled
+        prefs.edit().putBoolean("auto_sync_enabled", enabled).apply()
+    }
+
+    fun setImageQualitySetting(quality: String) {
+        _imageQualitySetting.value = quality
+        prefs.edit().putString("image_quality", quality).apply()
+    }
+
+    fun setNotifyHomework(notify: Boolean) {
+        _notifyHomework.value = notify
+        prefs.edit().putBoolean("notify_homework", notify).apply()
+    }
+
+    fun setNotifySchedule(notify: Boolean) {
+        _notifySchedule.value = notify
+        prefs.edit().putBoolean("notify_schedule", notify).apply()
+    }
+
+    fun setNotifyExams(notify: Boolean) {
+        _notifyExams.value = notify
+        prefs.edit().putBoolean("notify_exams", notify).apply()
+    }
+
+    fun setHapticsEnabled(enabled: Boolean) {
+        _hapticsEnabled.value = enabled
+        prefs.edit().putBoolean("haptics_enabled", enabled).apply()
+    }
 
     val currentUser = repository.currentUser.stateIn(
         viewModelScope,
@@ -533,22 +602,40 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         pageNumbers: String?,
         questionNumbers: String?,
         dueDate: String,
-        taskType: String = "HOMEWORK"
+        taskType: String = "HOMEWORK",
+        pages: List<com.magd.tanweer.util.ProcessedPageResult> = emptyList(),
+        onComplete: (() -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
         viewModelScope.launch {
-            repository.addHomework(
-                groupId = groupId,
-                studyDate = _selectedDate.value,
-                dueDate = dueDate,
-                subjectId = subjectId,
-                title = title,
-                details = details,
-                pageNumbers = pageNumbers,
-                questionNumbers = questionNumbers,
-                taskType = taskType
-            )
+            if (pages.isNotEmpty()) {
+                repository.addHomeworkWithImages(
+                    groupId = groupId,
+                    studyDate = _selectedDate.value,
+                    dueDate = dueDate,
+                    subjectId = subjectId,
+                    title = title,
+                    details = details,
+                    pageNumbers = pageNumbers,
+                    questionNumbers = questionNumbers,
+                    taskType = taskType,
+                    pages = pages
+                )
+            } else {
+                repository.addHomework(
+                    groupId = groupId,
+                    studyDate = _selectedDate.value,
+                    dueDate = dueDate,
+                    subjectId = subjectId,
+                    title = title,
+                    details = details,
+                    pageNumbers = pageNumbers,
+                    questionNumbers = questionNumbers,
+                    taskType = taskType
+                )
+            }
+            onComplete?.invoke()
         }
     }
 
@@ -671,9 +758,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun sendChatMessage(text: String) {
+    fun sendChatMessage(text: String, targetGroupId: String? = null) {
         val user = currentUser.value ?: return
-        val groupId = getActiveGroupId()
+        val groupId = targetGroupId ?: getActiveGroupId()
+        val cleanText = text.trim()
+        if (cleanText.isBlank() || groupId.isBlank()) return
         viewModelScope.launch {
             val gradeName = SchoolHierarchy.getGradeName(user.gradeId)
             val secAr = SchoolHierarchy.getSectionArabicName(user.sectionId)
@@ -682,7 +771,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 senderId = user.id,
                 senderName = user.fullName,
                 senderGradeSection = "$gradeName — $secAr",
-                text = text
+                text = cleanText
             )
         }
     }

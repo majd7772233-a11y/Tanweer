@@ -128,7 +128,8 @@ data class CreateHomeworkRequest(
     val details: String? = null,
     val pageNumbers: String? = null,
     val questionNumbers: String? = null,
-    val taskType: String = "HOMEWORK"
+    val taskType: String = "HOMEWORK",
+    val mediaUrls: List<String> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)
@@ -200,6 +201,7 @@ data class AddCommentRequest(
 
 @JsonClass(generateAdapter = true)
 data class PostMessageRequest(
+    val id: String? = null,
     val text: String
 )
 

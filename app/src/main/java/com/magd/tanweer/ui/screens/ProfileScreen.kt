@@ -13,15 +13,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ExitToApp
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -206,35 +200,35 @@ fun ProfileScreen(
             }
         }
 
-        // Data Saver Mode
+        // Settings Navigation Card
         item {
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                backgroundColor = GlassSurface
+                backgroundColor = GlassSurface,
+                onClick = { viewModel.setSubScreen(com.magd.tanweer.ui.SubScreen.SETTINGS) }
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "⚙️ توفير البيانات والاستخدام السريع",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = "ضغط وتحسين صور السبورة", fontSize = 13.sp, color = TextPrimary)
-                            Text(text = "تقليل حجم صور الدروس لتسريع الفتح وتوفير الرصيد", fontSize = 11.sp, color = TextSecondary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CyanGlow),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
                         }
-                        Switch(
-                            checked = isDataSaverEnabled,
-                            onCheckedChange = { isDataSaverEnabled = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = CyanAccent)
-                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(text = "إعدادات التطبيق وتخصيص الخط", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(text = "الخط (12px)، السمة، المزامنة والكاش", fontSize = 11.sp, color = TextSecondary)
+                        }
                     }
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = TextSecondary)
                 }
             }
         }
@@ -242,7 +236,7 @@ fun ProfileScreen(
         // Logout
         item {
             GlassOutlinedButton(
-                text = "تسجيل الخروج من الحساب",
+                text = "تسجيل الخروج",
                 icon = Icons.Default.ExitToApp,
                 borderColor = RubyRed.copy(alpha = 0.5f),
                 textColor = RubyRed,

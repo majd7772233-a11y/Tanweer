@@ -79,6 +79,7 @@ data class HomeworkEntity(
     val subjectName: String,
     val subjectIcon: String,
     val colorHex: String,
+    val mediaUrlsJson: String = "[]",
     val createdAt: Long,
     val syncStatus: String = "SYNCED"
 )

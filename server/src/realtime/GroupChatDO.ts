@@ -74,7 +74,9 @@ export class GroupChatDO {
           const text = (data.text || '').trim();
           if (!text) return; // ignore empty messages
 
-          const messageId = generateId('msg');
+          const messageId = (data.id && typeof data.id === 'string' && data.id.length > 3)
+            ? data.id
+            : generateId('msg');
           const now = Date.now();
 
           // Server-authoritative sender identity from verified session
@@ -90,10 +92,10 @@ export class GroupChatDO {
             status: 'SENT',
           };
 
-          // Save message to D1
+          // Save message to D1 (idempotent insert)
           try {
             await this.env.DB.prepare(
-              `INSERT INTO chat_messages (id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp)
+              `INSERT OR IGNORE INTO chat_messages (id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp)
                VALUES (?, ?, ?, ?, ?, ?, ?)`
             ).bind(
               messageId,

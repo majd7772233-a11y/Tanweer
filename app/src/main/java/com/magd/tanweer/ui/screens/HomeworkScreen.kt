@@ -1,7 +1,14 @@
 package com.magd.tanweer.ui.screens
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,8 +16,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -19,17 +29,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import com.magd.tanweer.data.model.HomeworkItem
 import com.magd.tanweer.data.model.SubjectItem
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.ImageProcessingUtils
+import com.magd.tanweer.util.ProcessedPageResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -37,10 +60,21 @@ enum class HomeworkFilter(val label: String, val icon: String) {
     ALL("الكل", "📋"),
     TODAY("اليوم", "⚡"),
     TOMORROW("غداً", "🌅"),
-    THIS_WEEK("هذا الأسبوع", "🗓️"),
+    THIS_WEEK("الأسبوع", "🗓️"),
     OVERDUE("متأخر", "⚠️"),
     COMPLETED("المكتملة", "✅")
 }
+
+data class HomeworkScanPage(
+    val id: String = UUID.randomUUID().toString(),
+    val uri: Uri? = null,
+    val rawBitmap: Bitmap? = null,
+    val processedResult: ProcessedPageResult? = null,
+    val displayBitmap: Bitmap? = null,
+    val rotation: Float = 0f,
+    val autoEnhance: Boolean = true,
+    val isProcessing: Boolean = false
+)
 
 @Composable
 fun HomeworkScreen(
@@ -59,8 +93,15 @@ fun HomeworkScreen(
     }
 
     var selectedFilter by remember { mutableStateOf(HomeworkFilter.ALL) }
-    var selectedTaskTypeFilter by remember { mutableStateOf<String?>(null) } // null = All, "HOMEWORK", "TASK"
+    var selectedTaskTypeFilter by remember { mutableStateOf<String?>(null) }
     var isAddModalOpen by remember { mutableStateOf(false) }
+    var fullScreenImagePreviewUrl by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(activeGroupId) {
+        if (activeGroupId.isNotBlank()) {
+            viewModel.syncHomeworks(activeGroupId, isRefresh = false)
+        }
+    }
 
     val sdf = remember { SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH) }
     val todayDate = remember { sdf.format(Date()) }
@@ -123,12 +164,12 @@ fun HomeworkScreen(
                     Column {
                         Text(
                             text = "📝 الواجبات والتكاليف",
-                            fontSize = 22.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Black,
                             color = CyanAccent
                         )
                         Text(
-                            text = "متابعة وإنجاز التكاليف والواجبات المدرسية",
+                            text = "${homeworks.size} واجب • $todayCount مستحق اليوم",
                             fontSize = 12.sp,
                             color = TextSecondary
                         )
@@ -137,12 +178,12 @@ fun HomeworkScreen(
                         text = "إضافة واجب",
                         icon = Icons.Default.Add,
                         onClick = { isAddModalOpen = true },
-                        modifier = Modifier.height(40.dp)
+                        modifier = Modifier.height(38.dp)
                     )
                 }
             }
 
-            // Task Type Segmented Chips (All, Homework, Task/Project)
+            // Task Type Segmented Chips
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -151,7 +192,7 @@ fun HomeworkScreen(
                     FilterChip(
                         selected = selectedTaskTypeFilter == null,
                         onClick = { selectedTaskTypeFilter = null },
-                        label = { Text("جميع التكاليف (${homeworks.size})") },
+                        label = { Text("الكل (${homeworks.size})") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyanAccent,
                             selectedLabelColor = TextOnAccent
@@ -160,7 +201,7 @@ fun HomeworkScreen(
                     FilterChip(
                         selected = selectedTaskTypeFilter == "HOMEWORK",
                         onClick = { selectedTaskTypeFilter = if (selectedTaskTypeFilter == "HOMEWORK") null else "HOMEWORK" },
-                        label = { Text("واجبات مدرسية 📝") },
+                        label = { Text("واجبات 📝") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyanAccent,
                             selectedLabelColor = TextOnAccent
@@ -169,7 +210,7 @@ fun HomeworkScreen(
                     FilterChip(
                         selected = selectedTaskTypeFilter == "TASK",
                         onClick = { selectedTaskTypeFilter = if (selectedTaskTypeFilter == "TASK") null else "TASK" },
-                        label = { Text("مشاريع وأبحاث 🎯") },
+                        label = { Text("مشاريع 🎯") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyanAccent,
                             selectedLabelColor = TextOnAccent
@@ -178,7 +219,7 @@ fun HomeworkScreen(
                 }
             }
 
-            // Filter Tabs Bar (Horizontal Scrollable for Clean Touch)
+            // Filter Tabs Bar
             item {
                 LazyRow(
                     modifier = Modifier
@@ -241,8 +282,8 @@ fun HomeworkScreen(
             if (filteredHomeworks.isEmpty()) {
                 item {
                     EmptyStateGlass(
-                        title = "لا توجد واجبات مسجلة في هذا القسم",
-                        subtitle = "يمكنك إضافة واجب جديد أو تغيير خيارات الفلترة أعلاه",
+                        title = "لا توجد واجبات في هذا القسم",
+                        subtitle = "يمكنك إضافة واجب جديد وتضمين صور الحلول",
                         icon = "📝",
                         actionButtonText = "إضافة واجب جديد",
                         onActionClick = { isAddModalOpen = true }
@@ -259,10 +300,11 @@ fun HomeworkScreen(
                         isDueToday = isDueToday,
                         onToggle = { viewModel.toggleHomework(hw.id, hw.isCompleted) },
                         onRetrySync = { viewModel.retrySyncHomework(hw.id) },
+                        onImageClick = { url -> fullScreenImagePreviewUrl = url },
                         onAskQuestion = {
                             viewModel.addIssue(
                                 title = "استفسار حول واجب ${hw.subjectName}: ${hw.title}",
-                                description = "ما هو المطلوب بالتحديد في هذا الواجب؟ صفحة: ${hw.pageNumbers ?: "-"}، أسئلة: ${hw.questionNumbers ?: "-"}",
+                                description = "ما هو المطلوب في هذا الواجب؟ صفحة: ${hw.pageNumbers ?: "-"}، أسئلة: ${hw.questionNumbers ?: "-"}",
                                 subjectId = hw.subjectId,
                                 homeworkId = hw.id
                             )
@@ -274,12 +316,12 @@ fun HomeworkScreen(
             }
         }
 
-        // Add Homework Dialog
+        // Add Homework Dialog with Image Attachment
         if (isAddModalOpen) {
             AddHomeworkDialog(
                 subjects = gradeSubjects,
                 onDismiss = { isAddModalOpen = false },
-                onAdd = { subjId, title, details, pages, questions, dueDate, taskType ->
+                onAddWithPages = { subjId, title, details, pages, questions, dueDate, taskType, scanPages ->
                     viewModel.addHomework(
                         subjectId = subjId,
                         title = title,
@@ -287,12 +329,72 @@ fun HomeworkScreen(
                         pageNumbers = pages,
                         questionNumbers = questions,
                         dueDate = dueDate,
-                        taskType = taskType
+                        taskType = taskType,
+                        pages = scanPages.mapNotNull { it.processedResult },
+                        onComplete = {
+                            Toast.makeText(context, "تم حفظ ونشر الواجب بنجاح ✨", Toast.LENGTH_SHORT).show()
+                        }
                     )
-                    Toast.makeText(context, "تم حفظ ونشر الواجب بنجاح ✨", Toast.LENGTH_SHORT).show()
                     isAddModalOpen = false
                 }
             )
+        }
+
+        // Full Screen Image Preview Modal
+        if (fullScreenImagePreviewUrl != null) {
+            Dialog(
+                onDismissRequest = { fullScreenImagePreviewUrl = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.95f))
+                        .clickable { fullScreenImagePreviewUrl = null },
+                    contentAlignment = Alignment.Center
+                ) {
+                    val imgUrl = fullScreenImagePreviewUrl!!
+                    if (imgUrl.startsWith("/") || imgUrl.startsWith("file://")) {
+                        val file = File(imgUrl.removePrefix("file://"))
+                        if (file.exists()) {
+                            val bmp = BitmapFactory.decodeFile(file.absolutePath)
+                            if (bmp != null) {
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = "معاينة صورة الواجب",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp)
+                                        .clip(RoundedCornerShape(12.dp)),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+                        }
+                    } else {
+                        AsyncImage(
+                            model = imgUrl,
+                            contentDescription = "معاينة صورة الواجب",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                                .clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { fullScreenImagePreviewUrl = null },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(24.dp)
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.6f))
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = Color.White)
+                    }
+                }
+            }
         }
     }
 }
@@ -304,6 +406,7 @@ fun HomeworkCard(
     isDueToday: Boolean = false,
     onToggle: () -> Unit,
     onRetrySync: (() -> Unit)? = null,
+    onImageClick: (String) -> Unit,
     onAskQuestion: () -> Unit
 ) {
     val borderColor = when {
@@ -353,7 +456,7 @@ fun HomeworkCard(
                                         .background(WarmAmber.copy(alpha = 0.15f))
                                         .padding(horizontal = 5.dp, vertical = 2.dp)
                                 ) {
-                                    Text("مشروع/بحث 🎯", fontSize = 9.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                                    Text("مشروع 🎯", fontSize = 9.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -363,7 +466,7 @@ fun HomeworkCard(
                             modifier = Modifier.padding(top = 2.dp)
                         ) {
                             Text(
-                                text = "موعد التسليم: ${homework.dueDate}",
+                                text = "التسليم: ${homework.dueDate}",
                                 fontSize = 12.sp,
                                 color = when {
                                     homework.isCompleted -> EmeraldGreen
@@ -389,7 +492,7 @@ fun HomeworkCard(
                                         .background(WarmAmber.copy(alpha = 0.2f))
                                         .padding(horizontal = 5.dp, vertical = 1.dp)
                                 ) {
-                                    Text("مستحق اليوم ⚡", fontSize = 9.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                                    Text("اليوم ⚡", fontSize = 9.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -448,6 +551,73 @@ fun HomeworkCard(
                 }
             }
 
+            // Attached Images Solution Preview Strip
+            if (homework.mediaUrls.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MidnightSurface.copy(alpha = 0.7f))
+                        .padding(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "📷 صور وتوثيق الحل (${homework.mediaUrls.size}):",
+                            fontSize = 11.sp,
+                            color = CyanAccent,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "اضغط للمعاينة 🔍",
+                            fontSize = 10.sp,
+                            color = TextMuted
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(homework.mediaUrls) { imgUrl ->
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(1.dp, CyanGlow, RoundedCornerShape(8.dp))
+                                    .clickable { onImageClick(imgUrl) }
+                            ) {
+                                if (imgUrl.startsWith("/") || imgUrl.startsWith("file://")) {
+                                    val file = File(imgUrl.removePrefix("file://"))
+                                    if (file.exists()) {
+                                        val bmp = BitmapFactory.decodeFile(file.absolutePath)
+                                        if (bmp != null) {
+                                            Image(
+                                                bitmap = bmp.asImageBitmap(),
+                                                contentDescription = "صورة الحل",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    AsyncImage(
+                                        model = imgUrl,
+                                        contentDescription = "صورة الحل",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
 
             if (homework.syncStatus != "SYNCED") {
@@ -492,7 +662,6 @@ fun HomeworkCard(
                     color = if (homework.isCompleted) EmeraldGreen else if (isOverdue) Color(0xFFFF5252) else TextMuted
                 )
 
-                // Ask Question Action linked with homework
                 OutlinedButton(
                     onClick = onAskQuestion,
                     modifier = Modifier.height(34.dp),
@@ -503,7 +672,7 @@ fun HomeworkCard(
                 ) {
                     Icon(Icons.Default.QuestionMark, contentDescription = "اسأل عن الواجب", modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("❓ اسأل عن الواجب", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("اسأل عن الواجب", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -514,15 +683,70 @@ fun HomeworkCard(
 fun AddHomeworkDialog(
     subjects: List<SubjectItem>,
     onDismiss: () -> Unit,
-    onAdd: (subjectId: String, title: String, details: String?, pages: String?, questions: String?, dueDate: String, taskType: String) -> Unit
+    onAddWithPages: (subjectId: String, title: String, details: String?, pages: String?, questions: String?, dueDate: String, taskType: String, scanPages: List<HomeworkScanPage>) -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
     var selectedSubjId by remember { mutableStateOf(subjects.firstOrNull()?.id ?: "math") }
     var title by remember { mutableStateOf("") }
     var details by remember { mutableStateOf("") }
     var pageNumbers by remember { mutableStateOf("") }
     var questionNumbers by remember { mutableStateOf("") }
     var dueDate by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
-    var taskType by remember { mutableStateOf("HOMEWORK") } // 'HOMEWORK' or 'TASK'
+    var taskType by remember { mutableStateOf("HOMEWORK") }
+    var scannedPages by remember { mutableStateOf<List<HomeworkScanPage>>(emptyList()) }
+
+    fun processPageItem(page: HomeworkScanPage, onUpdated: (HomeworkScanPage) -> Unit) {
+        scope.launch {
+            val result = ImageProcessingUtils.loadAndProcessImage(
+                context = context,
+                uri = page.uri,
+                rawBitmap = page.rawBitmap,
+                autoEnhance = page.autoEnhance,
+                blackAndWhite = false,
+                rotationDegrees = page.rotation
+            )
+            val bmp = result?.file?.let {
+                BitmapFactory.decodeFile(it.absolutePath)
+            }
+            onUpdated(
+                page.copy(
+                    processedResult = result,
+                    displayBitmap = bmp,
+                    isProcessing = false
+                )
+            )
+        }
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 5)
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            val newPages = uris.map { uri ->
+                HomeworkScanPage(uri = uri, isProcessing = true)
+            }
+            scannedPages = scannedPages + newPages
+            newPages.forEach { p ->
+                processPageItem(p) { updated ->
+                    scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
+                }
+            }
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        if (bitmap != null) {
+            val newPage = HomeworkScanPage(rawBitmap = bitmap, isProcessing = true)
+            scannedPages = scannedPages + newPage
+            processPageItem(newPage) { updated ->
+                scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -538,6 +762,7 @@ fun AddHomeworkDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -574,7 +799,7 @@ fun AddHomeworkDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            "مشروع / تكليف 🎯",
+                            "مشروع / بحث 🎯",
                             fontSize = 12.sp,
                             fontWeight = if (taskType == "TASK") FontWeight.Bold else FontWeight.Normal,
                             color = if (taskType == "TASK") TextOnAccent else TextPrimary
@@ -645,6 +870,109 @@ fun AddHomeworkDialog(
                     label = "موعد التسليم (YYYY-MM-DD)",
                     placeholder = "2026-09-30"
                 )
+
+                // -------------------------------------------------------------
+                // IMAGE ATTACHMENT SECTION (إدراج صور الواجب أو الحل)
+                // -------------------------------------------------------------
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MidnightSurface)
+                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
+                        .padding(10.dp)
+                ) {
+                    Text(
+                        text = "📷 إدراج صور الواجب / الحل (اختياري)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = CyanAccent
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                photoPickerLauncher.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                                    )
+                                )
+                            },
+                            modifier = Modifier.weight(1f).height(38.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent.copy(alpha = 0.6f))
+                        ) {
+                            Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("الاستوديو", fontSize = 11.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = { cameraLauncher.launch(null) },
+                            modifier = Modifier.weight(1f).height(38.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = WarmAmber),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, WarmAmber.copy(alpha = 0.6f))
+                        ) {
+                            Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("الكاميرا", fontSize = 11.sp)
+                        }
+                    }
+
+                    // Scanned / Selected Pages Thumbnails
+                    if (scannedPages.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            itemsIndexed(scannedPages) { index, page ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(72.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .border(1.dp, CyanAccent, RoundedCornerShape(10.dp))
+                                ) {
+                                    if (page.displayBitmap != null) {
+                                        Image(
+                                            bitmap = page.displayBitmap.asImageBitmap(),
+                                            contentDescription = "صفحة ${index + 1}",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else if (page.isProcessing) {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = CyanAccent)
+                                        }
+                                    }
+
+                                    // Remove Page Button
+                                    IconButton(
+                                        onClick = {
+                                            scannedPages = scannedPages.filter { it.id != page.id }
+                                        },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.Black.copy(alpha = 0.7f))
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = "حذف", tint = Color.White, modifier = Modifier.size(12.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -653,7 +981,7 @@ fun AddHomeworkDialog(
                 enabled = title.isNotBlank(),
                 onClick = {
                     if (title.isNotBlank()) {
-                        onAdd(selectedSubjId, title, details, pageNumbers, questionNumbers, dueDate, taskType)
+                        onAddWithPages(selectedSubjId, title, details, pageNumbers, questionNumbers, dueDate, taskType, scannedPages)
                     }
                 }
             )

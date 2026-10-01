@@ -40,11 +40,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 enum class LibraryViewMode(val title: String, val icon: String, val desc: String) {
-    WOODEN_SHELF("رفوف خشبية", "🪵", "عرض كعوب الكتب على رفوف خشبية تفاعلية واقعية"),
-    CARDS_3D("كروت 3D", "✨", "بطاقات ثلاثية الأبعاد مع لمحة هولوغرافية وألوان المواد"),
-    LIST_VIEW("قائمة سريعة", "📋", "عرض مضغوط ومفصل مع أحجام الكتب وحالة التحميل"),
-    SCATTERED_DESK("طاولة المذاكرة", "📐", "توزيع الكتب بزوايا طبيعية عفوية على طاولة المذاكرة"),
-    COVER_FLOW("كاروسيل الغلاف", "🎞️", "استعراض أفقي مسرحي للأغلفة مع أزرار التنقل")
+    WOODEN_SHELF("رفوف خشبية", "🪵", "عرض كعوب الكتب على رفوف واقعية"),
+    CARDS_3D("كروت 3D", "✨", "بطاقات مجسمة بألوان المواد"),
+    LIST_VIEW("قائمة سريعة", "📋", "قائمة مضغوطة مع أحجام الملفات"),
+    SCATTERED_DESK("طاولة المذاكرة", "📐", "توزيع طبيعي على طاولة الدراسة"),
+    COVER_FLOW("كاروسيل الغلاف", "🎞️", "استعراض أفقي للأغلفة")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -414,18 +414,13 @@ fun LibraryScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "🎨 اختر طريقة عرض المكتبة المفضلة:",
+                        text = "🎨 طريقة عرض المكتبة:",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
-                    Text(
-                        text = "يمكنك التبديل بين أنماط العرض المختلفة بنقرة واحدة في أي وقت.",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     LibraryViewMode.values().forEach { mode ->
                         val isSelected = currentViewMode == mode
@@ -841,27 +836,17 @@ fun EmptyGradeBooksView(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "لا توجد كتب دراسية لـ $gradeName حالياً",
-                fontSize = 17.sp,
+                text = "لا توجد كتب لـ $gradeName حالياً",
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = WarmAmber,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = "سيتم توفير ورفع جميع كتب هذا الصف لاحقاً في الإصدارات والتحديثات القادمة بإذن الله 📚✨",
-                fontSize = 13.sp,
-                color = TextSecondary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 16.dp)
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             GlassButton(
-                text = "فحص التحديثات والمزامنة الآن 🔄",
+                text = "فحص التحديثات والمزامنة 🔄",
                 icon = Icons.Default.Refresh,
                 color = WarmAmber,
                 textColor = TextOnAccent,

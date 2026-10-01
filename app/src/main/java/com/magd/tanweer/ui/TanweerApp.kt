@@ -136,6 +136,7 @@ fun TanweerApp(
                                     SubScreen.SCHEDULE -> "جدول الحصص المدرسي"
                                     SubScreen.TIMELINE -> "رحلة المادة"
                                     SubScreen.PROFILE -> "ملف الطالب والمساهمات"
+                                    SubScreen.SETTINGS -> "إعدادات التطبيق"
                                     SubScreen.WHAT_DID_I_MISS -> "ماذا فاتني؟"
                                     else -> ""
                                 },
@@ -151,6 +152,7 @@ fun TanweerApp(
                             SubScreen.SCHEDULE -> ScheduleScreen(viewModel = viewModel)
                             SubScreen.TIMELINE -> SubjectTimelineScreen(viewModel = viewModel)
                             SubScreen.PROFILE -> ProfileScreen(viewModel = viewModel)
+                            SubScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
                             else -> HomeScreen(viewModel = viewModel)
                         }
                     }
@@ -264,15 +266,15 @@ fun TanweerApp(
 
                             MoreMenuItem(
                                 title = "👥 المجموعات والشعب الدراسية",
-                                subtitle = "مجموعات الشعب والأندية ونقاشاتها",
+                                subtitle = "نقاشات ومجموعات الصف والشعبة",
                                 onClick = {
                                     isMoreMenuOpen = false
                                     viewModel.setSubScreen(SubScreen.GROUPS)
                                 }
                             )
                             MoreMenuItem(
-                                title = "📚 مكتبة الكتب والمناهج (GitHub)",
-                                subtitle = "الكتب الدراسية المعتمدة بصيغة PDF مباشرة من Releases",
+                                title = "📚 مكتبة الكتب والمناهج",
+                                subtitle = "الكتب الدراسية المعتمدة مع قارئ PDF الذكي",
                                 onClick = {
                                     isMoreMenuOpen = false
                                     viewModel.setSubScreen(SubScreen.LIBRARY)
@@ -280,7 +282,7 @@ fun TanweerApp(
                             )
                             MoreMenuItem(
                                 title = "📅 جدول الحصص الأسبوعي",
-                                subtitle = "إعداد وتعديل جدول حصص الشعبة",
+                                subtitle = "توزيع حصص ومواد الشعبة خلال الأسبوع",
                                 onClick = {
                                     isMoreMenuOpen = false
                                     viewModel.setSubScreen(SubScreen.SCHEDULE)
@@ -288,7 +290,7 @@ fun TanweerApp(
                             )
                             MoreMenuItem(
                                 title = "🗺️ رحلة المادة وخريطة العام",
-                                subtitle = "الخط الزمني التراكمي للدروس والاختبارات",
+                                subtitle = "الخط الزمني التراكمي للدروس والمراجعات",
                                 onClick = {
                                     isMoreMenuOpen = false
                                     viewModel.setSubScreen(SubScreen.TIMELINE)
@@ -296,10 +298,18 @@ fun TanweerApp(
                             )
                             MoreMenuItem(
                                 title = "👤 الملف الشخصي والمساهمات",
-                                subtitle = "سجل الإنجازات، الشارات والإعدادات",
+                                subtitle = "بيانات الطالب وسجل النشاط الدراسي",
                                 onClick = {
                                     isMoreMenuOpen = false
                                     viewModel.setSubScreen(SubScreen.PROFILE)
+                                }
+                            )
+                            MoreMenuItem(
+                                title = "⚙️ إعدادات التطبيق وتخصيص الخط",
+                                subtitle = "حجم الخط (افتراضي 12px)، السمة، والمزامنة",
+                                onClick = {
+                                    isMoreMenuOpen = false
+                                    viewModel.setSubScreen(SubScreen.SETTINGS)
                                 }
                             )
                             Spacer(modifier = Modifier.height(16.dp))

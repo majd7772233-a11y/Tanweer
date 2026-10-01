@@ -44,7 +44,7 @@ export async function handleGetCalendarOverview(
   // 4. Full Homeworks for the calendar
   const homeworks = await env.DB.prepare(
     `SELECT h.id, h.group_id, h.study_date, h.due_date, h.subject_id, h.title, h.details,
-            h.page_numbers, h.question_numbers, h.task_type, h.created_at,
+            h.page_numbers, h.question_numbers, h.task_type, h.media_urls, h.created_at,
             s.name_ar as subject_name, s.icon as subject_icon, s.color_hex,
             (SELECT 1 FROM homework_completions hc WHERE hc.homework_id = h.id AND hc.user_id = ?) as is_completed
      FROM homeworks h
@@ -91,7 +91,7 @@ export async function handleGetDayDetail(
   }
 
   const homeworks = await env.DB.prepare(
-    `SELECT h.id, h.group_id, h.study_date, h.due_date, h.subject_id, h.title, h.details, h.page_numbers, h.question_numbers, h.task_type, h.created_at,
+    `SELECT h.id, h.group_id, h.study_date, h.due_date, h.subject_id, h.title, h.details, h.page_numbers, h.question_numbers, h.task_type, h.media_urls, h.created_at,
             s.name_ar as subject_name, s.icon as subject_icon, s.color_hex,
             (SELECT 1 FROM homework_completions hc WHERE hc.homework_id = h.id AND hc.user_id = ?) as is_completed
      FROM homeworks h

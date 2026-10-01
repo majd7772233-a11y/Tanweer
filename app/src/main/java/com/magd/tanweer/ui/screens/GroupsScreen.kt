@@ -53,6 +53,7 @@ fun GroupsScreen(
     val chatMessages by viewModel.repository.getChatMessages(activeChatGroup?.id ?: "")
         .collectAsStateWithLifecycle(initialValue = emptyList())
     var chatInputText by remember { mutableStateOf("") }
+    var isSendingChat by remember { mutableStateOf(false) }
 
     LaunchedEffect(activeChatGroup?.id) {
         val g = activeChatGroup
@@ -245,15 +246,20 @@ fun GroupsScreen(
                     )
                     IconButton(
                         onClick = {
-                            if (chatInputText.isNotBlank()) {
-                                viewModel.sendChatMessage(chatInputText.trim())
+                            val text = chatInputText.trim()
+                            val gId = activeChatGroup?.id
+                            if (text.isNotBlank() && gId != null && !isSendingChat) {
+                                isSendingChat = true
                                 chatInputText = ""
+                                viewModel.sendChatMessage(text, targetGroupId = gId)
+                                isSendingChat = false
                             }
                         },
+                        enabled = !isSendingChat && chatInputText.isNotBlank(),
                         modifier = Modifier
                             .size(46.dp)
                             .clip(CircleShape)
-                            .background(CyanAccent)
+                            .background(if (chatInputText.isNotBlank()) CyanAccent else CyanAccent.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Default.Send, contentDescription = "إرسال", tint = TextOnAccent)
                     }

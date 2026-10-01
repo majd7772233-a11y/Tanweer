@@ -30,14 +30,16 @@ export async function handlePostGroupMessage(
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
 
-  const body = await request.json() as { text?: string; messageText?: string; message?: string };
+  const body = await request.json() as { id?: string; text?: string; messageText?: string; message?: string };
   const messageText = body.text || body.messageText || body.message;
 
   if (!messageText || !messageText.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى كتابة نص الرسالة');
   }
 
-  const messageId = generateId('msg');
+  const messageId = (body.id && typeof body.id === 'string' && body.id.length > 3)
+    ? body.id
+    : generateId('msg');
   const now = Date.now();
   const gradeNameMap: Record<number, string> = {
     7: 'سابع', 8: 'ثامن', 9: 'تاسع', 10: 'أول ثانوي', 11: 'ثاني ثانوي', 12: 'ثالث ثانوي'
@@ -46,7 +48,7 @@ export async function handlePostGroupMessage(
 
   // Server-authoritative sender identity from UserContext
   await env.DB.prepare(
-    `INSERT INTO chat_messages (id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp)
+    `INSERT OR IGNORE INTO chat_messages (id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     messageId,

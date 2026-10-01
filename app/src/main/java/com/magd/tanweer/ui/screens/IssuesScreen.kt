@@ -57,6 +57,12 @@ fun IssuesScreen(
     var selectedFilter by remember { mutableStateOf(IssueFilter.ALL) }
     var isAddModalOpen by remember { mutableStateOf(false) }
 
+    LaunchedEffect(activeGroupId) {
+        if (activeGroupId.isNotBlank()) {
+            viewModel.syncIssues(activeGroupId, isRefresh = false)
+        }
+    }
+
     // If an issue is selected, show Issue Details screen
     if (selectedIssueId != null) {
         IssueDetailView(
@@ -98,12 +104,12 @@ fun IssuesScreen(
                     Column {
                         Text(
                             text = "❓ الاستفسارات الدراسية",
-                            fontSize = 22.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Black,
                             color = CyanAccent
                         )
                         Text(
-                            text = "أسئلة الدروس والواجبات وحلولها النموذجية في الشعبة",
+                            text = "${issues.size} استفسار • نقاشات وحلول المنهج",
                             fontSize = 12.sp,
                             color = TextSecondary
                         )
@@ -148,7 +154,7 @@ fun IssuesScreen(
                 item {
                     EmptyStateGlass(
                         title = "لا توجد استفسارات هنا",
-                        subtitle = "هل لديك نقطة غامضة في المنهج أو الواجب؟ اطرح سؤالك ليجيبك زملاؤك والمعلم وتوثق الإجابة النموذجية.",
+                        subtitle = "اطرح سؤالك أو نقطة غير واضحة ليجيبك زملاؤك في الشعبة",
                         icon = "❓",
                         actionButtonText = "طرح استفسار جديد",
                         onActionClick = { isAddModalOpen = true }
