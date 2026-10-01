@@ -8,7 +8,7 @@
     {
       "binding": "DB",
       "database_name": "tanweer-db",
-      "database_id": "a7d8c6b4-3e2f-4a1b-90cd-5f6e7d8a9b0c",
+      "database_id": "c937c1d8-77dd-4292-a27c-43cf4bd78eae",
       "migrations_dir": "src/db/migrations"
     }
   ],
