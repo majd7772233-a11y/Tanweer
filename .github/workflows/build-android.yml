@@ -45,16 +45,23 @@ jobs:
             gradle/libs.versions.toml
             gradle/wrapper/gradle-wrapper.properties
 
-      - name: Show build environment
-        run: |
-          java -version
-          ./gradlew --version
-
       - name: Validate Gradle wrapper
         run: |
+          set -euo pipefail
+
           test -f gradlew
           test -f gradle/wrapper/gradle-wrapper.properties
+
           chmod +x gradlew
+
+          test -x gradlew
+
+      - name: Show build environment
+        run: |
+          set -euo pipefail
+
+          java -version
+          ./gradlew --version
 
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest --stacktrace --no-daemon
