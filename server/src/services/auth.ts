@@ -63,7 +63,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
 
   await env.DB.prepare(
     `INSERT INTO users (id, phone_number, password_hash, full_name, grade_id, section_id, email, recovery_code_hash, role, last_seen, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'MEMBER', ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     userId,
     normalizedPhone,
@@ -73,6 +73,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     body.sectionId.toUpperCase(),
     body.email?.trim() || null,
     recoveryCodeHash,
+    'MEMBER',
     now,
     now,
     now
@@ -91,8 +92,8 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
 
   await env.DB.prepare(
     `INSERT OR IGNORE INTO groups (id, name, type, description, academic_year_id, created_at)
-     VALUES (?, ?, 'CLASS', ?, '2026-2027', ?)`
-  ).bind(classGroupId, groupName, `المجموعة الدراسية الرسمية لـ ${groupName}`, now).run();
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(classGroupId, groupName, 'CLASS', `المجموعة الدراسية الرسمية لـ ${groupName}`, '2026-2027', now).run();
 
   await env.DB.prepare(
     `INSERT OR IGNORE INTO group_sections (group_id, grade_id, section_id)
@@ -101,8 +102,8 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
 
   await env.DB.prepare(
     `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at)
-     VALUES (?, ?, 'MEMBER', 'ACTIVE', ?)`
-  ).bind(classGroupId, userId, now).run();
+     VALUES (?, ?, ?, ?, ?)`
+  ).bind(classGroupId, userId, 'MEMBER', 'ACTIVE', now).run();
 
   const token = generateRandomToken();
   const tokenHash = await hashString(token, pepper);

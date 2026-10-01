@@ -29,13 +29,18 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
   const body = await request.json() as {
     groupId?: string;
     examDate?: string;
+    date?: string;
     subjectId?: string;
     title?: string;
     requiredChapters?: string;
+    topics?: string;
     notes?: string;
   };
 
-  if (!body.groupId || !body.examDate || !body.subjectId || !body.title) {
+  const examDate = body.examDate || body.date;
+  const chapters = body.requiredChapters || body.topics;
+
+  if (!body.groupId || !examDate || !body.subjectId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد تفاصيل الاختبار والمادة وتاريخه');
   }
 
@@ -49,10 +54,10 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
   ).bind(
     examId,
     body.groupId,
-    body.examDate,
+    examDate,
     body.subjectId,
     body.title.trim(),
-    body.requiredChapters?.trim() || null,
+    chapters?.trim() || null,
     body.notes?.trim() || null,
     user.userId,
     Date.now()

@@ -30,8 +30,10 @@ export async function handlePostGroupMessage(
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
 
-  const body = await request.json() as { text?: string };
-  if (!body.text || !body.text.trim()) {
+  const body = await request.json() as { text?: string; messageText?: string; message?: string };
+  const messageText = body.text || body.messageText || body.message;
+
+  if (!messageText || !messageText.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى كتابة نص الرسالة');
   }
 
@@ -52,7 +54,7 @@ export async function handlePostGroupMessage(
     user.userId,
     user.fullName,
     senderGradeSection,
-    body.text.trim(),
+    messageText.trim(),
     now
   ).run();
 
@@ -62,7 +64,7 @@ export async function handlePostGroupMessage(
     senderId: user.userId,
     senderName: user.fullName,
     senderGradeSection,
-    text: body.text.trim(),
+    text: messageText.trim(),
     timestamp: now,
     status: 'SENT',
   };

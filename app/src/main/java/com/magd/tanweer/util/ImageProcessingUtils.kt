@@ -35,8 +35,9 @@ object ImageProcessingUtils {
         quality: Int = 82
     ): ProcessedPageResult? = withContext(Dispatchers.IO) {
         try {
-            var bitmap: Bitmap? = rawBitmap ?: (uri?.let { decodeSampledBitmapFromUri(context, it, maxDimension) })
-            if (bitmap == null) return@withContext null
+            val initialBitmap: Bitmap = rawBitmap ?: (uri?.let { decodeSampledBitmapFromUri(context, it, maxDimension) })
+                ?: return@withContext null
+            var bitmap: Bitmap = initialBitmap
 
             // 1. Rotation if needed
             if (rotationDegrees != 0f) {
@@ -60,15 +61,35 @@ object ImageProcessingUtils {
                 bitmap = applyColorFilters(bitmap, autoEnhance, contrast, brightness, blackAndWhite)
             }
 
-            // 4. Compress to JPEG with strict size guard (< 1.4MB)
-            val stream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
-            var bytes = stream.toByteArray()
+            // 4. Compress to JPEG with strict mathematical size guard (always <= 1.25MB)
+            val maxTargetBytes = 1_250_000
+            var currentQuality = quality
+            var currentBitmap = bitmap
+            var bytes: ByteArray
 
-            if (bytes.size > 1_400_000) {
-                val reducedStream = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 68, reducedStream)
-                bytes = reducedStream.toByteArray()
+            while (true) {
+                val stream = ByteArrayOutputStream()
+                currentBitmap.compress(Bitmap.CompressFormat.JPEG, currentQuality, stream)
+                bytes = stream.toByteArray()
+
+                if (bytes.size <= maxTargetBytes) {
+                    break
+                }
+
+                // If still too large, step down quality first
+                if (currentQuality > 45) {
+                    currentQuality -= 12
+                } else {
+                    // If quality reached lower bound, scale down bitmap dimensions by 0.8x
+                    val nextW = (currentBitmap.width * 0.8f).toInt().coerceAtLeast(300)
+                    val nextH = (currentBitmap.height * 0.8f).toInt().coerceAtLeast(300)
+                    if (nextW >= currentBitmap.width || nextH >= currentBitmap.height) {
+                        // Cannot downscale further, use what we have
+                        break
+                    }
+                    currentBitmap = Bitmap.createScaledBitmap(currentBitmap, nextW, nextH, true)
+                    currentQuality = 70 // Reset quality slightly for smaller dimensions
+                }
             }
 
             // 5. Calculate SHA-256 Checksum
@@ -86,8 +107,8 @@ object ImageProcessingUtils {
                 byteArray = bytes,
                 sizeBytes = bytes.size.toLong(),
                 sha256 = checksum,
-                width = bitmap.width,
-                height = bitmap.height
+                width = currentBitmap.width,
+                height = currentBitmap.height
             )
         } catch (e: Exception) {
             e.printStackTrace()

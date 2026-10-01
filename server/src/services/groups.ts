@@ -48,8 +48,8 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
   const initialStatus = group.type === 'OPTIONAL' ? 'ACTIVE' : 'PENDING';
   await env.DB.prepare(
     `INSERT INTO group_members (group_id, user_id, role, status, joined_at)
-     VALUES (?, ?, 'MEMBER', ?, ?)`
-  ).bind(groupId, user.userId, initialStatus, Date.now()).run();
+     VALUES (?, ?, ?, ?, ?)`
+  ).bind(groupId, user.userId, 'MEMBER', initialStatus, Date.now()).run();
 
   return jsonResponse({
     success: true,

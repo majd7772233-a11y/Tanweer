@@ -3,28 +3,35 @@ import { generateId } from '../lib/ids';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 
+interface MediaPayloadItem {
+  url: string;
+  pageOrder?: number;
+  page_order?: number;
+  objectKey?: string;
+  mimeType?: string;
+  mime_type?: string;
+  fileSize?: number;
+  file_size?: number;
+  checksum?: string;
+}
+
 export async function handleCreateContent(user: UserContext, request: Request, env: Env): Promise<Response> {
   const body = await request.json() as {
     groupId?: string;
     studyDate?: string;
+    date?: string;
     subjectId?: string;
     type?: string;
     title?: string;
     description?: string;
-    media?: Array<{
-      url: string;
-      pageOrder?: number;
-      page_order?: number;
-      objectKey?: string;
-      mimeType?: string;
-      mime_type?: string;
-      fileSize?: number;
-      file_size?: number;
-      checksum?: string;
-    }>;
+    mediaUrls?: string[];
+    media?: MediaPayloadItem[];
   };
 
-  if (!body.groupId || !body.studyDate || !body.subjectId || !body.title) {
+  const studyDate = body.studyDate || body.date;
+  const mediaList: MediaPayloadItem[] = body.media || (body.mediaUrls ? body.mediaUrls.map((u, i) => ({ url: u, pageOrder: i + 1 })) : []);
+
+  if (!body.groupId || !studyDate || !body.subjectId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد المجموعة، تاريخ الحصة، المادة وعنوان الدرس');
   }
 
@@ -32,13 +39,13 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   if (memberCheck) return memberCheck;
 
   // Check duplicate checksum if media provided
-  if (body.media && body.media.length > 0 && body.media[0].checksum) {
+  if (mediaList && mediaList.length > 0 && mediaList[0].checksum) {
     const duplicate = await env.DB.prepare(
       `SELECT cm.content_id, c.title, c.study_date
        FROM content_media cm
        JOIN contents c ON cm.content_id = c.id
        WHERE cm.checksum = ? AND c.group_id = ? AND c.study_date = ? AND c.subject_id = ?`
-    ).bind(body.media[0].checksum, body.groupId, body.studyDate, body.subjectId).first<{
+    ).bind(mediaList[0].checksum, body.groupId, studyDate, body.subjectId).first<{
       content_id: string;
       title: string;
     }>();
@@ -62,11 +69,11 @@ export async function handleCreateContent(user: UserContext, request: Request, e
 
   await env.DB.prepare(
     `INSERT INTO contents (id, group_id, study_date, subject_id, type, title, description, created_by, author_name, author_grade_section, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PUBLISHED', ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     contentId,
     body.groupId,
-    body.studyDate,
+    studyDate,
     body.subjectId,
     body.type || 'LESSON',
     body.title.trim(),
@@ -74,13 +81,14 @@ export async function handleCreateContent(user: UserContext, request: Request, e
     user.userId,
     user.fullName,
     authorGradeSection,
+    'PUBLISHED',
     now,
     now
   ).run();
 
-  if (body.media && body.media.length > 0) {
+  if (mediaList && mediaList.length > 0) {
     let order = 1;
-    for (const m of body.media) {
+    for (const m of mediaList) {
       const mediaId = generateId('med');
       const pageOrder = m.pageOrder || m.page_order || order;
       await env.DB.prepare(
