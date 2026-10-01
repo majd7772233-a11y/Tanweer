@@ -1,27 +1,59 @@
-name: Test Server
+name: Test Tanweer Server
 
 on:
-  pull_request:
-    paths:
-      - 'server/**'
   push:
     paths:
       - 'server/**'
+      - '.github/workflows/test-server.yml'
+
+  pull_request:
+    paths:
+      - 'server/**'
+      - '.github/workflows/test-server.yml'
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-test-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    name: Typecheck + Tests + Wrangler Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     defaults:
       run:
         working-directory: ./server
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: '20'
+          cache: npm
           cache-dependency-path: server/package-lock.json
+
+      - name: Show Node environment
+        run: |
+          node --version
+          npm --version
+
+      - name: Validate package metadata
+        run: |
+          test -f package.json
+          test -f package-lock.json
+          test -f tsconfig.json
+          test -f wrangler.jsonc
 
       - name: Install dependencies
         run: npm ci
@@ -29,5 +61,16 @@ jobs:
       - name: Typecheck
         run: npm run types
 
-      - name: Run Tests
-        run: npm test
+      - name: Run unit and integration tests
+        run: npm test -- --reporter=verbose
+
+      # No deployment here.
+      # This validates Worker bundling/configuration only.
+      - name: Validate Wrangler production bundle
+        run: |
+          ./node_modules/.bin/wrangler deploy --dry-run
+
+      - name: Show migration files
+        run: |
+          echo "Available D1 migrations:"
+          find src/db/migrations -maxdepth 1 -type f -name '*.sql' | sort

@@ -3,38 +3,157 @@ name: Deploy Tanweer Server
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: tanweer-production-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
+    name: Deploy Production Worker + D1
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     defaults:
       run:
         working-directory: ./server
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: '20'
+          cache: npm
           cache-dependency-path: server/package-lock.json
+
+      - name: Show environment
+        run: |
+          node --version
+          npm --version
+
+      - name: Validate production files
+        run: |
+          set -euo pipefail
+
+          test -f package.json
+          test -f package-lock.json
+          test -f tsconfig.json
+          test -f wrangler.jsonc
+          test -f src/index.ts
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run Tests
-        run: npm test
+      - name: Typecheck server
+        run: npm run types
 
-      - name: Apply D1 Database Migrations
+      - name: Run server tests
+        run: npm test -- --reporter=verbose
+
+      - name: Validate Wrangler bundle
+        run: |
+          ./node_modules/.bin/wrangler deploy --dry-run
+
+      # ------------------------------------------------------------
+      # Cloudflare authentication
+      # ------------------------------------------------------------
+
+      - name: Verify Cloudflare credentials
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: 'server'
+          workingDirectory: server
+          command: whoami
+
+      # ------------------------------------------------------------
+      # D1 migrations
+      # ------------------------------------------------------------
+
+      - name: Apply D1 migrations
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: server
           command: d1 migrations apply tanweer-db --remote
 
-      - name: Deploy to Cloudflare Workers
+      # ------------------------------------------------------------
+      # Worker secrets
+      #
+      # Current Tanweer server code requires:
+      #   SESSION_PEPPER || PASSWORD_PEPPER
+      #
+      # JWT_SECRET also exists in Env.
+      #
+      # Since the repository currently has one GitHub Secret:
+      #   MAGD_JWT_SECRET
+      #
+      # we map it to all three Worker secret names.
+      # ------------------------------------------------------------
+
+      - name: Configure Worker secrets and deploy
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: 'server'
+          workingDirectory: server
+          secrets: |
+            JWT_SECRET
+            SESSION_PEPPER
+            PASSWORD_PEPPER
+        env:
+          JWT_SECRET: ${{ secrets.MAGD_JWT_SECRET }}
+          SESSION_PEPPER: ${{ secrets.MAGD_JWT_SECRET }}
+          PASSWORD_PEPPER: ${{ secrets.MAGD_JWT_SECRET }}
+
+      # ------------------------------------------------------------
+      # Explicit deployment
+      # ------------------------------------------------------------
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: server
+
+      # ------------------------------------------------------------
+      # Production smoke test
+      # ------------------------------------------------------------
+
+      - name: Health check
+        working-directory: .
+        run: |
+          set -euo pipefail
+
+          URL="https://tanweer.magd.workers.dev/api/v1/health"
+
+          echo "Checking: $URL"
+
+          for attempt in 1 2 3 4 5; do
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --max-time 15 \
+              "$URL" > health.json; then
+
+              echo "Health check succeeded."
+              cat health.json
+              exit 0
+            fi
+
+            echo "Health check attempt $attempt failed."
+            sleep 5
+          done
+
+          echo "Production health check failed."
+          exit 1
