@@ -33,7 +33,9 @@ enum class SubScreen {
     PROFILE,
     SETTINGS,
     SEARCH,
-    WHAT_DID_I_MISS
+    WHAT_DID_I_MISS,
+    SUBJECT_KNOWLEDGE_BASE,
+    ACADEMIC_HISTORY
 }
 
 class TanweerViewModel(application: Application) : AndroidViewModel(application) {
@@ -90,16 +92,31 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun setNotifyHomework(notify: Boolean) {
         _notifyHomework.value = notify
         prefs.edit().putBoolean("notify_homework", notify).apply()
+        val app = getApplication<Application>()
+        com.magd.tanweer.data.notifications.TanweerNotificationManager.scheduleDailyReminder(app)
+        if (notify) {
+            com.magd.tanweer.data.notifications.TanweerNotificationManager.checkAndSendReminders(app)
+        }
     }
 
     fun setNotifySchedule(notify: Boolean) {
         _notifySchedule.value = notify
         prefs.edit().putBoolean("notify_schedule", notify).apply()
+        val app = getApplication<Application>()
+        com.magd.tanweer.data.notifications.TanweerNotificationManager.scheduleDailyReminder(app)
+        if (notify) {
+            com.magd.tanweer.data.notifications.TanweerNotificationManager.checkAndSendReminders(app)
+        }
     }
 
     fun setNotifyExams(notify: Boolean) {
         _notifyExams.value = notify
         prefs.edit().putBoolean("notify_exams", notify).apply()
+        val app = getApplication<Application>()
+        com.magd.tanweer.data.notifications.TanweerNotificationManager.scheduleDailyReminder(app)
+        if (notify) {
+            com.magd.tanweer.data.notifications.TanweerNotificationManager.checkAndSendReminders(app)
+        }
     }
 
     fun setHapticsEnabled(enabled: Boolean) {
@@ -122,6 +139,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _activeReadingBook = MutableStateFlow<BookItem?>(null)
     val activeReadingBook: StateFlow<BookItem?> = _activeReadingBook.asStateFlow()
 
+    private val _activeReadingInitialPage = MutableStateFlow<Int?>(null)
+    val activeReadingInitialPage: StateFlow<Int?> = _activeReadingInitialPage.asStateFlow()
+
     private val _selectedGroupId = MutableStateFlow("")
     val selectedGroupId: StateFlow<String> = _selectedGroupId.asStateFlow()
 
@@ -139,6 +159,40 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _selectedKnowledgeBaseSubjectId = MutableStateFlow<String?>("math")
+    val selectedKnowledgeBaseSubjectId: StateFlow<String?> = _selectedKnowledgeBaseSubjectId.asStateFlow()
+
+    private val _selectedAcademicYear = MutableStateFlow("2026-2027")
+    val selectedAcademicYear: StateFlow<String> = _selectedAcademicYear.asStateFlow()
+
+    fun openSubjectKnowledgeBase(subjectId: String) {
+        _selectedKnowledgeBaseSubjectId.value = subjectId
+        setSubScreen(SubScreen.SUBJECT_KNOWLEDGE_BASE)
+    }
+
+    fun setSelectedAcademicYear(year: String) {
+        _selectedAcademicYear.value = year
+    }
+
+    fun submitCorrection(
+        contentId: String,
+        groupId: String,
+        fieldName: String,
+        originalValue: String,
+        proposedValue: String,
+        reason: String?,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val res = repository.submitCorrection(contentId, groupId, fieldName, originalValue, proposedValue, reason)
+            if (res.isSuccess) {
+                onResult(true, "تم تقديم اقتراح التصحيح بنجاح! وهو قيد المراجعة 📩")
+            } else {
+                onResult(false, res.exceptionOrNull()?.localizedMessage ?: "تعذر إرسال التصحيح")
+            }
+        }
+    }
 
     // -------------------------------------------------------------
     // PER-SCREEN SYNC STATES
@@ -222,13 +276,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun openBookInPdfReader(book: BookItem) {
+    fun openBookInPdfReader(book: BookItem, targetPage: Int? = null) {
         _activeReadingBook.value = book
+        _activeReadingInitialPage.value = targetPage
         _subScreen.value = SubScreen.PDF_VIEWER
     }
 
     fun closePdfReader() {
         _activeReadingBook.value = null
+        _activeReadingInitialPage.value = null
         _subScreen.value = SubScreen.LIBRARY
     }
 
@@ -363,7 +419,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         val targetGrade = gradeId ?: currentUser.value?.gradeId ?: 10
         viewModelScope.launch {
             _librarySyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncBooks(targetGrade)) {
+            when (val result = repository.syncBooks(targetGrade, forceRefresh = isRefresh)) {
                 is SyncResult.Success -> {
                     _librarySyncState.value = SyncState.Success()
                     onResult?.invoke(true, "تمت مزامنة الكتب الدراسية بنجاح ✨")
@@ -566,33 +622,37 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         description: String?,
         date: String = _selectedDate.value
     ) {
-        addLessonWithPages(subjectId, title, description, date, emptyList())
+        viewModelScope.launch {
+            addLessonWithPages(subjectId, title, description, date, emptyList())
+        }
     }
 
-    fun addLessonWithPages(
+    suspend fun addLessonWithPages(
         subjectId: String,
         title: String,
         description: String?,
         date: String = _selectedDate.value,
         pages: List<com.magd.tanweer.util.ProcessedPageResult>
-    ) {
-        val user = currentUser.value ?: return
+    ): Result<String> {
+        val user = currentUser.value
+            ?: return Result.failure(Exception("لم يتم تسجيل الدخول"))
         val groupId = getActiveGroupId()
-        viewModelScope.launch {
-            val gradeName = SchoolHierarchy.getGradeName(user.gradeId)
-            val secAr = SchoolHierarchy.getSectionArabicName(user.sectionId)
-            repository.addLessonWithPages(
-                groupId = groupId,
-                date = date,
-                subjectId = subjectId,
-                title = title,
-                description = description,
-                authorName = user.fullName,
-                authorGradeSection = "$gradeName — $secAr",
-                pages = pages
-            )
+        val gradeName = SchoolHierarchy.getGradeName(user.gradeId)
+        val secAr = SchoolHierarchy.getSectionArabicName(user.sectionId)
+        val res = repository.addLessonWithPages(
+            groupId = groupId,
+            date = date,
+            subjectId = subjectId,
+            title = title,
+            description = description,
+            authorName = user.fullName,
+            authorGradeSection = "$gradeName — $secAr",
+            pages = pages
+        )
+        if (res.isSuccess) {
             closeUploadDialog()
         }
+        return res
     }
 
     fun addHomework(
@@ -741,19 +801,30 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun retrySyncContent(contentId: String) {
+        viewModelScope.launch {
+            repository.retrySyncContent(contentId)
+        }
+    }
+
     fun retrySyncComment(issueId: String, commentId: String, commentText: String) {
         viewModelScope.launch {
             repository.retrySyncIssueComment(issueId, commentId, commentText)
         }
     }
 
-    fun joinGroup(groupId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+    fun joinGroup(
+        groupId: String,
+        onResult: (isSuccess: Boolean, status: String, message: String) -> Unit
+    ) {
         viewModelScope.launch {
             val result = repository.joinGroup(groupId)
-            result.onSuccess {
-                onSuccess()
+            result.onSuccess { response ->
+                val status = response.status ?: "ACTIVE"
+                val msg = response.message ?: if (status == "ACTIVE") "تم الانضمام إلى المجموعة بنجاح" else "تم إرسال طلب الانضمام، بانتظار موافقة المشرف"
+                onResult(true, status, msg)
             }.onFailure {
-                onError(it.message ?: "فشل الانضمام للمجموعة")
+                onResult(false, "ERROR", it.message ?: "فشل الانضمام للمجموعة")
             }
         }
     }
@@ -788,6 +859,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             return sdf.format(Date())
         }
 
+        fun isWeekend(calendar: Calendar = Calendar.getInstance()): Boolean {
+            val d = calendar.get(Calendar.DAY_OF_WEEK)
+            return d == Calendar.FRIDAY || d == Calendar.SATURDAY
+        }
+
         fun getDayOfWeekIndex(calendar: Calendar = Calendar.getInstance()): Int {
             return when (calendar.get(Calendar.DAY_OF_WEEK)) {
                 Calendar.SUNDAY -> 0
@@ -795,8 +871,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 Calendar.TUESDAY -> 2
                 Calendar.WEDNESDAY -> 3
                 Calendar.THURSDAY -> 4
-                Calendar.FRIDAY -> 0
-                Calendar.SATURDAY -> 0
+                Calendar.FRIDAY -> -1
+                Calendar.SATURDAY -> -1
                 else -> 0
             }
         }

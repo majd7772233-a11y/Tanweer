@@ -54,8 +54,9 @@ export async function handleCreateContent(user: UserContext, request: Request, e
       return jsonResponse({
         success: true,
         isDuplicate: true,
+        contentId: duplicate.content_id,
         duplicateContentId: duplicate.content_id,
-        message: 'تم رصد هذه الصورة مسبقًا في هذا الدرس وجرى تجميعها معه',
+        message: 'هذا الدرس موثق بالفعل — جرى ربط المساهمة بالدرس الموثق مسبقاً',
       });
     }
   }
@@ -126,6 +127,37 @@ export async function handleVoteUseful(contentId: string, user: UserContext, env
   const memberCheck = await requireGroupMember(user, content.group_id, env.DB);
   if (memberCheck) return memberCheck;
 
+  // Ensure table exists
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS content_useful_votes (
+       user_id TEXT NOT NULL,
+       content_id TEXT NOT NULL,
+       created_at INTEGER NOT NULL,
+       PRIMARY KEY (user_id, content_id)
+     )`
+  ).run();
+
+  // Check if user already voted on this content
+  const existingVote = await env.DB.prepare(
+    `SELECT 1 FROM content_useful_votes WHERE user_id = ? AND content_id = ?`
+  ).bind(user.userId, contentId).first();
+
+  if (existingVote) {
+    // Toggle off (remove vote)
+    await env.DB.prepare(
+      `DELETE FROM content_useful_votes WHERE user_id = ? AND content_id = ?`
+    ).bind(user.userId, contentId).run();
+    await env.DB.prepare(
+      `UPDATE contents SET useful_count = MAX(0, useful_count - 1) WHERE id = ?`
+    ).bind(contentId).run();
+    return jsonResponse({ success: true, voted: false, message: 'تم إلغاء الإعجاب' });
+  }
+
+  // Register new vote
+  await env.DB.prepare(
+    `INSERT INTO content_useful_votes (user_id, content_id, created_at) VALUES (?, ?, ?)`
+  ).bind(user.userId, contentId, Date.now()).run();
   await env.DB.prepare(`UPDATE contents SET useful_count = useful_count + 1 WHERE id = ?`).bind(contentId).run();
-  return jsonResponse({ success: true, message: 'شكرًا لمساهمتك' });
+
+  return jsonResponse({ success: true, voted: true, message: 'شكرًا لمساهمتك، تم تسجيل تقييمك بنجاح 👍' });
 }

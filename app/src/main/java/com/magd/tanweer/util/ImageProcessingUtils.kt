@@ -20,6 +20,27 @@ data class ProcessedPageResult(
     val height: Int
 )
 
+enum class ImageQualityPreset(
+    val maxDimension: Int,
+    val initialQuality: Int,
+    val maxTargetBytes: Int
+) {
+    ULTRA_COMPACT(maxDimension = 1280, initialQuality = 68, maxTargetBytes = 700_000),
+    COMPACT(maxDimension = 1280, initialQuality = 68, maxTargetBytes = 700_000),
+    BALANCED(maxDimension = 1800, initialQuality = 80, maxTargetBytes = 1_250_000),
+    HIGH(maxDimension = 2400, initialQuality = 88, maxTargetBytes = 1_500_000),
+    ORIGINAL(maxDimension = 3200, initialQuality = 95, maxTargetBytes = 3_000_000);
+
+    companion object {
+        fun fromString(value: String?): ImageQualityPreset = when (value?.uppercase()) {
+            "ULTRA_COMPACT", "COMPACT" -> ULTRA_COMPACT
+            "HIGH" -> HIGH
+            "ORIGINAL" -> ORIGINAL
+            else -> BALANCED
+        }
+    }
+}
+
 object ImageProcessingUtils {
 
     suspend fun loadAndProcessImage(
@@ -31,11 +52,20 @@ object ImageProcessingUtils {
         brightness: Float = 0.05f,
         blackAndWhite: Boolean = false,
         rotationDegrees: Float = 0f,
-        maxDimension: Int = 1600,
-        quality: Int = 82
+        qualityMode: String? = null,
+        maxDimension: Int? = null,
+        quality: Int? = null
     ): ProcessedPageResult? = withContext(Dispatchers.IO) {
+        val preset = ImageQualityPreset.fromString(
+            qualityMode ?: context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
+                .getString("image_quality", "BALANCED")
+        )
+        val targetMaxDim = maxDimension ?: preset.maxDimension
+        val targetQuality = quality ?: preset.initialQuality
+        val maxTargetBytes = preset.maxTargetBytes
+
         try {
-            val initialBitmap: Bitmap = rawBitmap ?: (uri?.let { decodeSampledBitmapFromUri(context, it, maxDimension) })
+            val initialBitmap: Bitmap = rawBitmap ?: (uri?.let { decodeSampledBitmapFromUri(context, it, targetMaxDim) })
                 ?: return@withContext null
             var bitmap: Bitmap = initialBitmap
 
@@ -49,8 +79,8 @@ object ImageProcessingUtils {
             }
 
             // 2. Resizing to maximum bound if necessary
-            if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
-                val ratio = minOf(maxDimension.toFloat() / bitmap.width, maxDimension.toFloat() / bitmap.height)
+            if (bitmap.width > targetMaxDim || bitmap.height > targetMaxDim) {
+                val ratio = minOf(targetMaxDim.toFloat() / bitmap.width, targetMaxDim.toFloat() / bitmap.height)
                 val newW = (bitmap.width * ratio).toInt()
                 val newH = (bitmap.height * ratio).toInt()
                 bitmap = Bitmap.createScaledBitmap(bitmap, newW, newH, true)
@@ -61,9 +91,8 @@ object ImageProcessingUtils {
                 bitmap = applyColorFilters(bitmap, autoEnhance, contrast, brightness, blackAndWhite)
             }
 
-            // 4. Compress to JPEG with strict mathematical size guard (always <= 1.25MB)
-            val maxTargetBytes = 1_250_000
-            var currentQuality = quality
+            // 4. Compress to JPEG with user's configured quality preset
+            var currentQuality = targetQuality
             var currentBitmap = bitmap
             var bytes: ByteArray
 
@@ -77,27 +106,26 @@ object ImageProcessingUtils {
                 }
 
                 // If still too large, step down quality first
-                if (currentQuality > 45) {
-                    currentQuality -= 12
+                if (currentQuality > 40) {
+                    currentQuality -= 10
                 } else {
                     // If quality reached lower bound, scale down bitmap dimensions by 0.8x
                     val nextW = (currentBitmap.width * 0.8f).toInt().coerceAtLeast(300)
                     val nextH = (currentBitmap.height * 0.8f).toInt().coerceAtLeast(300)
                     if (nextW >= currentBitmap.width || nextH >= currentBitmap.height) {
-                        // Cannot downscale further, use what we have
                         break
                     }
                     currentBitmap = Bitmap.createScaledBitmap(currentBitmap, nextW, nextH, true)
-                    currentQuality = 70 // Reset quality slightly for smaller dimensions
+                    currentQuality = 65
                 }
             }
 
             // 5. Calculate SHA-256 Checksum
             val checksum = calculateSha256(bytes)
 
-            // 6. Save to app cache dir
-            val cacheDir = File(context.cacheDir, "lesson_pages").apply { mkdirs() }
-            val tempFile = File(cacheDir, "page_${System.currentTimeMillis()}_${checksum.take(8)}.jpg")
+            // 6. Save to app files dir (pending_uploads) so pending uploads survive cache clearing
+            val pendingDir = File(context.filesDir, "pending_uploads").apply { mkdirs() }
+            val tempFile = File(pendingDir, "page_${System.currentTimeMillis()}_${checksum.take(8)}.jpg")
             FileOutputStream(tempFile).use { fos ->
                 fos.write(bytes)
             }

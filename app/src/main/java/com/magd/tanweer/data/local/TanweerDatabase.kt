@@ -22,9 +22,13 @@ import androidx.room.RoomDatabase
         BookReadingStateEntity::class,
         BookBookmarkEntity::class,
         BookNoteEntity::class,
-        BookVocabularyEntity::class
+        BookVocabularyEntity::class,
+        BookDrawingEntity::class,
+        SyncMetaEntity::class,
+        OutboxEntity::class,
+        CorrectionRequestEntity::class
     ],
-    version = 6,
+    version = 9,
     exportSchema = false
 )
 abstract class TanweerDatabase : RoomDatabase() {
@@ -39,6 +43,9 @@ abstract class TanweerDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
     abstract fun chatDao(): ChatDao
     abstract fun bookReadingDao(): BookReadingDao
+    abstract fun syncMetaDao(): SyncMetaDao
+    abstract fun outboxDao(): OutboxDao
+    abstract fun correctionDao(): CorrectionDao
 
     companion object {
         @Volatile

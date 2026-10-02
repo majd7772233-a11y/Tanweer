@@ -106,12 +106,25 @@ export class GroupChatDO {
               text,
               now
             ).run();
+
+            // Broadcast verified message to all connected clients only after successful persistence
+            this.broadcast(JSON.stringify(messagePayload));
+
+            // Send explicit ACK back to the sender
+            try {
+              server.send(JSON.stringify({ type: 'ack', id: messageId, status: 'SENT' }));
+            } catch {}
           } catch (dbErr) {
             console.error('Failed to persist chat message in DO:', dbErr);
+            // Notify the sender that message persistence failed
+            try {
+              server.send(JSON.stringify({
+                type: 'message_error',
+                id: messageId,
+                error: 'تعذر حفظ الرسالة في قاعدة البيانات'
+              }));
+            } catch {}
           }
-
-          // Broadcast verified message to all connected clients
-          this.broadcast(JSON.stringify(messagePayload));
         } catch {
           // ignore malformed packets
         }

@@ -52,6 +52,10 @@ fun ProfileScreen(
     var editErrorMessage by remember { mutableStateOf<String?>(null) }
     var isSavingProfile by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        viewModel.repository.syncProfile()
+    }
+
     LaunchedEffect(currentUser) {
         currentUser?.let {
             editFullName = it.fullName
@@ -161,21 +165,38 @@ fun ProfileScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    val stats = currentUser?.stats
+                    val lessonsCount = stats?.lessonsCount ?: 0
+                    val photosCount = stats?.photosCount ?: 0
+                    val homeworksCount = stats?.homeworksCount ?: 0
+                    val issuesCount = stats?.issuesCount ?: 0
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceAround
                     ) {
-                        StatItem(label = "دروس موثقة", count = "0", icon = "📚")
-                        StatItem(label = "صور سبورة", count = "0", icon = "📷")
-                        StatItem(label = "واجبات مسجلة", count = "0", icon = "📝")
-                        StatItem(label = "استفسارات", count = "0", icon = "❓")
+                        StatItem(label = "دروس موثقة", count = "$lessonsCount", icon = "📚")
+                        StatItem(label = "صور سبورة", count = "$photosCount", icon = "📷")
+                        StatItem(label = "واجبات مسجلة", count = "$homeworksCount", icon = "📝")
+                        StatItem(label = "استفسارات", count = "$issuesCount", icon = "❓")
                     }
                 }
             }
         }
 
-        // Badges Section
+        // Badges Section (Dynamically computed from actual student activity)
         item {
+            val stats = currentUser?.stats
+            val lessonsCount = stats?.lessonsCount ?: 0
+            val photosCount = stats?.photosCount ?: 0
+            val homeworksCount = stats?.homeworksCount ?: 0
+            val issuesCount = stats?.issuesCount ?: 0
+            val userRole = currentUser?.role ?: "MEMBER"
+
+            val isActiveMember = (lessonsCount + homeworksCount + issuesCount) > 0 || currentUser != null
+            val isLessonDoc = lessonsCount >= 1 || photosCount >= 3
+            val isHelper = issuesCount >= 1 || homeworksCount >= 2 || userRole == "MODERATOR" || userRole == "ADMIN" || userRole == "VERIFIED_TEACHER"
+
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 backgroundColor = GlassSurface
@@ -192,9 +213,58 @@ fun ProfileScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        BadgeItem(name = "عضو نشط", icon = "🌟", active = true, modifier = Modifier.weight(1f))
-                        BadgeItem(name = "موثق الدروس", icon = "📚", active = false, modifier = Modifier.weight(1f))
-                        BadgeItem(name = "مساعد الشعبة", icon = "⭐", active = false, modifier = Modifier.weight(1f))
+                        BadgeItem(name = "عضو نشط", icon = "🌟", active = isActiveMember, modifier = Modifier.weight(1f))
+                        BadgeItem(name = "موثق الدروس", icon = "📚", active = isLessonDoc, modifier = Modifier.weight(1f))
+                        BadgeItem(name = "مساعد الشعبة", icon = "⭐", active = isHelper, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        // Navigation shortcuts to Academic History & Knowledge Base
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface,
+                    onClick = { viewModel.setSubScreen(com.magd.tanweer.ui.SubScreen.ACADEMIC_HISTORY) }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🏛️", fontSize = 20.sp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("الأرشيف الأكاديمي الشخصي", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                Text("تصفح سجلاتك ودروسك للأعوام الدراسية السابقة", fontSize = 11.sp, color = TextSecondary)
+                            }
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = CyanAccent)
+                    }
+                }
+
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface,
+                    onClick = { viewModel.setSubScreen(com.magd.tanweer.ui.SubScreen.SUBJECT_KNOWLEDGE_BASE) }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("📚", fontSize = 20.sp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("مساحة المادة الموحدة (Knowledge Base)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                Text("دروس، واجبات، اختبارات، وأسئلة كل مادة في مكان واحد", fontSize = 11.sp, color = TextSecondary)
+                            }
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = CyanAccent)
                     }
                 }
             }

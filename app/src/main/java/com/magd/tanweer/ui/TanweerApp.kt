@@ -44,6 +44,7 @@ fun TanweerApp(
     val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
     val subScreen by viewModel.subScreen.collectAsStateWithLifecycle()
     val activeReadingBook by viewModel.activeReadingBook.collectAsStateWithLifecycle()
+    val activeReadingInitialPage by viewModel.activeReadingInitialPage.collectAsStateWithLifecycle()
     val isUploadModalOpen by viewModel.isUploadModalOpen.collectAsStateWithLifecycle()
     val uploadInitialSubjectId by viewModel.uploadInitialSubjectId.collectAsStateWithLifecycle()
     val recoveryCodeDialog by viewModel.recoveryCodeDialog.collectAsStateWithLifecycle()
@@ -101,6 +102,7 @@ fun TanweerApp(
                 if (subScreen == SubScreen.PDF_VIEWER && activeReadingBook != null) {
                     PdfReaderScreen(
                         book = activeReadingBook!!,
+                        initialPageIndex = activeReadingInitialPage,
                         onBack = { viewModel.closePdfReader() }
                     )
                 } else if (subScreen != SubScreen.NONE) {
@@ -138,6 +140,9 @@ fun TanweerApp(
                                     SubScreen.PROFILE -> "ملف الطالب والمساهمات"
                                     SubScreen.SETTINGS -> "إعدادات التطبيق"
                                     SubScreen.WHAT_DID_I_MISS -> "ماذا فاتني؟"
+                                    SubScreen.SEARCH -> "البحث الشامل"
+                                    SubScreen.SUBJECT_KNOWLEDGE_BASE -> "مساحة المادة الموحدة"
+                                    SubScreen.ACADEMIC_HISTORY -> "الأرشيف الأكاديمي"
                                     else -> ""
                                 },
                                 fontSize = 17.sp,
@@ -153,6 +158,10 @@ fun TanweerApp(
                             SubScreen.TIMELINE -> SubjectTimelineScreen(viewModel = viewModel)
                             SubScreen.PROFILE -> ProfileScreen(viewModel = viewModel)
                             SubScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
+                            SubScreen.WHAT_DID_I_MISS -> WhatDidIMissScreen(viewModel = viewModel)
+                            SubScreen.SEARCH -> SearchScreen(viewModel = viewModel)
+                            SubScreen.SUBJECT_KNOWLEDGE_BASE -> ClassKnowledgeBaseScreen(viewModel = viewModel)
+                            SubScreen.ACADEMIC_HISTORY -> AcademicHistoryScreen(viewModel = viewModel)
                             else -> HomeScreen(viewModel = viewModel)
                         }
                     }
@@ -264,6 +273,22 @@ fun TanweerApp(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
 
+                            MoreMenuItem(
+                                title = "🎒 ماذا فاتني أثناء الغياب؟",
+                                subtitle = "متابعة الواجبات والدروس والاختبارات السابقة",
+                                onClick = {
+                                    isMoreMenuOpen = false
+                                    viewModel.setSubScreen(SubScreen.WHAT_DID_I_MISS)
+                                }
+                            )
+                            MoreMenuItem(
+                                title = "🔍 البحث الشامل في المنظومة",
+                                subtitle = "بحث فوري في الدروس، الواجبات، الاختبارات والكتب",
+                                onClick = {
+                                    isMoreMenuOpen = false
+                                    viewModel.setSubScreen(SubScreen.SEARCH)
+                                }
+                            )
                             MoreMenuItem(
                                 title = "👥 المجموعات والشعب الدراسية",
                                 subtitle = "نقاشات ومجموعات الصف والشعبة",

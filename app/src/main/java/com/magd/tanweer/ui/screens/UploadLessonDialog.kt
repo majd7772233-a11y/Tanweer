@@ -525,7 +525,7 @@ fun UploadLessonDialog(
                                     "درس موثق ومسجل"
                                 }
                             }
-                            viewModel.addLessonWithPages(
+                            val result = viewModel.addLessonWithPages(
                                 subjectId = selectedSubjectId,
                                 title = title,
                                 description = descText,
@@ -533,7 +533,13 @@ fun UploadLessonDialog(
                                 pages = validPages
                             )
                             isUploading = false
-                            Toast.makeText(context, "تم توثيق ونشر الدرس بنجاح 🚀", Toast.LENGTH_SHORT).show()
+                            if (result.isSuccess) {
+                                Toast.makeText(context, "تم توثيق ونشر الدرس بنجاح 🚀", Toast.LENGTH_SHORT).show()
+                                onDismiss()
+                            } else {
+                                val errorMsg = result.exceptionOrNull()?.message ?: "حدث خطأ أثناء نشر الدرس"
+                                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                            }
                         }
                     }
                 }

@@ -163,8 +163,17 @@ export async function handleMarkBestAnswer(issueId: string, commentId: string, u
     return errorResponse('FORBIDDEN', 'صاحب الاستفسار فقط يستطيع تحديد أفضل إجابة');
   }
 
+  // Verify that the comment belongs to this issue
+  const comment = await env.DB.prepare(
+    `SELECT id FROM issue_comments WHERE id = ? AND issue_id = ?`
+  ).bind(commentId, issueId).first();
+
+  if (!comment) {
+    return errorResponse('COMMENT_NOT_FOUND', 'التعليق غير موجود أو لا ينتمي لهذا الاستفسار');
+  }
+
   await env.DB.prepare(`UPDATE issue_comments SET is_best_answer = 0 WHERE issue_id = ?`).bind(issueId).run();
-  await env.DB.prepare(`UPDATE issue_comments SET is_best_answer = 1 WHERE id = ?`).bind(commentId).run();
+  await env.DB.prepare(`UPDATE issue_comments SET is_best_answer = 1 WHERE id = ? AND issue_id = ?`).bind(commentId, issueId).run();
   await env.DB.prepare(`UPDATE issues SET status = 'SOLVED', best_comment_id = ?, updated_at = ? WHERE id = ?`)
     .bind(commentId, Date.now(), issueId).run();
 

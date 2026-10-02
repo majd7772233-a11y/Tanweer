@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.speech.tts.TextToSpeech
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -44,16 +45,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.magd.tanweer.data.local.TanweerDatabase
 import com.magd.tanweer.data.model.BookItem
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.data.pdf.PdfBookManager
 import com.magd.tanweer.data.pdf.PdfDownloadState
+import com.magd.tanweer.data.repository.TanweerRepository
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 
 data class PageBookmark(
     val id: String,
@@ -80,11 +86,41 @@ data class PageVocabulary(
 @Composable
 fun PdfReaderScreen(
     book: BookItem,
+    initialPageIndex: Int? = null,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val pdfManager = remember { PdfBookManager(context) }
+    val db = remember { TanweerDatabase.getInstance(context) }
+    val repository = remember { TanweerRepository(db) }
+
+    // Real TextToSpeech Engine
+    var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
+    var isTtsReady by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        var tts: TextToSpeech? = null
+        try {
+            tts = TextToSpeech(context) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    val result = tts?.setLanguage(Locale("ar"))
+                    if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        tts?.setLanguage(Locale.getDefault())
+                    }
+                    isTtsReady = true
+                }
+            }
+            ttsEngine = tts
+        } catch (_: Exception) {}
+
+        onDispose {
+            try {
+                tts?.stop()
+                tts?.shutdown()
+            } catch (_: Exception) {}
+        }
+    }
 
     // Download & Document State
     var downloadState by remember { mutableStateOf<PdfDownloadState>(PdfDownloadState.Idle) }
@@ -133,40 +169,134 @@ fun PdfReaderScreen(
     // Watermark
     var isWatermarkEnabled by remember { mutableStateOf(false) }
 
-    // Freehand Pen & Annotations
+    // Freehand Pen & Annotations (Persisted per page in Room)
     var isDrawingMode by remember { mutableStateOf(false) }
     var currentPenColor by remember { mutableStateOf(CyanAccent) }
     var currentPenWidth by remember { mutableFloatStateOf(4f) }
     var isHighlighter by remember { mutableStateOf(false) }
     val pageStrokesMap = remember { mutableStateMapOf<Int, MutableList<DrawnStroke>>() }
 
-    // Bookmarks, Notes & Vocabulary
+    // Bookmarks, Notes & Vocabulary (Persisted in Room)
     val bookmarksList = remember { mutableStateListOf<PageBookmark>() }
     val notesList = remember { mutableStateListOf<PageStudyNote>() }
     val vocabList = remember { mutableStateListOf<PageVocabulary>() }
 
-    // Study Stopwatch & Pomodoro Timer
+    // Study Stopwatch & Real Reading Time
     var readingTimeSeconds by remember { mutableLongStateOf(0L) }
-    var isTimerRunning by remember { mutableStateOf(true) }
+    var isTimerRunning by remember { mutableStateOf(false) }
 
     // Pomodoro (25m study / 5m break)
     var isPomodoroActive by remember { mutableStateOf(false) }
     var pomodoroSecondsLeft by remember { mutableIntStateOf(25 * 60) }
     var isPomodoroBreak by remember { mutableStateOf(false) }
 
-    // Smart Audio Reader Simulator (TTS Assistant)
+    // Real Audio Reader (TTS Assistant)
     var isAudioPlaying by remember { mutableStateOf(false) }
     var audioSpeed by remember { mutableFloatStateOf(1.0f) }
 
-    // Reading Target / Daily Goal (e.g. 10 pages)
-    var pagesReadCount by remember { mutableIntStateOf(1) }
+    // Unique Pages Read Counter
+    var visitedPages by remember { mutableStateOf(setOf<Int>()) }
+    val pagesReadCount = visitedPages.size.coerceAtLeast(1)
     val targetPagesGoal = 15
 
-    // Handle back button cleanly
+    // Helper functions for strokes serialization
+    fun serializeStrokes(strokes: List<DrawnStroke>): String {
+        val arr = JSONArray()
+        for (stroke in strokes) {
+            val obj = JSONObject()
+            val pointsArr = JSONArray()
+            for (pt in stroke.points) {
+                val ptObj = JSONObject()
+                ptObj.put("x", pt.x.toDouble())
+                ptObj.put("y", pt.y.toDouble())
+                pointsArr.put(ptObj)
+            }
+            obj.put("points", pointsArr)
+            obj.put("color", stroke.color.value.toLong())
+            obj.put("width", stroke.strokeWidth.toDouble())
+            obj.put("isHighlighter", stroke.isHighlighter)
+            arr.put(obj)
+        }
+        return arr.toString()
+    }
+
+    fun deserializeStrokes(json: String): List<DrawnStroke> {
+        if (json.isBlank()) return emptyList()
+        val list = mutableListOf<DrawnStroke>()
+        try {
+            val arr = JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val pointsArr = obj.getJSONArray("points")
+                val pts = mutableListOf<Offset>()
+                for (j in 0 until pointsArr.length()) {
+                    val ptObj = pointsArr.getJSONObject(j)
+                    pts.add(Offset(ptObj.getDouble("x").toFloat(), ptObj.getDouble("y").toFloat()))
+                }
+                val colorVal = obj.getLong("color")
+                val width = obj.getDouble("width").toFloat()
+                val isHighlighter = obj.optBoolean("isHighlighter", false)
+                list.add(DrawnStroke(points = pts, color = Color(colorVal.toULong()), strokeWidth = width, isHighlighter = isHighlighter))
+            }
+        } catch (_: Exception) {}
+        return list
+    }
+
+    fun saveCurrentPageStrokes() {
+        val strokes = pageStrokesMap[currentPageIndex] ?: emptyList()
+        val json = serializeStrokes(strokes)
+        coroutineScope.launch {
+            repository.saveBookDrawing(book.id, currentPageIndex, json)
+        }
+    }
+
+    // TTS Control Functions
+    fun speakCurrentPage(customText: String? = null) {
+        if (!isTtsReady || ttsEngine == null) {
+            Toast.makeText(context, "جاري تهيئة المساعد الصوتي...", Toast.LENGTH_SHORT).show()
+        }
+        val textToRead = customText ?: run {
+            val pageNotes = notesList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { it.noteText }
+            val baseNarration = "كتاب ${book.title}، الصفحة ${currentPageIndex + 1} من $totalPages."
+            if (pageNotes.isNotBlank()) {
+                "$baseNarration. ملاحظات الصفحة: $pageNotes"
+            } else {
+                "$baseNarration. مادة ${book.subjectName}، قراءة دراسية موجهة."
+            }
+        }
+        ttsEngine?.setSpeechRate(audioSpeed)
+        ttsEngine?.speak(textToRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
+        isAudioPlaying = true
+    }
+
+    fun stopAudioPlayback() {
+        try {
+            ttsEngine?.stop()
+        } catch (_: Exception) {}
+        isAudioPlaying = false
+    }
+
+    // Save Reading State on exit or state changes
+    fun persistReadingState() {
+        coroutineScope.launch {
+            repository.saveBookReadingState(
+                bookId = book.id,
+                lastPage = currentPageIndex,
+                zoom = zoomScale,
+                theme = readingTheme.name,
+                totalStudySeconds = readingTimeSeconds,
+                uniquePagesCount = visitedPages.size.coerceAtLeast(1)
+            )
+        }
+    }
+
+    // Handle back button cleanly and persist state
     BackHandler {
         if (isDrawingMode) {
             isDrawingMode = false
         } else {
+            stopAudioPlayback()
+            persistReadingState()
             pdfManager.closeRenderer()
             onBack()
         }
@@ -185,9 +315,9 @@ fun PdfReaderScreen(
         }
     }
 
-    // Study Stopwatch ticker
-    LaunchedEffect(isTimerRunning) {
-        while (isTimerRunning) {
+    // Study Stopwatch ticker (only runs when document is downloaded and reader is active)
+    LaunchedEffect(isTimerRunning, downloadState) {
+        while (isTimerRunning && downloadState is PdfDownloadState.Ready) {
             delay(1000)
             readingTimeSeconds++
         }
@@ -219,20 +349,86 @@ fun PdfReaderScreen(
                 delay(autoScrollSpeedSeconds * 1000L)
                 if (isAutoScrollActive && currentPageIndex < totalPages - 1) {
                     currentPageIndex++
-                    pagesReadCount++
                 }
             }
         }
     }
 
-    // Initial Download & Render Flow
+    // Initial Download & Render Flow, and Room State Synchronization
     LaunchedEffect(book.id) {
+        // 1. Restore persistent reading state from Room
+        val savedState = repository.getBookReadingStateSync(book.id)
+        if (savedState != null) {
+            currentPageIndex = savedState.lastPage
+            zoomScale = savedState.zoom
+            readingTimeSeconds = savedState.totalStudySeconds
+            readingTheme = try { ReadingTheme.valueOf(savedState.theme) } catch (_: Exception) { ReadingTheme.DAY }
+        }
+
+        // 2. Observe bookmarks from Room
+        launch {
+            repository.getBookBookmarks(book.id).collect { list ->
+                bookmarksList.clear()
+                bookmarksList.addAll(list.map { PageBookmark(it.id, it.pageIndex, it.title, it.createdAt) })
+            }
+        }
+
+        // 3. Observe notes from Room
+        launch {
+            repository.getBookNotes(book.id).collect { list ->
+                notesList.clear()
+                notesList.addAll(list.map { PageStudyNote(it.id, it.pageIndex, it.noteText, it.createdAt) })
+            }
+        }
+
+        // 4. Observe vocabulary from Room
+        launch {
+            repository.getBookVocabulary(book.id).collect { list ->
+                vocabList.clear()
+                vocabList.addAll(list.map { PageVocabulary(it.id, it.pageIndex, it.word, it.meaning) })
+            }
+        }
+
+        // 5. Restore drawings from Room
+        launch {
+            val drawings = repository.getBookDrawingsSync(book.id)
+            for (drawing in drawings) {
+                val strokes = deserializeStrokes(drawing.strokesJson)
+                pageStrokesMap[drawing.pageIndex] = strokes.toMutableList()
+            }
+        }
+
+        // 6. Download and open PDF
         pdfManager.downloadAndOpenBook(book.id, book.fileUrl).collect { state ->
             downloadState = state
             if (state is PdfDownloadState.Ready) {
                 totalPages = state.pageCount
-                currentPageIndex = 0
+                if (initialPageIndex != null) {
+                    currentPageIndex = initialPageIndex.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
+                } else if (savedState != null) {
+                    currentPageIndex = savedState.lastPage.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
+                }
+                isTimerRunning = true
             }
+        }
+    }
+
+    // Track unique visited pages accurately
+    LaunchedEffect(currentPageIndex, downloadState) {
+        if (downloadState is PdfDownloadState.Ready) {
+            visitedPages = visitedPages + currentPageIndex
+            persistReadingState()
+            if (isAudioPlaying) {
+                speakCurrentPage()
+            }
+        }
+    }
+
+    // Persist reading state on dispose
+    DisposableEffect(book.id) {
+        onDispose {
+            stopAudioPlayback()
+            persistReadingState()
         }
     }
 
@@ -419,7 +615,6 @@ fun PdfReaderScreen(
                     onNextPage = {
                         if (currentPageIndex < totalPages - 1) {
                             currentPageIndex++
-                            pagesReadCount++
                         }
                     },
                     onPrevPage = {
@@ -430,6 +625,7 @@ fun PdfReaderScreen(
                     onStrokeAdded = { stroke ->
                         val list = pageStrokesMap.getOrPut(currentPageIndex) { mutableListOf() }
                         list.add(stroke)
+                        saveCurrentPageStrokes()
                     },
                     onTap = {
                         if (!isDrawingMode) {
@@ -472,16 +668,19 @@ fun PdfReaderScreen(
                         .border(1.dp, if (isCurrentPageBookmarked) Color(0xFFFFD54F) else GlassBorderSubtle, CircleShape)
                         .clickable {
                             if (isCurrentPageBookmarked) {
-                                bookmarksList.removeAll { it.pageIndex == currentPageIndex }
+                                val existing = bookmarksList.find { it.pageIndex == currentPageIndex }
+                                if (existing != null) {
+                                    coroutineScope.launch { repository.deleteBookmark(existing.id) }
+                                }
                                 Toast.makeText(context, "تمت إزالة الإشارة المرجعية", Toast.LENGTH_SHORT).show()
                             } else {
-                                bookmarksList.add(
-                                    PageBookmark(
-                                        id = "bm_${System.currentTimeMillis()}",
+                                coroutineScope.launch {
+                                    repository.addBookmark(
+                                        bookId = book.id,
                                         pageIndex = currentPageIndex,
                                         title = "صفحة ${currentPageIndex + 1} - ${book.subjectName}"
                                     )
-                                )
+                                }
                                 Toast.makeText(context, "تم حفظ الصفحة في الإشارات المرجعية 🔖", Toast.LENGTH_SHORT).show()
                             }
                         },
@@ -525,13 +724,16 @@ fun PdfReaderScreen(
                                         1.5f -> 2.0f
                                         else -> 1.0f
                                     }
+                                    if (isAudioPlaying) {
+                                        speakCurrentPage()
+                                    }
                                 },
                                 modifier = Modifier.size(28.dp)
                             ) {
                                 Text(text = "${audioSpeed}x", fontSize = 11.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
                             }
                             IconButton(
-                                onClick = { isAudioPlaying = false },
+                                onClick = { stopAudioPlayback() },
                                 modifier = Modifier.size(28.dp)
                             ) {
                                 Icon(Icons.Default.Close, contentDescription = "إيقاف", tint = RubyRed, modifier = Modifier.size(16.dp))
@@ -653,10 +855,12 @@ fun PdfReaderScreen(
                             val list = pageStrokesMap[currentPageIndex]
                             if (!list.isNullOrEmpty()) {
                                 list.removeAt(list.size - 1)
+                                saveCurrentPageStrokes()
                             }
                         },
                         onClearAll = {
                             pageStrokesMap[currentPageIndex]?.clear()
+                            coroutineScope.launch { repository.clearBookDrawing(book.id, currentPageIndex) }
                             Toast.makeText(context, "تم مسح رسومات الصفحة الحالية", Toast.LENGTH_SHORT).show()
                         },
                         onCloseDrawing = { isDrawingMode = false }
@@ -728,7 +932,11 @@ fun PdfReaderScreen(
                                 }
                             },
                             onToggleAudio = {
-                                isAudioPlaying = !isAudioPlaying
+                                if (isAudioPlaying) {
+                                    stopAudioPlayback()
+                                } else {
+                                    speakCurrentPage()
+                                }
                             },
                             onSharePage = {
                                 if (currentPageBitmap != null) {
@@ -763,7 +971,7 @@ fun PdfReaderScreen(
                                 isBookmarksSheetOpen = false
                             },
                             onDeleteBookmark = { id ->
-                                bookmarksList.removeAll { it.id == id }
+                                coroutineScope.launch { repository.deleteBookmark(id) }
                             }
                         )
                     }
@@ -780,16 +988,16 @@ fun PdfReaderScreen(
                             currentPage = currentPageIndex,
                             notes = notesList,
                             onAddNote = { noteText ->
-                                notesList.add(
-                                    PageStudyNote(
-                                        id = "note_${System.currentTimeMillis()}",
+                                coroutineScope.launch {
+                                    repository.addNote(
+                                        bookId = book.id,
                                         pageIndex = currentPageIndex,
                                         noteText = noteText
                                     )
-                                )
+                                }
                             },
                             onDeleteNote = { id ->
-                                notesList.removeAll { it.id == id }
+                                coroutineScope.launch { repository.deleteNote(id) }
                             }
                         )
                     }
@@ -806,17 +1014,17 @@ fun PdfReaderScreen(
                             currentPage = currentPageIndex,
                             vocabList = vocabList,
                             onAddVocab = { word, meaning ->
-                                vocabList.add(
-                                    PageVocabulary(
-                                        id = "v_${System.currentTimeMillis()}",
-                                        pageIndex = currentPageIndex,
+                                coroutineScope.launch {
+                                    repository.addVocabulary(
+                                        bookId = book.id,
                                         word = word,
-                                        meaning = meaning
+                                        meaning = meaning,
+                                        pageIndex = currentPageIndex
                                     )
-                                )
+                                }
                             },
                             onDeleteVocab = { id ->
-                                vocabList.removeAll { it.id == id }
+                                coroutineScope.launch { repository.deleteVocabulary(id) }
                             }
                         )
                     }
@@ -1994,6 +2202,6 @@ private fun sharePageSnapshot(context: Context, bitmap: Bitmap, pageIndex: Int, 
         }
         context.startActivity(Intent.createChooser(shareIntent, "مشاركة صفحة من الكتاب"))
     } catch (e: Exception) {
-        Toast.makeText(context, "تم التقاط لقطة الصفحة بنجاح 📸", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "تعذر مشاركة لقطة الصفحة: ${e.localizedMessage ?: "حدث خطأ غير متوقع"}", Toast.LENGTH_SHORT).show()
     }
 }

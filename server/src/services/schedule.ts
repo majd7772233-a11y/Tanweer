@@ -1,7 +1,7 @@
 import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
 import { mapScheduleSlot } from '../lib/mappers';
-import { requireGroupMember } from '../middleware/permissions';
+import { requireGroupMember, requireScheduleManager } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 
 export async function handleGetSchedule(groupId: string, user: UserContext, env: Env): Promise<Response> {
@@ -52,8 +52,8 @@ export async function handleCreateScheduleSlot(
   request: Request,
   env: Env
 ): Promise<Response> {
-  const memberCheck = await requireGroupMember(user, groupId, env.DB);
-  if (memberCheck) return memberCheck;
+  const permCheck = await requireScheduleManager(user, groupId, env.DB);
+  if (permCheck) return permCheck;
 
   const body = await request.json() as {
     dayOfWeek?: number;
@@ -132,8 +132,8 @@ export async function handleDeleteScheduleSlot(
   user: UserContext,
   env: Env
 ): Promise<Response> {
-  const memberCheck = await requireGroupMember(user, groupId, env.DB);
-  if (memberCheck) return memberCheck;
+  const permCheck = await requireScheduleManager(user, groupId, env.DB);
+  if (permCheck) return permCheck;
 
   const activeVersion = await env.DB.prepare(
     `SELECT id FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`

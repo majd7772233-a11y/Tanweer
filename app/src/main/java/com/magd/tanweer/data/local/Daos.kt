@@ -85,6 +85,12 @@ interface ContentDao {
 
     @Query("DELETE FROM cached_contents WHERE groupId = :groupId")
     suspend fun clearContents(groupId: String)
+
+    @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND studyDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    suspend fun clearSyncedContentsForDate(groupId: String, date: String)
+
+    @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    suspend fun clearSyncedContents(groupId: String)
 }
 
 @Dao
@@ -106,6 +112,15 @@ interface HomeworkDao {
 
     @Query("SELECT * FROM cached_homeworks WHERE id = :id LIMIT 1")
     suspend fun getHomeworkById(id: String): HomeworkEntity?
+
+    @Query("DELETE FROM cached_homeworks WHERE id = :id")
+    suspend fun deleteHomeworkById(id: String)
+
+    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    suspend fun clearSyncedHomeworks(groupId: String)
+
+    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND (studyDate = :date OR dueDate = :date) AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    suspend fun clearSyncedHomeworksForDate(groupId: String, date: String)
 
     @Query("SELECT * FROM cached_homework_completions WHERE userId = :userId")
     fun getCompletionsForUser(userId: String): Flow<List<HomeworkCompletionEntity>>
@@ -143,6 +158,12 @@ interface ExamDao {
     @Query("DELETE FROM cached_exams WHERE id = :id")
     suspend fun deleteExamById(id: String)
 
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    suspend fun clearSyncedExams(groupId: String)
+
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    suspend fun clearSyncedExamsForDate(groupId: String, date: String)
+
     @Query("DELETE FROM cached_exams WHERE groupId = :groupId")
     suspend fun clearExams(groupId: String)
 }
@@ -163,6 +184,12 @@ interface EventDao {
 
     @Query("UPDATE cached_events SET syncStatus = :status WHERE id = :id")
     suspend fun updateSyncStatus(id: String, status: String)
+
+    @Query("DELETE FROM cached_events WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    suspend fun clearSyncedEvents(groupId: String)
+
+    @Query("DELETE FROM cached_events WHERE groupId = :groupId AND eventDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    suspend fun clearSyncedEventsForDate(groupId: String, date: String)
 
     @Query("DELETE FROM cached_events WHERE groupId = :groupId")
     suspend fun clearEvents(groupId: String)
@@ -190,6 +217,9 @@ interface IssueDao {
 
     @Query("UPDATE cached_issues SET syncStatus = :status WHERE id = :id")
     suspend fun updateSyncStatus(id: String, status: String)
+
+    @Query("DELETE FROM cached_issues WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    suspend fun clearSyncedIssues(groupId: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertComments(comments: List<IssueCommentEntity>)
@@ -262,6 +292,18 @@ interface BookReadingDao {
 
     @Query("DELETE FROM book_vocabulary WHERE id = :id")
     suspend fun deleteVocabulary(id: String)
+
+    @Query("SELECT * FROM book_drawings WHERE bookId = :bookId")
+    fun getDrawings(bookId: String): Flow<List<BookDrawingEntity>>
+
+    @Query("SELECT * FROM book_drawings WHERE bookId = :bookId")
+    suspend fun getDrawingsSync(bookId: String): List<BookDrawingEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveDrawing(drawing: BookDrawingEntity)
+
+    @Query("DELETE FROM book_drawings WHERE bookId = :bookId AND pageIndex = :pageIndex")
+    suspend fun clearDrawingForPage(bookId: String, pageIndex: Int)
 }
 
 @Dao
@@ -280,4 +322,58 @@ interface ChatDao {
 
     @Query("DELETE FROM cached_chat_messages WHERE groupId = :groupId")
     suspend fun clearMessages(groupId: String)
+}
+
+@Dao
+interface SyncMetaDao {
+    @Query("SELECT lastSyncedAt FROM cached_sync_meta WHERE `key` = :key LIMIT 1")
+    suspend fun getLastSyncTime(key: String): Long?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun setLastSyncTime(meta: SyncMetaEntity)
+}
+
+@Dao
+interface OutboxDao {
+    @Query("SELECT * FROM outbox WHERE status IN ('PENDING', 'FAILED') ORDER BY createdAt ASC")
+    fun getPendingItems(): Flow<List<OutboxEntity>>
+
+    @Query("SELECT * FROM outbox WHERE status IN ('PENDING', 'FAILED') ORDER BY createdAt ASC")
+    suspend fun getPendingItemsSync(): List<OutboxEntity>
+
+    @Query("SELECT * FROM outbox WHERE id = :id LIMIT 1")
+    suspend fun getOutboxItemById(id: String): OutboxEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOutbox(item: OutboxEntity)
+
+    @Query("UPDATE outbox SET status = :status, attempts = attempts + 1, lastAttemptAt = :now, error = :error WHERE id = :id")
+    suspend fun updateOutboxStatus(id: String, status: String, now: Long = System.currentTimeMillis(), error: String? = null)
+
+    @Query("DELETE FROM outbox WHERE id = :id")
+    suspend fun deleteOutbox(id: String)
+
+    @Query("DELETE FROM outbox WHERE status = 'SYNCED'")
+    suspend fun clearSynced()
+}
+
+@Dao
+interface CorrectionDao {
+    @Query("SELECT * FROM correction_requests WHERE groupId = :groupId ORDER BY createdAt DESC")
+    fun getCorrections(groupId: String): Flow<List<CorrectionRequestEntity>>
+
+    @Query("SELECT * FROM correction_requests WHERE contentId = :contentId ORDER BY createdAt DESC")
+    fun getCorrectionsForContent(contentId: String): Flow<List<CorrectionRequestEntity>>
+
+    @Query("SELECT * FROM correction_requests WHERE id = :id LIMIT 1")
+    suspend fun getCorrectionById(id: String): CorrectionRequestEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCorrection(correction: CorrectionRequestEntity)
+
+    @Query("UPDATE correction_requests SET upvotes = upvotes + 1 WHERE id = :id")
+    suspend fun upvoteCorrection(id: String)
+
+    @Query("UPDATE correction_requests SET status = :status WHERE id = :id")
+    suspend fun updateStatus(id: String, status: String)
 }

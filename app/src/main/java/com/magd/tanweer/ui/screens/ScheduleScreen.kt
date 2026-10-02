@@ -74,7 +74,10 @@ fun ScheduleScreen(
         viewModel.getScheduleSubjectsForCurrentGrade()
     }
 
-    var selectedDayForList by remember { mutableIntStateOf(TanweerViewModel.getDayOfWeekIndex()) }
+    var selectedDayForList by remember {
+        val todayIdx = TanweerViewModel.getDayOfWeekIndex()
+        mutableIntStateOf(if (todayIdx < 0) 0 else todayIdx)
+    }
     var isFullWeekView by remember { mutableStateOf(true) }
 
     // Selected cell for subject selection modal: (dayOfWeek, slotOrder)

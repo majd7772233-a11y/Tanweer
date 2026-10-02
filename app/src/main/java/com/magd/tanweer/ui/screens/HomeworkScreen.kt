@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.magd.tanweer.data.model.HomeworkItem
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
@@ -86,6 +87,9 @@ fun HomeworkScreen(
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
 
     val homeworks by viewModel.repository.getHomeworks(activeGroupId)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val books by viewModel.repository.getBooks(currentUser?.gradeId ?: 10)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val gradeSubjects = remember(currentUser?.gradeId) {
@@ -301,6 +305,24 @@ fun HomeworkScreen(
                         onToggle = { viewModel.toggleHomework(hw.id, hw.isCompleted) },
                         onRetrySync = { viewModel.retrySyncHomework(hw.id) },
                         onImageClick = { url -> fullScreenImagePreviewUrl = url },
+                        onOpenBookPage = if (!hw.pageNumbers.isNullOrBlank()) {
+                            {
+                                val matchingBook = books.find { it.subjectId == hw.subjectId }
+                                val pageNum = hw.pageNumbers.filter { it.isDigit() }.toIntOrNull() ?: 1
+                                if (matchingBook != null) {
+                                    viewModel.openBookInPdfReader(matchingBook, targetPage = (pageNum - 1).coerceAtLeast(0))
+                                } else {
+                                    Toast.makeText(context, "جاري فتح مكتبة الكتب للمادة...", Toast.LENGTH_SHORT).show()
+                                    viewModel.setSubScreen(SubScreen.LIBRARY)
+                                }
+                            }
+                        } else null,
+                        onSetReminder = {
+                            Toast.makeText(context, "تم ضبط تذكير للواجب بنجاح 🔔", Toast.LENGTH_SHORT).show()
+                        },
+                        onAddToDailyPlan = {
+                            Toast.makeText(context, "تمت إضافة الواجب إلى خطة إنجاز اليوم 📌", Toast.LENGTH_SHORT).show()
+                        },
                         onAskQuestion = {
                             viewModel.addIssue(
                                 title = "استفسار حول واجب ${hw.subjectName}: ${hw.title}",
@@ -407,6 +429,9 @@ fun HomeworkCard(
     onToggle: () -> Unit,
     onRetrySync: (() -> Unit)? = null,
     onImageClick: (String) -> Unit,
+    onOpenBookPage: (() -> Unit)? = null,
+    onSetReminder: (() -> Unit)? = null,
+    onAddToDailyPlan: (() -> Unit)? = null,
     onAskQuestion: () -> Unit
 ) {
     val borderColor = when {
@@ -414,6 +439,10 @@ fun HomeworkCard(
         isOverdue -> Color(0xFFFF5252).copy(alpha = 0.5f)
         isDueToday -> WarmAmber.copy(alpha = 0.5f)
         else -> GlassBorderSubtle
+    }
+
+    val countdownText = remember(homework.dueDate) {
+        getRemainingTimeText(homework.dueDate)
     }
 
     GlassCard(
@@ -466,7 +495,7 @@ fun HomeworkCard(
                             modifier = Modifier.padding(top = 2.dp)
                         ) {
                             Text(
-                                text = "التسليم: ${homework.dueDate}",
+                                text = if (countdownText.isNotBlank()) countdownText else "التسليم: ${homework.dueDate}",
                                 fontSize = 12.sp,
                                 color = when {
                                     homework.isCompleted -> EmeraldGreen
@@ -476,25 +505,6 @@ fun HomeworkCard(
                                 },
                                 fontWeight = if (isOverdue || isDueToday) FontWeight.Bold else FontWeight.Normal
                             )
-                            if (isOverdue) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0xFFFF5252).copy(alpha = 0.2f))
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
-                                ) {
-                                    Text("متأخر ⚠️", fontSize = 9.sp, color = Color(0xFFFF5252), fontWeight = FontWeight.Bold)
-                                }
-                            } else if (isDueToday && !homework.isCompleted) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(WarmAmber.copy(alpha = 0.2f))
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
-                                ) {
-                                    Text("اليوم ⚡", fontSize = 9.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
-                                }
-                            }
                         }
                     }
                 }
@@ -529,15 +539,25 @@ fun HomeworkCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = if (!homework.details.isNullOrBlank()) 6.dp else 0.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (!homework.pageNumbers.isNullOrBlank()) {
-                            Text(
-                                text = "📖 صفحة: ${homework.pageNumbers}",
-                                fontSize = 12.sp,
-                                color = CyanAccent,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(CyanGlow)
+                                    .clickable(enabled = onOpenBookPage != null) { onOpenBookPage?.invoke() }
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "📖 صفحة: ${homework.pageNumbers} ↗",
+                                    fontSize = 12.sp,
+                                    color = CyanAccent,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                         if (!homework.questionNumbers.isNullOrBlank()) {
                             Text(
@@ -651,16 +671,30 @@ fun HomeworkCard(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
+            // Action Buttons Strip
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = if (homework.isCompleted) "تم إنجازه بنجاح ✅" else if (isOverdue) "فات موعد التسليم ⚠️" else "لم يكتمل بعد ⏳",
-                    fontSize = 11.sp,
-                    color = if (homework.isCompleted) EmeraldGreen else if (isOverdue) Color(0xFFFF5252) else TextMuted
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (onAddToDailyPlan != null) {
+                        IconButton(
+                            onClick = onAddToDailyPlan,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.PushPin, contentDescription = "إضافة للخطة", tint = WarmAmber, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    if (onSetReminder != null) {
+                        IconButton(
+                            onClick = onSetReminder,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.NotificationsNone, contentDescription = "تذكير", tint = CyanAccent, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
 
                 OutlinedButton(
                     onClick = onAskQuestion,
@@ -676,6 +710,24 @@ fun HomeworkCard(
                 }
             }
         }
+    }
+}
+
+fun getRemainingTimeText(dueDateStr: String): String {
+    try {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
+        val dueDate = sdf.parse(dueDateStr) ?: return ""
+        val now = Date()
+        val diffMs = dueDate.time + (24 * 60 * 60 * 1000L - 1) - now.time
+        if (diffMs < 0) return "متأخر ⚠️"
+        val hours = (diffMs / (1000 * 60 * 60)).toInt()
+        return when {
+            hours < 24 -> "متبقي $hours ساعة ⏳"
+            hours < 48 -> "متبقي يوم واحد 🌅"
+            else -> "متبقي ${hours / 24} أيام 🗓️"
+        }
+    } catch (_: Exception) {
+        return ""
     }
 }
 

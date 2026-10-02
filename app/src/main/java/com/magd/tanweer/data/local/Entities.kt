@@ -13,7 +13,11 @@ data class UserEntity(
     val role: String,
     val defaultGroupId: String,
     val token: String,
-    val recoveryCode: String?
+    val recoveryCode: String?,
+    val lessonsCount: Int = 0,
+    val homeworksCount: Int = 0,
+    val issuesCount: Int = 0,
+    val photosCount: Int = 0
 )
 
 @Entity(tableName = "cached_groups")
@@ -183,7 +187,18 @@ data class BookReadingStateEntity(
     val lastPage: Int = 0,
     val zoom: Float = 1.0f,
     val theme: String = "LIGHT",
+    val totalStudySeconds: Long = 0L,
+    val uniquePagesCount: Int = 1,
     val lastReadAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "book_drawings")
+data class BookDrawingEntity(
+    @PrimaryKey val id: String,
+    val bookId: String,
+    val pageIndex: Int,
+    val strokesJson: String,
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "book_bookmarks")
@@ -219,4 +234,33 @@ data class SyncMetaEntity(
     @PrimaryKey val key: String,
     val lastSyncedAt: Long,
     val etag: String? = null
+)
+
+@Entity(tableName = "outbox")
+data class OutboxEntity(
+    @PrimaryKey val id: String,
+    val entityType: String, // "CONTENT", "HOMEWORK", "EXAM", "ISSUE", "COMMENT", "CHAT_MESSAGE", "CORRECTION"
+    val entityId: String,
+    val operation: String, // "CREATE", "UPDATE", "DELETE"
+    val payloadJson: String,
+    val attempts: Int = 0,
+    val createdAt: Long = System.currentTimeMillis(),
+    val lastAttemptAt: Long = 0L,
+    val error: String? = null,
+    val status: String = "PENDING" // "PENDING", "SYNCING", "FAILED", "SYNCED"
+)
+
+@Entity(tableName = "correction_requests")
+data class CorrectionRequestEntity(
+    @PrimaryKey val id: String,
+    val contentId: String,
+    val groupId: String,
+    val fieldName: String,
+    val originalValue: String,
+    val proposedValue: String,
+    val reason: String?,
+    val authorName: String,
+    val status: String = "PENDING_REVIEW",
+    val upvotes: Int = 1,
+    val createdAt: Long = System.currentTimeMillis()
 )

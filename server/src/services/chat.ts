@@ -8,11 +8,14 @@ export async function handleGetGroupMessages(groupId: string, user: UserContext,
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
 
+  // Retrieve the latest 100 messages in chronological order
   const messages = await env.DB.prepare(
-    `SELECT id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp
-     FROM chat_messages
-     WHERE group_id = ?
-     ORDER BY timestamp ASC LIMIT 100`
+    `SELECT * FROM (
+       SELECT id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp
+       FROM chat_messages
+       WHERE group_id = ?
+       ORDER BY timestamp DESC LIMIT 100
+     ) ORDER BY timestamp ASC`
   ).bind(groupId).all();
 
   return jsonResponse({

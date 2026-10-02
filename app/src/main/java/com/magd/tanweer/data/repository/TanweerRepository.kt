@@ -42,7 +42,13 @@ class TanweerRepository(
                 sectionId = it.sectionId,
                 role = it.role,
                 defaultGroupId = it.defaultGroupId,
-                gradeName = SchoolHierarchy.getGradeName(it.gradeId)
+                gradeName = SchoolHierarchy.getGradeName(it.gradeId),
+                stats = UserStats(
+                    lessonsCount = it.lessonsCount,
+                    homeworksCount = it.homeworksCount,
+                    issuesCount = it.issuesCount,
+                    photosCount = it.photosCount
+                )
             )
         }
     }
@@ -138,24 +144,7 @@ class TanweerRepository(
             }
         } catch (e: Exception) {
             Log.e("TanweerRepository", "Login network error", e)
-            // Allow offline cached session ONLY if the exact registered user exists in local Room DB
-            val cached = db.userDao().getUserSync()
-            if (cached != null && cached.phoneNumber == phone) {
-                Result.success(
-                    User(
-                        id = cached.id,
-                        fullName = cached.fullName,
-                        phoneNumber = cached.phoneNumber,
-                        gradeId = cached.gradeId,
-                        sectionId = cached.sectionId,
-                        role = cached.role,
-                        defaultGroupId = cached.defaultGroupId,
-                        gradeName = SchoolHierarchy.getGradeName(cached.gradeId)
-                    )
-                )
-            } else {
-                Result.failure(Exception("تعذر الاتصال بالسيرفر للتأكد من بيانات الحساب"))
-            }
+            Result.failure(Exception("تعذر الاتصال بالسيرفر للتحقق من كلمة المرور والحساب بأمان. يلزم الاتصال بالإنترنت لتسجيل الدخول."))
         }
     }
 
@@ -185,23 +174,7 @@ class TanweerRepository(
             }
         } catch (e: Exception) {
             Log.e("TanweerRepository", "Recovery login error", e)
-            val cached = db.userDao().getUserSync()
-            if (cached != null && cached.recoveryCode == code) {
-                Result.success(
-                    User(
-                        id = cached.id,
-                        fullName = cached.fullName,
-                        phoneNumber = cached.phoneNumber,
-                        gradeId = cached.gradeId,
-                        sectionId = cached.sectionId,
-                        role = cached.role,
-                        defaultGroupId = cached.defaultGroupId,
-                        gradeName = SchoolHierarchy.getGradeName(cached.gradeId)
-                    )
-                )
-            } else {
-                Result.failure(Exception("تعذر الاتصال بالسيرفر للتحقق من رمز الاسترداد"))
-            }
+            Result.failure(Exception("تعذر الاتصال بالسيرفر للتحقق من رمز الاسترداد بأمان. يلزم الاتصال بالإنترنت."))
         }
     }
 
@@ -226,20 +199,11 @@ class TanweerRepository(
                     sectionId = newSectionId.uppercase()
                 )
             )
-            val updatedUser = if (res.isSuccessful && res.body()?.user != null) {
-                res.body()!!.user!!
-            } else {
-                User(
-                    id = currentUserEntity.id,
-                    fullName = newFullName,
-                    phoneNumber = currentUserEntity.phoneNumber,
-                    gradeId = newGradeId,
-                    sectionId = newSectionId,
-                    role = currentUserEntity.role,
-                    defaultGroupId = newGroupId,
-                    gradeName = SchoolHierarchy.getGradeName(newGradeId)
-                )
+            if (!res.isSuccessful || res.body()?.user == null) {
+                val errorMsg = res.body()?.message ?: res.message().let { if (it.isNullOrBlank()) "فشل تحديث بيانات الحساب على السيرفر" else it }
+                return@withContext Result.failure(Exception(errorMsg))
             }
+            val updatedUser = res.body()!!.user!!
 
             db.userDao().insertUser(
                 UserEntity(
@@ -255,49 +219,13 @@ class TanweerRepository(
                 )
             )
 
-            val gradeName = SchoolHierarchy.getGradeName(newGradeId)
-            val secAr = SchoolHierarchy.getSectionArabicName(newSectionId)
-            db.groupDao().insertGroups(
-                listOf(
-                    GroupEntity(
-                        id = newGroupId,
-                        name = "$gradeName — شعبة $secAr",
-                        type = "CLASS",
-                        description = "المجموعة الدراسية الرسمية للشعبة",
-                        icon = "🏫",
-                        role = "MEMBER",
-                        memberCount = 1
-                    )
-                )
-            )
+            // If class changed, re-sync groups to reflect current membership from server
+            syncGroups()
 
             Result.success(updatedUser)
         } catch (e: Exception) {
-            // Local fallback if offline
-            val localUpdated = User(
-                id = currentUserEntity.id,
-                fullName = newFullName,
-                phoneNumber = currentUserEntity.phoneNumber,
-                gradeId = newGradeId,
-                sectionId = newSectionId,
-                role = currentUserEntity.role,
-                defaultGroupId = newGroupId,
-                gradeName = SchoolHierarchy.getGradeName(newGradeId)
-            )
-            db.userDao().insertUser(
-                UserEntity(
-                    id = localUpdated.id,
-                    fullName = localUpdated.fullName,
-                    phoneNumber = localUpdated.phoneNumber,
-                    gradeId = localUpdated.gradeId,
-                    sectionId = localUpdated.sectionId,
-                    role = localUpdated.role,
-                    defaultGroupId = localUpdated.defaultGroupId,
-                    token = currentUserEntity.token,
-                    recoveryCode = currentUserEntity.recoveryCode
-                )
-            )
-            Result.success(localUpdated)
+            Log.e("TanweerRepository", "Update profile error", e)
+            Result.failure(Exception("تعذر الاتصال بالسيرفر لحفظ التعديلات. يرجى التأكد من اتصالك بالإنترنت."))
         }
     }
 
@@ -347,7 +275,11 @@ class TanweerRepository(
                         role = user.role,
                         defaultGroupId = user.defaultGroupId,
                         token = currentToken,
-                        recoveryCode = currentRecovery
+                        recoveryCode = currentRecovery,
+                        lessonsCount = user.stats?.lessonsCount ?: 0,
+                        homeworksCount = user.stats?.homeworksCount ?: 0,
+                        issuesCount = user.stats?.issuesCount ?: 0,
+                        photosCount = user.stats?.photosCount ?: 0
                     )
                 )
                 SyncResult.Success(1)
@@ -391,6 +323,7 @@ class TanweerRepository(
                     )
                 }
                 val allEntities = myEntities + discoverEntities
+                db.groupDao().clearGroups()
                 if (allEntities.isNotEmpty()) {
                     db.groupDao().insertGroups(allEntities)
                 }
@@ -422,8 +355,8 @@ class TanweerRepository(
                         endTime = it.endTime
                     )
                 }
+                db.scheduleDao().clearSlots(groupId)
                 if (slots.isNotEmpty()) {
-                    db.scheduleDao().clearSlots(groupId)
                     db.scheduleDao().insertSlots(slots)
                 }
                 SyncResult.Success(slots.size)
@@ -442,7 +375,8 @@ class TanweerRepository(
             if (res.isSuccessful && res.body() != null) {
                 val body = res.body()!!
 
-                // Save Lessons
+                // Reconcile Lessons for this date
+                db.contentDao().clearSyncedContentsForDate(groupId, date)
                 if (body.contents.isNotEmpty()) {
                     val contents = body.contents.map {
                         ContentEntity(
@@ -466,7 +400,8 @@ class TanweerRepository(
                     db.contentDao().insertContents(contents)
                 }
 
-                // Save Homeworks
+                // Reconcile Homeworks for this date
+                db.homeworkDao().clearSyncedHomeworksForDate(groupId, date)
                 if (body.homeworks.isNotEmpty()) {
                     val homeworks = body.homeworks.map {
                         HomeworkEntity(
@@ -490,7 +425,8 @@ class TanweerRepository(
                     db.homeworkDao().insertHomeworks(homeworks)
                 }
 
-                // Save Exams
+                // Reconcile Exams for this date
+                db.examDao().clearSyncedExamsForDate(groupId, date)
                 if (body.exams.isNotEmpty()) {
                     val exams = body.exams.map {
                         ExamEntity(
@@ -509,7 +445,8 @@ class TanweerRepository(
                     db.examDao().insertExams(exams)
                 }
 
-                // Save Events
+                // Reconcile Events for this date
+                db.eventDao().clearSyncedEventsForDate(groupId, date)
                 if (body.events.isNotEmpty()) {
                     val events = body.events.map {
                         EventEntity(
@@ -560,6 +497,7 @@ class TanweerRepository(
                         createdAt = it.createdAt
                     )
                 }
+                db.homeworkDao().clearSyncedHomeworks(groupId)
                 if (hwList.isNotEmpty()) {
                     db.homeworkDao().insertHomeworks(hwList)
                 }
@@ -591,6 +529,7 @@ class TanweerRepository(
                         colorHex = it.colorHex
                     )
                 }
+                db.examDao().clearSyncedExams(groupId)
                 if (exams.isNotEmpty()) {
                     db.examDao().insertExams(exams)
                 }
@@ -621,6 +560,7 @@ class TanweerRepository(
                         createdAt = it.createdAt
                     )
                 }
+                db.eventDao().clearSyncedEvents(groupId)
                 if (events.isNotEmpty()) {
                     db.eventDao().insertEvents(events)
                 }
@@ -656,6 +596,7 @@ class TanweerRepository(
                         createdAt = it.createdAt
                     )
                 }
+                db.issueDao().clearSyncedIssues(groupId)
                 if (issues.isNotEmpty()) {
                     db.issueDao().insertIssues(issues)
                 }
@@ -668,24 +609,30 @@ class TanweerRepository(
         }
     }
 
-    private var lastBooksSyncTime: Long = 0L
     private val BOOKS_SYNC_COOLDOWN_MS = 24 * 60 * 60 * 1000L // 24 hours
 
     suspend fun syncBooks(gradeId: Int, forceRefresh: Boolean = false): SyncResult = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
+        val syncKey = "books_sync_grade_$gradeId"
+        val lastSync = db.syncMetaDao().getLastSyncTime(syncKey) ?: 0L
+
         // If not forced and synced within 24h, return Success immediately using cached Room database
-        if (!forceRefresh && (now - lastBooksSyncTime < BOOKS_SYNC_COOLDOWN_MS) && lastBooksSyncTime > 0L) {
+        if (!forceRefresh && (now - lastSync < BOOKS_SYNC_COOLDOWN_MS) && lastSync > 0L) {
             return@withContext SyncResult.Success()
         }
 
         try {
             var count = 0
+            var fetchAttempted = false
+            var anySourceReached = false
 
             // 1. Primary: Try fetching official pre-compiled catalog.json directly from GitHub
             var catalogSuccess = false
             try {
+                fetchAttempted = true
                 val catalogRes = gitHubApi.getCatalog()
                 if (catalogRes.isSuccessful && catalogRes.body() != null) {
+                    anySourceReached = true
                     val catalog = catalogRes.body()!!
                     val catalogBooks = catalog.books
                         .filter { it.grade_id == gradeId || gradeId == 0 }
@@ -710,7 +657,7 @@ class TanweerRepository(
                     }
                 }
             } catch (e: Exception) {
-                Log.d("TanweerRepository", "catalog.json not available or failed, falling back to releases: ${e.message}")
+                Log.d("TanweerRepository", "catalog.json not available or failed: ${e.message}")
             }
 
             // 2. Fallback: Parse directly from GitHub Releases if catalog.json was not loaded
@@ -718,6 +665,7 @@ class TanweerRepository(
                 try {
                     val ghRes = gitHubApi.getReleases()
                     if (ghRes.isSuccessful && ghRes.body() != null) {
+                        anySourceReached = true
                         val releases = ghRes.body()!!
                         val ghBooks = releases.flatMap { release ->
                             release.assets.mapNotNull { asset ->
@@ -742,11 +690,17 @@ class TanweerRepository(
                             count += ghBooks.size
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    Log.d("TanweerRepository", "GitHub Releases fallback failed: ${e.message}")
+                }
             }
 
-            lastBooksSyncTime = now
-            SyncResult.Success(count)
+            if (count > 0 || anySourceReached) {
+                db.syncMetaDao().setLastSyncTime(SyncMetaEntity(key = syncKey, lastSyncedAt = now))
+                SyncResult.Success(count)
+            } else {
+                SyncResult.Error("تعذر تحميل قائمة الكتب الدراسية من الخادم والمصدر الرسمي")
+            }
         } catch (e: Exception) {
             SyncResult.Offline("أوفلاين: الكتب المنهجية")
         }
@@ -804,18 +758,131 @@ class TanweerRepository(
         }
     }
 
-    suspend fun joinGroup(groupId: String): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun joinGroup(groupId: String): Result<GenericResponse> = withContext(Dispatchers.IO) {
         try {
             val res = api.joinGroupRequest(groupId)
-            if (res.isSuccessful) {
+            if (res.isSuccessful && res.body() != null) {
+                val body = res.body()!!
                 syncGroups()
-                Result.success(Unit)
+                Result.success(body)
             } else {
-                Result.failure(Exception(res.body()?.message ?: "تعذر إتمام طلب الانضمام"))
+                val errorMsg = res.body()?.error?.message ?: res.body()?.message ?: "تعذر إتمام طلب الانضمام"
+                Result.failure(Exception(errorMsg))
             }
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    // =========================================================================
+    // BOOK READING PERSISTENCE & ANNOTATIONS (ROOM LOCAL STORAGE)
+    // =========================================================================
+
+    fun getBookReadingState(bookId: String): Flow<BookReadingStateEntity?> {
+        return db.bookReadingDao().getReadingState(bookId)
+    }
+
+    suspend fun getBookReadingStateSync(bookId: String): BookReadingStateEntity? = withContext(Dispatchers.IO) {
+        db.bookReadingDao().getReadingStateSync(bookId)
+    }
+
+    suspend fun saveBookReadingState(
+        bookId: String,
+        lastPage: Int,
+        zoom: Float = 1.0f,
+        theme: String = "LIGHT",
+        totalStudySeconds: Long = 0L,
+        uniquePagesCount: Int = 1
+    ) = withContext(Dispatchers.IO) {
+        db.bookReadingDao().saveReadingState(
+            BookReadingStateEntity(
+                bookId = bookId,
+                lastPage = lastPage,
+                zoom = zoom,
+                theme = theme,
+                totalStudySeconds = totalStudySeconds,
+                uniquePagesCount = uniquePagesCount,
+                lastReadAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    fun getBookBookmarks(bookId: String): Flow<List<BookBookmarkEntity>> {
+        return db.bookReadingDao().getBookmarks(bookId)
+    }
+
+    suspend fun addBookmark(bookId: String, pageIndex: Int, title: String) = withContext(Dispatchers.IO) {
+        val entity = BookBookmarkEntity(
+            id = "bm_${bookId}_${pageIndex}_${System.currentTimeMillis()}",
+            bookId = bookId,
+            pageIndex = pageIndex,
+            title = title
+        )
+        db.bookReadingDao().insertBookmark(entity)
+    }
+
+    suspend fun deleteBookmark(id: String) = withContext(Dispatchers.IO) {
+        db.bookReadingDao().deleteBookmark(id)
+    }
+
+    fun getBookNotes(bookId: String): Flow<List<BookNoteEntity>> {
+        return db.bookReadingDao().getNotes(bookId)
+    }
+
+    suspend fun addNote(bookId: String, pageIndex: Int, noteText: String) = withContext(Dispatchers.IO) {
+        val entity = BookNoteEntity(
+            id = "note_${bookId}_${pageIndex}_${System.currentTimeMillis()}",
+            bookId = bookId,
+            pageIndex = pageIndex,
+            noteText = noteText
+        )
+        db.bookReadingDao().insertNote(entity)
+    }
+
+    suspend fun deleteNote(id: String) = withContext(Dispatchers.IO) {
+        db.bookReadingDao().deleteNote(id)
+    }
+
+    fun getBookVocabulary(bookId: String): Flow<List<BookVocabularyEntity>> {
+        return db.bookReadingDao().getVocabulary(bookId)
+    }
+
+    suspend fun addVocabulary(bookId: String, word: String, meaning: String, pageIndex: Int) = withContext(Dispatchers.IO) {
+        val entity = BookVocabularyEntity(
+            id = "vocab_${bookId}_${System.currentTimeMillis()}",
+            bookId = bookId,
+            word = word,
+            meaning = meaning,
+            pageIndex = pageIndex
+        )
+        db.bookReadingDao().insertVocabulary(entity)
+    }
+
+    suspend fun deleteVocabulary(id: String) = withContext(Dispatchers.IO) {
+        db.bookReadingDao().deleteVocabulary(id)
+    }
+
+    fun getBookDrawings(bookId: String): Flow<List<BookDrawingEntity>> {
+        return db.bookReadingDao().getDrawings(bookId)
+    }
+
+    suspend fun getBookDrawingsSync(bookId: String): List<BookDrawingEntity> = withContext(Dispatchers.IO) {
+        db.bookReadingDao().getDrawingsSync(bookId)
+    }
+
+    suspend fun saveBookDrawing(bookId: String, pageIndex: Int, strokesJson: String) = withContext(Dispatchers.IO) {
+        db.bookReadingDao().saveDrawing(
+            BookDrawingEntity(
+                id = "${bookId}_${pageIndex}",
+                bookId = bookId,
+                pageIndex = pageIndex,
+                strokesJson = strokesJson
+            )
+        )
+    }
+
+    suspend fun clearBookDrawing(bookId: String, pageIndex: Int) = withContext(Dispatchers.IO) {
+        db.bookReadingDao().clearDrawingForPage(bookId, pageIndex)
     }
 
     fun getScheduleSlots(groupId: String, dayOfWeek: Int): Flow<List<ScheduleSlot>> {
@@ -1234,6 +1301,28 @@ class TanweerRepository(
 
         chatManager.connect(groupId) { json ->
             try {
+                val type = json.optString("type", "")
+                if (type == "ack") {
+                    val ackId = json.optString("id", "")
+                    if (ackId.isNotBlank()) {
+                        recentMessageIds.add(ackId)
+                        CoroutineScope(Dispatchers.IO).launch {
+                            db.chatDao().updateMessageStatus(ackId, "SENT")
+                        }
+                    }
+                    return@connect
+                }
+
+                if (type == "message_error") {
+                    val errId = json.optString("id", "")
+                    if (errId.isNotBlank()) {
+                        CoroutineScope(Dispatchers.IO).launch {
+                            db.chatDao().updateMessageStatus(errId, "FAILED")
+                        }
+                    }
+                    return@connect
+                }
+
                 val id = json.optString("id", "")
                 val senderId = json.optString("senderId", "")
                 val senderName = json.optString("senderName", "")
@@ -1243,7 +1332,7 @@ class TanweerRepository(
 
                 if (text.isNotBlank() && id.isNotBlank()) {
                     if (senderId == myUserId) {
-                        // My own message echo from server broadcast: mark as SENT without duplicate insert
+                        // My own message echo from server broadcast: confirmed saved and published
                         recentMessageIds.add(id)
                         CoroutineScope(Dispatchers.IO).launch {
                             db.chatDao().updateMessageStatus(id, "SENT")
@@ -1321,10 +1410,7 @@ class TanweerRepository(
         }
         val wsSent = chatManager.sendMessage(json)
 
-        if (wsSent) {
-            // Sent successfully via real-time WebSocket, mark as SENT immediately
-            db.chatDao().updateMessageStatus(msgId, "SENT")
-        } else {
+        if (!wsSent) {
             // Fallback to HTTP REST endpoint only if WebSocket is disconnected
             try {
                 val res = api.postGroupMessage(groupId, PostMessageRequest(id = msgId, text = cleanText))
@@ -1337,6 +1423,7 @@ class TanweerRepository(
                 db.chatDao().updateMessageStatus(msgId, "FAILED")
             }
         }
+        // If wsSent is true, message status remains SENDING until confirmed by server ACK/echo
     }
 
     suspend fun retryChatMessage(msg: ChatMessageItem) = withContext(Dispatchers.IO) {
@@ -1351,9 +1438,7 @@ class TanweerRepository(
             put("timestamp", msg.timestamp)
         }
         val wsSent = chatManager.sendMessage(json)
-        if (wsSent) {
-            db.chatDao().updateMessageStatus(msg.id, "SENT")
-        } else {
+        if (!wsSent) {
             try {
                 val res = api.postGroupMessage(msg.groupId, PostMessageRequest(id = msg.id, text = msg.text))
                 if (res.isSuccessful) {
@@ -1365,6 +1450,7 @@ class TanweerRepository(
                 db.chatDao().updateMessageStatus(msg.id, "FAILED")
             }
         }
+        // If wsSent is true, message status remains SENDING until server ACK/echo confirms persistence
     }
 
     suspend fun addLesson(
@@ -1481,6 +1567,12 @@ class TanweerRepository(
             }
         }
 
+        // If any image upload failed, NEVER send phone local paths to the server!
+        if (anyUploadFailed) {
+            db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), "FAILED")
+            return@withContext Result.failure(Exception("تعذر رفع بعض صفحات الدرس إلى الخادم. تم حفظ الدرس محلياً ويمكنك إعادة المحاولة لاحقاً."))
+        }
+
         // 3. Post lesson content with remote URLs
         try {
             val res = api.createContent(
@@ -1493,16 +1585,112 @@ class TanweerRepository(
                     media = uploadedMediaItems
                 )
             )
-            if (res.isSuccessful && !anyUploadFailed) {
-                db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), "SYNCED")
+            if (res.isSuccessful) {
+                val body = res.body()
+                if (body?.isDuplicate == true && body.contentId != null && body.contentId != id) {
+                    // Server detected a duplicate and linked it to an existing lesson
+                    // Remove local ghost duplicate draft and refresh real server content
+                    db.contentDao().deleteContentById(id)
+                    syncDay(groupId, date)
+                } else {
+                    db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), "SYNCED")
+                }
+                // Cleanup temporary pending files on success
+                pages.forEach { try { it.file.delete() } catch (_: Exception) {} }
                 Result.success(id)
             } else {
-                val status = if (anyUploadFailed) "FAILED" else "LOCAL"
-                db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), status)
-                Result.failure(Exception("فشل إرسال الدرس أو رفع بعض الصفحات للسيرفر"))
+                db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), "FAILED")
+                Result.failure(Exception(res.message() ?: "فشل تسجيل الدرس على السيرفر"))
             }
         } catch (e: Exception) {
             db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), "FAILED")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun retrySyncContent(contentId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val content = db.contentDao().getContentById(contentId)
+            ?: return@withContext Result.failure(Exception("الدرس غير موجود"))
+
+        db.contentDao().updateSyncStatus(contentId, "SYNCING")
+        val mediaItems = parseMediaJson(content.mediaUrlsJson)
+        val updatedMediaItems = mutableListOf<MediaItem>()
+        var uploadFailed = false
+
+        for (item in mediaItems) {
+            if (item.url.startsWith("http://") || item.url.startsWith("https://")) {
+                updatedMediaItems.add(item)
+            } else {
+                val file = java.io.File(item.url)
+                if (file.exists() && file.length() > 0) {
+                    try {
+                        val reqFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                        val part = MultipartBody.Part.createFormData("file", "retry_${file.name}", reqFile)
+                        val uploadRes = api.uploadMedia(part)
+                        if (uploadRes.isSuccessful && uploadRes.body() != null) {
+                            val body = uploadRes.body()!!
+                            val remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
+                                if (rel.startsWith("http")) rel else "https://tanweer.magd.workers.dev/${rel.removePrefix("/")}"
+                            }
+                            if (remoteUrl != null) {
+                                updatedMediaItems.add(item.copy(url = remoteUrl))
+                            } else {
+                                uploadFailed = true
+                                updatedMediaItems.add(item)
+                            }
+                        } else {
+                            uploadFailed = true
+                            updatedMediaItems.add(item)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("TanweerRepository", "Retry upload failed for ${file.name}", e)
+                        uploadFailed = true
+                        updatedMediaItems.add(item)
+                    }
+                } else {
+                    uploadFailed = true
+                    updatedMediaItems.add(item)
+                }
+            }
+        }
+
+        db.contentDao().updateMediaAndSyncStatus(contentId, serializeMediaList(updatedMediaItems), if (uploadFailed) "FAILED" else "SYNCING")
+
+        if (uploadFailed) {
+            return@withContext Result.failure(Exception("تعذر رفع بعض صفحات الدرس. تأكد من اتصال الإنترنت وحاول مجدداً."))
+        }
+
+        try {
+            val res = api.createContent(
+                CreateContentRequest(
+                    groupId = content.groupId,
+                    studyDate = content.studyDate,
+                    subjectId = content.subjectId,
+                    title = content.title,
+                    description = content.description,
+                    media = updatedMediaItems
+                )
+            )
+            if (res.isSuccessful) {
+                val body = res.body()
+                if (body?.isDuplicate == true && body.contentId != null && body.contentId != contentId) {
+                    db.contentDao().deleteContentById(contentId)
+                    syncDay(content.groupId, content.studyDate)
+                } else {
+                    db.contentDao().updateMediaAndSyncStatus(contentId, serializeMediaList(updatedMediaItems), "SYNCED")
+                }
+                for (item in mediaItems) {
+                    if (!item.url.startsWith("http")) {
+                        try { java.io.File(item.url).delete() } catch (_: Exception) {}
+                    }
+                }
+                Result.success(Unit)
+            } else {
+                db.contentDao().updateSyncStatus(contentId, "FAILED")
+                Result.failure(Exception(res.message() ?: "فشل مزامنة الدرس مع السيرفر"))
+            }
+        } catch (e: Exception) {
+            db.contentDao().updateSyncStatus(contentId, "FAILED")
             Result.failure(e)
         }
     }
@@ -1640,6 +1828,16 @@ class TanweerRepository(
             }
         }
 
+        // If any image upload failed, NEVER send phone local paths to the server!
+        if (anyUploadFailed) {
+            val updatedEntity = entity.copy(
+                mediaUrlsJson = serializeStringList(uploadedUrls),
+                syncStatus = "FAILED"
+            )
+            db.homeworkDao().insertHomework(updatedEntity)
+            return@withContext Result.failure(Exception("تعذر رفع بعض صور الواجب إلى الخادم. تم حفظ الواجب محلياً ويمكنك إعادة المحاولة لاحقاً."))
+        }
+
         try {
             val res = api.createHomework(
                 CreateHomeworkRequest(
@@ -1661,15 +1859,15 @@ class TanweerRepository(
                     syncStatus = "SYNCED"
                 )
                 db.homeworkDao().insertHomework(updatedEntity)
+                pages.forEach { try { it.file.delete() } catch (_: Exception) {} }
                 Result.success(id)
             } else {
-                val status = if (anyUploadFailed) "FAILED" else "LOCAL"
                 val updatedEntity = entity.copy(
                     mediaUrlsJson = serializeStringList(uploadedUrls),
-                    syncStatus = status
+                    syncStatus = "FAILED"
                 )
                 db.homeworkDao().insertHomework(updatedEntity)
-                Result.failure(Exception("فشل إرسال الواجب أو رفع الصور للسيرفر"))
+                Result.failure(Exception("فشل إرسال الواجب للسيرفر"))
             }
         } catch (e: Exception) {
             val updatedEntity = entity.copy(
@@ -1682,8 +1880,62 @@ class TanweerRepository(
     }
 
     suspend fun retrySyncHomework(homeworkId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        val hw = db.homeworkDao().getHomeworkById(homeworkId) ?: return@withContext Result.failure(Exception("الواجب غير موجود"))
+        val hw = db.homeworkDao().getHomeworkById(homeworkId)
+            ?: return@withContext Result.failure(Exception("الواجب غير موجود"))
         db.homeworkDao().updateSyncStatus(homeworkId, "SYNCING")
+
+        val currentUrls = parseStringListJson(hw.mediaUrlsJson)
+        val finalRemoteUrls = mutableListOf<String>()
+        var uploadFailed = false
+
+        for (url in currentUrls) {
+            if (url.startsWith("http://") || url.startsWith("https://")) {
+                finalRemoteUrls.add(url)
+            } else {
+                val file = java.io.File(url)
+                if (file.exists() && file.length() > 0) {
+                    try {
+                        val reqFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                        val part = MultipartBody.Part.createFormData("file", "retry_hw_${file.name}", reqFile)
+                        val uploadRes = api.uploadMedia(part)
+                        if (uploadRes.isSuccessful && uploadRes.body() != null) {
+                            val body = uploadRes.body()!!
+                            val remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
+                                if (rel.startsWith("http")) rel else "https://tanweer.magd.workers.dev/${rel.removePrefix("/")}"
+                            }
+                            if (remoteUrl != null) {
+                                finalRemoteUrls.add(remoteUrl)
+                            } else {
+                                uploadFailed = true
+                                finalRemoteUrls.add(url)
+                            }
+                        } else {
+                            uploadFailed = true
+                            finalRemoteUrls.add(url)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("TanweerRepository", "Retry hw upload failed for ${file.name}", e)
+                        uploadFailed = true
+                        finalRemoteUrls.add(url)
+                    }
+                } else {
+                    uploadFailed = true
+                    finalRemoteUrls.add(url)
+                }
+            }
+        }
+
+        db.homeworkDao().insertHomework(
+            hw.copy(
+                mediaUrlsJson = serializeStringList(finalRemoteUrls),
+                syncStatus = if (uploadFailed) "FAILED" else "SYNCING"
+            )
+        )
+
+        if (uploadFailed) {
+            return@withContext Result.failure(Exception("تعذر رفع بعض صور الواجب. تأكد من اتصال الإنترنت وحاول مجدداً."))
+        }
+
         try {
             val res = api.createHomework(
                 CreateHomeworkRequest(
@@ -1695,11 +1947,22 @@ class TanweerRepository(
                     details = hw.details,
                     pageNumbers = hw.pageNumbers,
                     questionNumbers = hw.questionNumbers,
-                    taskType = hw.taskType
+                    taskType = hw.taskType,
+                    mediaUrls = finalRemoteUrls
                 )
             )
             if (res.isSuccessful) {
-                db.homeworkDao().updateSyncStatus(homeworkId, "SYNCED")
+                db.homeworkDao().insertHomework(
+                    hw.copy(
+                        mediaUrlsJson = serializeStringList(finalRemoteUrls),
+                        syncStatus = "SYNCED"
+                    )
+                )
+                for (url in currentUrls) {
+                    if (!url.startsWith("http")) {
+                        try { java.io.File(url).delete() } catch (_: Exception) {}
+                    }
+                }
                 Result.success(Unit)
             } else {
                 db.homeworkDao().updateSyncStatus(homeworkId, "FAILED")
@@ -1997,5 +2260,82 @@ class TanweerRepository(
 
     suspend fun deleteContentById(contentId: String) = withContext(Dispatchers.IO) {
         db.contentDao().deleteContentById(contentId)
+    }
+
+    fun getPendingOutboxCount(): Flow<Int> {
+        return db.outboxDao().getPendingItems().map { it.size }
+    }
+
+    suspend fun processOutboxQueue(): Result<Int> = withContext(Dispatchers.IO) {
+        val pending = db.outboxDao().getPendingItemsSync()
+        if (pending.isEmpty()) return@withContext Result.success(0)
+        var successCount = 0
+
+        for (item in pending) {
+            db.outboxDao().updateOutboxStatus(item.id, "SYNCING")
+            try {
+                if (item.entityType == "CORRECTION") {
+                    val correction = db.correctionDao().getCorrectionById(item.entityId)
+                    if (correction != null) {
+                        val res = api.submitCorrection(
+                            correction.contentId,
+                            SubmitCorrectionRequest(
+                                fieldName = correction.fieldName,
+                                originalValue = correction.originalValue,
+                                proposedValue = correction.proposedValue,
+                                reason = correction.reason
+                            )
+                        )
+                        if (res.isSuccessful) {
+                            db.correctionDao().updateStatus(correction.id, "SUBMITTED")
+                            db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
+                            successCount++
+                        } else {
+                            db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
+                        }
+                    }
+                } else {
+                    db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
+                    successCount++
+                }
+            } catch (e: Exception) {
+                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = e.localizedMessage)
+            }
+        }
+        db.outboxDao().clearSynced()
+        Result.success(successCount)
+    }
+
+    suspend fun submitCorrection(
+        contentId: String,
+        groupId: String,
+        fieldName: String,
+        originalValue: String,
+        proposedValue: String,
+        reason: String?
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val user = db.userDao().getUserSync()
+        val id = "corr_${System.currentTimeMillis()}"
+        val entity = CorrectionRequestEntity(
+            id = id,
+            contentId = contentId,
+            groupId = groupId,
+            fieldName = fieldName,
+            originalValue = originalValue,
+            proposedValue = proposedValue,
+            reason = reason,
+            authorName = user?.fullName ?: "طالب"
+        )
+        db.correctionDao().insertCorrection(entity)
+
+        val req = SubmitCorrectionRequest(fieldName, originalValue, proposedValue, reason)
+        try {
+            val res = api.submitCorrection(contentId, req)
+            if (res.isSuccessful) {
+                db.correctionDao().updateStatus(id, "SUBMITTED")
+            }
+        } catch (_: Exception) {}
+
+        Result.success(id)
     }
 }

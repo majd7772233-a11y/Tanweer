@@ -603,12 +603,17 @@ fun GroupsScreen(
                                     onClick = {
                                         viewModel.joinGroup(
                                             groupId = group.id,
-                                            onSuccess = {
-                                                Toast.makeText(context, "تم الانضمام إلى ${group.name} بنجاح! 🚀", Toast.LENGTH_SHORT).show()
-                                                activeTab = GroupsTab.MY_GROUPS
-                                            },
-                                            onError = { err ->
-                                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                            onResult = { isSuccess, status, message ->
+                                                if (isSuccess) {
+                                                    if (status == "ACTIVE") {
+                                                        Toast.makeText(context, "تم الانضمام إلى ${group.name} بنجاح! 🎉", Toast.LENGTH_SHORT).show()
+                                                        activeTab = GroupsTab.MY_GROUPS
+                                                    } else {
+                                                        Toast.makeText(context, "تم إرسال طلب الانضمام إلى ${group.name}، بانتظار موافقة المشرفين ⏳", Toast.LENGTH_LONG).show()
+                                                    }
+                                                } else {
+                                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         )
                                     },

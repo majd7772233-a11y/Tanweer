@@ -1,6 +1,7 @@
 import { Env, UserContext } from '../env';
 import { validateArabicFullName, isValidGradeSection } from '../lib/validation';
 import { errorResponse, jsonResponse } from '../lib/response';
+import { getCurrentAcademicYearId } from '../lib/school';
 
 export async function handleGetProfile(user: UserContext, env: Env): Promise<Response> {
   const contributions = await env.DB.prepare(
@@ -75,6 +76,17 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
   ).bind(newFullName, newGradeId, newSectionId, now, user.userId).run();
 
   const classGroupId = `class_${newGradeId}_${newSectionId}`;
+  const oldClassGroupId = `class_${user.gradeId}_${user.sectionId}`;
+
+  // If class or section changed, remove user from previous class group memberships
+  if (oldClassGroupId !== classGroupId) {
+    await env.DB.prepare(
+      `DELETE FROM group_members
+       WHERE user_id = ?
+         AND (group_id = ? OR group_id IN (SELECT id FROM groups WHERE type = 'CLASS' AND id != ?))`
+    ).bind(user.userId, oldClassGroupId, classGroupId).run();
+  }
+
   const gradeNameMap: Record<number, string> = {
     7: 'الصف السابع',
     8: 'الصف الثامن',
@@ -86,10 +98,11 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
   const groupName = `${gradeNameMap[newGradeId]} — شعبة (${newSectionId})`;
 
   // Ensure new group exists and user is member
+  const academicYear = await getCurrentAcademicYearId(env.DB);
   await env.DB.prepare(
     `INSERT OR IGNORE INTO groups (id, name, type, description, academic_year_id, created_at)
-     VALUES (?, ?, 'CLASS', ?, '2026-2027', ?)`
-  ).bind(classGroupId, groupName, `المجموعة الدراسية الرسمية لـ ${groupName}`, now).run();
+     VALUES (?, ?, 'CLASS', ?, ?, ?)`
+  ).bind(classGroupId, groupName, `المجموعة الدراسية الرسمية لـ ${groupName}`, academicYear, now).run();
 
   await env.DB.prepare(
     `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at)

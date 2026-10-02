@@ -3,6 +3,7 @@ import { hashPassword, verifyPassword, hashString, generateRecoveryCode, generat
 import { generateId } from '../lib/ids';
 import { validateArabicFullName, validateYemenPhoneNumber, evaluatePasswordStrength, isValidGradeSection } from '../lib/validation';
 import { errorResponse, jsonResponse } from '../lib/response';
+import { getCurrentAcademicYearId } from '../lib/school';
 
 export async function handleRegister(request: Request, env: Env): Promise<Response> {
   const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
@@ -90,10 +91,11 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   };
   const groupName = `${gradeNameMap[body.gradeId]} — شعبة (${body.sectionId.toUpperCase()})`;
 
+  const academicYear = await getCurrentAcademicYearId(env.DB);
   await env.DB.prepare(
     `INSERT OR IGNORE INTO groups (id, name, type, description, academic_year_id, created_at)
      VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(classGroupId, groupName, 'CLASS', `المجموعة الدراسية الرسمية لـ ${groupName}`, '2026-2027', now).run();
+  ).bind(classGroupId, groupName, 'CLASS', `المجموعة الدراسية الرسمية لـ ${groupName}`, academicYear, now).run();
 
   await env.DB.prepare(
     `INSERT OR IGNORE INTO group_sections (group_id, grade_id, section_id)

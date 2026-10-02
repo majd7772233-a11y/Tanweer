@@ -206,6 +206,14 @@ data class PostMessageRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class SubmitCorrectionRequest(
+    val fieldName: String,
+    val originalValue: String,
+    val proposedValue: String,
+    val reason: String? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class ChatMessagesResponse(
     val success: Boolean,
     val messages: List<ChatMessageItem> = emptyList()
@@ -221,7 +229,10 @@ data class BooksResponse(
 data class GenericResponse(
     val success: Boolean,
     val message: String? = null,
+    val status: String? = null,
     val isCompleted: Boolean? = null,
+    val isDuplicate: Boolean? = null,
+    val contentId: String? = null,
     val error: ApiError? = null
 )
 
@@ -241,6 +252,7 @@ data class UploadMediaResponse(
 @JsonClass(generateAdapter = true)
 data class ProfileResponse(
     val success: Boolean,
+    val message: String? = null,
     val user: User? = null
 )
 
@@ -319,6 +331,12 @@ interface TanweerApiService {
     @POST("api/v1/content/{id}/useful")
     suspend fun voteUseful(@Path("id") contentId: String): Response<GenericResponse>
 
+    @POST("api/v1/content/{id}/corrections")
+    suspend fun submitCorrection(
+        @Path("id") contentId: String,
+        @Body req: SubmitCorrectionRequest
+    ): Response<GenericResponse>
+
     @GET("api/v1/homeworks")
     suspend fun getHomeworks(@Query("groupId") groupId: String): Response<HomeworksResponse>
 
@@ -389,6 +407,8 @@ object NetworkModule {
         .add(KotlinJsonAdapterFactory())
         .build()
 
+    var onSessionExpired: (() -> Unit)? = null
+
     private val authInterceptor = Interceptor { chain ->
         val original = chain.request()
         val builder = original.newBuilder()
@@ -396,7 +416,11 @@ object NetworkModule {
             builder.addHeader("Authorization", "Bearer $it")
         }
         builder.addHeader("X-App-Version", "1.0")
-        chain.proceed(builder.build())
+        val response = chain.proceed(builder.build())
+        if (response.code == 401 && !original.url.encodedPath.contains("/auth/")) {
+            onSessionExpired?.invoke()
+        }
+        response
     }
 
     private val githubInterceptor = Interceptor { chain ->

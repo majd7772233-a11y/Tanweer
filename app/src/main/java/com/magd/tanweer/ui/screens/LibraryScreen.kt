@@ -170,7 +170,7 @@ fun LibraryScreen(
                         // Refresh/Sync Button
                         IconButton(
                             onClick = {
-                                viewModel.syncBooks(selectedGradeId) { _, msg ->
+                                viewModel.syncBooks(selectedGradeId, isRefresh = true) { _, msg ->
                                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 }
                             },
@@ -323,7 +323,7 @@ fun LibraryScreen(
                     EmptyGradeBooksView(
                         gradeName = currentGradeName,
                         onSyncClick = {
-                            viewModel.syncBooks(selectedGradeId) { _, msg ->
+                            viewModel.syncBooks(selectedGradeId, isRefresh = true) { _, msg ->
                                 Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                             }
                         }
