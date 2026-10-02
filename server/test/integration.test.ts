@@ -42,7 +42,9 @@ class MockD1Database {
     groups: [],
     group_members: [],
     subjects: [],
+    schedule_versions: [],
     schedule_slots: [],
+    schedule_proposals: [],
     contents: [],
     homeworks: [],
     homework_completions: [],
@@ -85,6 +87,7 @@ class MockD1Database {
             row[`col_${idx}`] = val;
           });
         }
+
         this.tables[table].push(row);
         return [row];
       }
@@ -96,13 +99,16 @@ class MockD1Database {
       if (match) {
         const table = match[1];
         const rows = this.tables[table] || [];
+
         if (normalized.includes('WHERE id = ?')) {
           const id = params[params.length - 1];
           const found = rows.find((r) => r.id === id);
+
           if (found && normalized.includes('status = ?')) {
             found.status = params[0];
           }
         }
+
         return [];
       }
     }
@@ -112,14 +118,35 @@ class MockD1Database {
       const match = normalized.match(/DELETE FROM (\w+)/i);
       if (match) {
         const table = match[1];
+
         if (this.tables[table]) {
-          if (normalized.includes('WHERE group_id = ? AND day_of_week = ? AND slot_order = ?')) {
-            const [groupId, day, slot] = params;
+          if (normalized.includes('WHERE version_id = ? AND day_of_week = ? AND slot_order = ?')) {
+            const [versionId, day, slot] = params;
+
             this.tables[table] = this.tables[table].filter(
-              (r) => !(r.group_id === groupId && r.day_of_week === day && r.slot_order === slot)
+              (r) =>
+                !(
+                  r.version_id === versionId &&
+                  r.day_of_week === day &&
+                  r.slot_order === slot
+                )
+            );
+          } else if (
+            normalized.includes('WHERE group_id = ? AND day_of_week = ? AND slot_order = ?')
+          ) {
+            const [groupId, day, slot] = params;
+
+            this.tables[table] = this.tables[table].filter(
+              (r) =>
+                !(
+                  r.group_id === groupId &&
+                  r.day_of_week === day &&
+                  r.slot_order === slot
+                )
             );
           }
         }
+
         return [];
       }
     }
@@ -128,17 +155,21 @@ class MockD1Database {
     if (/^SELECT/i.test(normalized)) {
       const fromMatch = normalized.match(/FROM (\w+)/i);
       if (!fromMatch) return [];
+
       const table = fromMatch[1];
       let rows = [...(this.tables[table] || [])];
 
       // Handle JOIN query for sessions and users
       if (table.toLowerCase() === 'sessions' && normalized.includes('JOIN users')) {
         const tokenHash = params[0];
+
         const matchingSessions = (this.tables.sessions || []).filter(
           (s) => s.refresh_token_hash === tokenHash
         );
+
         return matchingSessions.map((s) => {
           const user = (this.tables.users || []).find((u) => u.id === s.user_id) || {};
+
           return {
             id: s.id,
             user_id: s.user_id,
@@ -157,38 +188,71 @@ class MockD1Database {
         const phone = params[0];
         rows = rows.filter((r) => r.phone_number === phone);
       }
-      if (normalized.includes('refresh_token_hash = ?') || normalized.includes('token = ?')) {
+
+      if (
+        normalized.includes('refresh_token_hash = ?') ||
+        normalized.includes('token = ?')
+      ) {
         const tokenHash = params[0];
-        rows = rows.filter((r) => r.refresh_token_hash === tokenHash || r.id === tokenHash);
+
+        rows = rows.filter(
+          (r) =>
+            r.refresh_token_hash === tokenHash ||
+            r.id === tokenHash
+        );
       }
-      if (normalized.includes('group_id = ?') && !normalized.includes('user_id = ?')) {
+
+      if (
+        normalized.includes('group_id = ?') &&
+        !normalized.includes('user_id = ?')
+      ) {
         const groupId = params[0];
         rows = rows.filter((r) => r.group_id === groupId);
       }
+
       if (normalized.includes('id = ?')) {
         const id = params[0];
         rows = rows.filter((r) => r.id === id);
       }
+
       if (normalized.includes('checksum = ?')) {
         const checksum = params[0];
         rows = rows.filter((r) => r.checksum === checksum);
       }
+
       if (table.toLowerCase() === 'group_members') {
-        // Find member with group_id and user_id and status ACTIVE
+        // Find member with group_id and user_id and active status
         const groupId = params[0];
         const userId = params[1];
+
         const matching = (this.tables.group_members || []).filter(
-          (m) => m.group_id === groupId && m.user_id === userId && (m.status === 'ACTIVE' || !m.status)
+          (m) =>
+            m.group_id === groupId &&
+            m.user_id === userId &&
+            (m.status === 'ACTIVE' || !m.status)
         );
+
         return matching;
       }
+
       if (normalized.includes('user_id = ? AND group_id = ?')) {
         const [userId, groupId] = params;
-        rows = rows.filter((r) => r.user_id === userId && r.group_id === groupId);
+
+        rows = rows.filter(
+          (r) =>
+            r.user_id === userId &&
+            r.group_id === groupId
+        );
       }
+
       if (normalized.includes('WHERE grade_id = ? AND section_id = ?')) {
         const [gradeId, sectionId] = params;
-        rows = rows.filter((r) => r.grade_id === gradeId && r.section_id === sectionId);
+
+        rows = rows.filter(
+          (r) =>
+            r.grade_id === gradeId &&
+            r.section_id === sectionId
+        );
       }
 
       return rows;
@@ -230,7 +294,9 @@ describe('End-to-End System Integration Flow', () => {
       DB: mockDb as any,
       CHAT: {
         idFromName: () => 'mock-id',
-        get: () => ({ fetch: async () => new Response('ws') }),
+        get: () => ({
+          fetch: async () => new Response('ws'),
+        }),
       } as any,
       JWT_SECRET: 'test-jwt-secret-key-12345678901234567890',
       PASSWORD_PEPPER: 'test-pepper-123',
@@ -255,9 +321,11 @@ describe('End-to-End System Integration Flow', () => {
 
     const regRes = await app.fetch(regReq, env, {} as any);
     const regJson = (await regRes.json()) as any;
+
     expect(regRes.status).toBe(200);
     expect(regJson.token).toBeDefined();
     expect(regJson.user.fullName).toBe('عمر خالد المنصوري');
+
     token = regJson.token;
 
     // Automatically ensure group membership is active for the test user
@@ -273,7 +341,9 @@ describe('End-to-End System Integration Flow', () => {
     // 2. Login User
     const loginReq = new Request('http://localhost/api/v1/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
         phoneNumber: '771234567',
         password: 'Password@123',
@@ -283,6 +353,7 @@ describe('End-to-End System Integration Flow', () => {
 
     const loginRes = await app.fetch(loginReq, env, {} as any);
     const loginJson = (await loginRes.json()) as any;
+
     expect(loginRes.status).toBe(200);
     expect(loginJson.token).toBeDefined();
 
@@ -296,6 +367,7 @@ describe('End-to-End System Integration Flow', () => {
       method: 'GET',
       headers: authHeaders,
     });
+
     const profileRes = await app.fetch(profileReq, env, {} as any);
     expect(profileRes.status).toBe(200);
 
@@ -303,117 +375,319 @@ describe('End-to-End System Integration Flow', () => {
       method: 'GET',
       headers: authHeaders,
     });
+
     const groupsRes = await app.fetch(groupsReq, env, {} as any);
     expect(groupsRes.status).toBe(200);
 
-    // 4. Schedule Slot CRUD
-    const addSlotReq = new Request('http://localhost/api/v1/schedule/class_10_A/slots', {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({
-        dayOfWeek: 1, // Sunday
-        slotOrder: 1,
-        subjectId: 'sub_math',
-        startTime: '08:00',
-        endTime: '08:45',
-      }),
-    });
-    const addSlotRes = await app.fetch(addSlotReq, env, {} as any);
-    expect(addSlotRes.status).toBe(200);
+    // 4. Schedule permissions & CRUD
 
-    const getScheduleReq = new Request('http://localhost/api/v1/schedule/class_10_A', {
-      method: 'GET',
-      headers: authHeaders,
+    // 4A. A normal student MUST NOT be able to modify the official schedule.
+    const studentScheduleReq = new Request(
+      'http://localhost/api/v1/schedule/class_10_A/slots',
+      {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          dayOfWeek: 1,
+          slotOrder: 1,
+          subjectId: 'sub_math',
+          startTime: '08:00',
+          endTime: '08:45',
+        }),
+      }
+    );
+
+    const studentScheduleRes = await app.fetch(
+      studentScheduleReq,
+      env,
+      {} as any
+    );
+
+    expect(studentScheduleRes.status).toBe(403);
+
+    const studentScheduleJson = (await studentScheduleRes.json()) as any;
+    expect(studentScheduleJson.success).not.toBe(true);
+
+    // 4B. The same student can submit a schedule-change proposal.
+    const proposalReq = new Request(
+      'http://localhost/api/v1/schedule/proposals',
+      {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          groupId: 'class_10_A',
+          dayOfWeek: 1,
+          slotOrder: 1,
+          oldSubjectId: 'sub_science',
+          newSubjectId: 'sub_math',
+          reason: 'يوجد تعارض في الحصة الأولى ونحتاج نقل الرياضيات إلى هذا الموعد.',
+        }),
+      }
+    );
+
+    const proposalRes = await app.fetch(
+      proposalReq,
+      env,
+      {} as any
+    );
+
+    const proposalJson = (await proposalRes.json()) as any;
+
+    expect(proposalRes.status).toBe(200);
+    expect(proposalJson.success).toBe(true);
+    expect(proposalJson.proposalId).toBeDefined();
+
+    // Verify that the proposal was actually stored.
+    expect(mockDb.tables.schedule_proposals).toHaveLength(1);
+    expect(mockDb.tables.schedule_proposals[0]).toMatchObject({
+      group_id: 'class_10_A',
+      proposed_by: regJson.user.id,
+      day_of_week: 1,
+      slot_order: 1,
+      new_subject_id: 'sub_math',
+      status: 'PENDING',
     });
-    const getScheduleRes = await app.fetch(getScheduleReq, env, {} as any);
+
+    // 4C. A schedule manager/moderator MAY modify the official schedule.
+    const member = mockDb.tables.group_members.find(
+      (m) =>
+        m.id === 'mem_1' &&
+        m.user_id === regJson.user.id
+    );
+
+    expect(member).toBeDefined();
+
+    // Promote only for the schedule-manager portion of this integration test.
+    member.role = 'MODERATOR';
+
+    const managerAddSlotReq = new Request(
+      'http://localhost/api/v1/schedule/class_10_A/slots',
+      {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          dayOfWeek: 1,
+          slotOrder: 1,
+          subjectId: 'sub_math',
+          startTime: '08:00',
+          endTime: '08:45',
+        }),
+      }
+    );
+
+    const managerAddSlotRes = await app.fetch(
+      managerAddSlotReq,
+      env,
+      {} as any
+    );
+
+    const managerAddSlotJson = (await managerAddSlotRes.json()) as any;
+
+    expect(managerAddSlotRes.status).toBe(200);
+    expect(managerAddSlotJson.success).toBe(true);
+    expect(managerAddSlotJson.slotId).toBeDefined();
+
+    expect(mockDb.tables.schedule_versions).toHaveLength(1);
+    expect(mockDb.tables.schedule_slots).toHaveLength(1);
+
+    // 4D. Schedule manager can delete the official slot.
+    const deleteSlotReq = new Request(
+      'http://localhost/api/v1/schedule/class_10_A/slots/1/1',
+      {
+        method: 'DELETE',
+        headers: authHeaders,
+      }
+    );
+
+    const deleteSlotRes = await app.fetch(
+      deleteSlotReq,
+      env,
+      {} as any
+    );
+
+    const deleteSlotJson = (await deleteSlotRes.json()) as any;
+
+    expect(deleteSlotRes.status).toBe(200);
+    expect(deleteSlotJson.success).toBe(true);
+    expect(mockDb.tables.schedule_slots).toHaveLength(0);
+
+    // Return the member to the real student's role for the remainder
+    // of the end-to-end lifecycle.
+    member.role = 'STUDENT';
+
+    // 4E. Group members, including students, can still read the schedule.
+    const getScheduleReq = new Request(
+      'http://localhost/api/v1/schedule/class_10_A',
+      {
+        method: 'GET',
+        headers: authHeaders,
+      }
+    );
+
+    const getScheduleRes = await app.fetch(
+      getScheduleReq,
+      env,
+      {} as any
+    );
+
     expect(getScheduleRes.status).toBe(200);
 
     // 5. Upload Media with Valid JPEG Magic Numbers (FF D8 FF ...)
     const validJpegBytes = new Uint8Array([
-      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00,
+      0xff,
+      0xd8,
+      0xff,
+      0xe0,
+      0x00,
+      0x10,
+      0x4a,
+      0x46,
+      0x49,
+      0x46,
+      0x00,
+      0x01,
+      0x01,
+      0x01,
+      0x00,
       0x60,
     ]);
 
-    const uploadReq = new Request('http://localhost/api/v1/media/upload', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'image/jpeg',
-      },
-      body: validJpegBytes.buffer,
-    });
-    const uploadRes = await app.fetch(uploadReq, env, {} as any);
+    const uploadReq = new Request(
+      'http://localhost/api/v1/media/upload',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'image/jpeg',
+        },
+        body: validJpegBytes.buffer,
+      }
+    );
+
+    const uploadRes = await app.fetch(
+      uploadReq,
+      env,
+      {} as any
+    );
+
     const uploadJson = (await uploadRes.json()) as any;
+
     expect(uploadRes.status).toBe(200);
     expect(uploadJson.success).toBe(true);
     expect(uploadJson.url).toContain('/api/v1/media/');
 
     // 6. Create Content / Lesson with uploaded Media
-    const contentReq = new Request('http://localhost/api/v1/content', {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({
-        groupId: 'class_10_A',
-        subjectId: 'sub_math',
-        date: '2026-10-01',
-        title: 'درس المعادلات التربيعية',
-        description: 'شرح طريقة إكمال المربع والحل بالدستور',
-        mediaUrls: [uploadJson.url],
-      }),
-    });
-    const contentRes = await app.fetch(contentReq, env, {} as any);
+    const contentReq = new Request(
+      'http://localhost/api/v1/content',
+      {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          groupId: 'class_10_A',
+          subjectId: 'sub_math',
+          date: '2026-10-01',
+          title: 'درس المعادلات التربيعية',
+          description: 'شرح طريقة إكمال المربع والحل بالدستور',
+          mediaUrls: [uploadJson.url],
+        }),
+      }
+    );
+
+    const contentRes = await app.fetch(
+      contentReq,
+      env,
+      {} as any
+    );
+
     expect(contentRes.status).toBe(200);
 
     // 7. Create Homework
-    const hwReq = new Request('http://localhost/api/v1/homeworks', {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({
-        groupId: 'class_10_A',
-        subjectId: 'sub_math',
-        dueDate: '2026-10-03',
-        title: 'واجب ص 45 تدريب 1 و 2',
-        description: 'حل المسائل في دفتر الواجبات',
-      }),
-    });
-    const hwRes = await app.fetch(hwReq, env, {} as any);
+    const hwReq = new Request(
+      'http://localhost/api/v1/homeworks',
+      {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          groupId: 'class_10_A',
+          subjectId: 'sub_math',
+          dueDate: '2026-10-03',
+          title: 'واجب ص 45 تدريب 1 و 2',
+          description: 'حل المسائل في دفتر الواجبات',
+        }),
+      }
+    );
+
+    const hwRes = await app.fetch(
+      hwReq,
+      env,
+      {} as any
+    );
+
     expect(hwRes.status).toBe(200);
 
-    const getHwReq = new Request('http://localhost/api/v1/homeworks?groupId=class_10_A', {
-      method: 'GET',
-      headers: authHeaders,
-    });
-    const getHwRes = await app.fetch(getHwReq, env, {} as any);
+    const getHwReq = new Request(
+      'http://localhost/api/v1/homeworks?groupId=class_10_A',
+      {
+        method: 'GET',
+        headers: authHeaders,
+      }
+    );
+
+    const getHwRes = await app.fetch(
+      getHwReq,
+      env,
+      {} as any
+    );
+
     expect(getHwRes.status).toBe(200);
 
     // 8. Create Exam
-    const examReq = new Request('http://localhost/api/v1/exams', {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({
-        groupId: 'class_10_A',
-        subjectId: 'sub_math',
-        date: '2026-10-15',
-        title: 'اختبار شهري أول',
-        topics: 'الوحدة الأولى كاملة',
-      }),
-    });
-    const examRes = await app.fetch(examReq, env, {} as any);
+    const examReq = new Request(
+      'http://localhost/api/v1/exams',
+      {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          groupId: 'class_10_A',
+          subjectId: 'sub_math',
+          date: '2026-10-15',
+          title: 'اختبار شهري أول',
+          topics: 'الوحدة الأولى كاملة',
+        }),
+      }
+    );
+
+    const examRes = await app.fetch(
+      examReq,
+      env,
+      {} as any
+    );
+
     expect(examRes.status).toBe(200);
 
     // 9. Create Issue & Add Comment
-    const issueReq = new Request('http://localhost/api/v1/issues', {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({
-        groupId: 'class_10_A',
-        subjectId: 'sub_math',
-        title: 'استفسار حول قانون المميز',
-        description: 'متى يكون الجذران متساويين؟',
-      }),
-    });
-    const issueRes = await app.fetch(issueReq, env, {} as any);
+    const issueReq = new Request(
+      'http://localhost/api/v1/issues',
+      {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          groupId: 'class_10_A',
+          subjectId: 'sub_math',
+          title: 'استفسار حول قانون المميز',
+          description: 'متى يكون الجذران متساويين؟',
+        }),
+      }
+    );
+
+    const issueRes = await app.fetch(
+      issueReq,
+      env,
+      {} as any
+    );
+
     const issueJson = (await issueRes.json()) as any;
+
     expect(issueRes.status).toBe(200);
 
     const commentReq = new Request(
@@ -426,25 +700,49 @@ describe('End-to-End System Integration Flow', () => {
         }),
       }
     );
-    const commentRes = await app.fetch(commentReq, env, {} as any);
+
+    const commentRes = await app.fetch(
+      commentReq,
+      env,
+      {} as any
+    );
+
     expect(commentRes.status).toBe(200);
 
     // 10. Post Group Chat Message & Retrieve
-    const chatMsgReq = new Request('http://localhost/api/v1/groups/class_10_A/messages', {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({
-        messageText: 'السلام عليكم يا شباب، متى موعد تسليم الواجب؟',
-      }),
-    });
-    const chatMsgRes = await app.fetch(chatMsgReq, env, {} as any);
+    const chatMsgReq = new Request(
+      'http://localhost/api/v1/groups/class_10_A/messages',
+      {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          messageText: 'السلام عليكم يا شباب، متى موعد تسليم الواجب؟',
+        }),
+      }
+    );
+
+    const chatMsgRes = await app.fetch(
+      chatMsgReq,
+      env,
+      {} as any
+    );
+
     expect(chatMsgRes.status).toBe(200);
 
-    const getChatReq = new Request('http://localhost/api/v1/groups/class_10_A/messages', {
-      method: 'GET',
-      headers: authHeaders,
-    });
-    const getChatRes = await app.fetch(getChatReq, env, {} as any);
+    const getChatReq = new Request(
+      'http://localhost/api/v1/groups/class_10_A/messages',
+      {
+        method: 'GET',
+        headers: authHeaders,
+      }
+    );
+
+    const getChatRes = await app.fetch(
+      getChatReq,
+      env,
+      {} as any
+    );
+
     expect(getChatRes.status).toBe(200);
   });
 });
