@@ -9,6 +9,7 @@ import { errorResponse, jsonResponse } from '../lib/response';
 import { Role, normalizeRole, ROLE_METADATA } from '../lib/roles';
 import { generateId } from '../lib/ids';
 import { hashString } from '../lib/crypto';
+import { applyDecisionExecution } from './governance';
 
 const OWNER_COOKIE_NAME = 'tanweer_owner_token';
 
@@ -350,7 +351,17 @@ export async function handleChangeUserRole(
   } else {
     // Global role update
     await env.DB.prepare(`UPDATE users SET role = ?, updated_at = ? WHERE id = ?`).bind(newRole, now, userId).run();
-    if (newRole === Role.TEACHER || newRole === Role.ADMIN) {
+    if (newRole === Role.STUDENT) {
+      // Complete downgrade: clean up all elevated group roles across all groups
+      await env.DB.prepare(
+        `UPDATE group_members SET role = ? WHERE user_id = ?`
+      ).bind(Role.STUDENT, userId).run();
+    } else if (newRole === Role.MODERATOR) {
+      // Downgrade any higher teacher/admin group roles
+      await env.DB.prepare(
+        `UPDATE group_members SET role = ? WHERE user_id = ? AND (role = 'TEACHER' OR role = 'ADMIN' OR role = 'VERIFIED_TEACHER')`
+      ).bind(Role.MODERATOR, userId).run();
+    } else if (newRole === Role.TEACHER || newRole === Role.ADMIN) {
       await env.DB.prepare(
         `UPDATE group_members SET role = ? WHERE user_id = ?`
       ).bind(newRole, userId).run();
@@ -697,11 +708,14 @@ export async function handleGetAuditLogs(request: Request, env: Env): Promise<Re
 }
 
 /**
- * God Mode: Returns all lessons / content items across the platform.
+ * God Mode: Returns all lessons / content items across the platform with pagination.
  */
 export async function handleGetDashboardContents(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const search = url.searchParams.get('q') || '';
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+  const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
   let query = `
     SELECT c.id, c.group_id, c.subject_id, c.created_by, c.title, c.type, c.views_count, c.useful_count, c.is_pinned, c.created_at,
            u.full_name as author_name, g.name as group_name
@@ -714,9 +728,11 @@ export async function handleGetDashboardContents(request: Request, env: Env): Pr
     query += ` WHERE c.title LIKE ? OR u.full_name LIKE ?`;
     binds.push(`%${search}%`, `%${search}%`);
   }
-  query += ` ORDER BY c.created_at DESC LIMIT 100`;
+  query += ` ORDER BY c.created_at DESC LIMIT ? OFFSET ?`;
+  binds.push(limit, offset);
+
   const rows = await env.DB.prepare(query).bind(...binds).all();
-  return jsonResponse({ success: true, contents: rows.results || [] });
+  return jsonResponse({ success: true, contents: rows.results || [], count: rows.results?.length || 0, offset, limit });
 }
 
 /**
@@ -743,17 +759,21 @@ export async function handleTogglePinDashboardContent(contentId: string, actorId
 }
 
 /**
- * God Mode: Returns all homeworks across groups.
+ * God Mode: Returns all homeworks across groups with pagination.
  */
 export async function handleGetDashboardHomeworks(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+  const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
   const rows = await env.DB.prepare(`
     SELECT h.*, u.full_name as author_name, g.name as group_name
     FROM homeworks h
     LEFT JOIN users u ON h.created_by = u.id
     LEFT JOIN groups g ON h.group_id = g.id
-    ORDER BY h.created_at DESC LIMIT 100
-  `).all();
-  return jsonResponse({ success: true, homeworks: rows.results || [] });
+    ORDER BY h.created_at DESC LIMIT ? OFFSET ?
+  `).bind(limit, offset).all();
+  return jsonResponse({ success: true, homeworks: rows.results || [], count: rows.results?.length || 0, offset, limit });
 }
 
 /**
@@ -767,17 +787,21 @@ export async function handleDeleteDashboardHomework(hwId: string, actorId: strin
 }
 
 /**
- * God Mode: Returns all exams across groups.
+ * God Mode: Returns all exams across groups with pagination.
  */
 export async function handleGetDashboardExams(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+  const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
   const rows = await env.DB.prepare(`
     SELECT e.*, u.full_name as author_name, g.name as group_name
     FROM exams e
     LEFT JOIN users u ON e.created_by = u.id
     LEFT JOIN groups g ON e.group_id = g.id
-    ORDER BY e.created_at DESC LIMIT 100
-  `).all();
-  return jsonResponse({ success: true, exams: rows.results || [] });
+    ORDER BY e.created_at DESC LIMIT ? OFFSET ?
+  `).bind(limit, offset).all();
+  return jsonResponse({ success: true, exams: rows.results || [], count: rows.results?.length || 0, offset, limit });
 }
 
 /**
@@ -790,17 +814,21 @@ export async function handleDeleteDashboardExam(examId: string, actorId: string,
 }
 
 /**
- * God Mode: Returns all events across groups.
+ * God Mode: Returns all events across groups with pagination.
  */
 export async function handleGetDashboardEvents(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+  const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
   const rows = await env.DB.prepare(`
     SELECT ev.*, u.full_name as author_name, g.name as group_name
     FROM events ev
     LEFT JOIN users u ON ev.created_by = u.id
     LEFT JOIN groups g ON ev.group_id = g.id
-    ORDER BY ev.created_at DESC LIMIT 100
-  `).all();
-  return jsonResponse({ success: true, events: rows.results || [] });
+    ORDER BY ev.created_at DESC LIMIT ? OFFSET ?
+  `).bind(limit, offset).all();
+  return jsonResponse({ success: true, events: rows.results || [], count: rows.results?.length || 0, offset, limit });
 }
 
 /**
@@ -813,18 +841,22 @@ export async function handleDeleteDashboardEvent(eventId: string, actorId: strin
 }
 
 /**
- * God Mode: Returns all issues / Q&A.
+ * God Mode: Returns all issues / Q&A with pagination.
  */
 export async function handleGetDashboardIssues(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+  const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
   const rows = await env.DB.prepare(`
     SELECT i.*, u.full_name as author_name, g.name as group_name,
            (SELECT COUNT(*) FROM issue_comments WHERE issue_id = i.id) as comments_count
     FROM issues i
     LEFT JOIN users u ON i.created_by = u.id
     LEFT JOIN groups g ON i.group_id = g.id
-    ORDER BY i.created_at DESC LIMIT 100
-  `).all();
-  return jsonResponse({ success: true, issues: rows.results || [] });
+    ORDER BY i.created_at DESC LIMIT ? OFFSET ?
+  `).bind(limit, offset).all();
+  return jsonResponse({ success: true, issues: rows.results || [], count: rows.results?.length || 0, offset, limit });
 }
 
 /**
@@ -886,9 +918,41 @@ export async function handleGetDashboardDecisions(env: Env): Promise<Response> {
  * God Mode: Force applies a community decision.
  */
 export async function handleApplyDashboardDecision(decisionId: string, actorId: string, env: Env): Promise<Response> {
-  await env.DB.prepare(`UPDATE community_decisions SET status = 'APPLIED', applied_at = ? WHERE id = ?`).bind(Date.now(), decisionId).run();
-  await logRoleAudit(env.DB, 'OWNER_APPLY_DECISION', actorId, 'SYSTEM_OWNER', null, `تنفيذ وتطبيق القرار الجماعي (${decisionId}) يدوياً من لوحة المالك`);
-  return jsonResponse({ success: true, message: 'تم تطبيق القرار بنجاح' });
+  const decision = await env.DB.prepare(
+    `SELECT * FROM community_decisions WHERE id = ?`
+  ).bind(decisionId).first<{
+    id: string;
+    group_id: string;
+    request_type: string;
+    target_id: string;
+  }>();
+
+  if (!decision) {
+    return errorResponse('DECISION_NOT_FOUND', 'القرار الجماعي غير موجود', 404);
+  }
+
+  const result = await applyDecisionExecution(
+    decisionId,
+    decision.request_type,
+    decision.target_id,
+    decision.group_id,
+    actorId,
+    env
+  );
+
+  await logRoleAudit(
+    env.DB,
+    'OWNER_APPLY_DECISION',
+    actorId,
+    'SYSTEM_OWNER',
+    null,
+    `تنفيذ وتطبيق القرار الجماعي (${decisionId} - ${decision.request_type}) يدوياً وبأثر فوري من لوحة المالك`
+  );
+
+  return jsonResponse({
+    success: true,
+    message: result.message || 'تم تطبيق القرار وتنفيذ أثره الفعلي على قاعدة البيانات بنجاح ✅',
+  });
 }
 
 /**

@@ -284,7 +284,6 @@ export async function handleCreateCommunityDecision(
     targetId?: string;
     title?: string;
     description?: string;
-    thresholdPercent?: number;
     expiresInHours?: number;
   };
 
@@ -292,16 +291,51 @@ export async function handleCreateCommunityDecision(
     return errorResponse('INVALID_INPUT', 'يرجى تحديد نوع القرار، المعرّف المستهدف وعنوان القرار');
   }
 
-  // Calculate exact total eligible voters in this group right now
-  const eligibleMembers = await env.DB.prepare(
-    `SELECT COUNT(*) as count FROM group_members WHERE group_id = ? AND status = 'ACTIVE' AND role != 'BANNED'`
-  ).bind(groupId).first<{ count: number }>();
+  const normType = body.requestType.toUpperCase();
 
-  const totalEligible = Math.max(1, eligibleMembers?.count || 1);
-  const threshold = Math.min(100, Math.max(50, body.thresholdPercent || 60)); // default 60% quorum
+  // 1. System-enforced Quorum Policies based on decision sensitivity
+  let thresholdPercent: number;
+  switch (normType) {
+    case 'DELETION':
+    case 'CONTENT_DELETION':
+      thresholdPercent = 75; // 75% for content deletion (high consensus)
+      break;
+    case 'VERIFICATION':
+    case 'OFFICIAL_VERIFICATION':
+      thresholdPercent = 65; // 65% for verification
+      break;
+    case 'SCHEDULE':
+    case 'SCHEDULE_CHANGE':
+    case 'PIN_CONTENT':
+      thresholdPercent = 60; // 60% for schedule / pin
+      break;
+    case 'CORRECTION':
+    default:
+      thresholdPercent = 50; // 50% for standard correction
+      break;
+  }
+
+  // 2. Exact Snapshot of all currently active group members
+  const eligibleRows = await env.DB.prepare(
+    `SELECT user_id FROM group_members WHERE group_id = ? AND status = 'ACTIVE' AND role != 'BANNED'`
+  ).bind(groupId).all<{ user_id: string }>();
+
+  const eligibleVoterIds = (eligibleRows.results || []).map(r => r.user_id);
+  // Ensure creator is in the list if active
+  if (!eligibleVoterIds.includes(user.userId)) {
+    eligibleVoterIds.push(user.userId);
+  }
+
+  const totalEligible = Math.max(1, eligibleVoterIds.length);
   const decisionId = generateId('dec');
   const now = Date.now();
   const expiresAt = now + (body.expiresInHours || 48) * 3600 * 1000; // default 48h
+
+  // Store metadata package with exact snapshot
+  const metaPackage = JSON.stringify({
+    text: body.description?.trim() || '',
+    voters: eligibleVoterIds,
+  });
 
   await env.DB.prepare(
     `INSERT INTO community_decisions (
@@ -312,14 +346,14 @@ export async function handleCreateCommunityDecision(
   ).bind(
     decisionId,
     groupId,
-    body.requestType.toUpperCase(),
+    normType,
     body.targetId,
     body.title.trim(),
-    body.description?.trim() || null,
+    metaPackage,
     user.userId,
     user.fullName,
     totalEligible,
-    threshold,
+    thresholdPercent,
     expiresAt,
     now
   ).run();
@@ -330,9 +364,9 @@ export async function handleCreateCommunityDecision(
      VALUES (?, ?, 1, ?)`
   ).bind(decisionId, user.userId, now).run();
 
-  // If only 1 voter, auto-apply immediately
+  // If only 1 voter in the entire group, auto-apply immediately
   if (totalEligible <= 1) {
-    await applyDecisionExecution(decisionId, body.requestType.toUpperCase(), body.targetId, groupId, user.userId, env);
+    await applyDecisionExecution(decisionId, normType, body.targetId, groupId, user.userId, env);
     return jsonResponse({
       success: true,
       decisionId,
@@ -346,8 +380,8 @@ export async function handleCreateCommunityDecision(
     decisionId,
     status: 'PENDING',
     totalEligibleVoters: totalEligible,
-    thresholdPercent: threshold,
-    message: 'تم طرح القرار الجماعي للتصويت بنجاح 🗳️',
+    thresholdPercent,
+    message: `تم طرح القرار الجماعي للتصويت بنجاح (النصاب المطلوب: ${thresholdPercent}%) 🗳️`,
   });
 }
 
@@ -369,24 +403,34 @@ export async function handleGetCommunityDecisions(
 
   return jsonResponse({
     success: true,
-    decisions: (decisions.results || []).map((d: any) => ({
-      id: d.id,
-      groupId: d.group_id,
-      requestType: d.request_type,
-      targetId: d.target_id,
-      title: d.title,
-      description: d.description,
-      requestedBy: d.requested_by,
-      requesterName: d.requester_name || 'عضو في الشعبة',
-      totalEligibleVoters: d.total_eligible_voters,
-      thresholdPercent: d.threshold_percent,
-      votesFor: d.votes_for,
-      votesAgainst: d.votes_against,
-      status: d.status,
-      myVote: d.my_vote,
-      expiresAt: d.expires_at,
-      createdAt: d.created_at,
-    })),
+    decisions: (decisions.results || []).map((d: any) => {
+      let descText = d.description || '';
+      try {
+        if (descText.startsWith('{')) {
+          const parsed = JSON.parse(descText);
+          descText = parsed.text || '';
+        }
+      } catch {}
+
+      return {
+        id: d.id,
+        groupId: d.group_id,
+        requestType: d.request_type,
+        targetId: d.target_id,
+        title: d.title,
+        description: descText,
+        requestedBy: d.requested_by,
+        requesterName: d.requester_name || 'عضو في الشعبة',
+        totalEligibleVoters: d.total_eligible_voters,
+        thresholdPercent: d.threshold_percent,
+        votesFor: d.votes_for,
+        votesAgainst: d.votes_against,
+        status: d.status,
+        myVote: d.my_vote,
+        expiresAt: d.expires_at,
+        createdAt: d.created_at,
+      };
+    }),
   });
 }
 
@@ -403,6 +447,7 @@ export async function handleVoteCommunityDecision(
     group_id: string;
     request_type: string;
     target_id: string;
+    description: string | null;
     status: string;
     total_eligible_voters: number;
     threshold_percent: number;
@@ -425,7 +470,25 @@ export async function handleVoteCommunityDecision(
     return errorResponse('DECISION_EXPIRED', 'انتهت المهلة المحددة للتصويت على هذا القرار', 410);
   }
 
-  // Strict voter eligibility check: user must be active member of this exact group
+  // Strict voter eligibility check: user must belong to the exact snapshot list of eligible voters
+  let snapshotVoters: string[] = [];
+  try {
+    if (decision.description && decision.description.startsWith('{')) {
+      const parsed = JSON.parse(decision.description);
+      if (Array.isArray(parsed.voters)) {
+        snapshotVoters = parsed.voters;
+      }
+    }
+  } catch {}
+
+  if (snapshotVoters.length > 0 && !snapshotVoters.includes(user.userId)) {
+    return errorResponse(
+      'NOT_ELIGIBLE_VOTER',
+      'أنت غير مؤهل للتصويت على هذا القرار (لأنك لم تكن عضواً فعالاً في الشعبة لحظة إنشاء هذا القرار)',
+      403
+    );
+  }
+
   const memberCheck = await requireGroupMember(user, decision.group_id, env.DB);
   if (memberCheck) return memberCheck;
 
@@ -449,8 +512,10 @@ export async function handleVoteCommunityDecision(
   const vFor = counts?.v_for || 0;
   const vAgainst = counts?.v_against || 0;
 
-  // Threshold check
-  const requiredVotes = Math.max(1, Math.ceil((decision.total_eligible_voters * decision.threshold_percent) / 100));
+  // Threshold calculation (minimum 2 votes if group has 2+ members)
+  const rawThreshold = Math.ceil((decision.total_eligible_voters * decision.threshold_percent) / 100);
+  const requiredVotes = decision.total_eligible_voters > 1 ? Math.max(2, rawThreshold) : 1;
+
   let newStatus = 'PENDING';
   let appliedMsg = '';
 

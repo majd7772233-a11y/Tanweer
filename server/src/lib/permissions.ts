@@ -144,6 +144,10 @@ export async function hasPermission(
 
   // 7. Role-specific privilege evaluation
   switch (effectiveRole) {
+    case Role.SYSTEM_OWNER:
+    case Role.ADMIN:
+      return true;
+
     case Role.TEACHER:
       return [
         Permission.MANAGE_SCHEDULE,
@@ -154,6 +158,8 @@ export async function hasPermission(
         Permission.MODERATE_EVENT,
         Permission.MODERATE_ISSUES,
         Permission.VERIFY_BEST_ANSWER,
+        Permission.MODERATE_CHAT,
+        Permission.MANAGE_GROUP_MEMBERS,
       ].includes(permission);
 
     case Role.MODERATOR:

@@ -122,6 +122,30 @@ export async function handleUpdateGroupMemberRole(
   if (norm === Role.SYSTEM_OWNER) {
     return errorResponse('FORBIDDEN', 'لا يمكن تعيين رتبة مالك المنظومة (SYSTEM_OWNER) لأعضاء المجموعات', 403);
   }
+
+  const targetUser = await env.DB.prepare(
+    `SELECT role FROM users WHERE id = ?`
+  ).bind(targetUserId).first<{ role: string }>();
+
+  const targetGlobalRole = normalizeRole(targetUser?.role);
+  const actorRole = normalizeRole(user.role);
+
+  if (norm === Role.TEACHER && targetGlobalRole !== Role.TEACHER && actorRole !== Role.ADMIN && actorRole !== Role.SYSTEM_OWNER) {
+    return errorResponse(
+      'FORBIDDEN_TEACHER_VERIFICATION_REQUIRED',
+      'رتبة الأستاذ المعتمد تتطلب اعتماداً رسمياً من مالك المنظومة عبر رمز التحقق المخصص ولا يمكن منحها مباشرة داخل المجموعة',
+      403
+    );
+  }
+
+  if (norm === Role.ADMIN && actorRole !== Role.ADMIN && actorRole !== Role.SYSTEM_OWNER) {
+    return errorResponse(
+      'FORBIDDEN_ADMIN_REQUIRED',
+      'تعيين رتبة المدير مقتصر على إدارة المنظومة العليا فقط',
+      403
+    );
+  }
+
   await env.DB.prepare(
     `UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?`
   ).bind(norm, groupId, targetUserId).run();

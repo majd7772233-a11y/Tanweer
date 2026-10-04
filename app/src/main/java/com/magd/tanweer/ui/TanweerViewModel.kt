@@ -25,6 +25,7 @@ enum class NavigationTab {
 
 enum class SubScreen {
     NONE,
+    EXTRA_SECTIONS_HUB,
     GROUPS,
     LIBRARY,
     PDF_VIEWER,

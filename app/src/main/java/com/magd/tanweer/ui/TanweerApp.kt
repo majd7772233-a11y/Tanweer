@@ -5,7 +5,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -51,8 +52,6 @@ fun TanweerApp(
     val uploadInitialSubjectId by viewModel.uploadInitialSubjectId.collectAsStateWithLifecycle()
     val recoveryCodeDialog by viewModel.recoveryCodeDialog.collectAsStateWithLifecycle()
 
-    var isMoreMenuOpen by remember { mutableStateOf(false) }
-
     if (currentUser == null) {
         AuthScreen(viewModel = viewModel)
     } else {
@@ -61,14 +60,16 @@ fun TanweerApp(
                 if (subScreen != SubScreen.PDF_VIEWER) {
                     GlassBottomNavigationBar(
                         currentTab = currentTab,
-                        isSubScreenActive = (subScreen != SubScreen.NONE),
+                        subScreen = subScreen,
                         onSelectTab = { tab ->
-                            // Always reset subScreen and any open sheet when tapping tabs to prevent freezing
-                            viewModel.setSubScreen(SubScreen.NONE)
                             if (tab == NavigationTab.MORE) {
-                                isMoreMenuOpen = true
+                                if (subScreen == SubScreen.EXTRA_SECTIONS_HUB) {
+                                    viewModel.setSubScreen(SubScreen.NONE)
+                                } else {
+                                    viewModel.setSubScreen(SubScreen.EXTRA_SECTIONS_HUB)
+                                }
                             } else {
-                                isMoreMenuOpen = false
+                                viewModel.setSubScreen(SubScreen.NONE)
                                 viewModel.setTab(tab)
                             }
                         }
@@ -109,55 +110,62 @@ fun TanweerApp(
                     )
                 } else if (subScreen != SubScreen.NONE) {
                     BackHandler {
-                        viewModel.setSubScreen(SubScreen.NONE)
+                        if (subScreen == SubScreen.EXTRA_SECTIONS_HUB) {
+                            viewModel.setSubScreen(SubScreen.NONE)
+                        } else {
+                            viewModel.setSubScreen(SubScreen.EXTRA_SECTIONS_HUB)
+                        }
                     }
                     Column(modifier = Modifier.fillMaxSize()) {
-                        // SubScreen Top Header with Back Button
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(
-                                onClick = { viewModel.setSubScreen(SubScreen.NONE) },
+                        // SubScreen Top Header with Back Button (omitted if on Hub itself)
+                        if (subScreen != SubScreen.EXTRA_SECTIONS_HUB) {
+                            Row(
                                 modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(GlassSurface)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "رجوع",
-                                    tint = CyanAccent
+                                IconButton(
+                                    onClick = { viewModel.setSubScreen(SubScreen.EXTRA_SECTIONS_HUB) },
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(GlassSurface)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "رجوع للأقسام",
+                                        tint = CyanAccent
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = when (subScreen) {
+                                        SubScreen.GROUPS -> "المجموعات والشعب"
+                                        SubScreen.LIBRARY -> "مكتبة المناهج والكتب"
+                                        SubScreen.SCHEDULE -> "جدول الحصص المدرسي"
+                                        SubScreen.TIMELINE -> "رحلة المادة"
+                                        SubScreen.PROFILE -> "ملف الطالب والمساهمات"
+                                        SubScreen.SETTINGS -> "إعدادات التطبيق"
+                                        SubScreen.WHAT_DID_I_MISS -> "ماذا فاتني؟"
+                                        SubScreen.SEARCH -> "البحث الشامل"
+                                        SubScreen.SUBJECT_KNOWLEDGE_BASE -> "مساحة المادة الموحدة"
+                                        SubScreen.ACADEMIC_HISTORY -> "الأرشيف الأكاديمي"
+                                        SubScreen.TEACHER_DASHBOARD -> "مركز التعليم للأستاذ 🎓"
+                                        SubScreen.MODERATOR_DASHBOARD -> "مركز إشراف الشعبة 🛡️"
+                                        SubScreen.ADMIN_DASHBOARD -> "إدارة المدرسة 👑"
+                                        SubScreen.COMMUNITY_DECISIONS -> "القرارات والتصويتات الجماعية 🗳️"
+                                        else -> ""
+                                    },
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = when (subScreen) {
-                                    SubScreen.GROUPS -> "المجموعات والشعب"
-                                    SubScreen.LIBRARY -> "مكتبة المناهج والكتب"
-                                    SubScreen.SCHEDULE -> "جدول الحصص المدرسي"
-                                    SubScreen.TIMELINE -> "رحلة المادة"
-                                    SubScreen.PROFILE -> "ملف الطالب والمساهمات"
-                                    SubScreen.SETTINGS -> "إعدادات التطبيق"
-                                    SubScreen.WHAT_DID_I_MISS -> "ماذا فاتني؟"
-                                    SubScreen.SEARCH -> "البحث الشامل"
-                                    SubScreen.SUBJECT_KNOWLEDGE_BASE -> "مساحة المادة الموحدة"
-                                    SubScreen.ACADEMIC_HISTORY -> "الأرشيف الأكاديمي"
-                                    SubScreen.TEACHER_DASHBOARD -> "مركز التعليم للأستاذ 🎓"
-                                    SubScreen.MODERATOR_DASHBOARD -> "مركز إشراف الشعبة 🛡️"
-                                    SubScreen.ADMIN_DASHBOARD -> "إدارة المدرسة 👑"
-                                    SubScreen.COMMUNITY_DECISIONS -> "القرارات والتصويتات الجماعية 🗳️"
-                                    else -> ""
-                                },
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
                         }
 
                         when (subScreen) {
+                            SubScreen.EXTRA_SECTIONS_HUB -> ExtraSectionsHubScreen(viewModel = viewModel)
                             SubScreen.GROUPS -> GroupsScreen(viewModel = viewModel)
                             SubScreen.LIBRARY -> LibraryScreen(viewModel = viewModel)
                             SubScreen.SCHEDULE -> ScheduleScreen(viewModel = viewModel)
@@ -260,159 +268,7 @@ fun TanweerApp(
                         shape = RoundedCornerShape(20.dp)
                     )
                 }
-
-                // More Menu Bottom Sheet
-                if (isMoreMenuOpen) {
-                    ModalBottomSheet(
-                        onDismissRequest = { isMoreMenuOpen = false },
-                        containerColor = MidnightSurface,
-                        dragHandle = { BottomSheetDefaults.DragHandle(color = CyanAccent) }
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 8.dp)
-                                .navigationBarsPadding(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Text(
-                                text = "أقسام تـنـويـر الإضافية",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = CyanAccent
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            MoreMenuItem(
-                                title = "🎒 ماذا فاتني أثناء الغياب؟",
-                                subtitle = "متابعة الواجبات والدروس والاختبارات السابقة",
-                                onClick = {
-                                    isMoreMenuOpen = false
-                                    viewModel.setSubScreen(SubScreen.WHAT_DID_I_MISS)
-                                }
-                            )
-                            MoreMenuItem(
-                                title = "🔍 البحث الشامل في المنظومة",
-                                subtitle = "بحث فوري في الدروس، الواجبات، الاختبارات والكتب",
-                                onClick = {
-                                    isMoreMenuOpen = false
-                                    viewModel.setSubScreen(SubScreen.SEARCH)
-                                }
-                            )
-                            MoreMenuItem(
-                                title = "👥 المجموعات والشعب الدراسية",
-                                subtitle = "نقاشات ومجموعات الصف والشعبة",
-                                onClick = {
-                                    isMoreMenuOpen = false
-                                    viewModel.setSubScreen(SubScreen.GROUPS)
-                                }
-                            )
-                            MoreMenuItem(
-                                title = "📚 مكتبة الكتب والمناهج",
-                                subtitle = "الكتب الدراسية المعتمدة مع قارئ PDF الذكي",
-                                onClick = {
-                                    isMoreMenuOpen = false
-                                    viewModel.setSubScreen(SubScreen.LIBRARY)
-                                }
-                            )
-                            MoreMenuItem(
-                                title = "📅 جدول الحصص الأسبوعي",
-                                subtitle = "توزيع حصص ومواد الشعبة خلال الأسبوع",
-                                onClick = {
-                                    isMoreMenuOpen = false
-                                    viewModel.setSubScreen(SubScreen.SCHEDULE)
-                                }
-                            )
-                            MoreMenuItem(
-                                title = "🗺️ رحلة المادة وخريطة العام",
-                                subtitle = "الخط الزمني التراكمي للدروس والمراجعات",
-                                onClick = {
-                                    isMoreMenuOpen = false
-                                    viewModel.setSubScreen(SubScreen.TIMELINE)
-                                }
-                            )
-                            val userRole = currentUser?.getRoleEnum() ?: Role.STUDENT
-                            if (userRole == Role.TEACHER || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
-                                MoreMenuItem(
-                                    title = "🎓 مركز التعليم للأستاذ المعتمد",
-                                    subtitle = "إدارة الواجبات والاختبارات الرسمية والردود المعتمدة",
-                                    onClick = {
-                                        isMoreMenuOpen = false
-                                        viewModel.setSubScreen(SubScreen.TEACHER_DASHBOARD)
-                                    }
-                                )
-                            }
-
-                            if (userRole == Role.MODERATOR || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
-                                MoreMenuItem(
-                                    title = "🛡️ مركز إشراف الشعبة والتدقيق",
-                                    subtitle = "مراجعة التصويبات ومقترحات الجدول والأعضاء",
-                                    onClick = {
-                                        isMoreMenuOpen = false
-                                        viewModel.setSubScreen(SubScreen.MODERATOR_DASHBOARD)
-                                    }
-                                )
-                            }
-
-                            if (userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
-                                MoreMenuItem(
-                                    title = "👑 لوحة مدير المدرسة",
-                                    subtitle = "إدارة المدرسة، كادر المعلمين، المشرفين والإحصاءات",
-                                    onClick = {
-                                        isMoreMenuOpen = false
-                                        viewModel.setSubScreen(SubScreen.ADMIN_DASHBOARD)
-                                    }
-                                )
-                            }
-
-                            MoreMenuItem(
-                                title = "🗳️ القرارات والتصويتات الجماعية",
-                                subtitle = "المشاركة في تصويتات الشعبة وحوكمة الدروس والجداول",
-                                onClick = {
-                                    isMoreMenuOpen = false
-                                    viewModel.setSubScreen(SubScreen.COMMUNITY_DECISIONS)
-                                }
-                            )
-
-                            MoreMenuItem(
-                                title = "👤 الملف الشخصي والمساهمات",
-                                subtitle = "بيانات الطالب وسجل النشاط الدراسي والرتبة",
-                                onClick = {
-                                    isMoreMenuOpen = false
-                                    viewModel.setSubScreen(SubScreen.PROFILE)
-                                }
-                            )
-                            MoreMenuItem(
-                                title = "⚙️ إعدادات التطبيق وتخصيص الخط",
-                                subtitle = "حجم الخط (افتراضي 12px)، السمة، والمزامنة",
-                                onClick = {
-                                    isMoreMenuOpen = false
-                                    viewModel.setSubScreen(SubScreen.SETTINGS)
-                                }
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                        }
-                    }
-                }
             }
-        }
-    }
-}
-
-@Composable
-fun MoreMenuItem(
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
-    GlassCard(
-        modifier = Modifier.fillMaxWidth(),
-        backgroundColor = GlassSurface,
-        onClick = onClick
-    ) {
-        Column {
-            Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-            Text(text = subtitle, fontSize = 12.sp, color = TextSecondary, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }
@@ -420,9 +276,30 @@ fun MoreMenuItem(
 @Composable
 fun GlassBottomNavigationBar(
     currentTab: NavigationTab,
-    isSubScreenActive: Boolean,
+    subScreen: SubScreen,
     onSelectTab: (NavigationTab) -> Unit
 ) {
+    val isSubScreenActive = (subScreen != SubScreen.NONE)
+
+    // Compute dynamic label & icon for the 6th tab
+    val (moreLabel, moreIcon) = when (subScreen) {
+        SubScreen.LIBRARY -> "المكتبة 📚" to Icons.Default.LocalLibrary
+        SubScreen.COMMUNITY_DECISIONS -> "القرارات 🗳️" to Icons.Default.HowToVote
+        SubScreen.GROUPS -> "الشعب 👥" to Icons.Default.Groups
+        SubScreen.SCHEDULE -> "الجدول 📅" to Icons.Default.Schedule
+        SubScreen.TIMELINE -> "الرحلة 🗺️" to Icons.Default.Timeline
+        SubScreen.WHAT_DID_I_MISS -> "فاتني 🎒" to Icons.Default.WorkHistory
+        SubScreen.SEARCH -> "البحث 🔍" to Icons.Default.Search
+        SubScreen.TEACHER_DASHBOARD -> "الأستاذ 🎓" to Icons.Default.School
+        SubScreen.MODERATOR_DASHBOARD -> "الإشراف 🛡️" to Icons.Default.Shield
+        SubScreen.ADMIN_DASHBOARD -> "الإدارة 👑" to Icons.Default.AdminPanelSettings
+        SubScreen.PROFILE -> "ملفي 👤" to Icons.Default.Person
+        SubScreen.SETTINGS -> "إعدادات ⚙️" to Icons.Default.Settings
+        SubScreen.ACADEMIC_HISTORY -> "الأرشيف 🏛️" to Icons.Default.Archive
+        SubScreen.SUBJECT_KNOWLEDGE_BASE -> "المادة 📖" to Icons.Default.MenuBook
+        SubScreen.EXTRA_SECTIONS_HUB, SubScreen.NONE, SubScreen.PDF_VIEWER -> "الأقسام ✨" to Icons.Default.DashboardCustomize
+    }
+
     NavigationBar(
         containerColor = MidnightSurface.copy(alpha = 0.95f),
         contentColor = TextPrimary,
@@ -432,17 +309,16 @@ fun GlassBottomNavigationBar(
             .fillMaxWidth()
             .border(BorderStroke(0.5.dp, GlassBorder))
     ) {
-        val navItems = listOf(
+        val staticNavItems = listOf(
             Triple(NavigationTab.TODAY, "اليوم", Icons.Default.Today),
             Triple(NavigationTab.CALENDAR, "التقويم", Icons.Default.CalendarMonth),
             Triple(NavigationTab.HOMEWORK, "الواجبات", Icons.Default.Assignment),
             Triple(NavigationTab.EXAMS, "الاختبارات", Icons.Default.Science),
-            Triple(NavigationTab.ISSUES, "استفسارات", Icons.Default.HelpOutline),
-            Triple(NavigationTab.MORE, "المزيد", Icons.Default.Menu)
+            Triple(NavigationTab.ISSUES, "استفسارات", Icons.Default.HelpOutline)
         )
 
-        navItems.forEach { (tab, label, icon) ->
-            val isSelected = !isSubScreenActive && (currentTab == tab) && (tab != NavigationTab.MORE)
+        staticNavItems.forEach { (tab, label, icon) ->
+            val isSelected = !isSubScreenActive && (currentTab == tab)
             NavigationBarItem(
                 selected = isSelected,
                 onClick = { onSelectTab(tab) },
@@ -470,5 +346,53 @@ fun GlassBottomNavigationBar(
                 alwaysShowLabel = true
             )
         }
+
+        // 6th Dynamic Morphing Tab with Slick Animation
+        val isMoreSelected = isSubScreenActive
+        NavigationBarItem(
+            selected = isMoreSelected,
+            onClick = { onSelectTab(NavigationTab.MORE) },
+            icon = {
+                AnimatedContent(
+                    targetState = moreIcon,
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(220, delayMillis = 50)) +
+                            scaleIn(initialScale = 0.8f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)))
+                            .togetherWith(fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.8f))
+                    },
+                    label = "DynamicNavIcon"
+                ) { targetIcon ->
+                    Icon(
+                        imageVector = targetIcon,
+                        contentDescription = moreLabel,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            },
+            label = {
+                AnimatedContent(
+                    targetState = moreLabel,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(200)).togetherWith(fadeOut(animationSpec = tween(150)))
+                    },
+                    label = "DynamicNavLabel"
+                ) { targetLabel ->
+                    Text(
+                        text = targetLabel,
+                        fontSize = 10.sp,
+                        fontWeight = if (isMoreSelected) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1
+                    )
+                }
+            },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = TextOnAccent,
+                selectedTextColor = if (subScreen == SubScreen.EXTRA_SECTIONS_HUB) CyanAccent else WarmAmber,
+                indicatorColor = if (subScreen == SubScreen.EXTRA_SECTIONS_HUB) CyanAccent else WarmAmber,
+                unselectedIconColor = TextSecondary,
+                unselectedTextColor = TextMuted
+            ),
+            alwaysShowLabel = true
+        )
     }
 }
