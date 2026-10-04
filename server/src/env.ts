@@ -4,6 +4,8 @@ export interface Env {
   JWT_SECRET?: string;
   SESSION_PEPPER?: string;
   PASSWORD_PEPPER?: string;
+  TANWEER_OWNER_SECRET?: string;
+  OWNER_SESSION_SECRET?: string;
   ENVIRONMENT?: string;
 }
 
@@ -14,5 +16,6 @@ export interface UserContext {
   gradeId: number;
   sectionId: string;
   role: string;
-  deviceId: string;
+  deviceId?: string;
+  defaultGroupId?: string;
 }

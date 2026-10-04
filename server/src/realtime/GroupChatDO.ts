@@ -6,6 +6,7 @@ interface ClientSession {
   userId: string;
   fullName: string;
   gradeSection: string;
+  role: string;
   groupId: string;
 }
 
@@ -42,6 +43,7 @@ export class GroupChatDO {
       const userId = request.headers.get('X-User-Id');
       const rawName = request.headers.get('X-User-Name');
       const rawGrade = request.headers.get('X-User-Grade-Section');
+      const verifiedRole = request.headers.get('X-User-Role') || 'STUDENT';
       const groupId = request.headers.get('X-Group-Id') || url.pathname.split('/')[3];
 
       if (!userId || !rawName) {
@@ -61,6 +63,7 @@ export class GroupChatDO {
         userId,
         fullName,
         gradeSection,
+        role: verifiedRole,
         groupId,
       };
 
@@ -70,6 +73,32 @@ export class GroupChatDO {
         try {
           const raw = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
           const data = JSON.parse(raw);
+
+          // Handle message deletion action by sender or moderator/teacher/admin
+          if (data.type === 'delete_message' || data.action === 'delete_message') {
+            const messageId = data.messageId || data.id;
+            if (!messageId) return;
+
+            const existing = await this.env.DB.prepare(
+              `SELECT sender_id FROM chat_messages WHERE id = ? AND group_id = ?`
+            ).bind(messageId, session.groupId).first<{ sender_id: string }>();
+
+            if (existing) {
+              const isOwner = existing.sender_id === session.userId;
+              const isPrivileged = ['MODERATOR', 'TEACHER', 'ADMIN', 'SYSTEM_OWNER'].includes(session.role);
+
+              if (isOwner || isPrivileged) {
+                await this.env.DB.prepare(`DELETE FROM chat_messages WHERE id = ?`).bind(messageId).run();
+                this.broadcast(JSON.stringify({
+                  type: 'message_deleted',
+                  messageId,
+                  groupId: session.groupId,
+                  deletedBy: session.userId,
+                }));
+              }
+            }
+            return;
+          }
 
           const text = (data.text || '').trim();
           if (!text) return; // ignore empty messages
@@ -87,6 +116,7 @@ export class GroupChatDO {
             senderId: session.userId,
             senderName: session.fullName,
             senderGradeSection: session.gradeSection,
+            senderRole: session.role,
             text: text,
             timestamp: now,
             status: 'SENT',

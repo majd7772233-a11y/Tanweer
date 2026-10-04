@@ -3,6 +3,7 @@ import { generateId } from '../lib/ids';
 import { mapChatMessage } from '../lib/mappers';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
+import { Permission, hasPermission } from '../lib/permissions';
 
 export async function handleGetGroupMessages(groupId: string, user: UserContext, env: Env): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
@@ -92,5 +93,55 @@ export async function handlePostGroupMessage(
   return jsonResponse({
     success: true,
     message: messagePayload,
+  });
+}
+
+export async function handleDeleteGroupMessage(
+  groupId: string,
+  messageId: string,
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
+
+  const message = await env.DB.prepare(
+    `SELECT sender_id FROM chat_messages WHERE id = ? AND group_id = ?`
+  ).bind(messageId, groupId).first<{ sender_id: string }>();
+
+  if (!message) {
+    return errorResponse('MESSAGE_NOT_FOUND', 'الرسالة غير موجودة', 404);
+  }
+
+  const isOwner = message.sender_id === user.userId;
+  const canModerate = await hasPermission(user, Permission.DELETE_ANY_CHAT_MESSAGE, {
+    db: env.DB,
+    groupId,
+    resourceOwnerId: message.sender_id,
+  });
+
+  if (!isOwner && !canModerate) {
+    return errorResponse('FORBIDDEN', 'لا تملك صلاحية حذف هذه الرسالة', 403);
+  }
+
+  await env.DB.prepare(`DELETE FROM chat_messages WHERE id = ?`).bind(messageId).run();
+
+  try {
+    const doId = env.CHAT.idFromName(groupId);
+    const doStub = env.CHAT.get(doId);
+    await doStub.fetch(new Request('http://internal/broadcast', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'message_deleted',
+        messageId,
+        groupId,
+        deletedBy: user.userId,
+      }),
+    }));
+  } catch {}
+
+  return jsonResponse({
+    success: true,
+    message: 'تم حذف الرسالة بنجاح',
   });
 }

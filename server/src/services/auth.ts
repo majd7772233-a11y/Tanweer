@@ -4,6 +4,7 @@ import { generateId } from '../lib/ids';
 import { validateArabicFullName, validateYemenPhoneNumber, evaluatePasswordStrength, isValidGradeSection } from '../lib/validation';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { getCurrentAcademicYearId } from '../lib/school';
+import { Role, normalizeRole } from '../lib/roles';
 
 export async function handleRegister(request: Request, env: Env): Promise<Response> {
   const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
@@ -74,7 +75,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     body.sectionId.toUpperCase(),
     body.email?.trim() || null,
     recoveryCodeHash,
-    'MEMBER',
+    Role.STUDENT,
     now,
     now,
     now
@@ -105,7 +106,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   await env.DB.prepare(
     `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at)
      VALUES (?, ?, ?, ?, ?)`
-  ).bind(classGroupId, userId, 'MEMBER', 'ACTIVE', now).run();
+  ).bind(classGroupId, userId, Role.STUDENT, 'ACTIVE', now).run();
 
   const token = generateRandomToken();
   const tokenHash = await hashString(token, pepper);
@@ -128,7 +129,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
       phoneNumber: normalizedPhone,
       gradeId: body.gradeId,
       sectionId: body.sectionId.toUpperCase(),
-      role: 'MEMBER',
+      role: Role.STUDENT,
       defaultGroupId: classGroupId,
     },
   });
@@ -207,7 +208,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
       phoneNumber: user.phone_number,
       gradeId: user.grade_id,
       sectionId: user.section_id,
-      role: user.role,
+      role: normalizeRole(user.role),
       defaultGroupId: classGroupId,
     },
   });
@@ -272,7 +273,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
       phoneNumber: user.phone_number,
       gradeId: user.grade_id,
       sectionId: user.section_id,
-      role: user.role,
+      role: normalizeRole(user.role),
       defaultGroupId: classGroupId,
     },
   });

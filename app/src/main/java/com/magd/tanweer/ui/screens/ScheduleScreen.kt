@@ -33,9 +33,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.data.model.Permission
 import com.magd.tanweer.data.model.ScheduleSlot
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.data.model.getRoleEnum
+import com.magd.tanweer.data.model.hasPermission
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -70,6 +73,10 @@ fun ScheduleScreen(
     val allSlots by viewModel.repository.getAllScheduleSlots(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
+    val scheduleProposals by viewModel.scheduleProposals.collectAsStateWithLifecycle()
+    val scheduleVersion by viewModel.scheduleVersion.collectAsStateWithLifecycle()
+    val scheduleMeta by viewModel.scheduleMeta.collectAsStateWithLifecycle()
+
     val gradeSubjects = remember(currentUser?.gradeId) {
         viewModel.getScheduleSubjectsForCurrentGrade()
     }
@@ -82,15 +89,27 @@ fun ScheduleScreen(
 
     // Selected cell for subject selection modal: (dayOfWeek, slotOrder)
     var activeEditingCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var activeProposalCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var isCopyDayDialogOpen by remember { mutableStateOf(false) }
+    var isProposalsReviewDialogOpen by remember { mutableStateOf(false) }
     var sourceDayToCopy by remember { mutableIntStateOf(0) }
+
+    val canManageSchedule = remember(currentUser, allSlots.size, scheduleMeta) {
+        (scheduleMeta?.isInitialSetup == true) ||
+        (scheduleMeta?.canEditDirectly == true) ||
+        (currentUser?.hasPermission(Permission.MANAGE_SCHEDULE) == true) ||
+        allSlots.isEmpty()
+    }
+    var isDirectEditMode by remember { mutableStateOf(false) }
 
     val filledSlotsCount = allSlots.size
     val currentGradeName = SchoolHierarchy.getGradeName(currentUser?.gradeId ?: 10)
+    val pendingProposalsCount = scheduleProposals.count { it.status == "PENDING" }
 
     LaunchedEffect(activeGroupId) {
         if (activeGroupId.isNotBlank()) {
             viewModel.syncSchedule(activeGroupId, isRefresh = false)
+            viewModel.loadScheduleData()
         }
     }
 
@@ -176,12 +195,119 @@ fun ScheduleScreen(
                 }
             }
 
+            // Permission & Mode Status Banner
+            item {
+                val userRole = currentUser?.getRoleEnum() ?: com.magd.tanweer.data.model.Role.STUDENT
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MidnightSurface,
+                    borderColor = if (canManageSchedule && isDirectEditMode) CyanAccent else GlassBorderSubtle
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = if (allSlots.isEmpty()) "🌟 المساهمة في الجدول الأول"
+                                           else if (canManageSchedule && isDirectEditMode) "🛠️ وضع التحرير المباشر"
+                                           else if (canManageSchedule) "👁️ وضع العرض"
+                                           else "👁️ وضع العرض الرسمي",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (canManageSchedule && isDirectEditMode) CyanAccent else TextPrimary
+                                )
+                                GlassPill(
+                                    text = "${userRole.badgeIcon} ${userRole.displayNameAr}",
+                                    color = CyanAccent,
+                                    bgColor = CyanGlow
+                                )
+                            }
+                            Text(
+                                text = if (allSlots.isEmpty()) "بصفتك عضواً في الشعبة يمكنك إدخال الحصص الأولى مباشرة لبناء الجدول!"
+                                       else if (canManageSchedule && isDirectEditMode) "اضغط على أي خانة لتعديل أو تغيير المادة مباشرة وتحديث الجدول."
+                                       else if (canManageSchedule) "اضغط على زر التحرير لتعديل الجدول، أو تصفح الحصص بحرية."
+                                       else "الجدول معتمد ومثبت. لتعديل أي حصة اضغط عليها لتقديم مقترح تعديل ليصوت عليه الزملاء.",
+                                fontSize = 11.sp,
+                                color = TextSecondary,
+                                lineHeight = 15.sp
+                            )
+                        }
+
+                        if (canManageSchedule && allSlots.isNotEmpty()) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isDirectEditMode) CyanAccent else GlassSurface)
+                                    .border(1.dp, if (isDirectEditMode) CyanAccent else GlassBorderSubtle, RoundedCornerShape(10.dp))
+                                    .clickable { isDirectEditMode = !isDirectEditMode }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = if (isDirectEditMode) "إنهاء التحرير ✓" else "تفعيل التحرير ✏️",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDirectEditMode) TextOnAccent else CyanAccent
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Proposals Banner if any pending proposals exist
+            if (pendingProposalsCount > 0 || scheduleProposals.isNotEmpty()) {
+                item {
+                    GlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isProposalsReviewDialogOpen = true },
+                        borderColor = WarmAmber,
+                        backgroundColor = WarmAmber.copy(alpha = 0.08f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("🗳️", fontSize = 18.sp)
+                                Column {
+                                    Text(
+                                        text = "مقترحات تعديل الجدول المطروحة للزملاء",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "يوجد $pendingProposalsCount مقترح قيد التصويت والمراجعة",
+                                        fontSize = 10.sp,
+                                        color = WarmAmber
+                                    )
+                                }
+                            }
+                            GlassPill(text = "عرض وتصويت 👁️", color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.2f))
+                        }
+                    }
+                }
+            }
+
             // Timetable Content
             if (isFullWeekView) {
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = "اضغط على أي خانة لاختيار المادة أو تعديلها:",
+                            text = if (canManageSchedule && (isDirectEditMode || allSlots.isEmpty()))
+                                "اضغط على أي خانة لاختيار المادة أو تعديلها مباشرة:"
+                            else
+                                "اضغط على أي حصة لمعاينتها أو تقديم مقترح تعديل عليها:",
                             fontSize = 12.sp,
                             color = TextMuted,
                             modifier = Modifier.padding(bottom = 6.dp)
@@ -191,7 +317,11 @@ fun ScheduleScreen(
                         CanvasSchoolTimetableBoard(
                             allSlots = allSlots,
                             onCellClick = { dayIndex, slotOrder ->
-                                activeEditingCell = Pair(dayIndex, slotOrder)
+                                if (canManageSchedule && (isDirectEditMode || allSlots.isEmpty())) {
+                                    activeEditingCell = Pair(dayIndex, slotOrder)
+                                } else {
+                                    activeProposalCell = Pair(dayIndex, slotOrder)
+                                }
                             }
                         )
                     }
@@ -254,16 +384,18 @@ fun ScheduleScreen(
                             fontWeight = FontWeight.Bold,
                             color = CyanAccent
                         )
-                        TextButton(
-                            onClick = {
-                                sourceDayToCopy = selectedDayForList
-                                isCopyDayDialogOpen = true
-                            },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = WarmAmber, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("نسخ اليوم", fontSize = 11.sp, color = WarmAmber)
+                        if (canManageSchedule) {
+                            TextButton(
+                                onClick = {
+                                    sourceDayToCopy = selectedDayForList
+                                    isCopyDayDialogOpen = true
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, tint = WarmAmber, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("نسخ اليوم", fontSize = 11.sp, color = WarmAmber)
+                            }
                         }
                     }
                 }
@@ -278,8 +410,13 @@ fun ScheduleScreen(
                         periodOrder = periodOrder,
                         slot = slot,
                         defaultTime = defaultTime,
+                        canDirectEdit = canManageSchedule && (isDirectEditMode || allSlots.isEmpty()),
                         onClick = {
-                            activeEditingCell = Pair(selectedDayForList, periodOrder)
+                            if (canManageSchedule && (isDirectEditMode || allSlots.isEmpty())) {
+                                activeEditingCell = Pair(selectedDayForList, periodOrder)
+                            } else {
+                                activeProposalCell = Pair(selectedDayForList, periodOrder)
+                            }
                         }
                     )
                 }
@@ -324,6 +461,34 @@ fun ScheduleScreen(
             )
         }
 
+        // -------------------------------------------------------------
+        // SCHEDULE PROPOSAL DIALOG ("اقتراح تعديل حصة")
+        // -------------------------------------------------------------
+        activeProposalCell?.let { (dayIndex, slotOrder) ->
+            val existingSlot = allSlots.find { it.dayOfWeek == dayIndex && it.slotOrder == slotOrder }
+            ScheduleProposalDialog(
+                dayIndex = dayIndex,
+                slotOrder = slotOrder,
+                existingSlot = existingSlot,
+                gradeSubjects = gradeSubjects,
+                onDismiss = { activeProposalCell = null },
+                onSubmit = { oldSubjectId, newSubjectId, reason ->
+                    viewModel.proposeScheduleSlotChange(
+                        dayOfWeek = dayIndex,
+                        slotOrder = slotOrder,
+                        oldSubjectId = oldSubjectId,
+                        newSubjectId = newSubjectId,
+                        reason = reason
+                    ) { success, msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        if (success) {
+                            activeProposalCell = null
+                        }
+                    }
+                }
+            )
+        }
+
         // Copy Day Dialog
         if (isCopyDayDialogOpen) {
             CopyScheduleDayDialog(
@@ -346,6 +511,30 @@ fun ScheduleScreen(
                     }
                     Toast.makeText(context, "تم نسخ الحصص بنجاح", Toast.LENGTH_SHORT).show()
                     isCopyDayDialogOpen = false
+                }
+            )
+        }
+
+        // Proposals Review Dialog
+        if (isProposalsReviewDialogOpen) {
+            ScheduleProposalsReviewDialog(
+                proposals = scheduleProposals,
+                canManageSchedule = canManageSchedule,
+                onDismiss = { isProposalsReviewDialogOpen = false },
+                onVote = { proposalId, voteType ->
+                    viewModel.voteScheduleProposal(proposalId, voteType) { success, msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onApprove = { proposalId ->
+                    viewModel.approveScheduleProposal(proposalId) { success, msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    }
+                },
+                onReject = { proposalId ->
+                    viewModel.rejectScheduleProposal(proposalId) { success, msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
                 }
             )
         }
@@ -605,6 +794,7 @@ fun SinglePeriodSlotCard(
     periodOrder: Int,
     slot: ScheduleSlot?,
     defaultTime: Pair<String, String>,
+    canDirectEdit: Boolean = false,
     onClick: () -> Unit
 ) {
     val isOccupied = slot != null
@@ -668,7 +858,7 @@ fun SinglePeriodSlotCard(
                         )
                     }
                     Text(
-                        text = slot?.subjectName ?: "خانة فارغة (اضغط لإضافة مادة)",
+                        text = slot?.subjectName ?: if (canDirectEdit) "خانة فارغة (اضغط لإضافة مادة)" else "خانة غير مسجلة (اضغط لاقتراح مادة)",
                         fontSize = 14.sp,
                         fontWeight = if (isOccupied) FontWeight.Bold else FontWeight.Normal,
                         color = if (isOccupied) TextPrimary else TextMuted
@@ -676,10 +866,18 @@ fun SinglePeriodSlotCard(
                 }
             }
 
-            if (isOccupied) {
-                GlassPill(text = "مجدولة ✓", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.2f))
+            if (canDirectEdit) {
+                if (isOccupied) {
+                    GlassPill(text = "تعديل ✏️", color = CyanAccent, bgColor = CyanGlow)
+                } else {
+                    GlassPill(text = "إضافة ＋", color = CyanAccent, bgColor = CyanGlow)
+                }
             } else {
-                GlassPill(text = "إضافة ＋", color = CyanAccent, bgColor = CyanGlow)
+                if (isOccupied) {
+                    GlassPill(text = "اقتراح تعديل 💡", color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.2f))
+                } else {
+                    GlassPill(text = "اقتراح إضافة 💡", color = CyanAccent, bgColor = CyanGlow)
+                }
             }
         }
     }
@@ -856,6 +1054,143 @@ fun SubjectPickerSheet(
 }
 
 // -------------------------------------------------------------
+// SCHEDULE PROPOSAL DIALOG ("اقتراح تعديل حصة")
+// -------------------------------------------------------------
+@Composable
+fun ScheduleProposalDialog(
+    dayIndex: Int,
+    slotOrder: Int,
+    existingSlot: ScheduleSlot?,
+    gradeSubjects: List<SubjectItem>,
+    onDismiss: () -> Unit,
+    onSubmit: (oldSubjectId: String?, newSubjectId: String, reason: String) -> Unit
+) {
+    val dayName = SCHEDULE_DAYS.find { it.first == dayIndex }?.second ?: "اليوم"
+    var selectedSubject by remember { mutableStateOf<SubjectItem?>(null) }
+    var reason by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("💡", fontSize = 20.sp)
+                Column {
+                    Text(
+                        text = "اقتراح تعديل حصة",
+                        color = CyanAccent,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
+                    Text(
+                        text = "$dayName — الحصة $slotOrder",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Current slot info
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MidnightBackground)
+                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(10.dp))
+                        .padding(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("الحصة الحالية:", fontSize = 11.sp, color = TextMuted)
+                        Text(
+                            text = existingSlot?.let { "${it.subjectIcon} ${it.subjectName}" } ?: "فارغة (غير محددة)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                    }
+                }
+
+                // New Subject selection
+                Text("المادة المقترحة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(gradeSubjects) { subj ->
+                        val isSelected = selectedSubject?.id == subj.id
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) CyanGlow else MidnightBackground)
+                                .border(1.dp, if (isSelected) CyanAccent else GlassBorderSubtle, RoundedCornerShape(8.dp))
+                                .clickable { selectedSubject = subj }
+                                .padding(vertical = 6.dp, horizontal = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(subj.icon, fontSize = 16.sp)
+                                Text(
+                                    subj.name,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) CyanAccent else TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Reason input: لماذا؟
+                Text("لماذا؟ (سبب الاقتراح):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = { reason = it },
+                    placeholder = { Text("مثلاً: تغيير المدرس أو تبديل الحصة...", fontSize = 11.sp, color = TextMuted) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyanAccent,
+                        unfocusedBorderColor = GlassBorderSubtle,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    ),
+                    maxLines = 3
+                )
+
+                Text(
+                    text = "ℹ️ سيُطرح الاقتراح لتصويت الشعبة ويُعتمد رسمياً بعد الموافقة.",
+                    fontSize = 10.sp,
+                    color = TextSecondary
+                )
+            }
+        },
+        confirmButton = {
+            GlassButton(
+                text = "إرسال الاقتراح",
+                enabled = selectedSubject != null && reason.isNotBlank(),
+                onClick = {
+                    selectedSubject?.let { subj ->
+                        onSubmit(existingSlot?.subjectId, subj.id, reason.trim())
+                    }
+                }
+            )
+        },
+        dismissButton = {
+            GlassOutlinedButton(text = "إلغاء", onClick = onDismiss)
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(18.dp)
+    )
+}
+
+// -------------------------------------------------------------
 // COPY SCHEDULE DAY DIALOG
 // -------------------------------------------------------------
 @Composable
@@ -911,6 +1246,211 @@ fun CopyScheduleDayDialog(
         },
         dismissButton = {
             GlassOutlinedButton(text = "إلغاء", onClick = onDismiss)
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(18.dp)
+    )
+}
+
+// -------------------------------------------------------------
+// SCHEDULE PROPOSALS REVIEW & VOTING DIALOG
+// -------------------------------------------------------------
+@Composable
+fun ScheduleProposalsReviewDialog(
+    proposals: List<com.magd.tanweer.data.model.ScheduleProposalItem>,
+    canManageSchedule: Boolean,
+    onDismiss: () -> Unit,
+    onVote: (proposalId: String, voteType: String) -> Unit,
+    onApprove: (proposalId: String) -> Unit,
+    onReject: (proposalId: String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🗳️", fontSize = 22.sp)
+                Column {
+                    Text(
+                        text = "مقترحات تعديل جدول الشعبة",
+                        color = CyanAccent,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
+                    Text(
+                        text = "${proposals.size} مقترح متاح للمراجعة والتصويت",
+                        color = TextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        },
+        text = {
+            if (proposals.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("✨", fontSize = 28.sp)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "لا توجد مقترحات معلقة حالياً",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "الجدول مستقر ومتفق عليه بين جميع أعضاء الشعبة.",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 380.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(proposals, key = { it.id }) { prop ->
+                        val dayName = SCHEDULE_DAYS.find { it.first == prop.dayOfWeek }?.second ?: "اليوم"
+                        val isPending = prop.status == "PENDING"
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MidnightBackground)
+                                .border(1.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
+                                .padding(10.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "$dayName — الحصة ${prop.slotOrder}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = CyanAccent
+                                    )
+                                    val statusColor = when (prop.status) {
+                                        "ACCEPTED" -> EmeraldGreen
+                                        "REJECTED" -> RubyRed
+                                        else -> WarmAmber
+                                    }
+                                    val statusText = when (prop.status) {
+                                        "ACCEPTED" -> "معتمد ومطبق ✅"
+                                        "REJECTED" -> "مرفوض ❌"
+                                        else -> "قيد التصويت ⏳"
+                                    }
+                                    GlassPill(text = statusText, color = statusColor, bgColor = statusColor.copy(alpha = 0.15f))
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("التعديل المقترح:", fontSize = 11.sp, color = TextMuted)
+                                    Text(
+                                        text = "${prop.oldSubjectName ?: "فارغة"} ➔ ${prop.newSubjectIcon} ${prop.newSubjectName ?: prop.newSubjectId}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                }
+
+                                Text(
+                                    text = "السبب: ${prop.reason}",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "المقترح من: ${prop.proposerName}",
+                                        fontSize = 10.sp,
+                                        color = TextMuted
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("👍 ${prop.votesFor}", fontSize = 11.sp, color = EmeraldGreen, fontWeight = FontWeight.Bold)
+                                        Text("👎 ${prop.votesAgainst}", fontSize = 11.sp, color = RubyRed, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                if (isPending) {
+                                    HorizontalDivider(color = GlassBorderSubtle, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        // Voting buttons for all members
+                                        OutlinedButton(
+                                            onClick = { onVote(prop.id, "FOR") },
+                                            modifier = Modifier.weight(1f).height(32.dp),
+                                            contentPadding = PaddingValues(0.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, if (prop.myVote == "FOR") EmeraldGreen else GlassBorderSubtle)
+                                        ) {
+                                            Text(
+                                                text = if (prop.myVote == "FOR") "موافق ✓" else "أوافق 👍",
+                                                fontSize = 10.sp,
+                                                color = if (prop.myVote == "FOR") EmeraldGreen else TextSecondary
+                                            )
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { onVote(prop.id, "AGAINST") },
+                                            modifier = Modifier.weight(1f).height(32.dp),
+                                            contentPadding = PaddingValues(0.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, if (prop.myVote == "AGAINST") RubyRed else GlassBorderSubtle)
+                                        ) {
+                                            Text(
+                                                text = if (prop.myVote == "AGAINST") "معارض ✕" else "أعارض 👎",
+                                                fontSize = 10.sp,
+                                                color = if (prop.myVote == "AGAINST") RubyRed else TextSecondary
+                                            )
+                                        }
+
+                                        // Manager Decision buttons
+                                        if (canManageSchedule) {
+                                            Button(
+                                                onClick = { onApprove(prop.id) },
+                                                modifier = Modifier.weight(1.2f).height(32.dp),
+                                                contentPadding = PaddingValues(0.dp),
+                                                shape = RoundedCornerShape(8.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+                                            ) {
+                                                Text("اعتماد ✅", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                            }
+                                            Button(
+                                                onClick = { onReject(prop.id) },
+                                                modifier = Modifier.weight(0.9f).height(32.dp),
+                                                contentPadding = PaddingValues(0.dp),
+                                                shape = RoundedCornerShape(8.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = RubyRed)
+                                            ) {
+                                                Text("رفض ❌", fontSize = 10.sp, color = Color.White)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            GlassButton(text = "إغلاق", onClick = onDismiss)
         },
         containerColor = MidnightSurface,
         shape = RoundedCornerShape(18.dp)

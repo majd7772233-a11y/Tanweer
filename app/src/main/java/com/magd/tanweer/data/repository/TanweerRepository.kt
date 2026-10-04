@@ -989,6 +989,380 @@ class TanweerRepository(
         db.scheduleDao().deleteSlotById(slotId)
     }
 
+    suspend fun proposeScheduleSlotChange(
+        groupId: String,
+        dayOfWeek: Int,
+        slotOrder: Int,
+        oldSubjectId: String?,
+        newSubjectId: String,
+        reason: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.proposeScheduleChange(
+                ScheduleProposalRequest(
+                    groupId = groupId,
+                    dayOfWeek = dayOfWeek,
+                    slotOrder = slotOrder,
+                    oldSubjectId = oldSubjectId,
+                    newSubjectId = newSubjectId,
+                    reason = reason
+                )
+            )
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: "تم إرسال اقتراح التعديل بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر إرسال الاقتراح"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitRoleUpgradeRequest(
+        requestedRole: String,
+        reason: String,
+        groupId: String? = null
+    ): Result<com.magd.tanweer.data.model.SubmitRoleUpgradeResponse> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.submitRoleRequest(
+                com.magd.tanweer.data.model.SubmitRoleUpgradeRequest(
+                    requestedRole = requestedRole,
+                    reason = reason,
+                    groupId = groupId
+                )
+            )
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true) {
+                Result.success(body)
+            } else {
+                Result.failure(Exception(body?.message ?: "تعذر إرسال طلب الترقية"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun redeemRoleCode(
+        code: String,
+        requestId: String? = null
+    ): Result<com.magd.tanweer.data.model.RedeemRoleCodeResponse> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.redeemRoleCode(
+                com.magd.tanweer.data.model.RedeemRoleCodeRequest(
+                    code = code,
+                    requestId = requestId
+                )
+            )
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true) {
+                val currentUser = db.userDao().getUserSync()
+                if (currentUser != null && body.newRole != null) {
+                    db.userDao().insertUser(currentUser.copy(role = body.newRole))
+                }
+                Result.success(body)
+            } else {
+                Result.failure(Exception(body?.message ?: "رمز التفعيل غير صالح"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getMyRoleRequests(): List<com.magd.tanweer.data.model.RoleRequestItem> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getMyRoleRequests()
+            if (res.isSuccessful) {
+                res.body()?.requests ?: emptyList()
+            } else {
+                emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun getScheduleMetaAndSlots(groupId: String): Result<com.magd.tanweer.data.model.ScheduleResponse> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getSchedule(groupId)
+            if (res.isSuccessful && res.body() != null) {
+                val body = res.body()!!
+                val slots = body.slots.map {
+                    ScheduleSlotEntity(
+                        id = it.id,
+                        groupId = groupId,
+                        dayOfWeek = it.dayOfWeek,
+                        slotOrder = it.slotOrder,
+                        subjectId = it.subjectId,
+                        subjectName = it.subjectName,
+                        subjectIcon = it.subjectIcon,
+                        colorHex = it.colorHex,
+                        startTime = it.startTime,
+                        endTime = it.endTime
+                    )
+                }
+                db.scheduleDao().clearSlots(groupId)
+                if (slots.isNotEmpty()) {
+                    db.scheduleDao().insertSlots(slots)
+                }
+                Result.success(body)
+            } else {
+                Result.failure(Exception("تعذر جلب بيانات الجدول"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveScheduleBatch(groupId: String, slots: List<ScheduleSlot>): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.saveScheduleBatch(groupId, com.magd.tanweer.data.model.BatchScheduleRequest(slots))
+            if (res.isSuccessful && res.body()?.success == true) {
+                syncSchedule(groupId)
+                Result.success(res.body()?.message ?: "تم حفظ وتحديث الجدول بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر حفظ الجدول"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getScheduleProposals(groupId: String): Result<List<com.magd.tanweer.data.model.ScheduleProposalItem>> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getScheduleProposals(groupId)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!.proposals)
+            } else {
+                Result.failure(Exception("تعذر جلب مقترحات الجدول"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun voteScheduleProposal(proposalId: String, voteType: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.voteScheduleProposal(proposalId, com.magd.tanweer.data.model.VoteProposalRequest(voteType))
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: "تم تسجيل التصويت بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر التصويت على المقترح"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun approveScheduleProposal(proposalId: String, groupId: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.approveScheduleProposal(proposalId)
+            if (res.isSuccessful && res.body()?.success == true) {
+                syncSchedule(groupId)
+                Result.success(res.body()?.message ?: "تم اعتماد وتطبيق المقترح بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر اعتماد المقترح"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun rejectScheduleProposal(proposalId: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.rejectScheduleProposal(proposalId)
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: "تم رفض المقترح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر رفض المقترح"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getGroupMembers(groupId: String): Result<com.magd.tanweer.data.model.GroupMembersResponse> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getGroupMembers(groupId)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("تعذر جلب أعضاء المجموعة"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateGroupMemberRole(groupId: String, targetUserId: String, newRole: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.updateGroupMemberRole(groupId, targetUserId, com.magd.tanweer.data.model.UpdateMemberRoleRequest(newRole))
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: "تم تحديث رتبة العضو بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر تحديث رتبة العضو"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun removeGroupMember(groupId: String, targetUserId: String, isBan: Boolean): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = if (isBan) api.banGroupMember(groupId, targetUserId) else api.removeGroupMember(groupId, targetUserId)
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: if (isBan) "تم حظر العضو بنجاح" else "تمت إزالة العضو بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر تنفيذ الإجراء"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun approveGroupJoinRequest(groupId: String, targetUserId: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.approveGroupJoinRequest(groupId, targetUserId)
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: "تم قبول العضو واعتماده بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر اعتماد طلب الانضمام"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitContentCorrection(
+        contentId: String,
+        fieldName: String,
+        originalValue: String?,
+        proposedValue: String,
+        reason: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.submitCorrection(
+                contentId,
+                SubmitCorrectionRequest(
+                    fieldName = fieldName,
+                    originalValue = originalValue ?: "",
+                    proposedValue = proposedValue,
+                    reason = reason
+                )
+            )
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: "تم إرسال طلب التصحيح بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر إرسال التصحيح"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getGroupCorrections(groupId: String): Result<List<com.magd.tanweer.data.model.ContentCorrectionItem>> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getGroupCorrections(groupId)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!.corrections)
+            } else {
+                Result.failure(Exception("تعذر جلب طلبات التصحيح"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun approveCorrection(correctionId: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.approveCorrection(correctionId)
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: "تم اعتماد التصحيح بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر اعتماد التصحيح"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun rejectCorrection(correctionId: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.rejectCorrection(correctionId)
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: "تم رفض طلب التصحيح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر رفض التصحيح"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getCommunityDecisions(groupId: String): Result<List<com.magd.tanweer.data.model.CommunityDecisionItem>> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getCommunityDecisions(groupId)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!.decisions)
+            } else {
+                Result.failure(Exception("تعذر جلب القرارات والتصويتات الجماعية"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun voteCommunityDecision(decisionId: String, voteChoice: Int): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.voteCommunityDecision(decisionId, com.magd.tanweer.data.model.VoteDecisionRequest(voteChoice))
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: "تم تسجيل التصويت بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر تسجيل التصويت"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getTeacherDashboard(): Result<com.magd.tanweer.data.model.TeacherDashboardResponse> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getTeacherDashboard()
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("تعذر جلب بيانات مركز المعلم"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getModeratorDashboard(): Result<com.magd.tanweer.data.model.ModeratorDashboardResponse> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getModeratorDashboard()
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("تعذر جلب بيانات مركز الإشراف"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getAdminDashboard(): Result<com.magd.tanweer.data.model.AdminDashboardResponse> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getAdminDashboard()
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("تعذر جلب بيانات إدارة المدرسة"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private val recentMessageIds = java.util.Collections.synchronizedSet(java.util.LinkedHashSet<String>())
 
     private fun parseStringListJson(jsonStr: String?): List<String> {

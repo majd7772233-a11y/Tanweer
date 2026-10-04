@@ -35,7 +35,11 @@ enum class SubScreen {
     SEARCH,
     WHAT_DID_I_MISS,
     SUBJECT_KNOWLEDGE_BASE,
-    ACADEMIC_HISTORY
+    ACADEMIC_HISTORY,
+    TEACHER_DASHBOARD,
+    MODERATOR_DASHBOARD,
+    ADMIN_DASHBOARD,
+    COMMUNITY_DECISIONS
 }
 
 class TanweerViewModel(application: Application) : AndroidViewModel(application) {
@@ -495,6 +499,385 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun deleteScheduleSlotById(slotId: String) {
         viewModelScope.launch {
             repository.deleteScheduleSlotById(slotId)
+        }
+    }
+
+    private val _scheduleMeta = MutableStateFlow<com.magd.tanweer.data.model.ScheduleMeta?>(null)
+    val scheduleMeta: StateFlow<com.magd.tanweer.data.model.ScheduleMeta?> = _scheduleMeta.asStateFlow()
+
+    private val _scheduleVersion = MutableStateFlow<com.magd.tanweer.data.model.ScheduleVersionItem?>(null)
+    val scheduleVersion: StateFlow<com.magd.tanweer.data.model.ScheduleVersionItem?> = _scheduleVersion.asStateFlow()
+
+    private val _scheduleProposals = MutableStateFlow<List<com.magd.tanweer.data.model.ScheduleProposalItem>>(emptyList())
+    val scheduleProposals: StateFlow<List<com.magd.tanweer.data.model.ScheduleProposalItem>> = _scheduleProposals.asStateFlow()
+
+    private val _groupMembersState = MutableStateFlow<com.magd.tanweer.data.model.GroupMembersResponse?>(null)
+    val groupMembersState: StateFlow<com.magd.tanweer.data.model.GroupMembersResponse?> = _groupMembersState.asStateFlow()
+
+    // Dashboard State Flows
+    private val _teacherDashboard = MutableStateFlow<TeacherDashboardResponse?>(null)
+    val teacherDashboard: StateFlow<TeacherDashboardResponse?> = _teacherDashboard.asStateFlow()
+
+    private val _moderatorDashboard = MutableStateFlow<ModeratorDashboardResponse?>(null)
+    val moderatorDashboard: StateFlow<ModeratorDashboardResponse?> = _moderatorDashboard.asStateFlow()
+
+    private val _adminDashboard = MutableStateFlow<AdminDashboardResponse?>(null)
+    val adminDashboard: StateFlow<AdminDashboardResponse?> = _adminDashboard.asStateFlow()
+
+    private val _groupCorrections = MutableStateFlow<List<ContentCorrectionItem>>(emptyList())
+    val groupCorrections: StateFlow<List<ContentCorrectionItem>> = _groupCorrections.asStateFlow()
+
+    private val _communityDecisions = MutableStateFlow<List<CommunityDecisionItem>>(emptyList())
+    val communityDecisions: StateFlow<List<CommunityDecisionItem>> = _communityDecisions.asStateFlow()
+
+    private val _isDashboardLoading = MutableStateFlow(false)
+    val isDashboardLoading: StateFlow<Boolean> = _isDashboardLoading.asStateFlow()
+
+    fun loadTeacherDashboard() {
+        viewModelScope.launch {
+            _isDashboardLoading.value = true
+            val res = repository.getTeacherDashboard()
+            _isDashboardLoading.value = false
+            res.onSuccess { data ->
+                _teacherDashboard.value = data
+            }
+        }
+    }
+
+    fun loadModeratorDashboard() {
+        viewModelScope.launch {
+            _isDashboardLoading.value = true
+            val res = repository.getModeratorDashboard()
+            _isDashboardLoading.value = false
+            res.onSuccess { data ->
+                _moderatorDashboard.value = data
+            }
+        }
+    }
+
+    fun loadAdminDashboard() {
+        viewModelScope.launch {
+            _isDashboardLoading.value = true
+            val res = repository.getAdminDashboard()
+            _isDashboardLoading.value = false
+            res.onSuccess { data ->
+                _adminDashboard.value = data
+            }
+        }
+    }
+
+    fun loadGroupCorrections(groupId: String = getActiveGroupId()) {
+        if (groupId.isBlank()) return
+        viewModelScope.launch {
+            val res = repository.getGroupCorrections(groupId)
+            res.onSuccess { list ->
+                _groupCorrections.value = list
+            }
+        }
+    }
+
+    fun submitContentCorrection(
+        contentId: String,
+        fieldName: String,
+        originalValue: String?,
+        proposedValue: String,
+        reason: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val res = repository.submitContentCorrection(contentId, fieldName, originalValue, proposedValue, reason)
+            res.onSuccess { msg ->
+                loadGroupCorrections()
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "فشل إرسال طلب التصحيح")
+            }
+        }
+    }
+
+    fun approveCorrection(
+        correctionId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val res = repository.approveCorrection(correctionId)
+            res.onSuccess { msg ->
+                loadGroupCorrections()
+                loadModeratorDashboard()
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر اعتماد التصحيح")
+            }
+        }
+    }
+
+    fun rejectCorrection(
+        correctionId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val res = repository.rejectCorrection(correctionId)
+            res.onSuccess { msg ->
+                loadGroupCorrections()
+                loadModeratorDashboard()
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر رفض التصحيح")
+            }
+        }
+    }
+
+    fun loadCommunityDecisions(groupId: String = getActiveGroupId()) {
+        if (groupId.isBlank()) return
+        viewModelScope.launch {
+            val res = repository.getCommunityDecisions(groupId)
+            res.onSuccess { list ->
+                _communityDecisions.value = list
+            }
+        }
+    }
+
+    fun voteCommunityDecision(
+        decisionId: String,
+        voteChoice: Int,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val res = repository.voteCommunityDecision(decisionId, voteChoice)
+            res.onSuccess { msg ->
+                loadCommunityDecisions()
+                loadModeratorDashboard()
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر تسجيل التصويت")
+            }
+        }
+    }
+
+    fun loadScheduleData() {
+        val groupId = getActiveGroupId()
+        if (groupId.isBlank()) return
+        viewModelScope.launch {
+            val res = repository.getScheduleMetaAndSlots(groupId)
+            res.onSuccess { data ->
+                _scheduleMeta.value = data.meta
+                _scheduleVersion.value = data.version
+            }
+            loadScheduleProposals()
+        }
+    }
+
+    fun loadScheduleProposals() {
+        val groupId = getActiveGroupId()
+        if (groupId.isBlank()) return
+        viewModelScope.launch {
+            val res = repository.getScheduleProposals(groupId)
+            res.onSuccess { list ->
+                _scheduleProposals.value = list
+            }
+        }
+    }
+
+    fun saveScheduleBatch(
+        slots: List<ScheduleSlot>,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val groupId = getActiveGroupId()
+        viewModelScope.launch {
+            val res = repository.saveScheduleBatch(groupId, slots)
+            res.onSuccess { msg ->
+                loadScheduleData()
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر حفظ الجدول")
+            }
+        }
+    }
+
+    fun voteScheduleProposal(
+        proposalId: String,
+        voteType: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val res = repository.voteScheduleProposal(proposalId, voteType)
+            res.onSuccess { msg ->
+                loadScheduleProposals()
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر التصويت")
+            }
+        }
+    }
+
+    fun approveScheduleProposal(
+        proposalId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val groupId = getActiveGroupId()
+        viewModelScope.launch {
+            val res = repository.approveScheduleProposal(proposalId, groupId)
+            res.onSuccess { msg ->
+                loadScheduleData()
+                loadScheduleProposals()
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر اعتماد المقترح")
+            }
+        }
+    }
+
+    fun rejectScheduleProposal(
+        proposalId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val res = repository.rejectScheduleProposal(proposalId)
+            res.onSuccess { msg ->
+                loadScheduleProposals()
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر رفض المقترح")
+            }
+        }
+    }
+
+    fun loadGroupMembers(groupId: String = getActiveGroupId()) {
+        if (groupId.isBlank()) return
+        viewModelScope.launch {
+            val res = repository.getGroupMembers(groupId)
+            res.onSuccess { data ->
+                _groupMembersState.value = data
+            }
+        }
+    }
+
+    fun updateGroupMemberRole(
+        targetUserId: String,
+        newRole: String,
+        groupId: String = getActiveGroupId(),
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val res = repository.updateGroupMemberRole(groupId, targetUserId, newRole)
+            res.onSuccess { msg ->
+                loadGroupMembers(groupId)
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر تحديث رتبة العضو")
+            }
+        }
+    }
+
+    fun removeGroupMember(
+        targetUserId: String,
+        isBan: Boolean,
+        groupId: String = getActiveGroupId(),
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val res = repository.removeGroupMember(groupId, targetUserId, isBan)
+            res.onSuccess { msg ->
+                loadGroupMembers(groupId)
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر تنفيذ الإجراء")
+            }
+        }
+    }
+
+    fun approveGroupJoinRequest(
+        targetUserId: String,
+        groupId: String = getActiveGroupId(),
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val res = repository.approveGroupJoinRequest(groupId, targetUserId)
+            res.onSuccess { msg ->
+                loadGroupMembers(groupId)
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر اعتماد طلب الانضمام")
+            }
+        }
+    }
+
+    fun canManageSchedule(): Boolean {
+        val meta = _scheduleMeta.value
+        if (meta?.isInitialSetup == true) return true
+        if (meta?.canEditDirectly == true) return true
+        return currentUser.value?.hasPermission(Permission.MANAGE_SCHEDULE) == true
+    }
+
+    fun proposeScheduleSlotChange(
+        dayOfWeek: Int,
+        slotOrder: Int,
+        oldSubjectId: String?,
+        newSubjectId: String,
+        reason: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val groupId = getActiveGroupId()
+        viewModelScope.launch {
+            val result = repository.proposeScheduleSlotChange(
+                groupId = groupId,
+                dayOfWeek = dayOfWeek,
+                slotOrder = slotOrder,
+                oldSubjectId = oldSubjectId,
+                newSubjectId = newSubjectId,
+                reason = reason
+            )
+            result.onSuccess { msg ->
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر إرسال المقترح")
+            }
+        }
+    }
+
+    private val _myRoleRequests = MutableStateFlow<List<RoleRequestItem>>(emptyList())
+    val myRoleRequests: StateFlow<List<RoleRequestItem>> = _myRoleRequests.asStateFlow()
+
+    fun loadMyRoleRequests() {
+        viewModelScope.launch {
+            val list = repository.getMyRoleRequests()
+            _myRoleRequests.value = list
+        }
+    }
+
+    fun submitRoleUpgradeRequest(
+        requestedRole: Role,
+        reason: String,
+        onResult: (Boolean, com.magd.tanweer.data.model.SubmitRoleUpgradeResponse?, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val res = repository.submitRoleUpgradeRequest(
+                requestedRole = requestedRole.name,
+                reason = reason,
+                groupId = getActiveGroupId().ifBlank { null }
+            )
+            res.onSuccess { resp ->
+                loadMyRoleRequests()
+                onResult(true, resp, resp.message ?: "تم إرسال طلب الترقية بنجاح")
+            }.onFailure { err ->
+                onResult(false, null, err.message ?: "فشل إرسال طلب الترقية")
+            }
+        }
+    }
+
+    fun redeemRoleCode(
+        code: String,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val res = repository.redeemRoleCode(code.trim())
+            res.onSuccess { resp ->
+                loadMyRoleRequests()
+                repository.syncProfile()
+                onResult(true, resp.message ?: "تم تفعيل الرتبة بنجاح 🎉")
+            }.onFailure { err ->
+                onResult(false, err.message ?: "رمز التفعيل غير صالح أو منتهي الصلاحية")
+            }
         }
     }
 

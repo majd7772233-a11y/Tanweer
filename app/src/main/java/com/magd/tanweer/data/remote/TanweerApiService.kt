@@ -289,12 +289,18 @@ interface TanweerApiService {
     ): Response<GenericResponse>
 
     @GET("api/v1/schedule/{groupId}")
-    suspend fun getSchedule(@Path("groupId") groupId: String): Response<ScheduleResponse>
+    suspend fun getSchedule(@Path("groupId") groupId: String): Response<com.magd.tanweer.data.model.ScheduleResponse>
 
     @POST("api/v1/schedule/{groupId}/slots")
     suspend fun createScheduleSlot(
         @Path("groupId") groupId: String,
         @Body req: CreateScheduleSlotRequest
+    ): Response<GenericResponse>
+
+    @POST("api/v1/schedule/{groupId}/batch")
+    suspend fun saveScheduleBatch(
+        @Path("groupId") groupId: String,
+        @Body req: com.magd.tanweer.data.model.BatchScheduleRequest
     ): Response<GenericResponse>
 
     @DELETE("api/v1/schedule/{groupId}/slots/{dayOfWeek}/{slotOrder}")
@@ -304,8 +310,63 @@ interface TanweerApiService {
         @Path("slotOrder") slotOrder: Int
     ): Response<GenericResponse>
 
+    @GET("api/v1/schedule/{groupId}/proposals")
+    suspend fun getScheduleProposals(@Path("groupId") groupId: String): Response<com.magd.tanweer.data.model.ScheduleProposalsResponse>
+
     @POST("api/v1/schedule/proposals")
     suspend fun proposeScheduleChange(@Body req: ScheduleProposalRequest): Response<GenericResponse>
+
+    @POST("api/v1/schedule/proposals/{proposalId}/vote")
+    suspend fun voteScheduleProposal(
+        @Path("proposalId") proposalId: String,
+        @Body req: com.magd.tanweer.data.model.VoteProposalRequest
+    ): Response<GenericResponse>
+
+    @POST("api/v1/schedule/proposals/{proposalId}/approve")
+    suspend fun approveScheduleProposal(@Path("proposalId") proposalId: String): Response<GenericResponse>
+
+    @POST("api/v1/schedule/proposals/{proposalId}/reject")
+    suspend fun rejectScheduleProposal(@Path("proposalId") proposalId: String): Response<GenericResponse>
+
+    @GET("api/v1/schedule/{groupId}/versions")
+    suspend fun getScheduleVersions(@Path("groupId") groupId: String): Response<com.magd.tanweer.data.model.ScheduleVersionsResponse>
+
+    @GET("api/v1/groups/{groupId}/members")
+    suspend fun getGroupMembers(@Path("groupId") groupId: String): Response<com.magd.tanweer.data.model.GroupMembersResponse>
+
+    @POST("api/v1/groups/{groupId}/members/{userId}/role")
+    suspend fun updateGroupMemberRole(
+        @Path("groupId") groupId: String,
+        @Path("userId") userId: String,
+        @Body req: com.magd.tanweer.data.model.UpdateMemberRoleRequest
+    ): Response<GenericResponse>
+
+    @POST("api/v1/groups/{groupId}/members/{userId}/remove")
+    suspend fun removeGroupMember(
+        @Path("groupId") groupId: String,
+        @Path("userId") userId: String
+    ): Response<GenericResponse>
+
+    @POST("api/v1/groups/{groupId}/members/{userId}/ban")
+    suspend fun banGroupMember(
+        @Path("groupId") groupId: String,
+        @Path("userId") userId: String
+    ): Response<GenericResponse>
+
+    @POST("api/v1/groups/{groupId}/requests/{userId}/approve")
+    suspend fun approveGroupJoinRequest(
+        @Path("groupId") groupId: String,
+        @Path("userId") userId: String
+    ): Response<GenericResponse>
+
+    @POST("api/v1/role-requests")
+    suspend fun submitRoleRequest(@Body req: com.magd.tanweer.data.model.SubmitRoleUpgradeRequest): Response<com.magd.tanweer.data.model.SubmitRoleUpgradeResponse>
+
+    @GET("api/v1/role-requests/my")
+    suspend fun getMyRoleRequests(): Response<com.magd.tanweer.data.model.MyRoleRequestsResponse>
+
+    @POST("api/v1/role-requests/redeem")
+    suspend fun redeemRoleCode(@Body req: com.magd.tanweer.data.model.RedeemRoleCodeRequest): Response<com.magd.tanweer.data.model.RedeemRoleCodeResponse>
 
     @GET("api/v1/calendar")
     suspend fun getCalendar(
@@ -336,6 +397,41 @@ interface TanweerApiService {
         @Path("id") contentId: String,
         @Body req: SubmitCorrectionRequest
     ): Response<GenericResponse>
+
+    @GET("api/v1/groups/{groupId}/corrections")
+    suspend fun getGroupCorrections(
+        @Path("groupId") groupId: String
+    ): Response<com.magd.tanweer.data.model.GroupCorrectionsResponse>
+
+    @POST("api/v1/corrections/{id}/approve")
+    suspend fun approveCorrection(
+        @Path("id") correctionId: String
+    ): Response<GenericResponse>
+
+    @POST("api/v1/corrections/{id}/reject")
+    suspend fun rejectCorrection(
+        @Path("id") correctionId: String
+    ): Response<GenericResponse>
+
+    @GET("api/v1/groups/{groupId}/decisions")
+    suspend fun getCommunityDecisions(
+        @Path("groupId") groupId: String
+    ): Response<com.magd.tanweer.data.model.CommunityDecisionsResponse>
+
+    @POST("api/v1/decisions/{id}/vote")
+    suspend fun voteCommunityDecision(
+        @Path("id") decisionId: String,
+        @Body req: com.magd.tanweer.data.model.VoteDecisionRequest
+    ): Response<GenericResponse>
+
+    @GET("api/v1/dashboards/teacher")
+    suspend fun getTeacherDashboard(): Response<com.magd.tanweer.data.model.TeacherDashboardResponse>
+
+    @GET("api/v1/dashboards/moderator")
+    suspend fun getModeratorDashboard(): Response<com.magd.tanweer.data.model.ModeratorDashboardResponse>
+
+    @GET("api/v1/dashboards/admin")
+    suspend fun getAdminDashboard(): Response<com.magd.tanweer.data.model.AdminDashboardResponse>
 
     @GET("api/v1/homeworks")
     suspend fun getHomeworks(@Query("groupId") groupId: String): Response<HomeworksResponse>

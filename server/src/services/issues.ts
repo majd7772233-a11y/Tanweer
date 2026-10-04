@@ -3,6 +3,7 @@ import { generateId } from '../lib/ids';
 import { mapIssue, mapIssueComment } from '../lib/mappers';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
+import { Permission, hasPermission } from '../lib/permissions';
 
 export async function handleGetIssues(groupId: string, user: UserContext, env: Env): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
@@ -122,17 +123,24 @@ export async function handleAddIssueComment(issueId: string, user: UserContext, 
     return errorResponse('INVALID_INPUT', 'يرجى كتابة نص الإجابة أو التعليق');
   }
 
+  const isTeacher = user.role === 'TEACHER' || user.role === 'ADMIN' || await hasPermission(user, Permission.ANSWER_AS_TEACHER, {
+    db: env.DB,
+    groupId: issue.group_id,
+  });
+
   const commentId = generateId('com');
   const now = Date.now();
   await env.DB.prepare(
-    `INSERT INTO issue_comments (id, issue_id, user_id, author_name, comment, is_best_answer, created_at)
-     VALUES (?, ?, ?, ?, ?, 0, ?)`
+    `INSERT INTO issue_comments (id, issue_id, user_id, author_name, comment, is_best_answer, is_teacher_answer, author_role, created_at)
+     VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`
   ).bind(
     commentId,
     issueId,
     user.userId,
     user.fullName,
     body.comment.trim(),
+    isTeacher ? 1 : 0,
+    user.role,
     now
   ).run();
 
@@ -140,10 +148,93 @@ export async function handleAddIssueComment(issueId: string, user: UserContext, 
     `UPDATE issues SET status = 'IN_DISCUSSION', updated_at = ? WHERE id = ? AND status = 'OPEN'`
   ).bind(now, issueId).run();
 
+  const msg = isTeacher
+    ? 'تمت إضافة إجابة الأستاذ المعتمدة بنجاح 🎓'
+    : 'تمت إضافة التعليق بنجاح 💬';
+
   return jsonResponse({
     success: true,
     commentId,
-    message: 'تمت إضافة التعليق بنجاح',
+    isTeacherAnswer: isTeacher,
+    message: msg,
+  });
+}
+
+export async function handleDeleteIssueComment(
+  issueId: string,
+  commentId: string,
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  const comment = await env.DB.prepare(
+    `SELECT ic.*, i.group_id FROM issue_comments ic JOIN issues i ON ic.issue_id = i.id WHERE ic.id = ? AND ic.issue_id = ?`
+  ).bind(commentId, issueId).first<{
+    id: string;
+    user_id: string;
+    group_id: string;
+  }>();
+
+  if (!comment) {
+    return errorResponse('COMMENT_NOT_FOUND', 'التعليق غير موجود', 404);
+  }
+
+  const memberCheck = await requireGroupMember(user, comment.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
+  const isOwner = comment.user_id === user.userId;
+  const canManage = await hasPermission(user, Permission.MANAGE_ISSUES, {
+    db: env.DB,
+    groupId: comment.group_id,
+    resourceOwnerId: comment.user_id,
+  });
+
+  if (!isOwner && !canManage) {
+    return errorResponse('FORBIDDEN', 'لا تملك صلاحية حذف هذا التعليق', 403);
+  }
+
+  await env.DB.prepare(`DELETE FROM issue_comments WHERE id = ?`).bind(commentId).run();
+
+  return jsonResponse({
+    success: true,
+    message: 'تم حذف التعليق بنجاح',
+  });
+}
+
+export async function handleDeleteIssue(
+  issueId: string,
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  const issue = await env.DB.prepare(`SELECT * FROM issues WHERE id = ?`).bind(issueId).first<{
+    id: string;
+    group_id: string;
+    created_by: string;
+  }>();
+
+  if (!issue) {
+    return errorResponse('ISSUE_NOT_FOUND', 'الاستفسار غير موجود', 404);
+  }
+
+  const memberCheck = await requireGroupMember(user, issue.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
+  const isOwner = issue.created_by === user.userId;
+  const canManage = await hasPermission(user, Permission.MANAGE_ISSUES, {
+    db: env.DB,
+    groupId: issue.group_id,
+    resourceOwnerId: issue.created_by,
+  });
+
+  if (!isOwner && !canManage) {
+    return errorResponse('FORBIDDEN', 'لا تملك صلاحية حذف هذا الاستفسار', 403);
+  }
+
+  await env.DB.prepare(`DELETE FROM issues WHERE id = ?`).bind(issueId).run();
+  await env.DB.prepare(`DELETE FROM issue_comments WHERE issue_id = ?`).bind(issueId).run();
+
+  return jsonResponse({
+    success: true,
+    message: 'تم حذف الاستفسار بنجاح',
   });
 }
 
@@ -159,8 +250,13 @@ export async function handleMarkBestAnswer(issueId: string, commentId: string, u
   const memberCheck = await requireGroupMember(user, issue.group_id, env.DB);
   if (memberCheck) return memberCheck;
 
-  if (issue.created_by !== user.userId && user.role !== 'ADMIN') {
-    return errorResponse('FORBIDDEN', 'صاحب الاستفسار فقط يستطيع تحديد أفضل إجابة');
+  const canVerify = await hasPermission(user, Permission.VERIFY_BEST_ANSWER, {
+    db: env.DB,
+    groupId: issue.group_id,
+    resourceOwnerId: issue.created_by,
+  });
+  if (!canVerify) {
+    return errorResponse('FORBIDDEN', 'صاحب الاستفسار أو الأستاذ أو المشرف فقط يستطيع تحديد واعتماد أفضل إجابة', 403);
   }
 
   // Verify that the comment belongs to this issue

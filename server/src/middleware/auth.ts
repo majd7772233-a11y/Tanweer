@@ -11,7 +11,8 @@ export async function getUserFromToken(token: string, env: Env): Promise<UserCon
   const tokenHash = await hashString(token, pepper);
 
   const session = await env.DB.prepare(
-    `SELECT s.id, s.user_id, s.device_id, s.expires_at, u.phone_number, u.full_name, u.grade_id, u.section_id, u.role
+    `SELECT s.id, s.user_id, s.device_id, s.expires_at, u.phone_number, u.full_name, u.grade_id, u.section_id, u.role,
+            COALESCE(u.status, 'ACTIVE') as status
      FROM sessions s
      JOIN users u ON s.user_id = u.id
      WHERE s.refresh_token_hash = ? AND s.expires_at > ?`
@@ -25,9 +26,13 @@ export async function getUserFromToken(token: string, env: Env): Promise<UserCon
     grade_id: number;
     section_id: string;
     role: string;
+    status: string;
   }>();
 
   if (!session) return null;
+  if (session.status === 'DISABLED') {
+    throw new Error('USER_DISABLED');
+  }
 
   return {
     userId: session.user_id,
@@ -62,6 +67,9 @@ export async function authenticateRequest(
     }
     return { user };
   } catch (err: any) {
+    if (err?.message === 'USER_DISABLED') {
+      return { user: null, error: errorResponse('ACCOUNT_DISABLED', 'تم تجميد هذا الحساب من قِبل إدارة المنظومة', 403) };
+    }
     return { user: null, error: errorResponse('INTERNAL_ERROR', err?.message || 'خطأ في المصادقة', 500) };
   }
 }

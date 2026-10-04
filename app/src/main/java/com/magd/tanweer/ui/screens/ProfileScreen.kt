@@ -27,7 +27,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.data.model.Role
+import android.content.Intent
+import android.net.Uri
+import com.magd.tanweer.data.model.SubmitRoleUpgradeResponse
 import com.magd.tanweer.data.model.SchoolHierarchy
+import com.magd.tanweer.data.model.getRoleEnum
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -52,8 +57,14 @@ fun ProfileScreen(
     var editErrorMessage by remember { mutableStateOf<String?>(null) }
     var isSavingProfile by remember { mutableStateOf(false) }
 
+    val myRoleRequests by viewModel.myRoleRequests.collectAsStateWithLifecycle()
+    var isRoleUpgradeDialogOpen by remember { mutableStateOf(false) }
+    var isRedeemCodeDialogOpen by remember { mutableStateOf(false) }
+    var requestSuccessInfo by remember { mutableStateOf<SubmitRoleUpgradeResponse?>(null) }
+
     LaunchedEffect(Unit) {
         viewModel.repository.syncProfile()
+        viewModel.loadMyRoleRequests()
     }
 
     LaunchedEffect(currentUser) {
@@ -96,6 +107,7 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val roleEnum = currentUser?.getRoleEnum() ?: Role.STUDENT
                         Row(
                             modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically
@@ -108,16 +120,28 @@ fun ProfileScreen(
                                     .border(1.5.dp, CyanAccent, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(text = "👤", fontSize = 28.sp)
+                                Text(text = roleEnum.badgeIcon, fontSize = 28.sp)
                             }
                             Spacer(modifier = Modifier.width(14.dp))
                             Column {
-                                Text(
-                                    text = currentUser?.fullName ?: "طالب تنوير",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        text = currentUser?.fullName ?: "طالب تنوير",
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    GlassPill(
+                                        text = "${roleEnum.badgeIcon} ${roleEnum.displayNameAr}",
+                                        color = when (roleEnum) {
+                                            Role.SYSTEM_OWNER, Role.ADMIN -> WarmAmber
+                                            Role.TEACHER -> EmeraldGreen
+                                            Role.MODERATOR -> CyanAccent
+                                            Role.STUDENT -> TextSecondary
+                                        },
+                                        bgColor = MidnightBackground
+                                    )
+                                }
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "$gradeName — شعبة $sectionAr",
@@ -126,7 +150,7 @@ fun ProfileScreen(
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    text = "🛡️ رقم الهاتف: ${currentUser?.phoneNumber ?: ""}",
+                                    text = "📱 رقم الهاتف: ${currentUser?.phoneNumber ?: ""}",
                                     fontSize = 11.sp,
                                     color = TextMuted
                                 )
@@ -144,6 +168,137 @@ fun ProfileScreen(
                                 isEditProfileDialogOpen = true
                             },
                             modifier = Modifier.height(38.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Unified Role & Authority Card (نواة الصلاحيات)
+        item {
+            val userRole = currentUser?.getRoleEnum() ?: Role.STUDENT
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = MidnightSurface
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(userRole.badgeIcon, fontSize = 22.sp)
+                            Column {
+                                Text(
+                                    text = "الرتبة في المنظومة: ${userRole.displayNameAr}",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = "المستوى ${userRole.level} من 5 في الهيكل الإداري",
+                                    fontSize = 11.sp,
+                                    color = CyanAccent
+                                )
+                            }
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            GlassOutlinedButton(
+                                text = "تفعيل رمز 🔑",
+                                onClick = { isRedeemCodeDialogOpen = true },
+                                modifier = Modifier.height(34.dp)
+                            )
+                            if (userRole == Role.STUDENT || userRole == Role.MODERATOR) {
+                                GlassButton(
+                                    text = "طلب ترقية 🎓",
+                                    onClick = { isRoleUpgradeDialogOpen = true },
+                                    modifier = Modifier.height(34.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = userRole.descriptionAr,
+                        fontSize = 12.sp,
+                        color = TextSecondary,
+                        lineHeight = 16.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MidnightBackground.copy(alpha = 0.6f))
+                            .border(1.dp, GlassBorderSubtle, RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = "💡 فلسفة تنوير: المساهمة في إضافة الدروس والصور والواجبات مفتوحة للجميع بالتساوي، بينما تمنح الرتبة سلطات الاعتماد والمراجعة والإشراف.",
+                            fontSize = 10.sp,
+                            color = TextMuted,
+                            lineHeight = 14.sp
+                        )
+                    }
+
+                    // Display pending/recent role request status if any
+                    if (myRoleRequests.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text("حالة طلبات الترقية السابقة:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        myRoleRequests.take(2).forEach { req ->
+                            val statusLabel = when (req.status) {
+                                "APPROVED" -> "تمت الموافقة والاعتماد ✅"
+                                "REJECTED" -> "مرفوض ❌"
+                                else -> "قيد المراجعة والتدقيق ⏳"
+                            }
+                            val statusColor = when (req.status) {
+                                "APPROVED" -> EmeraldGreen
+                                "REJECTED" -> RubyRed
+                                else -> WarmAmber
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "طلب رتبة: ${Role.fromString(req.requestedRole).displayNameAr}",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+                                GlassPill(text = statusLabel, color = statusColor, bgColor = statusColor.copy(alpha = 0.15f))
+                            }
+                        }
+                    }
+
+                    // Quick access to Role Dashboard if eligible
+                    if (userRole == Role.TEACHER || userRole == Role.MODERATOR || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        val dashboardTitle = when (userRole) {
+                            Role.TEACHER -> "🎓 فتح مركز التعليم للأستاذ المعتمد"
+                            Role.MODERATOR -> "🛡️ فتح مركز إشراف الشعبة والتدقيق"
+                            Role.ADMIN, Role.SYSTEM_OWNER -> "👑 فتح لوحة مدير المدرسة"
+                            else -> "مركز الإدارة"
+                        }
+                        val targetSubScreen = when (userRole) {
+                            Role.TEACHER -> com.magd.tanweer.ui.SubScreen.TEACHER_DASHBOARD
+                            Role.MODERATOR -> com.magd.tanweer.ui.SubScreen.MODERATOR_DASHBOARD
+                            Role.ADMIN, Role.SYSTEM_OWNER -> com.magd.tanweer.ui.SubScreen.ADMIN_DASHBOARD
+                            else -> com.magd.tanweer.ui.SubScreen.NONE
+                        }
+                        GlassButton(
+                            text = dashboardTitle,
+                            color = CyanAccent,
+                            textColor = TextOnAccent,
+                            onClick = { viewModel.setSubScreen(targetSubScreen) },
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
                         )
                     }
                 }
@@ -191,31 +346,43 @@ fun ProfileScreen(
             val photosCount = stats?.photosCount ?: 0
             val homeworksCount = stats?.homeworksCount ?: 0
             val issuesCount = stats?.issuesCount ?: 0
-            val userRole = currentUser?.role ?: "MEMBER"
 
-            val isActiveMember = (lessonsCount + homeworksCount + issuesCount) > 0 || currentUser != null
             val isLessonDoc = lessonsCount >= 1 || photosCount >= 3
-            val isHelper = issuesCount >= 1 || homeworksCount >= 2 || userRole == "MODERATOR" || userRole == "ADMIN" || userRole == "VERIFIED_TEACHER"
+            val isHelper = issuesCount >= 1 || homeworksCount >= 2
+            val isBestAnswerOwner = issuesCount >= 2
+            val isMonthContributor = (lessonsCount + photosCount + homeworksCount + issuesCount) >= 5
 
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 backgroundColor = GlassSurface
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "🎖️ شارات المساهمة والنشاط",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🎖️ شارات الإنجاز والنشاط الموثقة",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "تُحسب تلقائياً من مساهماتك",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
                     Spacer(modifier = Modifier.height(10.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        BadgeItem(name = "عضو نشط", icon = "🌟", active = isActiveMember, modifier = Modifier.weight(1f))
                         BadgeItem(name = "موثق الدروس", icon = "📚", active = isLessonDoc, modifier = Modifier.weight(1f))
-                        BadgeItem(name = "مساعد الشعبة", icon = "⭐", active = isHelper, modifier = Modifier.weight(1f))
+                        BadgeItem(name = "مساعد الشعبة", icon = "🛡️", active = isHelper, modifier = Modifier.weight(1f))
+                        BadgeItem(name = "صاحب أفضل إجابة", icon = "⭐", active = isBestAnswerOwner, modifier = Modifier.weight(1f))
+                        BadgeItem(name = "مساهم الشهر", icon = "🌟", active = isMonthContributor, modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -503,6 +670,299 @@ fun ProfileScreen(
             shape = RoundedCornerShape(20.dp)
         )
     }
+
+    if (isRoleUpgradeDialogOpen) {
+        val userRole = currentUser?.getRoleEnum() ?: Role.STUDENT
+        RoleUpgradeRequestDialog(
+            currentRole = userRole,
+            onDismiss = { isRoleUpgradeDialogOpen = false },
+            onSubmit = { targetRole, reason ->
+                viewModel.submitRoleUpgradeRequest(targetRole, reason) { success, resp, msg ->
+                    if (success && resp != null) {
+                        isRoleUpgradeDialogOpen = false
+                        requestSuccessInfo = resp
+                    } else {
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
+
+    requestSuccessInfo?.let { info ->
+        RoleRequestSuccessDialog(
+            info = info,
+            onDismiss = { requestSuccessInfo = null },
+            onOpenWhatsApp = {
+                val url = info.whatsappUrl ?: "https://wa.me/967735465673"
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                context.startActivity(intent)
+            },
+            onOpenRedeemDialog = {
+                requestSuccessInfo = null
+                isRedeemCodeDialogOpen = true
+            }
+        )
+    }
+
+    if (isRedeemCodeDialogOpen) {
+        RedeemRoleCodeDialog(
+            onDismiss = { isRedeemCodeDialogOpen = false },
+            onRedeem = { code ->
+                viewModel.redeemRoleCode(code) { success, msg ->
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    if (success) {
+                        isRedeemCodeDialogOpen = false
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun RoleRequestSuccessDialog(
+    info: SubmitRoleUpgradeResponse,
+    onDismiss: () -> Unit,
+    onOpenWhatsApp: () -> Unit,
+    onOpenRedeemDialog: () -> Unit
+) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("📋", fontSize = 22.sp)
+                Column {
+                    Text("تم إرسال الطلب بنجاح", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("الرتبة المطلوبة: ${info.targetRoleNameAr ?: "أستاذ / مسؤول"}", color = TextSecondary, fontSize = 11.sp)
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MidnightBackground)
+                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("رقم الطلب الخاص بك", fontSize = 11.sp, color = TextMuted)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = info.requestId ?: "TNV-8F294",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black,
+                            color = CyanAccent
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        GlassPill(text = "قيد المراجعة ⏳", color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.15f))
+                    }
+                }
+
+                Text(
+                    text = "يرجى التواصل مع إدارة المنظومة عبر WhatsApp لتأكيد هويتك واعتماد الرتبة واستلام رمز التفعيل السري.",
+                    fontSize = 11.sp,
+                    color = TextSecondary,
+                    lineHeight = 16.sp
+                )
+
+                Button(
+                    onClick = onOpenWhatsApp,
+                    modifier = Modifier.fillMaxWidth().height(42.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("💬", fontSize = 16.sp)
+                        Text("التواصل على WhatsApp (+967 735465673)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MidnightBackground)
+                    }
+                }
+
+                GlassOutlinedButton(
+                    text = "وصلني الرمز؟ إدخال رمز التفعيل 🔑",
+                    onClick = onOpenRedeemDialog,
+                    modifier = Modifier.fillMaxWidth().height(38.dp)
+                )
+            }
+        },
+        confirmButton = {
+            GlassButton(text = "حسناً", onClick = onDismiss)
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(18.dp)
+    )
+}
+
+@Composable
+fun RedeemRoleCodeDialog(
+    onDismiss: () -> Unit,
+    onRedeem: (String) -> Unit
+) {
+    var code by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🔑", fontSize = 22.sp)
+                Column {
+                    Text("تفعيل الرتبة بالرمز السري", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("رمز معتمد من إدارة المنظومة (صالح 24 ساعة)", color = TextSecondary, fontSize = 11.sp)
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("أدخل رمز التفعيل المكون من 8 أرقام:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { 
+                        if (it.length <= 10) code = it 
+                    },
+                    placeholder = { Text("مثال: 7391-8426", fontSize = 14.sp, color = TextMuted) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyanAccent,
+                        unfocusedBorderColor = GlassBorderSubtle,
+                        focusedTextColor = CyanAccent,
+                        unfocusedTextColor = TextPrimary
+                    )
+                )
+
+                Text(
+                    text = "🔒 الرمز صالح للاستخدام لمرة واحدة فقط ومقيد بحسابك ومحمي بحد أقصى 5 محاولات.",
+                    fontSize = 10.sp,
+                    color = TextMuted,
+                    lineHeight = 14.sp
+                )
+            }
+        },
+        confirmButton = {
+            GlassButton(
+                text = if (isSubmitting) "جاري التحقق..." else "تفعيل الرتبة ✨",
+                enabled = code.trim().replace("-", "").length == 8 && !isSubmitting,
+                onClick = {
+                    isSubmitting = true
+                    onRedeem(code.trim())
+                }
+            )
+        },
+        dismissButton = {
+            GlassOutlinedButton(text = "إلغاء", enabled = !isSubmitting, onClick = onDismiss)
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(18.dp)
+    )
+}
+
+@Composable
+fun RoleUpgradeRequestDialog(
+    currentRole: Role,
+    onDismiss: () -> Unit,
+    onSubmit: (Role, String) -> Unit
+) {
+    var targetRole by remember { mutableStateOf(if (currentRole == Role.STUDENT) Role.MODERATOR else Role.TEACHER) }
+    var reason by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🎓", fontSize = 22.sp)
+                Column {
+                    Text("طلب ترقية رتبة", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text("إدارة الشعبة والمحتوى الدراسي", color = TextSecondary, fontSize = 11.sp)
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("اختر الرتبة المطلوبة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val isMod = targetRole == Role.MODERATOR
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isMod) CyanGlow else MidnightBackground)
+                            .border(1.dp, if (isMod) CyanAccent else GlassBorderSubtle, RoundedCornerShape(10.dp))
+                            .clickable { targetRole = Role.MODERATOR }
+                            .padding(10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("🛡️", fontSize = 20.sp)
+                            Text("مسؤول شعبة", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isMod) CyanAccent else TextPrimary)
+                            Text("مراجعة وإشراف", fontSize = 9.sp, color = TextSecondary)
+                        }
+                    }
+
+                    val isTeacher = targetRole == Role.TEACHER
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isTeacher) CyanGlow else MidnightBackground)
+                            .border(1.dp, if (isTeacher) CyanAccent else GlassBorderSubtle, RoundedCornerShape(10.dp))
+                            .clickable { targetRole = Role.TEACHER }
+                            .padding(10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("🎓", fontSize = 20.sp)
+                            Text("أستاذ معتمد", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isTeacher) CyanAccent else TextPrimary)
+                            Text("اعتماد وتثبيت", fontSize = 9.sp, color = TextSecondary)
+                        }
+                    }
+                }
+
+                Text("سبب التقديم ومسؤولياتك:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = { reason = it },
+                    placeholder = { Text("وضح سبب طلب الترقية (مثلاً: رائد الفصل، ممثل الشعبة، أو معلم المادة)...", fontSize = 11.sp, color = TextMuted) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyanAccent,
+                        unfocusedBorderColor = GlassBorderSubtle,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    ),
+                    maxLines = 3
+                )
+
+                Text(
+                    text = "ℹ️ في تنوير، المساهمة مفتوحة لجميع الطلاب بالتساوي. الترقية تضيف صلاحيات المراجعة والاعتماد والإشراف.",
+                    fontSize = 10.sp,
+                    color = TextSecondary,
+                    lineHeight = 14.sp
+                )
+            }
+        },
+        confirmButton = {
+            GlassButton(
+                text = "إرسال الطلب",
+                enabled = reason.isNotBlank(),
+                onClick = { onSubmit(targetRole, reason.trim()) }
+            )
+        },
+        dismissButton = {
+            GlassOutlinedButton(text = "إلغاء", onClick = onDismiss)
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(18.dp)
+    )
 }
 
 @Composable

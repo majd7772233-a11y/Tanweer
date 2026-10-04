@@ -167,6 +167,237 @@ data class ScheduleSlot(
 )
 
 @JsonClass(generateAdapter = true)
+data class ScheduleVersionItem(
+    val id: String,
+    val versionNumber: Int = 1,
+    val validFrom: String = "",
+    val validUntil: String? = null,
+    val createdBy: String? = null,
+    val createdAt: Long = 0L,
+    val creatorName: String? = null,
+    val creatorRole: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class ScheduleMeta(
+    val isInitialSetup: Boolean = false,
+    val canEditDirectly: Boolean = false,
+    val canPropose: Boolean = true,
+    val pendingProposalsCount: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class ScheduleResponse(
+    val success: Boolean = true,
+    val version: ScheduleVersionItem? = null,
+    val slots: List<ScheduleSlot> = emptyList(),
+    val meta: ScheduleMeta? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class ScheduleProposalItem(
+    val id: String,
+    val groupId: String,
+    val proposedBy: String,
+    val proposerName: String = "طالب في الشعبة",
+    val proposerRole: String = "STUDENT",
+    val dayOfWeek: Int,
+    val slotOrder: Int,
+    val oldSubjectId: String? = null,
+    val oldSubjectName: String? = null,
+    val newSubjectId: String,
+    val newSubjectName: String? = null,
+    val newSubjectIcon: String = "📚",
+    val reason: String,
+    val status: String = "PENDING", // PENDING, ACCEPTED, REJECTED
+    val votesFor: Int = 0,
+    val votesAgainst: Int = 0,
+    val myVote: String? = null, // "FOR", "AGAINST", null
+    val createdAt: Long = 0L
+)
+
+@JsonClass(generateAdapter = true)
+data class ScheduleProposalsResponse(
+    val success: Boolean = true,
+    val canReviewProposals: Boolean = false,
+    val proposals: List<ScheduleProposalItem> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class ScheduleVersionsResponse(
+    val success: Boolean = true,
+    val versions: List<ScheduleVersionItem> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class GroupMemberItem(
+    val userId: String,
+    val fullName: String,
+    val phoneNumber: String? = null,
+    val memberRole: String = "STUDENT",
+    val globalRole: String = "STUDENT",
+    val status: String = "ACTIVE", // ACTIVE, PENDING, BANNED
+    val joinedAt: Long = 0L,
+    val gradeId: Int = 0,
+    val sectionId: String = ""
+)
+
+@JsonClass(generateAdapter = true)
+data class GroupMembersResponse(
+    val success: Boolean = true,
+    val canManageMembers: Boolean = false,
+    val members: List<GroupMemberItem> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class BatchScheduleRequest(
+    val slots: List<ScheduleSlot>,
+    val validFrom: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class VoteProposalRequest(
+    val voteType: String = "FOR" // "FOR" or "AGAINST"
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateMemberRoleRequest(
+    val newRole: String
+)
+
+@JsonClass(generateAdapter = true)
+data class ContentCorrectionItem(
+    val id: String,
+    val contentId: String,
+    val groupId: String,
+    val userId: String,
+    val authorName: String? = null,
+    val fieldName: String,
+    val originalValue: String? = null,
+    val proposedValue: String,
+    val reason: String,
+    val status: String = "PENDING", // PENDING, APPROVED, REJECTED, APPLIED
+    val contentTitle: String? = null,
+    val createdAt: Long = 0L
+)
+
+@JsonClass(generateAdapter = true)
+data class GroupCorrectionsResponse(
+    val success: Boolean = true,
+    val corrections: List<ContentCorrectionItem> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class CommunityDecisionItem(
+    val id: String,
+    val groupId: String,
+    val requestType: String, // DELETION, CORRECTION, SCHEDULE, VERIFICATION
+    val targetId: String,
+    val title: String,
+    val description: String? = null,
+    val requestedBy: String,
+    val requesterName: String = "عضو في الشعبة",
+    val totalEligibleVoters: Int = 1,
+    val thresholdPercent: Int = 50,
+    val votesFor: Int = 0,
+    val votesAgainst: Int = 0,
+    val status: String = "PENDING", // PENDING, APPROVED, REJECTED, APPLIED, EXPIRED
+    val myVote: Int? = null, // 1 = For, 0 = Against
+    val expiresAt: Long? = null,
+    val createdAt: Long = 0L
+)
+
+@JsonClass(generateAdapter = true)
+data class CommunityDecisionsResponse(
+    val success: Boolean = true,
+    val decisions: List<CommunityDecisionItem> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class VoteDecisionRequest(
+    val voteChoice: Int // 1 = For, 0 = Against
+)
+
+@JsonClass(generateAdapter = true)
+data class TeacherDashboardResponse(
+    val success: Boolean = true,
+    val teacher: TeacherInfo? = null,
+    val stats: TeacherStats? = null,
+    val recentHomeworks: List<HomeworkItem> = emptyList(),
+    val recentExams: List<ExamItem> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class TeacherInfo(
+    val fullName: String,
+    val phoneNumber: String,
+    val role: String,
+    val verified: Boolean = true
+)
+
+@JsonClass(generateAdapter = true)
+data class TeacherStats(
+    val officialHomeworksCount: Int = 0,
+    val officialExamsCount: Int = 0,
+    val teacherAnswersCount: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class ModeratorDashboardResponse(
+    val success: Boolean = true,
+    val groupId: String = "",
+    val stats: ModeratorStats? = null,
+    val pendingCorrections: List<ContentCorrectionItem> = emptyList(),
+    val pendingProposals: List<ScheduleProposalItem> = emptyList(),
+    val pendingDecisions: List<CommunityDecisionItem> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class ModeratorStats(
+    val pendingCorrectionsCount: Int = 0,
+    val pendingProposalsCount: Int = 0,
+    val pendingDecisionsCount: Int = 0,
+    val totalMembers: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminDashboardResponse(
+    val success: Boolean = true,
+    val school: SchoolAdminInfo? = null,
+    val stats: SchoolStats? = null,
+    val teachers: List<UserBrief> = emptyList(),
+    val moderators: List<UserBrief> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class SchoolAdminInfo(
+    val name: String,
+    val adminName: String,
+    val adminPhone: String
+)
+
+@JsonClass(generateAdapter = true)
+data class SchoolStats(
+    val totalUsers: Int = 0,
+    val totalTeachers: Int = 0,
+    val totalModerators: Int = 0,
+    val totalGroups: Int = 0,
+    val totalLessons: Int = 0,
+    val totalHomeworks: Int = 0,
+    val totalExams: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class UserBrief(
+    val id: String,
+    val full_name: String,
+    val phone_number: String,
+    val role: String,
+    val grade_id: Int = 0,
+    val section_id: String = ""
+)
+
+@JsonClass(generateAdapter = true)
 data class ContentItem(
     val id: String,
     val groupId: String,

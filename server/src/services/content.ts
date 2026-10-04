@@ -2,6 +2,7 @@ import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
+import { Permission, hasPermission } from '../lib/permissions';
 
 interface MediaPayloadItem {
   url: string;
@@ -160,4 +161,111 @@ export async function handleVoteUseful(contentId: string, user: UserContext, env
   await env.DB.prepare(`UPDATE contents SET useful_count = useful_count + 1 WHERE id = ?`).bind(contentId).run();
 
   return jsonResponse({ success: true, voted: true, message: 'شكرًا لمساهمتك، تم تسجيل تقييمك بنجاح 👍' });
+}
+
+export async function handleUpdateContent(
+  contentId: string,
+  user: UserContext,
+  request: Request,
+  env: Env
+): Promise<Response> {
+  const content = await env.DB.prepare(
+    `SELECT * FROM contents WHERE id = ?`
+  ).bind(contentId).first<{
+    id: string;
+    group_id: string;
+    created_by: string;
+    title: string;
+  }>();
+
+  if (!content) {
+    return errorResponse('CONTENT_NOT_FOUND', 'الدرس غير موجود', 404);
+  }
+
+  const memberCheck = await requireGroupMember(user, content.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
+  // 1. Ownership principle: Resource owner can edit their own content
+  const isOwner = content.created_by === user.userId;
+  // 2. Role permission: Teacher / Moderator / Admin can manage content
+  const canManage = await hasPermission(user, Permission.MANAGE_CONTENT, {
+    db: env.DB,
+    groupId: content.group_id,
+    resourceOwnerId: content.created_by,
+  });
+
+  if (!isOwner && !canManage) {
+    return errorResponse('FORBIDDEN', 'لا تملك صلاحية تعديل هذا الدرس (يمكن لصاحب الدرس أو أستاذ المادة أو المشرف التعديل)', 403);
+  }
+
+  const body = await request.json() as {
+    title?: string;
+    description?: string;
+    type?: string;
+  };
+
+  const now = Date.now();
+  await env.DB.prepare(
+    `UPDATE contents
+     SET title = COALESCE(?, title),
+         description = COALESCE(?, description),
+         type = COALESCE(?, type),
+         version = version + 1,
+         updated_at = ?
+     WHERE id = ?`
+  ).bind(
+    body.title?.trim() || null,
+    body.description?.trim() || null,
+    body.type || null,
+    now,
+    contentId
+  ).run();
+
+  return jsonResponse({
+    success: true,
+    message: 'تم تحديث بيانات الدرس بنجاح',
+  });
+}
+
+export async function handleDeleteContent(
+  contentId: string,
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  const content = await env.DB.prepare(
+    `SELECT * FROM contents WHERE id = ?`
+  ).bind(contentId).first<{
+    id: string;
+    group_id: string;
+    created_by: string;
+  }>();
+
+  if (!content) {
+    return errorResponse('CONTENT_NOT_FOUND', 'الدرس غير موجود', 404);
+  }
+
+  const memberCheck = await requireGroupMember(user, content.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
+  // 1. Ownership: Resource owner can delete their own content
+  const isOwner = content.created_by === user.userId;
+  // 2. Role permission: Moderator / Admin / Teacher with DELETE_ANY_CONTENT
+  const canDeleteAny = await hasPermission(user, Permission.DELETE_ANY_CONTENT, {
+    db: env.DB,
+    groupId: content.group_id,
+    resourceOwnerId: content.created_by,
+  });
+
+  if (!isOwner && !canDeleteAny) {
+    return errorResponse('FORBIDDEN', 'لا يمكنك حذف درس منشور من قِبل عضو آخر مباشرة — يمكنك تقديم طلب تصويت لحذفه', 403);
+  }
+
+  await env.DB.prepare(`DELETE FROM contents WHERE id = ?`).bind(contentId).run();
+  await env.DB.prepare(`DELETE FROM content_media WHERE content_id = ?`).bind(contentId).run();
+  await env.DB.prepare(`DELETE FROM content_useful_votes WHERE content_id = ?`).bind(contentId).run();
+
+  return jsonResponse({
+    success: true,
+    message: 'تم حذف الدرس بنجاح',
+  });
 }

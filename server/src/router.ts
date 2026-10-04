@@ -2,30 +2,57 @@ import { Env } from './env';
 import { authenticateRequest } from './middleware/auth';
 import { errorResponse, jsonResponse } from './lib/response';
 import { handleLogin, handleRegister, handleLoginWithRecoveryCode } from './services/auth';
-import { handleGetGroups, handleJoinGroupRequest } from './services/groups';
+import {
+  handleGetGroups,
+  handleJoinGroupRequest,
+  handleGetGroupMembers,
+  handleUpdateGroupMemberRole,
+  handleRemoveGroupMember,
+  handleApproveGroupJoinRequest,
+} from './services/groups';
 import {
   handleGetSchedule,
   handleCreateScheduleSlot,
+  handleSaveScheduleBatch,
   handleDeleteScheduleSlot,
+  handleGetScheduleProposals,
   handleProposeScheduleChange,
+  handleVoteScheduleProposal,
+  handleApproveScheduleProposal,
+  handleRejectScheduleProposal,
+  handleGetScheduleVersions,
 } from './services/schedule';
 import { handleGetCalendarOverview, handleGetDayDetail } from './services/calendar';
-import { handleCreateContent, handleVoteUseful } from './services/content';
-import { handleCreateHomework, handleGetHomeworks, handleToggleHomeworkCompletion } from './services/homework';
-import { handleCreateExam, handleGetExams } from './services/exams';
-import { handleCreateEvent, handleGetEvents } from './services/events';
+import { handleCreateContent, handleVoteUseful, handleUpdateContent, handleDeleteContent } from './services/content';
+import { handleCreateHomework, handleGetHomeworks, handleToggleHomeworkCompletion, handleUpdateHomework, handleDeleteHomework } from './services/homework';
+import { handleCreateExam, handleGetExams, handleUpdateExam, handleDeleteExam } from './services/exams';
+import { handleCreateEvent, handleGetEvents, handleUpdateEvent, handleDeleteEvent } from './services/events';
 import {
   handleAddIssueComment,
   handleCreateIssue,
   handleGetIssueDetails,
   handleGetIssues,
   handleMarkBestAnswer,
+  handleDeleteIssue,
+  handleDeleteIssueComment,
 } from './services/issues';
 import { handleRequestDeletion, handleVote } from './services/voting';
 import { handleGetBooks } from './services/books';
-import { handleGetGroupMessages, handlePostGroupMessage } from './services/chat';
+import {
+  handleCreateContentCorrection,
+  handleGetGroupCorrections,
+  handleApproveCorrection,
+  handleRejectCorrection,
+  handleGetCommunityDecisions,
+  handleVoteCommunityDecision,
+  handleGetTeacherDashboardData,
+  handleGetModeratorDashboardData,
+  handleGetAdminDashboardData,
+} from './services/governance';
+import { handleGetGroupMessages, handlePostGroupMessage, handleDeleteGroupMessage } from './services/chat';
 import { handleGetProfile, handleUpdateProfile } from './services/users';
 import { handleGetMedia, handleUploadMedia } from './services/media';
+import { handleCreateRoleRequest, handleGetMyRoleRequests, handleGetRoleMetadata, handleRedeemRoleCode } from './services/roleRequests';
 
 export async function handleApiRoute(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -54,9 +81,25 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     return jsonResponse({ status: 'ok', app: 'Tanweer', timestamp: Date.now() });
   }
 
+  // Unified Role Metadata (public)
+  if (path === '/api/v1/roles/metadata' && method === 'GET') {
+    return handleGetRoleMetadata();
+  }
+
   // Authenticated routes
   const { user, error } = await authenticateRequest(request, env);
   if (error || !user) return error!;
+
+  // Role Upgrade Requests
+  if (path === '/api/v1/role-requests' && method === 'POST') {
+    return handleCreateRoleRequest(user, request, env);
+  }
+  if (path === '/api/v1/role-requests/my' && method === 'GET') {
+    return handleGetMyRoleRequests(user, env);
+  }
+  if ((path === '/api/v1/role-requests/redeem' || path === '/api/v1/roles/redeem') && method === 'POST') {
+    return handleRedeemRoleCode(user, request, env);
+  }
 
   // User Profile
   if ((path === '/api/v1/me' || path === '/api/v1/profile') && method === 'GET') {
@@ -74,8 +117,44 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     const groupId = path.split('/')[4];
     return handleJoinGroupRequest(groupId, user, env);
   }
+  if (path.startsWith('/api/v1/groups/') && path.endsWith('/members') && method === 'GET') {
+    const groupId = path.split('/')[4];
+    return handleGetGroupMembers(groupId, user, env);
+  }
+  if (path.startsWith('/api/v1/groups/') && path.includes('/members/') && path.endsWith('/role') && method === 'POST') {
+    const parts = path.split('/');
+    const groupId = parts[4];
+    const targetUserId = parts[6];
+    return handleUpdateGroupMemberRole(groupId, targetUserId, user, request, env);
+  }
+  if (path.startsWith('/api/v1/groups/') && path.includes('/members/') && (path.endsWith('/remove') || method === 'DELETE')) {
+    const parts = path.split('/');
+    const groupId = parts[4];
+    const targetUserId = parts[6];
+    return handleRemoveGroupMember(groupId, targetUserId, false, user, env);
+  }
+  if (path.startsWith('/api/v1/groups/') && path.includes('/members/') && path.endsWith('/ban') && method === 'POST') {
+    const parts = path.split('/');
+    const groupId = parts[4];
+    const targetUserId = parts[6];
+    return handleRemoveGroupMember(groupId, targetUserId, true, user, env);
+  }
+  if (path.startsWith('/api/v1/groups/') && path.includes('/requests/') && path.endsWith('/approve') && method === 'POST') {
+    const parts = path.split('/');
+    const groupId = parts[4];
+    const targetUserId = parts[6];
+    return handleApproveGroupJoinRequest(groupId, targetUserId, user, env);
+  }
 
   // Group Chat Messages
+  if (path.startsWith('/api/v1/groups/') && path.includes('/messages/')) {
+    const parts = path.split('/');
+    const groupId = parts[4];
+    const messageId = parts[6];
+    if (method === 'DELETE') {
+      return handleDeleteGroupMessage(groupId, messageId, user, env);
+    }
+  }
   if (path.startsWith('/api/v1/groups/') && path.endsWith('/messages')) {
     const groupId = path.split('/')[4];
     if (method === 'GET') {
@@ -86,7 +165,11 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     }
   }
 
-  // Schedule CRUD
+  // Schedule CRUD & Lifecycle
+  if (path.startsWith('/api/v1/schedule/') && path.endsWith('/batch') && method === 'POST') {
+    const groupId = path.split('/')[4];
+    return handleSaveScheduleBatch(groupId, user, request, env);
+  }
   if (path.startsWith('/api/v1/schedule/') && path.endsWith('/slots') && method === 'POST') {
     const groupId = path.split('/')[4];
     return handleCreateScheduleSlot(groupId, user, request, env);
@@ -99,12 +182,32 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     const slotOrder = parseInt(parts[7]);
     return handleDeleteScheduleSlot(groupId, dayOfWeek, slotOrder, user, env);
   }
+  if (path.startsWith('/api/v1/schedule/') && path.endsWith('/proposals') && method === 'GET') {
+    const groupId = path.split('/')[4];
+    return handleGetScheduleProposals(groupId, user, env);
+  }
+  if (path.startsWith('/api/v1/schedule/') && path.endsWith('/versions') && method === 'GET') {
+    const groupId = path.split('/')[4];
+    return handleGetScheduleVersions(groupId, user, env);
+  }
+  if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/vote') && method === 'POST') {
+    const proposalId = path.split('/')[4];
+    return handleVoteScheduleProposal(proposalId, user, request, env);
+  }
+  if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/approve') && method === 'POST') {
+    const proposalId = path.split('/')[4];
+    return handleApproveScheduleProposal(proposalId, user, env);
+  }
+  if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/reject') && method === 'POST') {
+    const proposalId = path.split('/')[4];
+    return handleRejectScheduleProposal(proposalId, user, request, env);
+  }
+  if ((path === '/api/v1/schedule/proposals' || (path.startsWith('/api/v1/schedule/') && path.endsWith('/proposals'))) && method === 'POST') {
+    return handleProposeScheduleChange(user, request, env);
+  }
   if (path.startsWith('/api/v1/schedule/') && method === 'GET') {
     const groupId = path.split('/')[4];
     return handleGetSchedule(groupId, user, env);
-  }
-  if (path === '/api/v1/schedule/proposals' && method === 'POST') {
-    return handleProposeScheduleChange(user, request, env);
   }
 
   // Calendar & Day
@@ -130,6 +233,15 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     const contentId = path.split('/')[4];
     return handleVoteUseful(contentId, user, env);
   }
+  if (path.startsWith('/api/v1/content/') && !path.endsWith('/useful')) {
+    const contentId = path.split('/')[4];
+    if (method === 'PUT' || method === 'PATCH' || method === 'POST') {
+      return handleUpdateContent(contentId, user, request, env);
+    }
+    if (method === 'DELETE') {
+      return handleDeleteContent(contentId, user, env);
+    }
+  }
 
   // Homeworks
   if (path === '/api/v1/homeworks' && method === 'GET') {
@@ -143,6 +255,15 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     const hwId = path.split('/')[4];
     return handleToggleHomeworkCompletion(hwId, user, env);
   }
+  if (path.startsWith('/api/v1/homeworks/') && !path.endsWith('/toggle')) {
+    const hwId = path.split('/')[4];
+    if (method === 'PUT' || method === 'PATCH' || method === 'POST') {
+      return handleUpdateHomework(hwId, user, request, env);
+    }
+    if (method === 'DELETE') {
+      return handleDeleteHomework(hwId, user, env);
+    }
+  }
 
   // Exams
   if (path === '/api/v1/exams' && method === 'GET') {
@@ -151,6 +272,15 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
   if (path === '/api/v1/exams' && method === 'POST') {
     return handleCreateExam(user, request, env);
+  }
+  if (path.startsWith('/api/v1/exams/')) {
+    const examId = path.split('/')[4];
+    if (method === 'PUT' || method === 'PATCH' || method === 'POST') {
+      return handleUpdateExam(examId, user, request, env);
+    }
+    if (method === 'DELETE') {
+      return handleDeleteExam(examId, user, env);
+    }
   }
 
   // Events
@@ -161,6 +291,15 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path === '/api/v1/events' && method === 'POST') {
     return handleCreateEvent(user, request, env);
   }
+  if (path.startsWith('/api/v1/events/')) {
+    const eventId = path.split('/')[4];
+    if (method === 'PUT' || method === 'PATCH' || method === 'POST') {
+      return handleUpdateEvent(eventId, user, request, env);
+    }
+    if (method === 'DELETE') {
+      return handleDeleteEvent(eventId, user, env);
+    }
+  }
 
   // Issues
   if (path === '/api/v1/issues' && method === 'GET') {
@@ -170,6 +309,12 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path === '/api/v1/issues' && method === 'POST') {
     return handleCreateIssue(user, request, env);
   }
+  if (path.startsWith('/api/v1/issues/') && path.includes('/comments/') && method === 'DELETE') {
+    const parts = path.split('/');
+    const issueId = parts[4];
+    const commentId = parts[6];
+    return handleDeleteIssueComment(issueId, commentId, user, env);
+  }
   if (path.startsWith('/api/v1/issues/') && path.endsWith('/comments') && method === 'POST') {
     const issueId = path.split('/')[4];
     return handleAddIssueComment(issueId, user, request, env);
@@ -177,6 +322,10 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path.startsWith('/api/v1/issues/') && method === 'GET') {
     const issueId = path.split('/')[4];
     return handleGetIssueDetails(issueId, user, env);
+  }
+  if (path.startsWith('/api/v1/issues/') && method === 'DELETE') {
+    const issueId = path.split('/')[4];
+    return handleDeleteIssue(issueId, user, env);
   }
   if (path.startsWith('/api/v1/issues/') && path.includes('/best-answer/') && method === 'POST') {
     const issueId = path.split('/')[4];
@@ -197,6 +346,45 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path === '/api/v1/books' && method === 'GET') {
     const gradeId = parseInt(url.searchParams.get('gradeId') || user.gradeId.toString());
     return handleGetBooks(gradeId, env);
+  }
+
+  // Content Corrections
+  if (path.startsWith('/api/v1/content/') && path.endsWith('/corrections') && method === 'POST') {
+    const contentId = path.split('/')[4];
+    return handleCreateContentCorrection(contentId, user, request, env);
+  }
+  if (path.startsWith('/api/v1/groups/') && path.endsWith('/corrections') && method === 'GET') {
+    const groupId = path.split('/')[4];
+    return handleGetGroupCorrections(groupId, user, env);
+  }
+  if (path.startsWith('/api/v1/corrections/') && path.endsWith('/approve') && method === 'POST') {
+    const corrId = path.split('/')[4];
+    return handleApproveCorrection(corrId, user, env);
+  }
+  if (path.startsWith('/api/v1/corrections/') && path.endsWith('/reject') && method === 'POST') {
+    const corrId = path.split('/')[4];
+    return handleRejectCorrection(corrId, user, env);
+  }
+
+  // Community Decisions & Voting Engine
+  if (path.startsWith('/api/v1/groups/') && path.endsWith('/decisions') && method === 'GET') {
+    const groupId = path.split('/')[4];
+    return handleGetCommunityDecisions(groupId, user, env);
+  }
+  if (path.startsWith('/api/v1/decisions/') && path.endsWith('/vote') && method === 'POST') {
+    const decisionId = path.split('/')[4];
+    return handleVoteCommunityDecision(decisionId, user, request, env);
+  }
+
+  // In-App Role Dashboards
+  if (path === '/api/v1/dashboards/teacher' && method === 'GET') {
+    return handleGetTeacherDashboardData(user, env);
+  }
+  if (path === '/api/v1/dashboards/moderator' && method === 'GET') {
+    return handleGetModeratorDashboardData(user, env);
+  }
+  if (path === '/api/v1/dashboards/admin' && method === 'GET') {
+    return handleGetAdminDashboardData(user, env);
   }
 
   return errorResponse('NOT_FOUND', 'المسار المطلوب غير موجود', 404);

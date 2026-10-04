@@ -29,6 +29,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.data.model.Role
+import com.magd.tanweer.data.model.getRoleEnum
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.screens.*
 import com.magd.tanweer.ui.screens.pdf.PdfReaderScreen
@@ -143,6 +145,10 @@ fun TanweerApp(
                                     SubScreen.SEARCH -> "البحث الشامل"
                                     SubScreen.SUBJECT_KNOWLEDGE_BASE -> "مساحة المادة الموحدة"
                                     SubScreen.ACADEMIC_HISTORY -> "الأرشيف الأكاديمي"
+                                    SubScreen.TEACHER_DASHBOARD -> "مركز التعليم للأستاذ 🎓"
+                                    SubScreen.MODERATOR_DASHBOARD -> "مركز إشراف الشعبة 🛡️"
+                                    SubScreen.ADMIN_DASHBOARD -> "إدارة المدرسة 👑"
+                                    SubScreen.COMMUNITY_DECISIONS -> "القرارات والتصويتات الجماعية 🗳️"
                                     else -> ""
                                 },
                                 fontSize = 17.sp,
@@ -162,6 +168,10 @@ fun TanweerApp(
                             SubScreen.SEARCH -> SearchScreen(viewModel = viewModel)
                             SubScreen.SUBJECT_KNOWLEDGE_BASE -> ClassKnowledgeBaseScreen(viewModel = viewModel)
                             SubScreen.ACADEMIC_HISTORY -> AcademicHistoryScreen(viewModel = viewModel)
+                            SubScreen.TEACHER_DASHBOARD -> TeacherDashboardScreen(viewModel = viewModel)
+                            SubScreen.MODERATOR_DASHBOARD -> ModeratorDashboardScreen(viewModel = viewModel)
+                            SubScreen.ADMIN_DASHBOARD -> AdminDashboardScreen(viewModel = viewModel)
+                            SubScreen.COMMUNITY_DECISIONS -> CommunityDecisionsScreen(viewModel = viewModel)
                             else -> HomeScreen(viewModel = viewModel)
                         }
                     }
@@ -321,9 +331,52 @@ fun TanweerApp(
                                     viewModel.setSubScreen(SubScreen.TIMELINE)
                                 }
                             )
+                            val userRole = currentUser?.getRoleEnum() ?: Role.STUDENT
+                            if (userRole == Role.TEACHER || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
+                                MoreMenuItem(
+                                    title = "🎓 مركز التعليم للأستاذ المعتمد",
+                                    subtitle = "إدارة الواجبات والاختبارات الرسمية والردود المعتمدة",
+                                    onClick = {
+                                        isMoreMenuOpen = false
+                                        viewModel.setSubScreen(SubScreen.TEACHER_DASHBOARD)
+                                    }
+                                )
+                            }
+
+                            if (userRole == Role.MODERATOR || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
+                                MoreMenuItem(
+                                    title = "🛡️ مركز إشراف الشعبة والتدقيق",
+                                    subtitle = "مراجعة التصويبات ومقترحات الجدول والأعضاء",
+                                    onClick = {
+                                        isMoreMenuOpen = false
+                                        viewModel.setSubScreen(SubScreen.MODERATOR_DASHBOARD)
+                                    }
+                                )
+                            }
+
+                            if (userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
+                                MoreMenuItem(
+                                    title = "👑 لوحة مدير المدرسة",
+                                    subtitle = "إدارة المدرسة، كادر المعلمين، المشرفين والإحصاءات",
+                                    onClick = {
+                                        isMoreMenuOpen = false
+                                        viewModel.setSubScreen(SubScreen.ADMIN_DASHBOARD)
+                                    }
+                                )
+                            }
+
+                            MoreMenuItem(
+                                title = "🗳️ القرارات والتصويتات الجماعية",
+                                subtitle = "المشاركة في تصويتات الشعبة وحوكمة الدروس والجداول",
+                                onClick = {
+                                    isMoreMenuOpen = false
+                                    viewModel.setSubScreen(SubScreen.COMMUNITY_DECISIONS)
+                                }
+                            )
+
                             MoreMenuItem(
                                 title = "👤 الملف الشخصي والمساهمات",
-                                subtitle = "بيانات الطالب وسجل النشاط الدراسي",
+                                subtitle = "بيانات الطالب وسجل النشاط الدراسي والرتبة",
                                 onClick = {
                                     isMoreMenuOpen = false
                                     viewModel.setSubScreen(SubScreen.PROFILE)

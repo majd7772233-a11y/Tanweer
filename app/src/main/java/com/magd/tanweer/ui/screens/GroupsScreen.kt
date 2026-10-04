@@ -47,9 +47,11 @@ fun GroupsScreen(
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val chatStatus by viewModel.chatConnectionStatus.collectAsStateWithLifecycle()
+    val groupMembersState by viewModel.groupMembersState.collectAsStateWithLifecycle()
 
     var activeTab by remember { mutableStateOf(GroupsTab.MY_GROUPS) }
     var activeChatGroup by remember { mutableStateOf<GroupItem?>(null) }
+    var managingGroup by remember { mutableStateOf<GroupItem?>(null) }
     val chatMessages by viewModel.repository.getChatMessages(activeChatGroup?.id ?: "")
         .collectAsStateWithLifecycle(initialValue = emptyList())
     var chatInputText by remember { mutableStateOf("") }
@@ -419,6 +421,14 @@ fun GroupsScreen(
                                             onClick = { activeChatGroup = officialClassGroup },
                                             modifier = Modifier.weight(1f)
                                         )
+                                        GlassOutlinedButton(
+                                            text = "إدارة الأعضاء 👥",
+                                            onClick = {
+                                                managingGroup = officialClassGroup
+                                                viewModel.loadGroupMembers(officialClassGroup.id)
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
                                         if (!isSelected) {
                                             GlassOutlinedButton(
                                                 text = "التبديل كشعبة نشطة",
@@ -625,5 +635,193 @@ fun GroupsScreen(
                 }
             }
         }
+
+        // Group Members Management Dialog
+        managingGroup?.let { grp ->
+            GroupMembersManagementDialog(
+                group = grp,
+                membersResponse = groupMembersState,
+                onDismiss = { managingGroup = null },
+                onUpdateRole = { userId, newRole ->
+                    viewModel.updateGroupMemberRole(userId, newRole, grp.id) { success, msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onRemove = { userId, isBan ->
+                    viewModel.removeGroupMember(userId, isBan, grp.id) { success, msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onApproveJoin = { userId ->
+                    viewModel.approveGroupJoinRequest(userId, grp.id) { success, msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+        }
     }
+}
+
+// -------------------------------------------------------------
+// GROUP MEMBERS MANAGEMENT DIALOG
+// -------------------------------------------------------------
+@Composable
+fun GroupMembersManagementDialog(
+    group: GroupItem,
+    membersResponse: com.magd.tanweer.data.model.GroupMembersResponse?,
+    onDismiss: () -> Unit,
+    onUpdateRole: (userId: String, newRole: String) -> Unit,
+    onRemove: (userId: String, isBan: Boolean) -> Unit,
+    onApproveJoin: (userId: String) -> Unit
+) {
+    val members = membersResponse?.members ?: emptyList()
+    val canManage = membersResponse?.canManageMembers == true
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(group.icon ?: "👥", fontSize = 22.sp)
+                Column {
+                    Text(
+                        text = "إدارة أعضاء ${group.name}",
+                        color = CyanAccent,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
+                    Text(
+                        text = "${members.size} عضو مسجل في المجموعة",
+                        color = TextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        },
+        text = {
+            if (members.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("جاري جلب قائمة الأعضاء...", fontSize = 12.sp, color = TextSecondary)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(members, key = { it.userId }) { m ->
+                        val isPending = m.status == "PENDING"
+                        val isBanned = m.status == "BANNED"
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MidnightBackground)
+                                .border(1.dp, if (isPending) WarmAmber else GlassBorderSubtle, RoundedCornerShape(10.dp))
+                                .padding(10.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = m.fullName,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary
+                                        )
+                                        m.phoneNumber?.let {
+                                            Text(text = it, fontSize = 10.sp, color = TextMuted)
+                                        }
+                                    }
+
+                                    val roleLabel = when (m.memberRole) {
+                                        "ADMIN" -> "👑 مدير"
+                                        "TEACHER" -> "🎓 أستاذ"
+                                        "MODERATOR" -> "🛡️ مشرف"
+                                        else -> "👤 طالب"
+                                    }
+                                    GlassPill(
+                                        text = if (isPending) "طلب انضمام ⏳" else if (isBanned) "محظور 🚫" else roleLabel,
+                                        color = if (isPending) WarmAmber else if (isBanned) RubyRed else CyanAccent,
+                                        bgColor = if (isPending) AmberGlow else CyanGlow
+                                    )
+                                }
+
+                                if (canManage) {
+                                    HorizontalDivider(color = GlassBorderSubtle, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        if (isPending) {
+                                            Button(
+                                                onClick = { onApproveJoin(m.userId) },
+                                                modifier = Modifier.weight(1f).height(28.dp),
+                                                contentPadding = PaddingValues(0.dp),
+                                                shape = RoundedCornerShape(6.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+                                            ) {
+                                                Text("قبول الاعتماد ✅", fontSize = 10.sp, color = Color.White)
+                                            }
+                                        } else {
+                                            if (m.memberRole == "STUDENT") {
+                                                OutlinedButton(
+                                                    onClick = { onUpdateRole(m.userId, "MODERATOR") },
+                                                    modifier = Modifier.weight(1f).height(28.dp),
+                                                    contentPadding = PaddingValues(0.dp),
+                                                    shape = RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Text("ترقية لمشرف 🛡️", fontSize = 9.sp, color = CyanAccent)
+                                                }
+                                            } else if (m.memberRole == "MODERATOR") {
+                                                OutlinedButton(
+                                                    onClick = { onUpdateRole(m.userId, "STUDENT") },
+                                                    modifier = Modifier.weight(1f).height(28.dp),
+                                                    contentPadding = PaddingValues(0.dp),
+                                                    shape = RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Text("خفض لطالب 👤", fontSize = 9.sp, color = TextSecondary)
+                                                }
+                                            }
+
+                                            OutlinedButton(
+                                                onClick = { onRemove(m.userId, false) },
+                                                modifier = Modifier.weight(0.7f).height(28.dp),
+                                                contentPadding = PaddingValues(0.dp),
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Text("إزالة ✕", fontSize = 9.sp, color = RubyRed)
+                                            }
+
+                                            if (!isBanned) {
+                                                OutlinedButton(
+                                                    onClick = { onRemove(m.userId, true) },
+                                                    modifier = Modifier.weight(0.7f).height(28.dp),
+                                                    contentPadding = PaddingValues(0.dp),
+                                                    shape = RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Text("حظر 🚫", fontSize = 9.sp, color = RubyRed)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            GlassButton(text = "إغلاق", onClick = onDismiss)
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(18.dp)
+    )
 }

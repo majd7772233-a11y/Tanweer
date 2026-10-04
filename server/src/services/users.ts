@@ -2,6 +2,7 @@ import { Env, UserContext } from '../env';
 import { validateArabicFullName, isValidGradeSection } from '../lib/validation';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { getCurrentAcademicYearId } from '../lib/school';
+import { Role, normalizeRole } from '../lib/roles';
 
 export async function handleGetProfile(user: UserContext, env: Env): Promise<Response> {
   const contributions = await env.DB.prepare(
@@ -35,7 +36,7 @@ export async function handleGetProfile(user: UserContext, env: Env): Promise<Res
       gradeId: user.gradeId,
       gradeName: gradeNameMap[user.gradeId] || `الصف ${user.gradeId}`,
       sectionId: user.sectionId,
-      role: user.role,
+      role: normalizeRole(user.role),
       stats: {
         lessonsCount: contributions?.lessons_count || 0,
         homeworksCount: contributions?.homeworks_count || 0,
@@ -106,8 +107,8 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
 
   await env.DB.prepare(
     `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at)
-     VALUES (?, ?, 'MEMBER', 'ACTIVE', ?)`
-  ).bind(classGroupId, user.userId, now).run();
+     VALUES (?, ?, ?, 'ACTIVE', ?)`
+  ).bind(classGroupId, user.userId, Role.STUDENT, now).run();
 
   return jsonResponse({
     success: true,
@@ -119,7 +120,7 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
       gradeId: newGradeId,
       gradeName: gradeNameMap[newGradeId] || `الصف ${newGradeId}`,
       sectionId: newSectionId,
-      role: user.role,
+      role: normalizeRole(user.role),
       defaultGroupId: classGroupId,
     },
   });

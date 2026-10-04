@@ -210,7 +210,7 @@ class MockD1Database {
         rows = rows.filter((r) => r.group_id === groupId);
       }
 
-      if (normalized.includes('id = ?')) {
+      if (/\bid = \?/.test(normalized)) {
         const id = params[0];
         rows = rows.filter((r) => r.id === id);
       }
@@ -243,6 +243,11 @@ class MockD1Database {
             r.user_id === userId &&
             r.group_id === groupId
         );
+      }
+
+      if (normalized.includes('COUNT(*)') && normalized.includes('schedule_slots')) {
+        const count = this.tables.schedule_slots?.length || 0;
+        return [{ count }];
       }
 
       if (normalized.includes('WHERE grade_id = ? AND section_id = ?')) {
@@ -381,8 +386,8 @@ describe('End-to-End System Integration Flow', () => {
 
     // 4. Schedule permissions & CRUD
 
-    // 4A. A normal student MUST NOT be able to modify the official schedule.
-    const studentScheduleReq = new Request(
+    // 4A. Initial schedule setup: Any student can populate slots when the schedule is empty.
+    const initialScheduleReq = new Request(
       'http://localhost/api/v1/schedule/class_10_A/slots',
       {
         method: 'POST',
@@ -393,6 +398,29 @@ describe('End-to-End System Integration Flow', () => {
           subjectId: 'sub_math',
           startTime: '08:00',
           endTime: '08:45',
+        }),
+      }
+    );
+
+    const initialScheduleRes = await app.fetch(
+      initialScheduleReq,
+      env,
+      {} as any
+    );
+    expect(initialScheduleRes.status).toBe(200);
+
+    // 4B. Once the schedule exists, normal students CANNOT edit official slots directly.
+    const studentScheduleReq = new Request(
+      'http://localhost/api/v1/schedule/class_10_A/slots',
+      {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          dayOfWeek: 2,
+          slotOrder: 2,
+          subjectId: 'sub_math',
+          startTime: '09:00',
+          endTime: '09:45',
         }),
       }
     );
@@ -408,7 +436,7 @@ describe('End-to-End System Integration Flow', () => {
     const studentScheduleJson = (await studentScheduleRes.json()) as any;
     expect(studentScheduleJson.success).not.toBe(true);
 
-    // 4B. The same student can submit a schedule-change proposal.
+    // 4C. The student can submit a schedule-change proposal instead.
     const proposalReq = new Request(
       'http://localhost/api/v1/schedule/proposals',
       {
