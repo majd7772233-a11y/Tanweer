@@ -22,6 +22,26 @@ import {
   handleRejectRoleRequest,
   handleGetDashboardGroups,
   handleGetAuditLogs,
+  handleGetDashboardContents,
+  handleDeleteDashboardContent,
+  handleTogglePinDashboardContent,
+  handleGetDashboardHomeworks,
+  handleDeleteDashboardHomework,
+  handleGetDashboardExams,
+  handleDeleteDashboardExam,
+  handleGetDashboardEvents,
+  handleDeleteDashboardEvent,
+  handleGetDashboardIssues,
+  handleDeleteDashboardIssue,
+  handleGetDashboardSchedules,
+  handleResetDashboardSchedule,
+  handleGetDashboardDecisions,
+  handleApplyDashboardDecision,
+  handleRejectDashboardDecision,
+  handleGetDashboardChatMessages,
+  handleDeleteDashboardChatMessage,
+  handleGetDashboardCorrections,
+  handleExecuteSql,
 } from './services/dashboard';
 export { GroupChatDO } from './realtime/GroupChatDO';
 
@@ -158,6 +178,76 @@ export default {
       }
       if (url.pathname === '/api/dashboard/audit-logs' && request.method === 'GET') {
         return handleGetAuditLogs(request, env);
+      }
+      if (url.pathname === '/api/dashboard/contents' && request.method === 'GET') {
+        return handleGetDashboardContents(request, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/contents/') && url.pathname.endsWith('/pin') && request.method === 'POST') {
+        const contentId = url.pathname.split('/')[4];
+        return handleTogglePinDashboardContent(contentId, auth.ownerId, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/contents/') && request.method === 'DELETE') {
+        const contentId = url.pathname.split('/')[4];
+        return handleDeleteDashboardContent(contentId, auth.ownerId, env);
+      }
+      if (url.pathname === '/api/dashboard/homeworks' && request.method === 'GET') {
+        return handleGetDashboardHomeworks(request, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/homeworks/') && request.method === 'DELETE') {
+        const hwId = url.pathname.split('/')[4];
+        return handleDeleteDashboardHomework(hwId, auth.ownerId, env);
+      }
+      if (url.pathname === '/api/dashboard/exams' && request.method === 'GET') {
+        return handleGetDashboardExams(request, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/exams/') && request.method === 'DELETE') {
+        const examId = url.pathname.split('/')[4];
+        return handleDeleteDashboardExam(examId, auth.ownerId, env);
+      }
+      if (url.pathname === '/api/dashboard/events' && request.method === 'GET') {
+        return handleGetDashboardEvents(request, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/events/') && request.method === 'DELETE') {
+        const eventId = url.pathname.split('/')[4];
+        return handleDeleteDashboardEvent(eventId, auth.ownerId, env);
+      }
+      if (url.pathname === '/api/dashboard/issues' && request.method === 'GET') {
+        return handleGetDashboardIssues(request, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/issues/') && request.method === 'DELETE') {
+        const issueId = url.pathname.split('/')[4];
+        return handleDeleteDashboardIssue(issueId, auth.ownerId, env);
+      }
+      if (url.pathname === '/api/dashboard/schedules' && request.method === 'GET') {
+        return handleGetDashboardSchedules(env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/schedules/') && url.pathname.endsWith('/reset') && request.method === 'POST') {
+        const groupId = url.pathname.split('/')[4];
+        return handleResetDashboardSchedule(groupId, auth.ownerId, env);
+      }
+      if (url.pathname === '/api/dashboard/decisions' && request.method === 'GET') {
+        return handleGetDashboardDecisions(env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/decisions/') && url.pathname.endsWith('/apply') && request.method === 'POST') {
+        const decId = url.pathname.split('/')[4];
+        return handleApplyDashboardDecision(decId, auth.ownerId, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/decisions/') && url.pathname.endsWith('/reject') && request.method === 'POST') {
+        const decId = url.pathname.split('/')[4];
+        return handleRejectDashboardDecision(decId, auth.ownerId, env);
+      }
+      if (url.pathname === '/api/dashboard/chat-messages' && request.method === 'GET') {
+        return handleGetDashboardChatMessages(request, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/chat-messages/') && request.method === 'DELETE') {
+        const msgId = url.pathname.split('/')[4];
+        return handleDeleteDashboardChatMessage(msgId, auth.ownerId, env);
+      }
+      if (url.pathname === '/api/dashboard/corrections' && request.method === 'GET') {
+        return handleGetDashboardCorrections(env);
+      }
+      if (url.pathname === '/api/dashboard/sql' && request.method === 'POST') {
+        return handleExecuteSql(request, auth.ownerId, env);
       }
     }
 

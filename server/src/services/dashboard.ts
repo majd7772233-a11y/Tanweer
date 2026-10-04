@@ -11,18 +11,23 @@ import { generateId } from '../lib/ids';
 import { hashString } from '../lib/crypto';
 
 const OWNER_COOKIE_NAME = 'tanweer_owner_token';
-const DEFAULT_DEV_SECRET = 'tanweer-owner-secret-key-2026';
 
 /**
  * Extracts and verifies the owner authentication session from cookie or header.
  * The session is completely independent from Android client sessions.
+ * Returns unauthorized if TANWEER_OWNER_SECRET is unconfigured (no fallback defaults).
  */
 export async function verifyOwnerAuth(request: Request, env: Env): Promise<{ isOwner: boolean; ownerId: string }> {
-  const secretKey = (env as any).OWNER_SECRET_KEY || env.TANWEER_OWNER_SECRET || DEFAULT_DEV_SECRET;
+  const secretKey = env.TANWEER_OWNER_SECRET;
+  if (!secretKey || !secretKey.trim()) {
+    // If TANWEER_OWNER_SECRET is not configured in production, dashboard access is strictly disabled
+    return { isOwner: false, ownerId: '' };
+  }
+
   const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
 
   // 1. Direct Secret Header check (for API / script automation)
-  const headerSecret = request.headers.get('X-Owner-Secret') || request.headers.get('X-Owner-Secret-Key');
+  const headerSecret = request.headers.get('X-Owner-Secret');
   if (headerSecret && headerSecret === secretKey) {
     return { isOwner: true, ownerId: 'SYSTEM_OWNER' };
   }
@@ -35,7 +40,7 @@ export async function verifyOwnerAuth(request: Request, env: Env): Promise<{ isO
   } else {
     const cookieHeader = request.headers.get('Cookie');
     if (cookieHeader) {
-      const match = cookieHeader.match(/(?:^|;\s*)(?:tanweer_owner_token|tanweer_owner_session)=([^;]+)/);
+      const match = cookieHeader.match(/(?:^|;\s*)tanweer_owner_token=([^;]+)/);
       if (match) {
         token = decodeURIComponent(match[1]);
       }
@@ -82,7 +87,11 @@ export async function logRoleAudit(
  * Handles Owner Login via secret key.
  */
 export async function handleOwnerLogin(request: Request, env: Env): Promise<Response> {
-  const secretKey = env.TANWEER_OWNER_SECRET || DEFAULT_DEV_SECRET;
+  const secretKey = env.TANWEER_OWNER_SECRET;
+  if (!secretKey || !secretKey.trim()) {
+    return errorResponse('CONFIGURATION_ERROR', 'لوحة التحكم معطلة: مفتاح المالك TANWEER_OWNER_SECRET غير مهيأ في متغيرات البيئة', 500);
+  }
+
   const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
 
   let secret = '';
@@ -112,7 +121,7 @@ export async function handleOwnerLogin(request: Request, env: Env): Promise<Resp
     request.headers.get('CF-Connecting-IP') || 'local'
   );
 
-  const cookieHeader = `${OWNER_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`;
+  const cookieHeader = `${OWNER_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`;
 
   return new Response(JSON.stringify({ success: true, message: 'تم التحقق من هوية المالك بنجاح' }), {
     status: 200,
@@ -127,7 +136,7 @@ export async function handleOwnerLogin(request: Request, env: Env): Promise<Resp
  * Handles Owner Logout.
  */
 export async function handleOwnerLogout(): Promise<Response> {
-  const cookieHeader = `${OWNER_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  const cookieHeader = `${OWNER_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
   return new Response(JSON.stringify({ success: true, message: 'تم تسجيل الخروج بنجاح' }), {
     status: 200,
     headers: {
@@ -313,6 +322,10 @@ export async function handleChangeUserRole(
   }
 
   const newRole = normalizeRole(body.newRole);
+  if (newRole === Role.SYSTEM_OWNER) {
+    return errorResponse('FORBIDDEN', 'لا يمكن تعيين رتبة مالك المنظومة (SYSTEM_OWNER) عبر لوحة التحكم. المالك فريد ويتم تكوينه حصراً في متغيرات البيئة.', 403);
+  }
+
   const user = await env.DB.prepare(`SELECT id, full_name, role FROM users WHERE id = ?`).bind(userId).first<{
     id: string;
     full_name: string;
@@ -324,12 +337,24 @@ export async function handleChangeUserRole(
   }
 
   const oldRole = normalizeRole(user.role);
-  await env.DB.prepare(`UPDATE users SET role = ?, updated_at = ? WHERE id = ?`).bind(newRole, Date.now(), userId).run();
+  const now = Date.now();
 
-  if (newRole === Role.MODERATOR || newRole === Role.TEACHER || newRole === Role.ADMIN) {
-    await env.DB.prepare(
-      `UPDATE group_members SET role = ? WHERE user_id = ?`
-    ).bind(newRole, userId).run();
+  const bodyWithScope = body as { newRole?: string; reason?: string; scope?: string; groupId?: string };
+  if (bodyWithScope.groupId || bodyWithScope.scope === 'GROUP') {
+    // Group-scoped role update
+    if (bodyWithScope.groupId) {
+      await env.DB.prepare(
+        `UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?`
+      ).bind(newRole, bodyWithScope.groupId, userId).run();
+    }
+  } else {
+    // Global role update
+    await env.DB.prepare(`UPDATE users SET role = ?, updated_at = ? WHERE id = ?`).bind(newRole, now, userId).run();
+    if (newRole === Role.TEACHER || newRole === Role.ADMIN) {
+      await env.DB.prepare(
+        `UPDATE group_members SET role = ? WHERE user_id = ?`
+      ).bind(newRole, userId).run();
+    }
   }
 
   await logRoleAudit(
@@ -338,7 +363,7 @@ export async function handleChangeUserRole(
     actorId,
     'SYSTEM_OWNER',
     userId,
-    `تغيير رتبة المستخدم ${user.full_name} من ${ROLE_METADATA[oldRole].nameAr} إلى ${ROLE_METADATA[newRole].nameAr}. السبب: ${body.reason || 'إجراء إداري'}`,
+    `تغيير رتبة المستخدم ${user.full_name} من ${ROLE_METADATA[oldRole].nameAr} إلى ${ROLE_METADATA[newRole].nameAr}${bodyWithScope.groupId ? ` في المجموعة (${bodyWithScope.groupId})` : ' (عام)'}. السبب: ${body.reason || 'إجراء إداري'}`,
     request.headers.get('CF-Connecting-IP')
   );
 
@@ -348,6 +373,8 @@ export async function handleChangeUserRole(
     user: {
       id: userId,
       role: newRole,
+      scope: bodyWithScope.groupId ? 'GROUP' : 'GLOBAL',
+      groupId: bodyWithScope.groupId || null,
     },
   });
 }
@@ -509,32 +536,33 @@ export async function handleApproveRoleRequest(
   const now = Date.now();
   const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
 
-  // Generate 8-digit code in format: XXXX-XXXX (e.g. 7391-8426)
-  const part1 = Math.floor(1000 + Math.random() * 9000).toString();
-  const part2 = Math.floor(1000 + Math.random() * 9000).toString();
+  // Generate 8-digit cryptographically secure verification code: XXXX-XXXX (e.g. 7391-8426)
+  const randomBuffer = new Uint32Array(2);
+  crypto.getRandomValues(randomBuffer);
+  const part1 = (1000 + (randomBuffer[0] % 9000)).toString();
+  const part2 = (1000 + (randomBuffer[1] % 9000)).toString();
   const codeDisplay = `${part1}-${part2}`;
   const codeRaw = `${part1}${part2}`;
   const codeHash = await hashString(codeRaw, pepper);
   const codeId = generateId('code');
 
-  // Insert verification code record
+  // Insert verification code record storing only code_hash (no plain text in DB)
   await env.DB.prepare(
     `INSERT INTO role_verification_codes (id, request_id, user_id, role, code_hash, code_display, attempts, max_attempts, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, 5, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, NULL, 0, 5, ?, ?)`
   ).bind(
     codeId,
     requestId,
     req.user_id,
     targetRole,
     codeHash,
-    codeDisplay,
     expiresAt,
     now
   ).run();
 
   await env.DB.prepare(
     `UPDATE role_requests SET status = 'APPROVED', reviewed_by = ?, review_notes = ?, reviewed_at = ? WHERE id = ?`
-  ).bind(actorId, `تم اعتماد الطلب وتوليد رمز التحقق: ${codeDisplay}`, now, requestId).run();
+  ).bind(actorId, 'تم اعتماد الطلب وتوليد رمز تفعيل مشفر بنجاح', now, requestId).run();
 
   await logRoleAudit(
     env.DB,
@@ -666,6 +694,288 @@ export async function handleGetAuditLogs(request: Request, env: Env): Promise<Re
     success: true,
     logs: rows.results || [],
   });
+}
+
+/**
+ * God Mode: Returns all lessons / content items across the platform.
+ */
+export async function handleGetDashboardContents(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const search = url.searchParams.get('q') || '';
+  let query = `
+    SELECT c.id, c.group_id, c.subject_id, c.created_by, c.title, c.type, c.views_count, c.useful_count, c.is_pinned, c.created_at,
+           u.full_name as author_name, g.name as group_name
+    FROM contents c
+    LEFT JOIN users u ON c.created_by = u.id
+    LEFT JOIN groups g ON c.group_id = g.id
+  `;
+  const binds: any[] = [];
+  if (search) {
+    query += ` WHERE c.title LIKE ? OR u.full_name LIKE ?`;
+    binds.push(`%${search}%`, `%${search}%`);
+  }
+  query += ` ORDER BY c.created_at DESC LIMIT 100`;
+  const rows = await env.DB.prepare(query).bind(...binds).all();
+  return jsonResponse({ success: true, contents: rows.results || [] });
+}
+
+/**
+ * God Mode: Force deletes content.
+ */
+export async function handleDeleteDashboardContent(contentId: string, actorId: string, env: Env): Promise<Response> {
+  await env.DB.prepare(`DELETE FROM contents WHERE id = ?`).bind(contentId).run();
+  await env.DB.prepare(`DELETE FROM content_media WHERE content_id = ?`).bind(contentId).run();
+  await env.DB.prepare(`DELETE FROM content_corrections WHERE content_id = ?`).bind(contentId).run();
+  await logRoleAudit(env.DB, 'OWNER_DELETE_CONTENT', actorId, 'SYSTEM_OWNER', null, `حذف إداري شامل للدرس (${contentId}) من لوحة المالك`);
+  return jsonResponse({ success: true, message: 'تم حذف الدرس بنجاح' });
+}
+
+/**
+ * God Mode: Toggles pinned state of content.
+ */
+export async function handleTogglePinDashboardContent(contentId: string, actorId: string, env: Env): Promise<Response> {
+  const c = await env.DB.prepare(`SELECT is_pinned FROM contents WHERE id = ?`).bind(contentId).first<{ is_pinned: number }>();
+  if (!c) return errorResponse('NOT_FOUND', 'الدرس غير موجود', 404);
+  const newPinned = c.is_pinned ? 0 : 1;
+  await env.DB.prepare(`UPDATE contents SET is_pinned = ? WHERE id = ?`).bind(newPinned, contentId).run();
+  await logRoleAudit(env.DB, 'OWNER_PIN_CONTENT', actorId, 'SYSTEM_OWNER', null, `تعديل تثبيت الدرس (${contentId}) إلى: ${newPinned}`);
+  return jsonResponse({ success: true, isPinned: newPinned });
+}
+
+/**
+ * God Mode: Returns all homeworks across groups.
+ */
+export async function handleGetDashboardHomeworks(request: Request, env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(`
+    SELECT h.*, u.full_name as author_name, g.name as group_name
+    FROM homeworks h
+    LEFT JOIN users u ON h.created_by = u.id
+    LEFT JOIN groups g ON h.group_id = g.id
+    ORDER BY h.created_at DESC LIMIT 100
+  `).all();
+  return jsonResponse({ success: true, homeworks: rows.results || [] });
+}
+
+/**
+ * God Mode: Deletes a homework.
+ */
+export async function handleDeleteDashboardHomework(hwId: string, actorId: string, env: Env): Promise<Response> {
+  await env.DB.prepare(`DELETE FROM homeworks WHERE id = ?`).bind(hwId).run();
+  await env.DB.prepare(`DELETE FROM user_homework_completions WHERE homework_id = ?`).bind(hwId).run();
+  await logRoleAudit(env.DB, 'OWNER_DELETE_HOMEWORK', actorId, 'SYSTEM_OWNER', null, `حذف الواجب (${hwId}) من لوحة المالك`);
+  return jsonResponse({ success: true, message: 'تم حذف الواجب بنجاح' });
+}
+
+/**
+ * God Mode: Returns all exams across groups.
+ */
+export async function handleGetDashboardExams(request: Request, env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(`
+    SELECT e.*, u.full_name as author_name, g.name as group_name
+    FROM exams e
+    LEFT JOIN users u ON e.created_by = u.id
+    LEFT JOIN groups g ON e.group_id = g.id
+    ORDER BY e.created_at DESC LIMIT 100
+  `).all();
+  return jsonResponse({ success: true, exams: rows.results || [] });
+}
+
+/**
+ * God Mode: Deletes an exam.
+ */
+export async function handleDeleteDashboardExam(examId: string, actorId: string, env: Env): Promise<Response> {
+  await env.DB.prepare(`DELETE FROM exams WHERE id = ?`).bind(examId).run();
+  await logRoleAudit(env.DB, 'OWNER_DELETE_EXAM', actorId, 'SYSTEM_OWNER', null, `حذف الاختبار (${examId}) من لوحة المالك`);
+  return jsonResponse({ success: true, message: 'تم حذف الاختبار بنجاح' });
+}
+
+/**
+ * God Mode: Returns all events across groups.
+ */
+export async function handleGetDashboardEvents(request: Request, env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(`
+    SELECT ev.*, u.full_name as author_name, g.name as group_name
+    FROM events ev
+    LEFT JOIN users u ON ev.created_by = u.id
+    LEFT JOIN groups g ON ev.group_id = g.id
+    ORDER BY ev.created_at DESC LIMIT 100
+  `).all();
+  return jsonResponse({ success: true, events: rows.results || [] });
+}
+
+/**
+ * God Mode: Deletes an event.
+ */
+export async function handleDeleteDashboardEvent(eventId: string, actorId: string, env: Env): Promise<Response> {
+  await env.DB.prepare(`DELETE FROM events WHERE id = ?`).bind(eventId).run();
+  await logRoleAudit(env.DB, 'OWNER_DELETE_EVENT', actorId, 'SYSTEM_OWNER', null, `حذف الفعالية (${eventId}) من لوحة المالك`);
+  return jsonResponse({ success: true, message: 'تم حذف الفعالية بنجاح' });
+}
+
+/**
+ * God Mode: Returns all issues / Q&A.
+ */
+export async function handleGetDashboardIssues(request: Request, env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(`
+    SELECT i.*, u.full_name as author_name, g.name as group_name,
+           (SELECT COUNT(*) FROM issue_comments WHERE issue_id = i.id) as comments_count
+    FROM issues i
+    LEFT JOIN users u ON i.created_by = u.id
+    LEFT JOIN groups g ON i.group_id = g.id
+    ORDER BY i.created_at DESC LIMIT 100
+  `).all();
+  return jsonResponse({ success: true, issues: rows.results || [] });
+}
+
+/**
+ * God Mode: Deletes an issue and its comments.
+ */
+export async function handleDeleteDashboardIssue(issueId: string, actorId: string, env: Env): Promise<Response> {
+  await env.DB.prepare(`DELETE FROM issues WHERE id = ?`).bind(issueId).run();
+  await env.DB.prepare(`DELETE FROM issue_comments WHERE issue_id = ?`).bind(issueId).run();
+  await logRoleAudit(env.DB, 'OWNER_DELETE_ISSUE', actorId, 'SYSTEM_OWNER', null, `حذف السؤال (${issueId}) من لوحة المالك`);
+  return jsonResponse({ success: true, message: 'تم حذف السؤال بنجاح' });
+}
+
+/**
+ * God Mode: Returns active schedules across groups.
+ */
+export async function handleGetDashboardSchedules(env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(`
+    SELECT sv.id, sv.group_id, sv.version_number, sv.valid_from, sv.is_active, sv.created_at, sv.created_by,
+           g.name as group_name, u.full_name as author_name,
+           (SELECT COUNT(*) FROM schedule_slots WHERE version_id = sv.id) as slots_count
+    FROM schedule_versions sv
+    LEFT JOIN groups g ON sv.group_id = g.id
+    LEFT JOIN users u ON sv.created_by = u.id
+    WHERE sv.is_active = 1
+    ORDER BY sv.group_id ASC
+  `).all();
+  return jsonResponse({ success: true, schedules: rows.results || [] });
+}
+
+/**
+ * God Mode: Resets / purges a schedule for a group.
+ */
+export async function handleResetDashboardSchedule(groupId: string, actorId: string, env: Env): Promise<Response> {
+  const versions = await env.DB.prepare(`SELECT id FROM schedule_versions WHERE group_id = ?`).bind(groupId).all<{ id: string }>();
+  for (const v of versions.results || []) {
+    await env.DB.prepare(`DELETE FROM schedule_slots WHERE version_id = ?`).bind(v.id).run();
+  }
+  await env.DB.prepare(`DELETE FROM schedule_versions WHERE group_id = ?`).bind(groupId).run();
+  await env.DB.prepare(`DELETE FROM schedule_proposals WHERE group_id = ?`).bind(groupId).run();
+  await logRoleAudit(env.DB, 'OWNER_RESET_SCHEDULE', actorId, 'SYSTEM_OWNER', null, `تصفير وإعادة تعيين جدول المجموعة (${groupId}) بالكامل`);
+  return jsonResponse({ success: true, message: 'تمت إعادة تعيين جدول الشعبة بنجاح' });
+}
+
+/**
+ * God Mode: Returns community decisions across groups.
+ */
+export async function handleGetDashboardDecisions(env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(`
+    SELECT cd.*, g.name as group_name, u.full_name as creator_name
+    FROM community_decisions cd
+    LEFT JOIN groups g ON cd.group_id = g.id
+    LEFT JOIN users u ON cd.created_by = u.id
+    ORDER BY cd.created_at DESC LIMIT 100
+  `).all();
+  return jsonResponse({ success: true, decisions: rows.results || [] });
+}
+
+/**
+ * God Mode: Force applies a community decision.
+ */
+export async function handleApplyDashboardDecision(decisionId: string, actorId: string, env: Env): Promise<Response> {
+  await env.DB.prepare(`UPDATE community_decisions SET status = 'APPLIED', applied_at = ? WHERE id = ?`).bind(Date.now(), decisionId).run();
+  await logRoleAudit(env.DB, 'OWNER_APPLY_DECISION', actorId, 'SYSTEM_OWNER', null, `تنفيذ وتطبيق القرار الجماعي (${decisionId}) يدوياً من لوحة المالك`);
+  return jsonResponse({ success: true, message: 'تم تطبيق القرار بنجاح' });
+}
+
+/**
+ * God Mode: Force rejects a community decision.
+ */
+export async function handleRejectDashboardDecision(decisionId: string, actorId: string, env: Env): Promise<Response> {
+  await env.DB.prepare(`UPDATE community_decisions SET status = 'REJECTED' WHERE id = ?`).bind(decisionId).run();
+  await logRoleAudit(env.DB, 'OWNER_REJECT_DECISION', actorId, 'SYSTEM_OWNER', null, `رفض وإغلاق القرار الجماعي (${decisionId}) يدوياً من لوحة المالك`);
+  return jsonResponse({ success: true, message: 'تم رفض القرار بنجاح' });
+}
+
+/**
+ * God Mode: Returns recent chat messages across all groups.
+ */
+export async function handleGetDashboardChatMessages(request: Request, env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(`
+    SELECT cm.id, cm.group_id, cm.user_id, cm.content, cm.created_at,
+           u.full_name, u.phone_number, u.role, g.name as group_name
+    FROM chat_messages cm
+    LEFT JOIN users u ON cm.user_id = u.id
+    LEFT JOIN groups g ON cm.group_id = g.id
+    ORDER BY cm.created_at DESC LIMIT 100
+  `).all();
+  return jsonResponse({ success: true, messages: rows.results || [] });
+}
+
+/**
+ * God Mode: Deletes a chat message.
+ */
+export async function handleDeleteDashboardChatMessage(msgId: string, actorId: string, env: Env): Promise<Response> {
+  await env.DB.prepare(`DELETE FROM chat_messages WHERE id = ?`).bind(msgId).run();
+  await logRoleAudit(env.DB, 'OWNER_DELETE_CHAT_MSG', actorId, 'SYSTEM_OWNER', null, `حذف رسالة الشات (${msgId}) من لوحة المالك`);
+  return jsonResponse({ success: true, message: 'تم حذف الرسالة بنجاح' });
+}
+
+/**
+ * God Mode: Returns content corrections.
+ */
+export async function handleGetDashboardCorrections(env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(`
+    SELECT cc.*, c.title as content_title, u.full_name as author_name, g.name as group_name
+    FROM content_corrections cc
+    LEFT JOIN contents c ON cc.content_id = c.id
+    LEFT JOIN users u ON cc.user_id = u.id
+    LEFT JOIN groups g ON cc.group_id = g.id
+    ORDER BY cc.created_at DESC LIMIT 100
+  `).all();
+  return jsonResponse({ success: true, corrections: rows.results || [] });
+}
+
+/**
+ * God Mode: Direct SQL console executor for the Owner.
+ */
+export async function handleExecuteSql(request: Request, actorId: string, env: Env): Promise<Response> {
+  const body = await request.json() as { query?: string };
+  if (!body.query || !body.query.trim()) {
+    return errorResponse('INVALID_INPUT', 'يرجى كتابة استعلام SQL للتنفيذ');
+  }
+
+  const query = body.query.trim();
+
+  try {
+    const isSelect = /^SELECT\s+/i.test(query) || /^PRAGMA\s+/i.test(query);
+    if (isSelect) {
+      const results = await env.DB.prepare(query).all();
+      return jsonResponse({
+        success: true,
+        type: 'SELECT',
+        rowCount: results.results?.length || 0,
+        data: results.results || [],
+      });
+    } else {
+      const res = await env.DB.prepare(query).run();
+      await logRoleAudit(env.DB, 'OWNER_SQL_EXECUTE', actorId, 'SYSTEM_OWNER', null, `تنفيذ استعلام SQL مباشر: ${query.slice(0, 100)}`);
+      return jsonResponse({
+        success: true,
+        type: 'MUTATION',
+        meta: res.meta,
+        message: 'تم تنفيذ الاستعلام بنجاح',
+      });
+    }
+  } catch (err: any) {
+    return jsonResponse({
+      success: false,
+      error: err.message || 'خطأ أثناء تنفيذ استعلام SQL',
+    }, 400);
+  }
 }
 
 /**
@@ -1159,11 +1469,68 @@ export function renderDashboardHtml(): Response {
       color: white;
       font-size: 0.9rem;
     }
-    .modal-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 0.75rem;
-      margin-top: 1.5rem;
+    .menu-toggle-btn {
+      display: none;
+      background: var(--cyan-glow);
+      border: 1px solid var(--border-accent);
+      color: var(--cyan);
+      font-size: 1.2rem;
+      padding: 0.4rem 0.75rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    @media (max-width: 900px) {
+      body {
+        flex-direction: column;
+      }
+      .sidebar {
+        width: 100%;
+        height: auto;
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        border-left: none;
+        border-bottom: 1px solid var(--border);
+      }
+      .brand {
+        padding: 0.85rem 1.25rem;
+        justify-content: space-between;
+      }
+      .menu-toggle-btn {
+        display: block;
+      }
+      .nav-links {
+        display: none;
+        max-height: 55vh;
+        overflow-y: auto;
+      }
+      .nav-links.mobile-open {
+        display: flex;
+      }
+      .owner-info {
+        display: none;
+      }
+      .owner-info.mobile-open {
+        display: flex;
+      }
+      .main-content {
+        height: auto;
+        overflow-y: visible;
+      }
+      .top-bar {
+        padding: 1rem;
+      }
+      .page-body {
+        padding: 1rem;
+      }
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    @media (max-width: 500px) {
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
     }
     .toast {
       position: fixed;
@@ -1185,14 +1552,17 @@ export function renderDashboardHtml(): Response {
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-icon">✨</div>
-      <div>
-        <div class="brand-title">TANWEER CONTROL</div>
-        <div class="brand-sub">غرفة التحكم المركزية</div>
+      <div style="display:flex; align-items:center; gap:0.75rem;">
+        <div class="brand-icon">✨</div>
+        <div>
+          <div class="brand-title">TANWEER CONTROL</div>
+          <div class="brand-sub">غرفة التحكم المركزية (God Mode)</div>
+        </div>
       </div>
+      <button class="menu-toggle-btn" onclick="toggleMobileMenu()">☰</button>
     </div>
 
-    <nav class="nav-links">
+    <nav class="nav-links" id="dashboardNav">
       <div class="nav-item active" onclick="switchTab('overview')">
         <span>📊</span> <span>نظرة عامة والمنظومة</span>
       </div>
@@ -1202,30 +1572,42 @@ export function renderDashboardHtml(): Response {
       <div class="nav-item" onclick="switchTab('roles')">
         <span>👑</span> <span>Roles (عرض الرتب)</span>
       </div>
-      <div class="nav-item" onclick="switchTab('teachers')">
-        <span>🎓</span> <span>Teachers (الأساتذة)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('moderators')">
-        <span>🛡️</span> <span>Moderators (المشرفون)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('admins')">
-        <span>👑</span> <span>Administrators (المدراء)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('groups')">
-        <span>🏫</span> <span>Groups (الشعب والنوادي)</span>
-      </div>
       <div class="nav-item" onclick="switchTab('requests')">
         <span>📋</span> <span>Role Requests (طلبات الترقية)</span>
         <span class="nav-badge" id="requestsBadge" style="display:none;">0</span>
       </div>
-      <div class="nav-item" onclick="switchTab('academic')">
-        <span>📚</span> <span>المحتوى والواجبات والاختبارات</span>
+      <div class="nav-item" onclick="switchTab('contents')">
+        <span>📚</span> <span>Lessons & Content (الدروس)</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('homeworks')">
+        <span>📝</span> <span>Homework & Exams (الواجبات)</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('issues')">
+        <span>❓</span> <span>Issues & Q&A (الاستفسارات)</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('schedules')">
+        <span>📅</span> <span>Schedules (جداول الحصص)</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('decisions')">
+        <span>🗳️</span> <span>Governance & Votes (القرارات)</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('chat')">
+        <span>💬</span> <span>Live Chat (المحادثات الحية)</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('corrections')">
+        <span>✏️</span> <span>Corrections (طلبات التصحيح)</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('groups')">
+        <span>🏫</span> <span>Groups (الشعب والنوادي)</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('sql')">
+        <span>🛠️</span> <span>SQL Studio (استوديو البيانات)</span>
       </div>
       <div class="nav-item" onclick="switchTab('audit')">
         <span>📜</span> <span>Audit Log (سجل العمليات)</span>
       </div>
       <div class="nav-item" onclick="switchTab('system')">
-        <span>⚙️</span> <span>Security & System (النظام)</span>
+        <span>⚙️</span> <span>Security & System (الأمان)</span>
       </div>
     </nav>
 
@@ -1519,15 +1901,230 @@ export function renderDashboardHtml(): Response {
         </div>
       </section>
 
-      <!-- Academic Content Tab -->
-      <section id="tab-academic" style="display:none;">
+      <!-- Contents Tab -->
+      <section id="tab-contents" style="display:none;">
         <div class="section-card">
-          <h2 style="font-size:1.1rem; font-weight:800; margin-bottom:1rem;">📚 تفاصيل النشاط الأكاديمي</h2>
-          <div class="stats-grid">
-            <div class="stat-card"><div class="stat-num" id="acadLessons">-</div><div class="stat-label">دروس موثقة بالسبورة</div></div>
-            <div class="stat-card"><div class="stat-num" id="acadHomeworks">-</div><div class="stat-label">واجبات مسجلة ومكلفة</div></div>
-            <div class="stat-card"><div class="stat-num" id="acadExams">-</div><div class="stat-label">مواعيد ومناهج اختبارات</div></div>
-            <div class="stat-card"><div class="stat-num" id="acadEvents">-</div><div class="stat-label">أنشطة وفعاليات مدرسية</div></div>
+          <div class="section-header">
+            <h2 style="font-size:1.1rem; font-weight:800;">📚 إدارة الدروس والمحتوى التعليمي (God Mode)</h2>
+            <div class="filter-bar">
+              <input type="text" class="search-input" id="contentSearch" placeholder="بحث بعنوان الدرس أو الكاتب..." oninput="loadContents()">
+              <button class="action-btn" onclick="loadContents()">تحديث 🔄</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>عنوان الدرس</th>
+                  <th>الشعبة</th>
+                  <th>الكاتب</th>
+                  <th>المشاهدات</th>
+                  <th>التثبيت</th>
+                  <th>التاريخ</th>
+                  <th>الإجراءات المباشرة</th>
+                </tr>
+              </thead>
+              <tbody id="contentsTableBody">
+                <tr><td colspan="7" style="text-align:center;">جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Homework & Exams Tab -->
+      <section id="tab-homeworks" style="display:none;">
+        <div class="section-card">
+          <div class="section-header">
+            <h2 style="font-size:1.1rem; font-weight:800;">📝 إدارة الواجبات المدرسية والاختبارات</h2>
+            <button class="action-btn" onclick="loadHomeworks(); loadExams();">تحديث 🔄</button>
+          </div>
+          <h3 style="font-size:0.95rem; color:var(--cyan); margin:1rem 0 0.5rem;">الواجبات الحالية:</h3>
+          <div style="overflow-x:auto; margin-bottom:1.5rem;">
+            <table>
+              <thead>
+                <tr>
+                  <th>عنوان الواجب</th>
+                  <th>المادة</th>
+                  <th>الشعبة</th>
+                  <th>تاريخ الاستحقاق</th>
+                  <th>الإجراء</th>
+                </tr>
+              </thead>
+              <tbody id="homeworksTableBody">
+                <tr><td colspan="5" style="text-align:center;">جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3 style="font-size:0.95rem; color:var(--ruby); margin:1rem 0 0.5rem;">الاختبارات المجدولة:</h3>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>عنوان الاختبار</th>
+                  <th>المادة</th>
+                  <th>الشعبة</th>
+                  <th>تاريخ الاختبار</th>
+                  <th>الإجراء</th>
+                </tr>
+              </thead>
+              <tbody id="examsTableBody">
+                <tr><td colspan="5" style="text-align:center;">جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Issues / Q&A Tab -->
+      <section id="tab-issues" style="display:none;">
+        <div class="section-card">
+          <div class="section-header">
+            <h2 style="font-size:1.1rem; font-weight:800;">❓ بنك الأسئلة والاستفسارات (Q&A)</h2>
+            <button class="action-btn" onclick="loadIssues()">تحديث 🔄</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>عنوان السؤال</th>
+                  <th>الشعبة</th>
+                  <th>السائل</th>
+                  <th>الردود</th>
+                  <th>الحالة</th>
+                  <th>التاريخ</th>
+                  <th>الإجراء</th>
+                </tr>
+              </thead>
+              <tbody id="issuesTableBody">
+                <tr><td colspan="7" style="text-align:center;">جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Schedules Tab -->
+      <section id="tab-schedules" style="display:none;">
+        <div class="section-card">
+          <div class="section-header">
+            <h2 style="font-size:1.1rem; font-weight:800;">📅 الجداول المعتمدة وتصفير الحصص</h2>
+            <button class="action-btn" onclick="loadSchedules()">تحديث 🔄</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>الشعبة</th>
+                  <th>النسخة</th>
+                  <th>عدد الحصص</th>
+                  <th>المنشئ</th>
+                  <th>ساري من</th>
+                  <th>الإجراءات</th>
+                </tr>
+              </thead>
+              <tbody id="schedulesTableBody">
+                <tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Decisions & Governance Tab -->
+      <section id="tab-decisions" style="display:none;">
+        <div class="section-card">
+          <div class="section-header">
+            <h2 style="font-size:1.1rem; font-weight:800;">🗳️ القرارات الجماعية والتصويتات (Governance Engine)</h2>
+            <button class="action-btn" onclick="loadDecisions()">تحديث 🔄</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>نوع القرار</th>
+                  <th>العنوان</th>
+                  <th>الشعبة</th>
+                  <th>الأصوات (موافق/معارض)</th>
+                  <th>الحالة</th>
+                  <th>الإجراء الإداري المباشر</th>
+                </tr>
+              </thead>
+              <tbody id="decisionsTableBody">
+                <tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Live Chat Messages Tab -->
+      <section id="tab-chat" style="display:none;">
+        <div class="section-card">
+          <div class="section-header">
+            <h2 style="font-size:1.1rem; font-weight:800;">💬 المحادثات المباشرة للشعب والنوادي</h2>
+            <button class="action-btn" onclick="loadChatMessages()">تحديث 🔄</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>المرسل</th>
+                  <th>الشعبة</th>
+                  <th>الرسالة</th>
+                  <th>التوقيت</th>
+                  <th>الإجراء</th>
+                </tr>
+              </thead>
+              <tbody id="chatTableBody">
+                <tr><td colspan="5" style="text-align:center;">جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Corrections Tab -->
+      <section id="tab-corrections" style="display:none;">
+        <div class="section-card">
+          <div class="section-header">
+            <h2 style="font-size:1.1rem; font-weight:800;">✏️ طلبات تصحيح المحتوى والدروس</h2>
+            <button class="action-btn" onclick="loadCorrections()">تحديث 🔄</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>الدرس المستهدف</th>
+                  <th>الحقل المصوب</th>
+                  <th>القيمة المقترحة</th>
+                  <th>المبرر</th>
+                  <th>مقدم الطلب</th>
+                  <th>الحالة</th>
+                </tr>
+              </thead>
+              <tbody id="correctionsTableBody">
+                <tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- SQL Studio Tab -->
+      <section id="tab-sql" style="display:none;">
+        <div class="section-card">
+          <h2 style="font-size:1.1rem; font-weight:800; color:var(--cyan); margin-bottom:0.75rem;">🛠️ استوديو SQL المباشر لقاعدة البيانات (D1 Studio)</h2>
+          <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:1rem;">تنفيذ استعلامات SQL حرة مباشرة على قاعدة بيانات تنوير D1 مع تسجيل رقابي كامل.</p>
+          <div style="display:flex; flex-direction:column; gap:0.75rem; margin-bottom:1rem;">
+            <textarea id="sqlQuery" style="width:100%; height:110px; background:rgba(3,7,18,0.8); border:1px solid var(--border-accent); border-radius:10px; padding:0.75rem; color:#A5F3FC; font-family:monospace; font-size:0.9rem;" placeholder="SELECT * FROM users LIMIT 10;"></textarea>
+            <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
+              <button class="action-btn" onclick="document.getElementById('sqlQuery').value='SELECT name, tbl_name FROM sqlite_master WHERE type=\\'table\\';'">عرض الجداول 📋</button>
+              <button class="action-btn approve" onclick="runSqlConsole()">تنفيذ الاستعلام ⚡</button>
+            </div>
+          </div>
+          <div id="sqlResult" style="background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:10px; padding:1rem; font-family:monospace; font-size:0.85rem; max-height:400px; overflow:auto;">
+            النتائج ستظهر هنا...
           </div>
         </div>
       </section>

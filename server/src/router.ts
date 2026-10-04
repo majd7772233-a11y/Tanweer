@@ -44,6 +44,7 @@ import {
   handleApproveCorrection,
   handleRejectCorrection,
   handleGetCommunityDecisions,
+  handleCreateCommunityDecision,
   handleVoteCommunityDecision,
   handleGetTeacherDashboardData,
   handleGetModeratorDashboardData,
@@ -367,9 +368,14 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
 
   // Community Decisions & Voting Engine
-  if (path.startsWith('/api/v1/groups/') && path.endsWith('/decisions') && method === 'GET') {
+  if (path.startsWith('/api/v1/groups/') && path.endsWith('/decisions')) {
     const groupId = path.split('/')[4];
-    return handleGetCommunityDecisions(groupId, user, env);
+    if (method === 'GET') {
+      return handleGetCommunityDecisions(groupId, user, env);
+    }
+    if (method === 'POST') {
+      return handleCreateCommunityDecision(groupId, user, request, env);
+    }
   }
   if (path.startsWith('/api/v1/decisions/') && path.endsWith('/vote') && method === 'POST') {
     const decisionId = path.split('/')[4];

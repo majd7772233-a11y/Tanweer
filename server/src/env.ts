@@ -5,7 +5,6 @@ export interface Env {
   SESSION_PEPPER?: string;
   PASSWORD_PEPPER?: string;
   TANWEER_OWNER_SECRET?: string;
-  OWNER_SESSION_SECRET?: string;
   ENVIRONMENT?: string;
 }
 

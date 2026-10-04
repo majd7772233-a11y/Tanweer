@@ -183,6 +183,174 @@ export async function handleRejectCorrection(
  * 2. Unified Community Decisions Engine (التصويت والقرارات الموحدة)
  * -------------------------------------------------------------
  */
+
+/**
+ * Automatically applies the outcome of a passed community decision across the database.
+ */
+export async function applyDecisionExecution(
+  decisionId: string,
+  requestType: string,
+  targetId: string,
+  groupId: string,
+  actorId: string,
+  env: Env
+): Promise<{ success: boolean; message: string }> {
+  const now = Date.now();
+  const normType = requestType.toUpperCase();
+
+  try {
+    if (normType === 'DELETION' || normType === 'CONTENT_DELETION') {
+      await env.DB.prepare(`DELETE FROM content_media WHERE content_id = ?`).bind(targetId).run();
+      await env.DB.prepare(`DELETE FROM content_corrections WHERE content_id = ?`).bind(targetId).run();
+      await env.DB.prepare(`DELETE FROM contents WHERE id = ?`).bind(targetId).run();
+      await env.DB.prepare(`DELETE FROM homeworks WHERE id = ?`).bind(targetId).run();
+      await env.DB.prepare(`DELETE FROM exams WHERE id = ?`).bind(targetId).run();
+      await env.DB.prepare(`DELETE FROM issues WHERE id = ?`).bind(targetId).run();
+    } else if (normType === 'CORRECTION') {
+      const corr = await env.DB.prepare(
+        `SELECT * FROM content_corrections WHERE id = ?`
+      ).bind(targetId).first<{
+        content_id: string;
+        field_name: string;
+        proposed_value: string;
+      }>();
+      if (corr) {
+        if (corr.field_name === 'TITLE') {
+          await env.DB.prepare(`UPDATE contents SET title = ?, updated_at = ? WHERE id = ?`).bind(corr.proposed_value, now, corr.content_id).run();
+        } else if (corr.field_name === 'DESCRIPTION') {
+          await env.DB.prepare(`UPDATE contents SET description = ?, updated_at = ? WHERE id = ?`).bind(corr.proposed_value, now, corr.content_id).run();
+        }
+        await env.DB.prepare(
+          `UPDATE content_corrections SET status = 'APPROVED', reviewed_by = 'COMMUNITY_CONSENSUS', reviewed_at = ? WHERE id = ?`
+        ).bind(now, targetId).run();
+      }
+    } else if (normType === 'SCHEDULE' || normType === 'SCHEDULE_CHANGE') {
+      const prop = await env.DB.prepare(
+        `SELECT * FROM schedule_proposals WHERE id = ?`
+      ).bind(targetId).first<{
+        group_id: string;
+        day_of_week: number;
+        slot_order: number;
+        new_subject_id: string;
+      }>();
+      if (prop) {
+        const activeVer = await env.DB.prepare(
+          `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
+        ).bind(prop.group_id).first<{ id: string; version_number: number }>();
+        if (activeVer) {
+          await env.DB.prepare(
+            `UPDATE schedule_slots SET subject_id = ? WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
+          ).bind(prop.new_subject_id, activeVer.id, prop.day_of_week, prop.slot_order).run();
+          await env.DB.prepare(
+            `UPDATE schedule_proposals SET status = 'ACCEPTED', reviewed_by = 'COMMUNITY_CONSENSUS', reviewed_at = ? WHERE id = ?`
+          ).bind(now, targetId).run();
+        }
+      }
+    } else if (normType === 'VERIFICATION' || normType === 'OFFICIAL_VERIFICATION') {
+      await env.DB.prepare(
+        `UPDATE contents SET is_verified = 1, verified_by = 'COMMUNITY_CONSENSUS', updated_at = ? WHERE id = ?`
+      ).bind(now, targetId).run();
+    } else if (normType === 'PIN_CONTENT') {
+      await env.DB.prepare(
+        `UPDATE contents SET is_pinned = 1, updated_at = ? WHERE id = ?`
+      ).bind(now, targetId).run();
+    }
+
+    await env.DB.prepare(
+      `UPDATE community_decisions SET status = 'APPLIED', applied_at = ?, applied_by = ? WHERE id = ?`
+    ).bind(now, actorId || 'COMMUNITY_CONSENSUS', decisionId).run();
+
+    return { success: true, message: 'تم تطبيق القرار الجماعي بنجاح' };
+  } catch (err: any) {
+    console.error('Failed to execute decision:', err);
+    return { success: false, message: err?.message || 'فشل تطبيق القرار الجماعي' };
+  }
+}
+
+/**
+ * Creates a new community decision proposal with exact eligible voters snapshot.
+ */
+export async function handleCreateCommunityDecision(
+  groupId: string,
+  user: UserContext,
+  request: Request,
+  env: Env
+): Promise<Response> {
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
+
+  const body = await request.json() as {
+    requestType?: string; // 'DELETION', 'CORRECTION', 'SCHEDULE', 'VERIFICATION', 'PIN_CONTENT'
+    targetId?: string;
+    title?: string;
+    description?: string;
+    thresholdPercent?: number;
+    expiresInHours?: number;
+  };
+
+  if (!body.requestType || !body.targetId || !body.title) {
+    return errorResponse('INVALID_INPUT', 'يرجى تحديد نوع القرار، المعرّف المستهدف وعنوان القرار');
+  }
+
+  // Calculate exact total eligible voters in this group right now
+  const eligibleMembers = await env.DB.prepare(
+    `SELECT COUNT(*) as count FROM group_members WHERE group_id = ? AND status = 'ACTIVE' AND role != 'BANNED'`
+  ).bind(groupId).first<{ count: number }>();
+
+  const totalEligible = Math.max(1, eligibleMembers?.count || 1);
+  const threshold = Math.min(100, Math.max(50, body.thresholdPercent || 60)); // default 60% quorum
+  const decisionId = generateId('dec');
+  const now = Date.now();
+  const expiresAt = now + (body.expiresInHours || 48) * 3600 * 1000; // default 48h
+
+  await env.DB.prepare(
+    `INSERT INTO community_decisions (
+       id, group_id, request_type, target_id, title, description,
+       requested_by, requester_name, total_eligible_voters, threshold_percent,
+       votes_for, votes_against, status, expires_at, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'PENDING', ?, ?)`
+  ).bind(
+    decisionId,
+    groupId,
+    body.requestType.toUpperCase(),
+    body.targetId,
+    body.title.trim(),
+    body.description?.trim() || null,
+    user.userId,
+    user.fullName,
+    totalEligible,
+    threshold,
+    expiresAt,
+    now
+  ).run();
+
+  // Requester votes FOR automatically
+  await env.DB.prepare(
+    `INSERT INTO community_votes (decision_id, user_id, vote_choice, created_at)
+     VALUES (?, ?, 1, ?)`
+  ).bind(decisionId, user.userId, now).run();
+
+  // If only 1 voter, auto-apply immediately
+  if (totalEligible <= 1) {
+    await applyDecisionExecution(decisionId, body.requestType.toUpperCase(), body.targetId, groupId, user.userId, env);
+    return jsonResponse({
+      success: true,
+      decisionId,
+      status: 'APPLIED',
+      message: 'تم اعتماد وتطبيق القرار الجماعي تلقائياً (إجماع لعدم وجود أعضاء آخرين في المجموعة) ✨',
+    });
+  }
+
+  return jsonResponse({
+    success: true,
+    decisionId,
+    status: 'PENDING',
+    totalEligibleVoters: totalEligible,
+    thresholdPercent: threshold,
+    message: 'تم طرح القرار الجماعي للتصويت بنجاح 🗳️',
+  });
+}
+
 export async function handleGetCommunityDecisions(
   groupId: string,
   user: UserContext,
@@ -240,6 +408,7 @@ export async function handleVoteCommunityDecision(
     threshold_percent: number;
     votes_for: number;
     votes_against: number;
+    expires_at: number | null;
   }>();
 
   if (!decision) {
@@ -250,6 +419,13 @@ export async function handleVoteCommunityDecision(
     return errorResponse('DECISION_CLOSED', 'تم إغلاق التصويت على هذا القرار');
   }
 
+  // Check expiration
+  if (decision.expires_at && decision.expires_at < Date.now()) {
+    await env.DB.prepare(`UPDATE community_decisions SET status = 'EXPIRED' WHERE id = ?`).bind(decisionId).run();
+    return errorResponse('DECISION_EXPIRED', 'انتهت المهلة المحددة للتصويت على هذا القرار', 410);
+  }
+
+  // Strict voter eligibility check: user must be active member of this exact group
   const memberCheck = await requireGroupMember(user, decision.group_id, env.DB);
   if (memberCheck) return memberCheck;
 
@@ -279,14 +455,17 @@ export async function handleVoteCommunityDecision(
   let appliedMsg = '';
 
   if (vFor >= requiredVotes) {
-    newStatus = 'APPROVED';
-    // Auto execute deletion if it's a deletion decision
-    if (decision.request_type === 'DELETION') {
-      await env.DB.prepare(`DELETE FROM content_media WHERE content_id = ?`).bind(decision.target_id).run();
-      await env.DB.prepare(`DELETE FROM contents WHERE id = ?`).bind(decision.target_id).run();
-      newStatus = 'APPLIED';
-      appliedMsg = ' — واكتمل النصاب وتم تنفيذ الحذف نهائياً 🗑️';
-    }
+    // Quorum reached -> Execute automated outcome
+    await applyDecisionExecution(decisionId, decision.request_type, decision.target_id, decision.group_id, user.userId, env);
+    newStatus = 'APPLIED';
+    appliedMsg = ' — واكتمل النصاب وتم اعتماد وتطبيق القرار تلقائياً بنجاح ✨';
+  } else if (vAgainst > (decision.total_eligible_voters - requiredVotes)) {
+    // Rejection mathematically guaranteed
+    newStatus = 'REJECTED';
+    await env.DB.prepare(
+      `UPDATE community_decisions SET status = 'REJECTED' WHERE id = ?`
+    ).bind(decisionId).run();
+    appliedMsg = ' — وتم رفض القرار لعدم اكتمال النصاب المطلوب ❌';
   }
 
   await env.DB.prepare(

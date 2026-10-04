@@ -99,7 +99,21 @@ export async function handleCreateScheduleSlot(
   request: Request,
   env: Env
 ): Promise<Response> {
-  const permCheck = await requireScheduleManager(user, groupId, env.DB);
+  // 1. Ensure active version exists or initialize Version 1
+  let activeVersion = await env.DB.prepare(
+    `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
+  ).bind(groupId).first<{ id: string; version_number: number }>();
+
+  let hasSlots = false;
+  if (activeVersion) {
+    const slotCount = await env.DB.prepare(
+      `SELECT COUNT(*) as count FROM schedule_slots WHERE version_id = ?`
+    ).bind(activeVersion.id).first<{ count: number }>();
+    hasSlots = (slotCount?.count || 0) > 0;
+  }
+
+  const isInitial = !activeVersion || !hasSlots;
+  const permCheck = await requireScheduleManager(user, groupId, env.DB, isInitial);
   if (permCheck) return permCheck;
 
   const body = await request.json() as ScheduleSlotInput;
@@ -107,11 +121,6 @@ export async function handleCreateScheduleSlot(
   if (body.dayOfWeek === undefined || !body.slotOrder || !body.subjectId) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد اليوم ورقم الحصة والمادة');
   }
-
-  // 1. Ensure active version exists or initialize Version 1
-  let activeVersion = await env.DB.prepare(
-    `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
-  ).bind(groupId).first<{ id: string; version_number: number }>();
 
   if (!activeVersion) {
     const versionId = generateId('sch_ver');
@@ -167,7 +176,21 @@ export async function handleSaveScheduleBatch(
   request: Request,
   env: Env
 ): Promise<Response> {
-  const permCheck = await requireScheduleManager(user, groupId, env.DB);
+  // Determine current active version
+  const currentVersion = await env.DB.prepare(
+    `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
+  ).bind(groupId).first<{ id: string; version_number: number }>();
+
+  let hasSlots = false;
+  if (currentVersion) {
+    const slotCount = await env.DB.prepare(
+      `SELECT COUNT(*) as count FROM schedule_slots WHERE version_id = ?`
+    ).bind(currentVersion.id).first<{ count: number }>();
+    hasSlots = (slotCount?.count || 0) > 0;
+  }
+
+  const isInitial = !currentVersion || !hasSlots;
+  const permCheck = await requireScheduleManager(user, groupId, env.DB, isInitial);
   if (permCheck) return permCheck;
 
   const body = await request.json() as {
@@ -179,11 +202,6 @@ export async function handleSaveScheduleBatch(
   if (!Array.isArray(slotList) || slotList.length === 0) {
     return errorResponse('INVALID_INPUT', 'يرجى تزويد قائمة الحصص لتحديث الجدول');
   }
-
-  // Determine current active version
-  const currentVersion = await env.DB.prepare(
-    `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
-  ).bind(groupId).first<{ id: string; version_number: number }>();
 
   const newVersionNum = currentVersion ? currentVersion.version_number + 1 : 1;
   const newVersionId = generateId('sch_ver');

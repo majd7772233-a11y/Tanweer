@@ -200,16 +200,37 @@ export async function handleRedeemRoleCode(
     `UPDATE role_verification_codes SET used_at = ? WHERE id = ?`
   ).bind(now, codeRecord.id).run();
 
-  await env.DB.prepare(
-    `UPDATE users SET role = ?, updated_at = ? WHERE id = ?`
-  ).bind(targetRole, now, user.userId).run();
+  // Check if role request was scoped to a specific group
+  const originalReq = await env.DB.prepare(
+    `SELECT group_id FROM role_requests WHERE id = ?`
+  ).bind(codeRecord.request_id).first<{ group_id?: string | null }>();
 
-  // If role is MODERATOR, TEACHER, ADMIN, elevate in group_members too
-  await env.DB.prepare(
-    `UPDATE group_members SET role = ? WHERE user_id = ?`
-  ).bind(targetRole, user.userId).run();
+  if (originalReq?.group_id) {
+    // Group-scoped upgrade: update ONLY this group's member role
+    await env.DB.prepare(
+      `UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?`
+    ).bind(targetRole, originalReq.group_id, user.userId).run();
 
-  // Update role request status to ACTIVATED
+    // If upgraded to TEACHER or ADMIN, also reflect in global user profile
+    if (targetRole === Role.TEACHER || targetRole === Role.ADMIN) {
+      await env.DB.prepare(
+        `UPDATE users SET role = ?, updated_at = ? WHERE id = ?`
+      ).bind(targetRole, now, user.userId).run();
+    }
+  } else {
+    // Global-scoped upgrade
+    await env.DB.prepare(
+      `UPDATE users SET role = ?, updated_at = ? WHERE id = ?`
+    ).bind(targetRole, now, user.userId).run();
+
+    if (targetRole === Role.TEACHER || targetRole === Role.ADMIN) {
+      await env.DB.prepare(
+        `UPDATE group_members SET role = ? WHERE user_id = ?`
+      ).bind(targetRole, user.userId).run();
+    }
+  }
+
+  // Update role request status to APPROVED
   await env.DB.prepare(
     `UPDATE role_requests SET status = 'APPROVED', review_notes = 'تم تفعيل الرتبة بنجاح عبر رمز التحقق', reviewed_at = ? WHERE id = ?`
   ).bind(now, codeRecord.request_id).run();

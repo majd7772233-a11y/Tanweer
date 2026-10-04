@@ -154,22 +154,15 @@ export async function hasPermission(
         Permission.MODERATE_EVENT,
         Permission.MODERATE_ISSUES,
         Permission.VERIFY_BEST_ANSWER,
-        Permission.MODERATE_CHAT,
-        Permission.MANAGE_GROUP_MEMBERS,
       ].includes(permission);
 
     case Role.MODERATOR:
       return [
-        Permission.MANAGE_SCHEDULE,
-        Permission.MODERATE_CONTENT,
-        Permission.PIN_CONTENT,
-        Permission.MODERATE_HOMEWORK,
-        Permission.MODERATE_EXAM,
-        Permission.MODERATE_EVENT,
-        Permission.MODERATE_ISSUES,
-        Permission.VERIFY_BEST_ANSWER,
         Permission.MODERATE_CHAT,
         Permission.MANAGE_GROUP_MEMBERS,
+        Permission.MODERATE_CONTENT,
+        Permission.MODERATE_ISSUES,
+        Permission.MANAGE_SCHEDULE,
       ].includes(permission);
 
     case Role.STUDENT:

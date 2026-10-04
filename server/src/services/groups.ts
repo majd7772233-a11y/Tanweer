@@ -119,6 +119,9 @@ export async function handleUpdateGroupMemberRole(
   }
 
   const norm = normalizeRole(body.newRole);
+  if (norm === Role.SYSTEM_OWNER) {
+    return errorResponse('FORBIDDEN', 'لا يمكن تعيين رتبة مالك المنظومة (SYSTEM_OWNER) لأعضاء المجموعات', 403);
+  }
   await env.DB.prepare(
     `UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?`
   ).bind(norm, groupId, targetUserId).run();

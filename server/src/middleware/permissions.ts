@@ -29,11 +29,16 @@ export async function requireGroupMember(
 export async function requireScheduleManager(
   user: UserContext,
   groupId: string,
-  db: D1Database
+  db: D1Database,
+  allowInitialSetup = false
 ): Promise<Response | null> {
   // First ensure they are a member or administrative bypass
   const memberCheck = await requireGroupMember(user, groupId, db);
   if (memberCheck) return memberCheck;
+
+  if (allowInitialSetup) {
+    return null; // Initial setup allowed for group members
+  }
 
   // Check if group already has active slots configured
   // In accordance with Tanweer philosophy: all students can contribute to the initial schedule (المساهمة في الجدول الأول)

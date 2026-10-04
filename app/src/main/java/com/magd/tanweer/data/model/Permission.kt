@@ -42,8 +42,12 @@ enum class Permission {
 }
 
 /**
- * Universal Permission Evaluator on the Android client.
- * Evaluates whether a user can perform an action based on Tanweer's core philosophy.
+ * Client-Side Permission Evaluator on Android.
+ * IMPORTANT ARCHITECTURE RULE:
+ * This evaluator is used EXCLUSIVELY for UI rendering hints (e.g. enabling buttons,
+ * optimistic screen states, hiding edit icons).
+ * The Tanweer Cloudflare Server is the SOLE FINAL AUTHORITY for all authorization
+ * and strictly verifies every API endpoint independently.
  */
 object PermissionEvaluator {
     fun hasPermission(
@@ -95,7 +99,7 @@ object PermissionEvaluator {
             globalRole
         }
 
-        // 7. Role-specific privilege evaluation
+        // 7. Role-specific privilege evaluation (Teacher Level 3 vs Moderator Level 2)
         return when (effectiveRole) {
             Role.TEACHER -> permission in setOf(
                 Permission.MANAGE_SCHEDULE,
@@ -110,16 +114,11 @@ object PermissionEvaluator {
                 Permission.MANAGE_GROUP_MEMBERS
             )
             Role.MODERATOR -> permission in setOf(
-                Permission.MANAGE_SCHEDULE,
-                Permission.MODERATE_CONTENT,
-                Permission.PIN_CONTENT,
-                Permission.MODERATE_HOMEWORK,
-                Permission.MODERATE_EXAM,
-                Permission.MODERATE_EVENT,
-                Permission.MODERATE_ISSUES,
-                Permission.VERIFY_BEST_ANSWER,
                 Permission.MODERATE_CHAT,
-                Permission.MANAGE_GROUP_MEMBERS
+                Permission.MANAGE_GROUP_MEMBERS,
+                Permission.MODERATE_CONTENT,
+                Permission.MODERATE_ISSUES,
+                Permission.MANAGE_SCHEDULE
             )
             Role.STUDENT -> false
             Role.ADMIN, Role.SYSTEM_OWNER -> true

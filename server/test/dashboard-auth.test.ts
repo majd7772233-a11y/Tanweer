@@ -101,7 +101,7 @@ describe('Dashboard Roles & Authentication Security Boundaries', () => {
     mockDb = new DashboardMockDb();
     env = {
       DB: mockDb as any,
-      OWNER_SECRET_KEY: 'super_secret_owner_key_9999',
+      TANWEER_OWNER_SECRET: 'super_secret_owner_key_9999',
       PASSWORD_PEPPER: 'test_pepper',
     } as any;
   });
@@ -115,15 +115,15 @@ describe('Dashboard Roles & Authentication Security Boundaries', () => {
 
     it('REJECTS invalid secret key', async () => {
       const req = new Request('http://localhost/dashboard', {
-        headers: { 'X-Owner-Secret-Key': 'wrong_invalid_key' },
+        headers: { 'X-Owner-Secret': 'wrong_invalid_key' },
       });
       const isAuthed = await verifyOwnerAuth(req, env);
       expect(isAuthed.isOwner).toBe(false);
     });
 
-    it('ACCEPTS correct X-Owner-Secret-Key', async () => {
+    it('ACCEPTS correct X-Owner-Secret', async () => {
       const req = new Request('http://localhost/dashboard', {
-        headers: { 'X-Owner-Secret-Key': 'super_secret_owner_key_9999' },
+        headers: { 'X-Owner-Secret': 'super_secret_owner_key_9999' },
       });
       const isAuthed = await verifyOwnerAuth(req, env);
       expect(isAuthed.isOwner).toBe(true);
@@ -135,10 +135,19 @@ describe('Dashboard Roles & Authentication Security Boundaries', () => {
         env.PASSWORD_PEPPER
       );
       const req = new Request('http://localhost/dashboard', {
-        headers: { Cookie: `tanweer_owner_session=${expectedToken}` },
+        headers: { Cookie: `tanweer_owner_token=${expectedToken}` },
       });
       const isAuthed = await verifyOwnerAuth(req, env);
       expect(isAuthed.isOwner).toBe(true);
+    });
+
+    it('SECURITY: Rejects access and disables dashboard if TANWEER_OWNER_SECRET is not configured', async () => {
+      const unconfiguredEnv: any = { DB: mockDb, PASSWORD_PEPPER: 'test_pepper' };
+      const req = new Request('http://localhost/dashboard', {
+        headers: { 'X-Owner-Secret': 'super_secret_owner_key_9999' },
+      });
+      const isAuthed = await verifyOwnerAuth(req, unconfiguredEnv);
+      expect(isAuthed.isOwner).toBe(false);
     });
   });
 
