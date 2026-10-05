@@ -57,6 +57,50 @@ class PdfBookManager(private val context: Context) {
         return file.exists() && file.length() > 1024
     }
 
+    fun getBookFileSize(bookId: String): Long {
+        val file = getCachedFile(bookId)
+        return if (file.exists()) file.length() else 0L
+    }
+
+    fun getTotalBooksStorageBytes(): Long {
+        val dir = File(context.filesDir, "pdf_books")
+        if (!dir.exists()) return 0L
+        return dir.listFiles()?.filter { it.isFile && it.name.endsWith(".pdf") }?.sumOf { it.length() } ?: 0L
+    }
+
+    fun deleteBookFile(bookId: String): Boolean {
+        if (currentBookId == bookId) {
+            closeRenderer()
+        }
+        val file = getCachedFile(bookId)
+        return if (file.exists()) file.delete() else false
+    }
+
+    fun deleteAllDownloadedBooks(): Int {
+        closeRenderer()
+        val dir = File(context.filesDir, "pdf_books")
+        if (!dir.exists()) return 0
+        val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".pdf") } ?: emptyList()
+        var count = 0
+        for (f in files) {
+            if (f.delete()) count++
+        }
+        return count
+    }
+
+    fun formatFileSize(bytes: Long): String {
+        if (bytes <= 0) return "0 بايت"
+        val kb = bytes / 1024.0
+        val mb = kb / 1024.0
+        val gb = mb / 1024.0
+        return when {
+            gb >= 1.0 -> String.format(java.util.Locale.US, "%.2f غيغابايت", gb)
+            mb >= 1.0 -> String.format(java.util.Locale.US, "%.1f ميغابايت", mb)
+            kb >= 1.0 -> String.format(java.util.Locale.US, "%.0f كيلوبايت", kb)
+            else -> "$bytes بايت"
+        }
+    }
+
     fun downloadAndOpenBook(bookId: String, downloadUrl: String): Flow<PdfDownloadState> = flow {
         val targetFile = getCachedFile(bookId)
 

@@ -119,8 +119,8 @@ export async function handleUpdateGroupMemberRole(
   }
 
   const norm = normalizeRole(body.newRole);
-  if (norm === Role.SYSTEM_OWNER) {
-    return errorResponse('FORBIDDEN', 'لا يمكن تعيين رتبة مالك المنظومة (SYSTEM_OWNER) لأعضاء المجموعات', 403);
+  if (norm === Role.SYSTEM_OWNER || norm === Role.ADMIN) {
+    return errorResponse('FORBIDDEN', 'رتبتا مالك المنظومة والمدير العام (ADMIN) تُداران حصراً عبر الإدارة العليا ولا يمكن تعيينهما كأدوار فرعية داخل المجموعات', 403);
   }
 
   const targetUser = await env.DB.prepare(
@@ -130,18 +130,10 @@ export async function handleUpdateGroupMemberRole(
   const targetGlobalRole = normalizeRole(targetUser?.role);
   const actorRole = normalizeRole(user.role);
 
-  if (norm === Role.TEACHER && targetGlobalRole !== Role.TEACHER && actorRole !== Role.ADMIN && actorRole !== Role.SYSTEM_OWNER) {
+  if (norm === Role.TEACHER && targetGlobalRole !== Role.TEACHER && actorRole !== Role.SYSTEM_OWNER) {
     return errorResponse(
       'FORBIDDEN_TEACHER_VERIFICATION_REQUIRED',
-      'رتبة الأستاذ المعتمد تتطلب اعتماداً رسمياً من مالك المنظومة عبر رمز التحقق المخصص ولا يمكن منحها مباشرة داخل المجموعة',
-      403
-    );
-  }
-
-  if (norm === Role.ADMIN && actorRole !== Role.ADMIN && actorRole !== Role.SYSTEM_OWNER) {
-    return errorResponse(
-      'FORBIDDEN_ADMIN_REQUIRED',
-      'تعيين رتبة المدير مقتصر على إدارة المنظومة العليا فقط',
+      'رتبة الأستاذ المعتمد تتطلب اعتماداً رسمياً وتحققاً من مالك المنظومة عبر رمز التحقق المخصص (8 أرقام) ولا يمكن ترقية العضو لأستاذ داخل المجموعة دون اعتماده المسبق',
       403
     );
   }

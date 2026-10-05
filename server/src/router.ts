@@ -82,6 +82,27 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     return jsonResponse({ status: 'ok', app: 'Tanweer', timestamp: Date.now() });
   }
 
+  // System Version & Release Check
+  if (path === '/api/v1/system/version' && method === 'GET') {
+    return jsonResponse({
+      currentVersion: '1.2.0',
+      versionCode: 2,
+      minSupportedVersion: '1.0.0',
+      minSupportedVersionCode: 1,
+      isUpdateRequired: false,
+      releaseDate: '2026-10-05',
+      changelog: [
+        '✨ نظام الحوكمة الموحد والتصويت الشامل على القرارات',
+        '📷 ماسح السبورة الذكي عالي الدقة ومعالجة التباين',
+        '📚 مكتبة المناهج الذكية مع إدارة متقدمة لتخزين الكتب وحجم الذاكرة',
+        '🛡️ محرك الصلاحيات الهرمي وتأمين الرتب المدرسية',
+        '🚀 توافق عالي ودعم للأجهزة القديمة بدءاً من Android 5.0 (API 21)',
+        '⚡ مزامنة ذكية وسريعة دون استهلاك الذاكرة أو البيانات'
+      ],
+      downloadUrl: 'https://github.com/magd-tanweer/tanweer-releases/releases/latest'
+    });
+  }
+
   // Unified Role Metadata (public)
   if (path === '/api/v1/roles/metadata' && method === 'GET') {
     return handleGetRoleMetadata();

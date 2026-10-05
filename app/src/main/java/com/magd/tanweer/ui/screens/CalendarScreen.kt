@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.GlassButton
 import com.magd.tanweer.ui.components.GlassCard
@@ -34,6 +35,7 @@ import com.magd.tanweer.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarScreen(
     viewModel: TanweerViewModel
@@ -44,6 +46,7 @@ fun CalendarScreen(
 
     var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
+    var showAddActionSheet by remember { mutableStateOf(false) }
 
     val monthYearFormat = remember { SimpleDateFormat("MMMM yyyy", Locale("ar")) }
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
@@ -66,8 +69,15 @@ fun CalendarScreen(
         exams.filter { it.examDate == selectedDateStr }
     }
 
+    val events by viewModel.repository.getEvents(activeGroupId)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val dayEvents = remember(events, selectedDateStr) {
+        events.filter { it.eventDate == selectedDateStr }
+    }
+
     // Days in current month
-    val daysInMonth = remember(currentCalendar.timeInMillis) {
+    val daysInMonth = remember(currentCalendar.timeInMillis, exams, homeworks, events) {
         val cal = currentCalendar.clone() as Calendar
         cal.set(Calendar.DAY_OF_MONTH, 1)
         val maxDays = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
@@ -91,7 +101,8 @@ fun CalendarScreen(
                     isCurrentMonth = true,
                     isToday = (dStr == todayStr),
                     hasExam = exams.any { it.examDate == dStr },
-                    hasHomework = homeworks.any { it.dueDate == dStr }
+                    hasHomework = homeworks.any { it.dueDate == dStr },
+                    hasEvent = events.any { it.eventDate == dStr }
                 )
             )
         }
@@ -153,6 +164,54 @@ fun CalendarScreen(
                             contentDescription = "الشهر التالي",
                             tint = CyanAccent
                         )
+                    }
+                }
+            }
+        }
+
+        // Calendar Quick Highlights Bar
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(RubyRed.copy(alpha = 0.12f))
+                        .border(1.dp, RubyRed.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                        .padding(vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🔴 ${exams.size} اختبارات", fontSize = 11.sp, color = RubyRed, fontWeight = FontWeight.Bold)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(WarmAmber.copy(alpha = 0.12f))
+                        .border(1.dp, WarmAmber.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                        .padding(vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("📝 ${homeworks.size} واجبات", fontSize = 11.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1.2f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(PurpleAccent.copy(alpha = 0.15f))
+                        .border(1.dp, PurpleAccent.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                        .clickable { viewModel.setSubScreen(SubScreen.EVENTS) }
+                        .padding(vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("🎪 ${events.size} فعاليات", fontSize = 11.sp, color = PurpleAccent, fontWeight = FontWeight.Bold)
+                        Text("‹", fontSize = 13.sp, color = PurpleAccent)
                     }
                 }
             }
@@ -230,20 +289,35 @@ fun CalendarScreen(
                                         color = if (isSelected) TextOnAccent else TextPrimary
                                     )
                                     // Activity indicators
-                                    if (item.hasExam) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(4.dp)
-                                                .clip(CircleShape)
-                                                .background(RubyRed)
-                                        )
-                                    } else if (item.hasHomework) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(4.dp)
-                                                .clip(CircleShape)
-                                                .background(WarmAmber)
-                                        )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    ) {
+                                        if (item.hasExam) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(4.dp)
+                                                    .clip(CircleShape)
+                                                    .background(RubyRed)
+                                            )
+                                        }
+                                        if (item.hasHomework) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(4.dp)
+                                                    .clip(CircleShape)
+                                                    .background(WarmAmber)
+                                            )
+                                        }
+                                        if (item.hasEvent) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(4.dp)
+                                                    .clip(CircleShape)
+                                                    .background(PurpleAccent)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -281,7 +355,7 @@ fun CalendarScreen(
                     icon = Icons.Default.Add,
                     onClick = {
                         viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.openUploadDialog()
+                        showAddActionSheet = true
                     },
                     modifier = Modifier.height(36.dp)
                 )
@@ -366,6 +440,62 @@ fun CalendarScreen(
             }
         }
 
+        // Selected Day Events
+        if (dayEvents.isNotEmpty()) {
+            items(dayEvents) { ev ->
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    borderColor = PurpleAccent.copy(alpha = 0.5f),
+                    backgroundColor = GlassSurface
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = when (ev.category.uppercase()) {
+                                        "ACTIVITY" -> "🏆"
+                                        "CELEBRATION" -> "🎉"
+                                        "HOLIDAY" -> "🏖️"
+                                        "WORKSHOP" -> "💡"
+                                        else -> "🎪"
+                                    },
+                                    fontSize = 16.sp
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "فعالية: ${ev.title}",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                            }
+                            if (!ev.description.isNullOrBlank()) {
+                                Text(
+                                    text = ev.description,
+                                    fontSize = 12.sp,
+                                    color = TextSecondary,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                            if (!ev.location.isNullOrBlank() || !ev.timeStr.isNullOrBlank()) {
+                                Text(
+                                    text = "${ev.timeStr?.let { "⏰ $it " } ?: ""}${ev.location?.let { "📍 $it" } ?: ""}",
+                                    fontSize = 11.sp,
+                                    color = PurpleAccent,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                        }
+                        GlassPill(text = "فعالية 🎪", color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
+                    }
+                }
+            }
+        }
+
         // Selected Day Lessons
         if (dayContents.isNotEmpty()) {
             items(dayContents) { content ->
@@ -403,14 +533,14 @@ fun CalendarScreen(
                     }
                 }
             }
-        } else if (dayExams.isEmpty() && dayHomeworks.isEmpty()) {
+        } else if (dayExams.isEmpty() && dayHomeworks.isEmpty() && dayEvents.isEmpty()) {
             item {
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = GlassSurface.copy(alpha = 0.4f)
                 ) {
                     Text(
-                        text = "لا توجد منشورات أو واجبات مسجلة لهذا اليوم حتى الآن. يمكنك إضافة وتوثيق الحصة بالضغط على زر الإضافة أعلاه.",
+                        text = "لا توجد منشورات أو واجبات أو فعاليات مسجلة لهذا اليوم حتى الآن. يمكنك إضافة وتوثيق الحصة بالضغط على زر الإضافة أعلاه.",
                         fontSize = 13.sp,
                         color = TextSecondary,
                         textAlign = TextAlign.Center,
@@ -418,6 +548,127 @@ fun CalendarScreen(
                             .fillMaxWidth()
                             .padding(vertical = 12.dp)
                     )
+                }
+            }
+        }
+    }
+
+    if (showAddActionSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showAddActionSheet = false },
+            containerColor = MidnightSurface,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = CyanAccent) }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "➕ إضافة وتوثيق ليوم: ${TanweerViewModel.getFormattedArabicDate(selectedDateStr)}",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = CyanAccent
+                )
+                Text(
+                    text = "اختر نوع النشاط الذي ترغب في إضافته أو توثيقه لهذا التاريخ:",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface,
+                    onClick = {
+                        showAddActionSheet = false
+                        viewModel.setSelectedDate(selectedDateStr)
+                        viewModel.openUploadDialog()
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("📷", fontSize = 24.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("توثيق درس للشعبة", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("التقاط صور السبورة ومشاركتها مع زملاء الصف", fontSize = 11.sp, color = TextSecondary)
+                        }
+                        GlassPill(text = "درس", color = CyanAccent, bgColor = CyanGlow)
+                    }
+                }
+
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface,
+                    onClick = {
+                        showAddActionSheet = false
+                        viewModel.setSelectedDate(selectedDateStr)
+                        viewModel.setTab(com.magd.tanweer.ui.NavigationTab.HOMEWORK)
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("📝", fontSize = 24.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("إضافة واجب أو تكليف مدرسي", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("تسجيل الواجب المطلوب وتاريخ التسليم المعتمد", fontSize = 11.sp, color = TextSecondary)
+                        }
+                        GlassPill(text = "واجب", color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.15f))
+                    }
+                }
+
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface,
+                    onClick = {
+                        showAddActionSheet = false
+                        viewModel.setSelectedDate(selectedDateStr)
+                        viewModel.setTab(com.magd.tanweer.ui.NavigationTab.EXAMS)
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("📑", fontSize = 24.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("إضافة اختبار أو تسميع دوري", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("تحديد موعد الاختبار والفصول المقررة", fontSize = 11.sp, color = TextSecondary)
+                        }
+                        GlassPill(text = "اختبار", color = RubyRed, bgColor = RubyRed.copy(alpha = 0.15f))
+                    }
+                }
+
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface,
+                    onClick = {
+                        showAddActionSheet = false
+                        viewModel.setSubScreen(SubScreen.EVENTS)
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("🎪", fontSize = 24.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("إضافة فعالية أو مناسبة مدرسية", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("تسجيل مسابقة، عطلة، أو نشاط صفي تفاعلي", fontSize = 11.sp, color = TextSecondary)
+                        }
+                        GlassPill(text = "فعالية", color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
+                    }
                 }
             }
         }
@@ -430,5 +681,6 @@ data class CalendarDayItem(
     val isCurrentMonth: Boolean,
     val isToday: Boolean = false,
     val hasExam: Boolean = false,
-    val hasHomework: Boolean = false
+    val hasHomework: Boolean = false,
+    val hasEvent: Boolean = false
 )

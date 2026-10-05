@@ -1,5 +1,6 @@
 package com.magd.tanweer.ui.screens
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
@@ -20,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -336,6 +338,7 @@ fun IssueDetailView(
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var replyText by remember { mutableStateOf("") }
 
     val bestComment = remember(comments) {
@@ -558,7 +561,14 @@ fun IssueDetailView(
                                     if (bestComment == null) {
                                         OutlinedButton(
                                             onClick = {
-                                                viewModel.markBestAnswer(issueId, comment.id)
+                                                viewModel.markBestAnswer(issueId, comment.id) { res ->
+                                                    if (res.isFailure) {
+                                                        val err = res.exceptionOrNull()?.message ?: "تعذر اعتماد أفضل إجابة"
+                                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        Toast.makeText(context, "تم اعتماد أفضل إجابة بنجاح ⭐", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
                                             },
                                             modifier = Modifier.height(28.dp),
                                             shape = RoundedCornerShape(8.dp),
@@ -631,8 +641,15 @@ fun IssueDetailView(
                 IconButton(
                     onClick = {
                         if (replyText.isNotBlank()) {
-                            viewModel.addIssueComment(issueId, replyText.trim()) {
-                                replyText = ""
+                            val textToSend = replyText.trim()
+                            viewModel.addIssueComment(issueId, textToSend) { res ->
+                                if (res.isSuccess) {
+                                    replyText = ""
+                                    Toast.makeText(context, "تم نشر تعليقك بنجاح ✨", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val err = res.exceptionOrNull()?.message ?: "فشل إرسال التعليق"
+                                    Toast.makeText(context, "تعذر إرسال التعليق: $err", Toast.LENGTH_LONG).show()
+                                }
                             }
                         }
                     },

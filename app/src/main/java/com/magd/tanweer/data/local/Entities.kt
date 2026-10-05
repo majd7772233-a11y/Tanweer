@@ -95,6 +95,18 @@ data class HomeworkCompletionEntity(
     val completedAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "cached_daily_plan")
+data class DailyPlanEntity(
+    @PrimaryKey val id: String,
+    val userId: String,
+    val homeworkId: String?,
+    val title: String,
+    val subjectName: String?,
+    val planDate: String, // YYYY-MM-DD
+    val isCompleted: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "cached_exams")
 data class ExamEntity(
     @PrimaryKey val id: String,

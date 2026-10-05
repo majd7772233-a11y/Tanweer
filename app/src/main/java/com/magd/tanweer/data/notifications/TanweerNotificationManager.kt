@@ -178,4 +178,107 @@ object TanweerNotificationManager {
             }
         }
     }
+
+    fun scheduleHomeworkReminder(
+        context: Context,
+        homeworkId: String,
+        title: String,
+        subjectName: String,
+        dueDate: String
+    ): Boolean {
+        initChannel(context)
+        return try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return false
+            val intent = Intent(context, TanweerAlarmReceiver::class.java).apply {
+                action = TanweerAlarmReceiver.ACTION_HOMEWORK_REMINDER
+                putExtra(TanweerAlarmReceiver.EXTRA_HOMEWORK_ID, homeworkId)
+                putExtra(TanweerAlarmReceiver.EXTRA_HOMEWORK_TITLE, title)
+                putExtra(TanweerAlarmReceiver.EXTRA_SUBJECT_NAME, subjectName)
+            }
+            val requestCode = (homeworkId.hashCode() and 0x7FFFFFFF)
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
+            var triggerTime = System.currentTimeMillis()
+
+            try {
+                val due = sdf.parse(dueDate)
+                if (due != null) {
+                    val dueCal = Calendar.getInstance().apply {
+                        time = due
+                        set(Calendar.HOUR_OF_DAY, 8)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                    }
+
+                    if (dueCal.timeInMillis > System.currentTimeMillis()) {
+                        triggerTime = dueCal.timeInMillis
+                    } else {
+                        // If date is today or earlier, schedule a test reminder in 15 seconds
+                        triggerTime = System.currentTimeMillis() + 15_000L
+                    }
+                } else {
+                    triggerTime = System.currentTimeMillis() + 15_000L
+                }
+            } catch (_: Exception) {
+                triggerTime = System.currentTimeMillis() + 15_000L
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+            } else {
+                alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+            }
+            Log.d("TanweerNotifications", "Exact homework reminder scheduled at $triggerTime for $homeworkId")
+            true
+        } catch (e: Exception) {
+            Log.e("TanweerNotifications", "Failed to schedule homework reminder", e)
+            false
+        }
+    }
+
+    fun showIndividualHomeworkNotification(
+        context: Context,
+        homeworkId: String,
+        title: String,
+        subjectName: String
+    ) {
+        initChannel(context)
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            (homeworkId.hashCode() and 0x7FFFFFFF),
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("⏰ تذكير بموعد تسليم واجب: $subjectName")
+            .setContentText("تذكير: $title")
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText(
+                    "تذكير الواجب المدرسي لمادة $subjectName:\n$title\nيرجى إنجاز الواجب ورفعه للشعبة قبل انتهاء المهلة."
+                )
+            )
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setVibrate(longArrayOf(0, 350, 250, 350))
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(
+                (homeworkId.hashCode() and 0x7FFFFFFF),
+                notification
+            )
+        } catch (_: SecurityException) {}
+    }
 }

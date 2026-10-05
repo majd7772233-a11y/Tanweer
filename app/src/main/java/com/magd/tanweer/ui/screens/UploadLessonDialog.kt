@@ -1,7 +1,6 @@
 package com.magd.tanweer.ui.screens
 
 import android.Manifest
-import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.widget.Toast
@@ -35,14 +34,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.UUID
 
 data class LessonScanPage(
@@ -116,7 +115,6 @@ fun UploadLessonDialog(
                 )
             }
             scannedPages = scannedPages + newPages
-            // Process each in background
             newPages.forEach { p ->
                 processPageItem(p) { updated ->
                     scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
@@ -153,36 +151,119 @@ fun UploadLessonDialog(
         }
     }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = { if (!isUploading) onDismiss() },
-        title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "📷 توثيق درس ومساهمة",
-                        color = CyanAccent,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp
-                    )
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Scaffold(
+            topBar = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MidnightSurface)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            IconButton(
+                                onClick = { if (!isUploading) onDismiss() },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(GlassSurface)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextPrimary)
+                            }
+                            Text(
+                                text = "توثيق وإضافة درس رسمي 📷",
+                                color = CyanAccent,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 16.sp
+                            )
+                        }
+
+                        GlassPill(
+                            text = if (scannedPages.isEmpty()) "ماسح السبورة الذكي" else "${scannedPages.size} صفحات جاهزة",
+                            color = if (scannedPages.isEmpty()) CyanAccent else EmeraldGreen,
+                            bgColor = if (scannedPages.isEmpty()) CyanGlow else EmeraldGreen.copy(alpha = 0.15f)
+                        )
+                    }
                 }
-                GlassPill(
-                    text = if (scannedPages.isEmpty()) "Scanner السبورة" else "${scannedPages.size} صفحات جاهزة",
-                    color = if (scannedPages.isEmpty()) CyanAccent else EmeraldGreen,
-                    bgColor = if (scannedPages.isEmpty()) CyanGlow else EmeraldGreen.copy(alpha = 0.15f)
-                )
-            }
-        },
-        text = {
+            },
+            bottomBar = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MidnightSurface)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        GlassOutlinedButton(
+                            text = "إلغاء",
+                            enabled = !isUploading,
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f)
+                        )
+                        GlassButton(
+                            text = if (isUploading) "جاري النشر..." else "نشر وتوثيق الدرس ✨",
+                            enabled = title.isNotBlank() && !isUploading,
+                            onClick = {
+                                if (title.isNotBlank()) {
+                                    isUploading = true
+                                    scope.launch {
+                                        val validPages = scannedPages.mapNotNull { it.processedResult }
+                                        val descText = description.ifBlank {
+                                            if (validPages.isNotEmpty()) {
+                                                "درس موثق بـ ${validPages.size} صفحات ومحسن للقراءة بجودة عالية"
+                                            } else {
+                                                "درس موثق ومسجل"
+                                            }
+                                        }
+                                        val result = viewModel.addLessonWithPages(
+                                            subjectId = selectedSubjectId,
+                                            title = title,
+                                            description = descText,
+                                            date = studyDate,
+                                            pages = validPages
+                                        )
+                                        isUploading = false
+                                        if (result.isSuccess) {
+                                            Toast.makeText(context, "تم توثيق ونشر الدرس بنجاح 🚀", Toast.LENGTH_SHORT).show()
+                                            onDismiss()
+                                        } else {
+                                            val errorMsg = result.exceptionOrNull()?.message ?: "حدث خطأ أثناء نشر الدرس"
+                                            Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(2f)
+                        )
+                    }
+                }
+            },
+            containerColor = MidnightBackground
+        ) { paddingValues ->
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 16.dp)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                Spacer(modifier = Modifier.height(4.dp))
+
                 // Lesson Date Banner
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -208,8 +289,8 @@ fun UploadLessonDialog(
                             )
                         }
                         Text(
-                            text = "حفظ تلقائي في الجدول",
-                            fontSize = 10.sp,
+                            text = "حفظ تلقائي في الجدول والشعبة",
+                            fontSize = 11.sp,
                             color = TextMuted
                         )
                     }
@@ -230,7 +311,8 @@ fun UploadLessonDialog(
                                     .background(if (isSelected) CyanGlow else MidnightSurface)
                                     .border(1.dp, if (isSelected) CyanAccent else GlassBorderSubtle, RoundedCornerShape(10.dp))
                                     .clickable { selectedSubjectId = subj.id }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = "${subj.icon} ${subj.name}",
@@ -294,7 +376,7 @@ fun UploadLessonDialog(
                             // Camera Button
                             Button(
                                 onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
-                                modifier = Modifier.weight(1f).height(42.dp),
+                                modifier = Modifier.weight(1f).height(44.dp),
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = CyanAccent,
@@ -315,7 +397,7 @@ fun UploadLessonDialog(
                                         )
                                     )
                                 },
-                                modifier = Modifier.weight(1f).height(42.dp),
+                                modifier = Modifier.weight(1f).height(44.dp),
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent),
                                 border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent)
@@ -342,67 +424,57 @@ fun UploadLessonDialog(
                                             .padding(6.dp)
                                     ) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            // Top info bar
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(CyanAccent)
-                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                                ) {
-                                                    Text("صفحة ${index + 1}", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = TextOnAccent)
-                                                }
-                                                // Delete page button
+                                                Text(
+                                                    text = "صفحة ${index + 1}",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = CyanAccent
+                                                )
                                                 IconButton(
                                                     onClick = {
                                                         scannedPages = scannedPages.filter { it.id != page.id }
                                                     },
                                                     modifier = Modifier.size(22.dp)
                                                 ) {
-                                                    Icon(Icons.Default.Delete, contentDescription = "حذف", tint = Color(0xFFFF5252), modifier = Modifier.size(14.dp))
+                                                    Icon(Icons.Default.Close, contentDescription = "حذف", tint = RubyRed, modifier = Modifier.size(14.dp))
                                                 }
                                             }
 
-                                            Spacer(modifier = Modifier.height(4.dp))
-
-                                            // Thumbnail Preview
+                                            // Thumbnail Box
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .height(110.dp)
                                                     .clip(RoundedCornerShape(8.dp))
-                                                    .background(Color.Black),
+                                                    .background(MidnightBackground),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                if (page.displayBitmap != null) {
+                                                if (page.isProcessing) {
+                                                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = CyanAccent, strokeWidth = 2.dp)
+                                                } else if (page.displayBitmap != null) {
                                                     Image(
                                                         bitmap = page.displayBitmap.asImageBitmap(),
                                                         contentDescription = "صفحة ${index + 1}",
-                                                        modifier = Modifier.fillMaxSize(),
-                                                        contentScale = ContentScale.Crop
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize()
                                                     )
-                                                } else if (page.isProcessing) {
-                                                    CircularProgressIndicator(
-                                                        modifier = Modifier.size(24.dp),
-                                                        color = CyanAccent,
-                                                        strokeWidth = 2.dp
-                                                    )
+                                                } else {
+                                                    Icon(Icons.Default.BrokenImage, contentDescription = null, tint = TextMuted)
                                                 }
                                             }
 
-                                            Spacer(modifier = Modifier.height(6.dp))
-
-                                            // Page Controls: Rotate, B&W, Enhance
+                                            // Quick Per-Page Enhancements
                                             Row(
-                                                modifier = Modifier.fillMaxWidth(),
+                                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                                                 horizontalArrangement = Arrangement.SpaceEvenly,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                // Rotate 90 deg
+                                                // Rotate 90
                                                 IconButton(
                                                     onClick = {
                                                         val newRot = (page.rotation + 90f) % 360f
@@ -412,32 +484,12 @@ fun UploadLessonDialog(
                                                             scannedPages = scannedPages.map { if (it.id == res.id) res else it }
                                                         }
                                                     },
-                                                    modifier = Modifier.size(26.dp)
+                                                    modifier = Modifier.size(24.dp)
                                                 ) {
-                                                    Icon(Icons.Default.RotateRight, contentDescription = "تدوير", tint = CyanAccent, modifier = Modifier.size(16.dp))
+                                                    Icon(Icons.Default.RotateRight, contentDescription = "تدوير", tint = TextSecondary, modifier = Modifier.size(16.dp))
                                                 }
 
-                                                // Whiteboard Enhance toggle
-                                                IconButton(
-                                                    onClick = {
-                                                        val newEnhance = !page.autoEnhance
-                                                        val updated = page.copy(autoEnhance = newEnhance, isProcessing = true)
-                                                        scannedPages = scannedPages.map { if (it.id == page.id) updated else it }
-                                                        processPageItem(updated) { res ->
-                                                            scannedPages = scannedPages.map { if (it.id == res.id) res else it }
-                                                        }
-                                                    },
-                                                    modifier = Modifier.size(26.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.AutoFixHigh,
-                                                        contentDescription = "تحسين",
-                                                        tint = if (page.autoEnhance) CyanAccent else TextMuted,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-
-                                                // Black & White toggle
+                                                // Toggle Black & White Contrast
                                                 IconButton(
                                                     onClick = {
                                                         val newBW = !page.blackAndWhite
@@ -447,55 +499,50 @@ fun UploadLessonDialog(
                                                             scannedPages = scannedPages.map { if (it.id == res.id) res else it }
                                                         }
                                                     },
-                                                    modifier = Modifier.size(26.dp)
+                                                    modifier = Modifier.size(24.dp)
                                                 ) {
                                                     Icon(
                                                         Icons.Default.Contrast,
-                                                        contentDescription = "أبيض وأسود",
-                                                        tint = if (page.blackAndWhite) WarmAmber else TextMuted,
+                                                        contentDescription = "تباين عالي",
+                                                        tint = if (page.blackAndWhite) CyanAccent else TextSecondary,
                                                         modifier = Modifier.size(16.dp)
                                                     )
                                                 }
-                                            }
-
-                                            // Size and Checksum indicator
-                                            page.processedResult?.let { res ->
-                                                val kb = res.sizeBytes / 1024
-                                                Text(
-                                                    text = "${kb}KB • SHA:${res.sha256.take(6)}",
-                                                    fontSize = 8.sp,
-                                                    color = TextSecondary,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
                                             }
                                         }
                                     }
                                 }
                             }
+                        } else {
+                            Text(
+                                text = "💡 يمكنك تصوير السبورة مباشرة أو إرفاق صور متعددة وسيتم تحسين الإضاءة وتوضيح الخطوط آلياً.",
+                                fontSize = 11.sp,
+                                color = TextMuted,
+                                lineHeight = 16.sp
+                            )
                         }
 
-                        // Global Scanner Enhancement Settings
+                        // Global Auto-Enhance Setting
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(GlassSurfaceLight)
-                                .padding(8.dp),
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(GlassSurface)
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("☑ تحسين تلقائي ذكي للسبورة", fontSize = 12.sp, color = TextPrimary, fontWeight = FontWeight.Bold)
-                                Text("قص الحواف، إزالة الظلال، رفع التباين وضغط الحجم", fontSize = 10.sp, color = TextSecondary)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("التحسين التلقائي للسبورة والتباين", fontSize = 11.sp, color = TextPrimary)
                             }
                             Switch(
                                 checked = globalAutoEnhance,
-                                onCheckedChange = { isChecked ->
-                                    globalAutoEnhance = isChecked
-                                    // Re-apply to all pages
+                                onCheckedChange = { checked ->
+                                    globalAutoEnhance = checked
                                     scannedPages = scannedPages.map { p ->
-                                        val updated = p.copy(autoEnhance = isChecked, isProcessing = true)
+                                        val updated = p.copy(autoEnhance = checked, isProcessing = true)
                                         processPageItem(updated) { res ->
                                             scannedPages = scannedPages.map { if (it.id == res.id) res else it }
                                         }
@@ -507,52 +554,9 @@ fun UploadLessonDialog(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(24.dp))
             }
-        },
-        confirmButton = {
-            GlassButton(
-                text = if (isUploading) "جاري النشر..." else "نشر وتوثيق الدرس ✨",
-                enabled = title.isNotBlank() && !isUploading,
-                onClick = {
-                    if (title.isNotBlank()) {
-                        isUploading = true
-                        scope.launch {
-                            val validPages = scannedPages.mapNotNull { it.processedResult }
-                            val descText = description.ifBlank {
-                                if (validPages.isNotEmpty()) {
-                                    "درس موثق بـ ${validPages.size} صفحات ومحسن للقراءة بجودة عالية"
-                                } else {
-                                    "درس موثق ومسجل"
-                                }
-                            }
-                            val result = viewModel.addLessonWithPages(
-                                subjectId = selectedSubjectId,
-                                title = title,
-                                description = descText,
-                                date = studyDate,
-                                pages = validPages
-                            )
-                            isUploading = false
-                            if (result.isSuccess) {
-                                Toast.makeText(context, "تم توثيق ونشر الدرس بنجاح 🚀", Toast.LENGTH_SHORT).show()
-                                onDismiss()
-                            } else {
-                                val errorMsg = result.exceptionOrNull()?.message ?: "حدث خطأ أثناء نشر الدرس"
-                                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    }
-                }
-            )
-        },
-        dismissButton = {
-            GlassOutlinedButton(
-                text = "إلغاء",
-                enabled = !isUploading,
-                onClick = onDismiss
-            )
-        },
-        containerColor = MidnightSurface,
-        shape = RoundedCornerShape(20.dp)
-    )
+        }
+    }
 }

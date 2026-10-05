@@ -43,8 +43,8 @@ export async function handleCreateRoleRequest(
   }
 
   const targetRole = normalizeRole(body.requestedRole);
-  if (targetRole !== Role.MODERATOR && targetRole !== Role.TEACHER && targetRole !== Role.ADMIN) {
-    return errorResponse('INVALID_ROLE', 'الرتب القابلة للتقديم هي: مسؤول، أستاذ، أو مدير');
+  if (targetRole !== Role.MODERATOR && targetRole !== Role.TEACHER) {
+    return errorResponse('INVALID_ROLE', 'الرتب القابلة للتقديم هي: مسؤول (MODERATOR) أو أستاذ (TEACHER). رتبة المدير (ADMIN) تُمنح حصراً بقرار مباشر من المالك.');
   }
 
   const currentRole = normalizeRole(user.role);

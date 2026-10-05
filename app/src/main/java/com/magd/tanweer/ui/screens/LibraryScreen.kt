@@ -63,6 +63,7 @@ fun LibraryScreen(
     // DEFAULT VIEW MODE IS WOODEN BOOKSHELF AS REQUESTED
     var currentViewMode by remember { mutableStateOf(LibraryViewMode.WOODEN_SHELF) }
     var isViewModeSheetOpen by remember { mutableStateOf(false) }
+    var isStorageSheetOpen by remember { mutableStateOf(false) }
     var selectedBookForDetail by remember { mutableStateOf<BookItem?>(null) }
 
     // Fetch all books
@@ -70,11 +71,27 @@ fun LibraryScreen(
 
     // Track downloaded books dynamically
     var downloadedBooksMap by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    var refreshTrigger by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(allBooks) {
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                refreshTrigger++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(allBooks, refreshTrigger) {
         withContext(Dispatchers.IO) {
             val map = allBooks.associate { it.id to pdfManager.isBookDownloaded(it.id) }
-            downloadedBooksMap = map
+            withContext(Dispatchers.Main) {
+                downloadedBooksMap = map
+            }
         }
     }
 
@@ -146,6 +163,25 @@ fun LibraryScreen(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // Storage Management Button
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(GlassSurface)
+                                .border(1.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
+                                .clickable { isStorageSheetOpen = true }
+                                .padding(horizontal = 9.dp, vertical = 7.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(text = "💾", fontSize = 13.sp)
+                                Text(
+                                    text = "التخزين",
+                                    fontSize = 11.sp,
+                                    color = TextPrimary
+                                )
+                            }
+                        }
+
                         // Compact View Mode Selector Button (Saves screen real estate)
                         Box(
                             modifier = Modifier
@@ -479,7 +515,256 @@ fun LibraryScreen(
             }
         }
 
-        // Selected Book Quick Detail Modal / Bottom Sheet
+        // Storage Management Bottom Sheet
+        if (isStorageSheetOpen) {
+            val totalBytes = remember(refreshTrigger, allBooks) { pdfManager.getTotalBooksStorageBytes() }
+            val downloadedBooks = remember(allBooks, downloadedBooksMap) {
+                allBooks.filter { downloadedBooksMap[it.id] == true }
+            }
+            var confirmDeleteAll by remember { mutableStateOf(false) }
+            var bookToDelete by remember { mutableStateOf<BookItem?>(null) }
+            var storageSortBy by remember { mutableStateOf("SIZE") } // SIZE, NAME, DATE
+
+            val sortedDownloadedBooks = remember(downloadedBooks, storageSortBy) {
+                when (storageSortBy) {
+                    "SIZE" -> downloadedBooks.sortedByDescending { pdfManager.getBookFileSize(it.id) }
+                    "NAME" -> downloadedBooks.sortedBy { it.title }
+                    else -> downloadedBooks
+                }
+            }
+
+            ModalBottomSheet(
+                onDismissRequest = { isStorageSheetOpen = false },
+                containerColor = MidnightSurface,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = CyanAccent) }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .padding(bottom = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Sheet Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("💾", fontSize = 22.sp)
+                            Column {
+                                Text(
+                                    text = "إدارة تخزين ومساحة الكتب",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = "${downloadedBooks.size} كتب محملة أوفلاين على الجهاز",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+
+                        if (downloadedBooks.isNotEmpty()) {
+                            TextButton(
+                                onClick = { confirmDeleteAll = true },
+                                colors = ButtonDefaults.textButtonColors(contentColor = RubyRed)
+                            ) {
+                                Text("حذف الكل 🗑️", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    // Total Size Card
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = GlassSurface,
+                        borderColor = CyanAccent.copy(alpha = 0.3f)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("المساحة الإجمالية المستهلكة", fontSize = 12.sp, color = TextSecondary)
+                                Text(
+                                    text = pdfManager.formatFileSize(totalBytes),
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = CyanAccent
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(CyanGlow)
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = if (totalBytes > 0) "تخزين محلي آمن 📂" else "لا توجد ملفات محملة",
+                                    fontSize = 11.sp,
+                                    color = CyanAccent,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // Sort Chips
+                    if (downloadedBooks.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("ترتيب:", fontSize = 11.sp, color = TextSecondary)
+                            FilterChip(
+                                selected = storageSortBy == "SIZE",
+                                onClick = { storageSortBy = "SIZE" },
+                                label = { Text("الأكبر حجماً", fontSize = 11.sp) }
+                            )
+                            FilterChip(
+                                selected = storageSortBy == "NAME",
+                                onClick = { storageSortBy = "NAME" },
+                                label = { Text("أبجدياً", fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    // Downloaded Books List
+                    if (sortedDownloadedBooks.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "لم تقم بتحميل أي كتب للقراءة بدون إنترنت بعد.",
+                                fontSize = 13.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 300.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(sortedDownloadedBooks) { b ->
+                                val fileSize = pdfManager.getBookFileSize(b.id)
+                                GlassCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    backgroundColor = MidnightBackground
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Text("📕", fontSize = 20.sp)
+                                            Column {
+                                                Text(
+                                                    text = b.title,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = TextPrimary
+                                                )
+                                                Text(
+                                                    text = "${b.subjectName} • ${pdfManager.formatFileSize(fileSize)}",
+                                                    fontSize = 11.sp,
+                                                    color = TextSecondary
+                                                )
+                                            }
+                                        }
+
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            IconButton(
+                                                onClick = {
+                                                    isStorageSheetOpen = false
+                                                    viewModel.openBookInPdfReader(b)
+                                                },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(Icons.Default.MenuBook, contentDescription = "قراءة", tint = CyanAccent, modifier = Modifier.size(18.dp))
+                                            }
+
+                                            IconButton(
+                                                onClick = { bookToDelete = b },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = "حذف", tint = RubyRed, modifier = Modifier.size(18.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Confirm Delete Single Book Dialog
+            if (bookToDelete != null) {
+                val b = bookToDelete!!
+                AlertDialog(
+                    onDismissRequest = { bookToDelete = null },
+                    title = { Text("حذف الكتاب من الجهاز؟", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                    text = { Text("هل تريد حذف ملف PDF لكتاب (${b.title}) لتوفير مساحة؟ يمكنك إعادة تحميله لاحقاً في أي وقت.") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                pdfManager.deleteBookFile(b.id)
+                                refreshTrigger++
+                                bookToDelete = null
+                                Toast.makeText(context, "تم حذف الكتاب من التخزين بنجاح 🗑️", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = RubyRed)
+                        ) {
+                            Text("حذف الملف", color = Color.White)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { bookToDelete = null }) { Text("إلغاء") }
+                    }
+                )
+            }
+
+            // Confirm Delete All Books Dialog
+            if (confirmDeleteAll) {
+                AlertDialog(
+                    onDismissRequest = { confirmDeleteAll = false },
+                    title = { Text("حذف جميع الكتب المحملة؟", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                    text = { Text("سيتم حذف جميع ملفات PDF المخزنة محلياً (${downloadedBooks.size} كتب) وإفراغ مساحة ${pdfManager.formatFileSize(totalBytes)}. هل أنت متأكد؟") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val count = pdfManager.deleteAllDownloadedBooks()
+                                refreshTrigger++
+                                confirmDeleteAll = false
+                                Toast.makeText(context, "تم إفراغ الذاكرة وحذف $count كتب بنجاح 🗑️", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = RubyRed)
+                        ) {
+                            Text("حذف الكل الآن", color = Color.White)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmDeleteAll = false }) { Text("إلغاء") }
+                    }
+                )
+            }
+        }
         if (selectedBookForDetail != null) {
             val book = selectedBookForDetail!!
             val isDownloaded = downloadedBooksMap[book.id] == true

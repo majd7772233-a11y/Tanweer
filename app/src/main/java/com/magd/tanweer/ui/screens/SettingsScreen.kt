@@ -492,7 +492,36 @@ fun SettingsScreen(
         }
 
         // -------------------------------------------------------------
-        // SECTION 8: ABOUT TANWEER (حول المنصة)
+        // SECTION 8: APP VERSION & UPDATE CHECK
+        // -------------------------------------------------------------
+        item {
+            SettingsSectionHeader(title = "🚀 التحديثات والإصدار", subtitle = "التحقق من حالة النسخة وسجل التحسينات")
+        }
+
+        item {
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { viewModel.setSubScreen(SubScreen.VERSION_CHECK) }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("🚀", fontSize = 22.sp)
+                        Column {
+                            Text("فحص التحديثات والإصدار (1.2.0)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("التحقق من توافق النسخة مع الخادم وما الجديد", fontSize = 11.sp, color = TextSecondary)
+                        }
+                    }
+                    GlassPill(text = "محدث ✓", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // SECTION 9: ABOUT TANWEER (حول المنصة)
         // -------------------------------------------------------------
         item {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -503,7 +532,7 @@ fun SettingsScreen(
                     Text(text = "تـنـويـر ✨", fontSize = 20.sp, fontWeight = FontWeight.Black, color = CyanAccent)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(text = "المنصة التعليمية للطلاب والمعلمين", fontSize = 12.sp, color = TextSecondary)
-                    Text(text = "الإصدار 1.0.0 • معمارية Cloudflare Workers + D1", fontSize = 10.sp, color = TextMuted)
+                    Text(text = "الإصدار 1.2.0 (Build 2) • معمارية Cloudflare Workers + SQLite Room", fontSize = 11.sp, color = TextMuted)
                 }
             }
         }

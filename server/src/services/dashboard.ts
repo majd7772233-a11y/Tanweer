@@ -925,10 +925,15 @@ export async function handleApplyDashboardDecision(decisionId: string, actorId: 
     group_id: string;
     request_type: string;
     target_id: string;
+    status: string;
   }>();
 
   if (!decision) {
     return errorResponse('DECISION_NOT_FOUND', 'القرار الجماعي غير موجود', 404);
+  }
+
+  if (decision.status !== 'PENDING') {
+    return errorResponse('DECISION_ALREADY_RESOLVED', `لا يمكن تطبيق هذا القرار لأنه محسوم مسبقاً بحالة (${decision.status})`, 400);
   }
 
   const result = await applyDecisionExecution(
@@ -939,6 +944,10 @@ export async function handleApplyDashboardDecision(decisionId: string, actorId: 
     actorId,
     env
   );
+
+  if (!result.success) {
+    return errorResponse('EXECUTION_FAILED', result.message || 'فشل تطبيق القرار البرمجي في قاعدة البيانات', 500);
+  }
 
   await logRoleAudit(
     env.DB,
@@ -959,9 +968,22 @@ export async function handleApplyDashboardDecision(decisionId: string, actorId: 
  * God Mode: Force rejects a community decision.
  */
 export async function handleRejectDashboardDecision(decisionId: string, actorId: string, env: Env): Promise<Response> {
-  await env.DB.prepare(`UPDATE community_decisions SET status = 'REJECTED' WHERE id = ?`).bind(decisionId).run();
+  const decision = await env.DB.prepare(
+    `SELECT * FROM community_decisions WHERE id = ?`
+  ).bind(decisionId).first<{ id: string; status: string; request_type: string }>();
+
+  if (!decision) {
+    return errorResponse('DECISION_NOT_FOUND', 'القرار الجماعي غير موجود', 404);
+  }
+
+  if (decision.status !== 'PENDING') {
+    return errorResponse('DECISION_ALREADY_RESOLVED', `لا يمكن رفض هذا القرار لأنه محسوم مسبقاً بحالة (${decision.status})`, 400);
+  }
+
+  const now = Date.now();
+  await env.DB.prepare(`UPDATE community_decisions SET status = 'REJECTED', applied_at = ?, applied_by = ? WHERE id = ?`).bind(now, actorId, decisionId).run();
   await logRoleAudit(env.DB, 'OWNER_REJECT_DECISION', actorId, 'SYSTEM_OWNER', null, `رفض وإغلاق القرار الجماعي (${decisionId}) يدوياً من لوحة المالك`);
-  return jsonResponse({ success: true, message: 'تم رفض القرار بنجاح' });
+  return jsonResponse({ success: true, message: 'تم رفض وإغلاق القرار بنجاح ❌' });
 }
 
 /**

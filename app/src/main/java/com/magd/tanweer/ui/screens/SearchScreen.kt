@@ -36,7 +36,7 @@ fun SearchScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("ALL") } // ALL, CONTENTS, HOMEWORK, EXAMS, ISSUES, BOOKS
 
-    val contents by viewModel.repository.getDayContents(activeGroupId, "")
+    val contents by viewModel.repository.getAllContents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val homeworks by viewModel.repository.getHomeworks(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())

@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.magd.tanweer.data.model.HomeworkItem
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.data.notifications.TanweerNotificationManager
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.TanweerViewModel
@@ -87,6 +88,9 @@ fun HomeworkScreen(
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
 
     val homeworks by viewModel.repository.getHomeworks(activeGroupId)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val plannedHwIds by viewModel.todayPlannedHomeworkIds
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val books by viewModel.repository.getBooks(currentUser?.gradeId ?: 10)
@@ -302,7 +306,14 @@ fun HomeworkScreen(
                         homework = hw,
                         isOverdue = isOverdue,
                         isDueToday = isDueToday,
-                        onToggle = { viewModel.toggleHomework(hw.id, hw.isCompleted) },
+                        isPlanned = plannedHwIds.contains(hw.id),
+                        onToggle = {
+                            viewModel.toggleHomework(hw.id, hw.isCompleted) { res ->
+                                if (res.isFailure) {
+                                    Toast.makeText(context, res.exceptionOrNull()?.message ?: "تعذر تحديث الواجب", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
                         onRetrySync = { viewModel.retrySyncHomework(hw.id) },
                         onImageClick = { url -> fullScreenImagePreviewUrl = url },
                         onOpenBookPage = if (!hw.pageNumbers.isNullOrBlank()) {
@@ -318,10 +329,31 @@ fun HomeworkScreen(
                             }
                         } else null,
                         onSetReminder = {
-                            Toast.makeText(context, "تم ضبط تذكير للواجب بنجاح 🔔", Toast.LENGTH_SHORT).show()
+                            val scheduled = TanweerNotificationManager.scheduleHomeworkReminder(
+                                context = context,
+                                homeworkId = hw.id,
+                                title = hw.title,
+                                subjectName = hw.subjectName,
+                                dueDate = hw.dueDate
+                            )
+                            if (scheduled) {
+                                Toast.makeText(context, "🔔 تم تفعيل تذكير حقيقي على جهازك للواجب: ${hw.title}", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "تعذر جدولة التذكير، يرجى تفعيل أذونات الإشعارات", Toast.LENGTH_SHORT).show()
+                            }
                         },
                         onAddToDailyPlan = {
-                            Toast.makeText(context, "تمت إضافة الواجب إلى خطة إنجاز اليوم 📌", Toast.LENGTH_SHORT).show()
+                            viewModel.togglePlannedHomework(
+                                homeworkId = hw.id,
+                                title = hw.title,
+                                subjectName = hw.subjectName
+                            ) { isNowPlanned ->
+                                if (isNowPlanned) {
+                                    Toast.makeText(context, "📌 تمت إضافة الواجب إلى خطة إنجاز اليوم", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "تمت إزالة الواجب من خطة إنجاز اليوم", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         },
                         onAskQuestion = {
                             viewModel.addIssue(
@@ -353,11 +385,16 @@ fun HomeworkScreen(
                         dueDate = dueDate,
                         taskType = taskType,
                         pages = scanPages.mapNotNull { it.processedResult },
-                        onComplete = {
-                            Toast.makeText(context, "تم حفظ ونشر الواجب بنجاح ✨", Toast.LENGTH_SHORT).show()
+                        onResult = { result ->
+                            if (result.isSuccess) {
+                                Toast.makeText(context, "تم حفظ ونشر الواجب بنجاح ✨", Toast.LENGTH_SHORT).show()
+                                isAddModalOpen = false
+                            } else {
+                                val err = result.exceptionOrNull()?.message ?: "حدث خطأ أثناء حفظ الواجب"
+                                Toast.makeText(context, "تعذر النشر: $err", Toast.LENGTH_LONG).show()
+                            }
                         }
                     )
-                    isAddModalOpen = false
                 }
             )
         }
@@ -426,6 +463,7 @@ fun HomeworkCard(
     homework: HomeworkItem,
     isOverdue: Boolean = false,
     isDueToday: Boolean = false,
+    isPlanned: Boolean = false,
     onToggle: () -> Unit,
     onRetrySync: (() -> Unit)? = null,
     onImageClick: (String) -> Unit,
@@ -681,9 +719,19 @@ fun HomeworkCard(
                     if (onAddToDailyPlan != null) {
                         IconButton(
                             onClick = onAddToDailyPlan,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier
+                                .size(32.dp)
+                                .then(
+                                    if (isPlanned) Modifier.background(WarmAmber.copy(alpha = 0.25f), CircleShape)
+                                    else Modifier
+                                )
                         ) {
-                            Icon(Icons.Default.PushPin, contentDescription = "إضافة للخطة", tint = WarmAmber, modifier = Modifier.size(16.dp))
+                            Icon(
+                                Icons.Default.PushPin,
+                                contentDescription = if (isPlanned) "إزالة من الخطة" else "إضافة للخطة",
+                                tint = if (isPlanned) WarmAmber else TextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
                     if (onSetReminder != null) {
@@ -800,24 +848,93 @@ fun AddHomeworkDialog(
         }
     }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "إضافة واجب أو تكليف جديد 📝",
-                color = CyanAccent,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-        },
-        text = {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Scaffold(
+            topBar = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MidnightSurface)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            IconButton(
+                                onClick = onDismiss,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(GlassSurface)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextPrimary)
+                            }
+                            Text(
+                                text = "إضافة وتوثيق واجب مدرسي 📝",
+                                color = CyanAccent,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 16.sp
+                            )
+                        }
+
+                        GlassPill(
+                            text = if (taskType == "HOMEWORK") "واجب منزلي" else "مشروع / بحث",
+                            color = CyanAccent,
+                            bgColor = CyanGlow
+                        )
+                    }
+                }
+            },
+            bottomBar = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MidnightSurface)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        GlassOutlinedButton(
+                            text = "إلغاء",
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f)
+                        )
+                        GlassButton(
+                            text = "حفظ ونشر الواجب ✨",
+                            enabled = title.isNotBlank(),
+                            onClick = {
+                                if (title.isNotBlank()) {
+                                    onAddWithPages(selectedSubjId, title, details, pageNumbers, questionNumbers, dueDate, taskType, scannedPages)
+                                }
+                            },
+                            modifier = Modifier.weight(2f)
+                        )
+                    }
+                }
+            },
+            containerColor = MidnightBackground
+        ) { paddingValues ->
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                Spacer(modifier = Modifier.height(4.dp))
+
                 // Task Type Selector
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -830,7 +947,7 @@ fun AddHomeworkDialog(
                             .background(if (taskType == "HOMEWORK") CyanAccent else MidnightSurface)
                             .border(1.dp, if (taskType == "HOMEWORK") CyanAccent else GlassBorderSubtle, RoundedCornerShape(10.dp))
                             .clickable { taskType = "HOMEWORK" }
-                            .padding(vertical = 8.dp),
+                            .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -847,7 +964,7 @@ fun AddHomeworkDialog(
                             .background(if (taskType == "TASK") CyanAccent else MidnightSurface)
                             .border(1.dp, if (taskType == "TASK") CyanAccent else GlassBorderSubtle, RoundedCornerShape(10.dp))
                             .clickable { taskType = "TASK" }
-                            .padding(vertical = 8.dp),
+                            .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -923,9 +1040,7 @@ fun AddHomeworkDialog(
                     placeholder = "2026-09-30"
                 )
 
-                // -------------------------------------------------------------
-                // IMAGE ATTACHMENT SECTION (إدراج صور الواجب أو الحل)
-                // -------------------------------------------------------------
+                // IMAGE ATTACHMENT SECTION
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -954,7 +1069,7 @@ fun AddHomeworkDialog(
                                     )
                                 )
                             },
-                            modifier = Modifier.weight(1f).height(38.dp),
+                            modifier = Modifier.weight(1f).height(42.dp),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent),
                             border = androidx.compose.foundation.BorderStroke(1.dp, CyanAccent.copy(alpha = 0.6f))
@@ -966,7 +1081,7 @@ fun AddHomeworkDialog(
 
                         OutlinedButton(
                             onClick = { cameraLauncher.launch(null) },
-                            modifier = Modifier.weight(1f).height(38.dp),
+                            modifier = Modifier.weight(1f).height(42.dp),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = WarmAmber),
                             border = androidx.compose.foundation.BorderStroke(1.dp, WarmAmber.copy(alpha = 0.6f))
@@ -1025,23 +1140,9 @@ fun AddHomeworkDialog(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(24.dp))
             }
-        },
-        confirmButton = {
-            GlassButton(
-                text = "حفظ ونشر الواجب ✨",
-                enabled = title.isNotBlank(),
-                onClick = {
-                    if (title.isNotBlank()) {
-                        onAddWithPages(selectedSubjId, title, details, pageNumbers, questionNumbers, dueDate, taskType, scannedPages)
-                    }
-                }
-            )
-        },
-        dismissButton = {
-            GlassOutlinedButton(text = "إلغاء", onClick = onDismiss)
-        },
-        containerColor = MidnightSurface,
-        shape = RoundedCornerShape(20.dp)
-    )
+        }
+    }
 }

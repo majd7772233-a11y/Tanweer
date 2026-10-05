@@ -670,3 +670,15 @@ data class ChatMessageItem(
     val isMe: Boolean = false,
     val status: String = "SENT" // "SENDING", "SENT", "FAILED"
 )
+
+@JsonClass(generateAdapter = true)
+data class DailyPlanItem(
+    val id: String,
+    val userId: String,
+    val homeworkId: String?,
+    val title: String,
+    val subjectName: String?,
+    val planDate: String,
+    val isCompleted: Boolean,
+    val createdAt: Long = System.currentTimeMillis()
+)

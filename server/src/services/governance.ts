@@ -125,17 +125,22 @@ export async function handleApproveCorrection(
   }
 
   const now = Date.now();
+  const normField = (corr.field_name || '').toUpperCase().trim();
 
-  // Apply to content table
-  if (corr.field_name === 'TITLE') {
-    await env.DB.prepare(`UPDATE contents SET title = ?, updated_at = ? WHERE id = ?`).bind(corr.proposed_value, now, corr.content_id).run();
-  } else if (corr.field_name === 'DESCRIPTION') {
-    await env.DB.prepare(`UPDATE contents SET description = ?, updated_at = ? WHERE id = ?`).bind(corr.proposed_value, now, corr.content_id).run();
+  // Apply to content table safely within group
+  if (normField === 'TITLE' || normField === 'العنوان') {
+    await env.DB.prepare(`UPDATE contents SET title = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
+  } else if (normField === 'DESCRIPTION' || normField === 'الوصف' || normField === 'الشرح') {
+    await env.DB.prepare(`UPDATE contents SET description = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
+  } else if (normField === 'STUDY_DATE' || normField === 'STUDYDATE' || normField === 'DATE' || normField === 'التاريخ') {
+    await env.DB.prepare(`UPDATE contents SET study_date = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
+  } else if (normField === 'PAGE_NUMBERS' || normField === 'ORDER' || normField === 'الصفحات') {
+    await env.DB.prepare(`UPDATE contents SET description = description || ' \n[أرقام الصفحات المصوبة: ' || ? || ']', updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
   }
 
   await env.DB.prepare(
-    `UPDATE content_corrections SET status = 'APPROVED', reviewed_by = ?, reviewed_at = ? WHERE id = ?`
-  ).bind(user.userId, now, correctionId).run();
+    `UPDATE content_corrections SET status = 'APPROVED', reviewed_by = ?, reviewed_at = ? WHERE id = ? AND group_id = ?`
+  ).bind(user.userId, now, correctionId, corr.group_id).run();
 
   return jsonResponse({
     success: true,
@@ -169,8 +174,8 @@ export async function handleRejectCorrection(
 
   const now = Date.now();
   await env.DB.prepare(
-    `UPDATE content_corrections SET status = 'REJECTED', reviewed_by = ?, reviewed_at = ? WHERE id = ?`
-  ).bind(user.userId, now, correctionId).run();
+    `UPDATE content_corrections SET status = 'REJECTED', reviewed_by = ?, reviewed_at = ? WHERE id = ? AND group_id = ?`
+  ).bind(user.userId, now, correctionId, corr.group_id).run();
 
   return jsonResponse({
     success: true,
@@ -183,6 +188,17 @@ export async function handleRejectCorrection(
  * 2. Unified Community Decisions Engine (التصويت والقرارات الموحدة)
  * -------------------------------------------------------------
  */
+
+export const ALLOWED_DECISION_TYPES = [
+  'DELETION',
+  'CONTENT_DELETION',
+  'CORRECTION',
+  'SCHEDULE',
+  'SCHEDULE_CHANGE',
+  'VERIFICATION',
+  'OFFICIAL_VERIFICATION',
+  'PIN_CONTENT',
+] as const;
 
 /**
  * Automatically applies the outcome of a passed community decision across the database.
@@ -198,36 +214,44 @@ export async function applyDecisionExecution(
   const now = Date.now();
   const normType = requestType.toUpperCase();
 
+  if (!ALLOWED_DECISION_TYPES.includes(normType as any)) {
+    return { success: false, message: `نوع القرار غير معروف أو غير مدعوم: ${requestType}` };
+  }
+
   try {
     if (normType === 'DELETION' || normType === 'CONTENT_DELETION') {
-      await env.DB.prepare(`DELETE FROM content_media WHERE content_id = ?`).bind(targetId).run();
-      await env.DB.prepare(`DELETE FROM content_corrections WHERE content_id = ?`).bind(targetId).run();
-      await env.DB.prepare(`DELETE FROM contents WHERE id = ?`).bind(targetId).run();
-      await env.DB.prepare(`DELETE FROM homeworks WHERE id = ?`).bind(targetId).run();
-      await env.DB.prepare(`DELETE FROM exams WHERE id = ?`).bind(targetId).run();
-      await env.DB.prepare(`DELETE FROM issues WHERE id = ?`).bind(targetId).run();
+      await env.DB.prepare(`DELETE FROM content_media WHERE content_id IN (SELECT id FROM contents WHERE id = ? AND group_id = ?)`).bind(targetId, groupId).run();
+      await env.DB.prepare(`DELETE FROM content_corrections WHERE content_id = ? AND group_id = ?`).bind(targetId, groupId).run();
+      await env.DB.prepare(`DELETE FROM contents WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
+      await env.DB.prepare(`DELETE FROM homeworks WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
+      await env.DB.prepare(`DELETE FROM exams WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
+      await env.DB.prepare(`DELETE FROM issues WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
     } else if (normType === 'CORRECTION') {
       const corr = await env.DB.prepare(
-        `SELECT * FROM content_corrections WHERE id = ?`
-      ).bind(targetId).first<{
+        `SELECT * FROM content_corrections WHERE id = ? AND group_id = ?`
+      ).bind(targetId, groupId).first<{
         content_id: string;
+        group_id: string;
         field_name: string;
         proposed_value: string;
       }>();
       if (corr) {
-        if (corr.field_name === 'TITLE') {
-          await env.DB.prepare(`UPDATE contents SET title = ?, updated_at = ? WHERE id = ?`).bind(corr.proposed_value, now, corr.content_id).run();
-        } else if (corr.field_name === 'DESCRIPTION') {
-          await env.DB.prepare(`UPDATE contents SET description = ?, updated_at = ? WHERE id = ?`).bind(corr.proposed_value, now, corr.content_id).run();
+        const normField = (corr.field_name || '').toUpperCase().trim();
+        if (normField === 'TITLE' || normField === 'العنوان') {
+          await env.DB.prepare(`UPDATE contents SET title = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
+        } else if (normField === 'DESCRIPTION' || normField === 'الوصف' || normField === 'الشرح') {
+          await env.DB.prepare(`UPDATE contents SET description = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
+        } else if (normField === 'STUDY_DATE' || normField === 'STUDYDATE' || normField === 'DATE' || normField === 'التاريخ') {
+          await env.DB.prepare(`UPDATE contents SET study_date = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
         }
         await env.DB.prepare(
-          `UPDATE content_corrections SET status = 'APPROVED', reviewed_by = 'COMMUNITY_CONSENSUS', reviewed_at = ? WHERE id = ?`
-        ).bind(now, targetId).run();
+          `UPDATE content_corrections SET status = 'APPROVED', reviewed_by = 'COMMUNITY_CONSENSUS', reviewed_at = ? WHERE id = ? AND group_id = ?`
+        ).bind(now, targetId, groupId).run();
       }
     } else if (normType === 'SCHEDULE' || normType === 'SCHEDULE_CHANGE') {
       const prop = await env.DB.prepare(
-        `SELECT * FROM schedule_proposals WHERE id = ?`
-      ).bind(targetId).first<{
+        `SELECT * FROM schedule_proposals WHERE id = ? AND group_id = ?`
+      ).bind(targetId, groupId).first<{
         group_id: string;
         day_of_week: number;
         slot_order: number;
@@ -242,23 +266,23 @@ export async function applyDecisionExecution(
             `UPDATE schedule_slots SET subject_id = ? WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
           ).bind(prop.new_subject_id, activeVer.id, prop.day_of_week, prop.slot_order).run();
           await env.DB.prepare(
-            `UPDATE schedule_proposals SET status = 'ACCEPTED', reviewed_by = 'COMMUNITY_CONSENSUS', reviewed_at = ? WHERE id = ?`
-          ).bind(now, targetId).run();
+            `UPDATE schedule_proposals SET status = 'ACCEPTED', reviewed_by = 'COMMUNITY_CONSENSUS', reviewed_at = ? WHERE id = ? AND group_id = ?`
+          ).bind(now, targetId, groupId).run();
         }
       }
     } else if (normType === 'VERIFICATION' || normType === 'OFFICIAL_VERIFICATION') {
       await env.DB.prepare(
-        `UPDATE contents SET is_verified = 1, verified_by = 'COMMUNITY_CONSENSUS', updated_at = ? WHERE id = ?`
-      ).bind(now, targetId).run();
+        `UPDATE contents SET is_verified = 1, verified_by = 'COMMUNITY_CONSENSUS', updated_at = ? WHERE id = ? AND group_id = ?`
+      ).bind(now, targetId, groupId).run();
     } else if (normType === 'PIN_CONTENT') {
       await env.DB.prepare(
-        `UPDATE contents SET is_pinned = 1, updated_at = ? WHERE id = ?`
-      ).bind(now, targetId).run();
+        `UPDATE contents SET is_pinned = 1, updated_at = ? WHERE id = ? AND group_id = ?`
+      ).bind(now, targetId, groupId).run();
     }
 
     await env.DB.prepare(
-      `UPDATE community_decisions SET status = 'APPLIED', applied_at = ?, applied_by = ? WHERE id = ?`
-    ).bind(now, actorId || 'COMMUNITY_CONSENSUS', decisionId).run();
+      `UPDATE community_decisions SET status = 'APPLIED', applied_at = ?, applied_by = ? WHERE id = ? AND group_id = ?`
+    ).bind(now, actorId || 'COMMUNITY_CONSENSUS', decisionId, groupId).run();
 
     return { success: true, message: 'تم تطبيق القرار الجماعي بنجاح' };
   } catch (err: any) {
@@ -292,6 +316,39 @@ export async function handleCreateCommunityDecision(
   }
 
   const normType = body.requestType.toUpperCase();
+
+  if (!ALLOWED_DECISION_TYPES.includes(normType as any)) {
+    return errorResponse(
+      'INVALID_DECISION_TYPE',
+      `نوع القرار غير مدعوم. الأنواع المصرح بها للتصويت هي: ${ALLOWED_DECISION_TYPES.join(', ')}`
+    );
+  }
+
+  // Strict Cross-group isolation: Verify targetId belongs to groupId
+  if (normType === 'DELETION' || normType === 'CONTENT_DELETION') {
+    const content = await env.DB.prepare(`SELECT id FROM contents WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first();
+    const hw = !content ? await env.DB.prepare(`SELECT id FROM homeworks WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first() : null;
+    const exam = (!content && !hw) ? await env.DB.prepare(`SELECT id FROM exams WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first() : null;
+    const issue = (!content && !hw && !exam) ? await env.DB.prepare(`SELECT id FROM issues WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first() : null;
+    if (!content && !hw && !exam && !issue) {
+      return errorResponse('TARGET_NOT_FOUND', 'المورد المستهدف للحذف غير موجود أو لا ينتمي إلى هذه المجموعة', 404);
+    }
+  } else if (normType === 'CORRECTION') {
+    const corr = await env.DB.prepare(`SELECT id FROM content_corrections WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first();
+    if (!corr) {
+      return errorResponse('TARGET_NOT_FOUND', 'طلب التصحيح المستهدف غير موجود أو لا ينتمي إلى هذه المجموعة', 404);
+    }
+  } else if (normType === 'SCHEDULE' || normType === 'SCHEDULE_CHANGE') {
+    const prop = await env.DB.prepare(`SELECT id FROM schedule_proposals WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first();
+    if (!prop) {
+      return errorResponse('TARGET_NOT_FOUND', 'مقترح الجدول المستهدف غير موجود أو لا ينتمي إلى هذه المجموعة', 404);
+    }
+  } else if (normType === 'VERIFICATION' || normType === 'OFFICIAL_VERIFICATION' || normType === 'PIN_CONTENT') {
+    const content = await env.DB.prepare(`SELECT id FROM contents WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first();
+    if (!content) {
+      return errorResponse('TARGET_NOT_FOUND', 'الدرس المستهدف غير موجود أو لا ينتمي إلى هذه المجموعة', 404);
+    }
+  }
 
   // 1. System-enforced Quorum Policies based on decision sensitivity
   let thresholdPercent: number;
@@ -519,18 +576,18 @@ export async function handleVoteCommunityDecision(
   let newStatus = 'PENDING';
   let appliedMsg = '';
 
-  if (vFor >= requiredVotes) {
-    // Quorum reached -> Execute automated outcome
+  if (vFor >= requiredVotes && vFor > vAgainst) {
+    // Quorum reached with strict majority -> Execute automated outcome
     await applyDecisionExecution(decisionId, decision.request_type, decision.target_id, decision.group_id, user.userId, env);
     newStatus = 'APPLIED';
     appliedMsg = ' — واكتمل النصاب وتم اعتماد وتطبيق القرار تلقائياً بنجاح ✨';
-  } else if (vAgainst > (decision.total_eligible_voters - requiredVotes)) {
-    // Rejection mathematically guaranteed
+  } else if (vAgainst > (decision.total_eligible_voters - requiredVotes) || (vFor + vAgainst >= decision.total_eligible_voters && vFor <= vAgainst)) {
+    // Rejection guaranteed mathematically or finished in a tie/against
     newStatus = 'REJECTED';
     await env.DB.prepare(
       `UPDATE community_decisions SET status = 'REJECTED' WHERE id = ?`
     ).bind(decisionId).run();
-    appliedMsg = ' — وتم رفض القرار لعدم اكتمال النصاب المطلوب ❌';
+    appliedMsg = ' — وتم رفض القرار لعدم اكتمال النصاب المطلوب أو تعادل الأصوات ❌';
   }
 
   await env.DB.prepare(

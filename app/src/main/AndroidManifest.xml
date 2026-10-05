@@ -22,7 +22,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:windowSoftInputMode="adjustResize">
         <activity
             android:name=".MainActivity"
@@ -42,6 +42,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="com.magd.tanweer.ACTION_CHECK_REMINDERS" />
+                <action android:name="com.magd.tanweer.ACTION_HOMEWORK_REMINDER" />
             </intent-filter>
         </receiver>
     </application>

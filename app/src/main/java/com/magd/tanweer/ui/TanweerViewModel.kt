@@ -40,7 +40,10 @@ enum class SubScreen {
     TEACHER_DASHBOARD,
     MODERATOR_DASHBOARD,
     ADMIN_DASHBOARD,
-    COMMUNITY_DECISIONS
+    COMMUNITY_DECISIONS,
+    EVENTS,
+    VERSION_CHECK,
+    STORAGE_MANAGER
 }
 
 class TanweerViewModel(application: Application) : AndroidViewModel(application) {
@@ -1039,6 +1042,57 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         return res
     }
 
+    val todayPlannedHomeworkIds = currentUser.flatMapLatest { user ->
+        if (user != null) {
+            repository.getPlannedHomeworkIds(user.id, getTodayDateString())
+        } else {
+            flowOf(emptyList())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun togglePlannedHomework(
+        homeworkId: String,
+        title: String,
+        subjectName: String?,
+        onResult: ((isNowPlanned: Boolean) -> Unit)? = null
+    ) {
+        val user = currentUser.value ?: return
+        val today = getTodayDateString()
+        viewModelScope.launch {
+            val planned = todayPlannedHomeworkIds.value.contains(homeworkId)
+            if (planned) {
+                repository.removeDailyPlanByHomework(homeworkId, user.id)
+                onResult?.invoke(false)
+            } else {
+                repository.addToDailyPlan(
+                    userId = user.id,
+                    homeworkId = homeworkId,
+                    title = title,
+                    subjectName = subjectName,
+                    planDate = today
+                )
+                onResult?.invoke(true)
+            }
+        }
+    }
+
+    fun getDailyPlanForDate(date: String = getTodayDateString()): Flow<List<DailyPlanItem>> {
+        val userId = currentUser.value?.id ?: ""
+        return repository.getDailyPlan(userId, date)
+    }
+
+    fun toggleDailyPlanItem(id: String, currentCompleted: Boolean) {
+        viewModelScope.launch {
+            repository.toggleDailyPlanItem(id, !currentCompleted)
+        }
+    }
+
+    fun removeDailyPlanItem(id: String) {
+        viewModelScope.launch {
+            repository.removeDailyPlanItem(id)
+        }
+    }
+
     fun addHomework(
         subjectId: String,
         title: String,
@@ -1048,12 +1102,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         dueDate: String,
         taskType: String = "HOMEWORK",
         pages: List<com.magd.tanweer.util.ProcessedPageResult> = emptyList(),
+        onResult: ((Result<String>) -> Unit)? = null,
         onComplete: (() -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
         viewModelScope.launch {
-            if (pages.isNotEmpty()) {
+            val result = if (pages.isNotEmpty()) {
                 repository.addHomeworkWithImages(
                     groupId = groupId,
                     studyDate = _selectedDate.value,
@@ -1079,13 +1134,21 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                     taskType = taskType
                 )
             }
-            onComplete?.invoke()
+            onResult?.invoke(result)
+            if (result.isSuccess) {
+                onComplete?.invoke()
+            }
         }
     }
 
-    fun toggleHomework(homeworkId: String, currentStatus: Boolean) {
+    fun toggleHomework(
+        homeworkId: String,
+        currentStatus: Boolean,
+        onResult: ((Result<Boolean>) -> Unit)? = null
+    ) {
         viewModelScope.launch {
-            repository.toggleHomeworkCompletion(homeworkId, currentStatus)
+            val res = repository.toggleHomeworkCompletion(homeworkId, currentStatus)
+            onResult?.invoke(res)
         }
     }
 
@@ -1094,12 +1157,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         title: String,
         requiredChapters: String?,
         notes: String?,
-        examDate: String
+        examDate: String,
+        onResult: ((Result<String>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
         viewModelScope.launch {
-            repository.addExam(
+            val res = repository.addExam(
                 groupId = groupId,
                 examDate = examDate,
                 subjectId = subjectId,
@@ -1107,6 +1171,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 requiredChapters = requiredChapters,
                 notes = notes
             )
+            onResult?.invoke(res)
         }
     }
 
@@ -1122,12 +1187,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         category: String,
         eventDate: String,
         timeStr: String?,
-        location: String?
+        location: String?,
+        onResult: ((Result<String>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
         viewModelScope.launch {
-            repository.addEvent(
+            val res = repository.addEvent(
                 groupId = groupId,
                 eventDate = eventDate,
                 timeStr = timeStr,
@@ -1135,6 +1201,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 description = description,
                 category = category
             )
+            onResult?.invoke(res)
         }
     }
 
@@ -1166,16 +1233,25 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun addIssueComment(issueId: String, comment: String, onDone: () -> Unit = {}) {
+    fun addIssueComment(
+        issueId: String,
+        comment: String,
+        onDone: (Result<Unit>) -> Unit = {}
+    ) {
         viewModelScope.launch {
-            repository.addIssueComment(issueId, comment)
-            onDone()
+            val res = repository.addIssueComment(issueId, comment)
+            onDone(res)
         }
     }
 
-    fun markBestAnswer(issueId: String, commentId: String) {
+    fun markBestAnswer(
+        issueId: String,
+        commentId: String,
+        onResult: ((Result<Unit>) -> Unit)? = null
+    ) {
         viewModelScope.launch {
-            repository.markBestAnswer(issueId, commentId)
+            val res = repository.markBestAnswer(issueId, commentId)
+            onResult?.invoke(res)
         }
     }
 

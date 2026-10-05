@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.ChatMessageItem
 import com.magd.tanweer.data.model.GroupItem
+import com.magd.tanweer.data.model.Role
+import com.magd.tanweer.data.model.getRoleEnum
 import com.magd.tanweer.data.remote.ConnectionStatus
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
@@ -48,6 +50,8 @@ fun GroupsScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val chatStatus by viewModel.chatConnectionStatus.collectAsStateWithLifecycle()
     val groupMembersState by viewModel.groupMembersState.collectAsStateWithLifecycle()
+    val userRole = currentUser?.getRoleEnum() ?: Role.STUDENT
+    val canManageMembers = userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER || userRole == Role.TEACHER || userRole == Role.MODERATOR
 
     var activeTab by remember { mutableStateOf(GroupsTab.MY_GROUPS) }
     var activeChatGroup by remember { mutableStateOf<GroupItem?>(null) }
@@ -421,14 +425,16 @@ fun GroupsScreen(
                                             onClick = { activeChatGroup = officialClassGroup },
                                             modifier = Modifier.weight(1f)
                                         )
-                                        GlassOutlinedButton(
-                                            text = "إدارة الأعضاء 👥",
-                                            onClick = {
-                                                managingGroup = officialClassGroup
-                                                viewModel.loadGroupMembers(officialClassGroup.id)
-                                            },
-                                            modifier = Modifier.weight(1f)
-                                        )
+                                        if (canManageMembers) {
+                                            GlassOutlinedButton(
+                                                text = "إدارة الأعضاء 👥",
+                                                onClick = {
+                                                    managingGroup = officialClassGroup
+                                                    viewModel.loadGroupMembers(officialClassGroup.id)
+                                                },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
                                         if (!isSelected) {
                                             GlassOutlinedButton(
                                                 text = "التبديل كشعبة نشطة",

@@ -1,13 +1,13 @@
 package com.magd.tanweer.ui.screens
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,7 +21,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -30,6 +30,7 @@ import com.magd.tanweer.data.model.getRoleEnum
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.GlassCard
+import com.magd.tanweer.ui.components.GlassPill
 import com.magd.tanweer.ui.theme.*
 
 @Composable
@@ -39,14 +40,23 @@ fun ExtraSectionsHubScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val userRole = currentUser?.getRoleEnum() ?: Role.STUDENT
     var searchQuery by remember { mutableStateOf("") }
+    var selectedCategoryFilter by remember { mutableStateOf("ALL") }
+
+    val categories = listOf(
+        "ALL" to "الكل ✨",
+        "ACADEMIC" to "المناهج والتعلم 📚",
+        "COMMUNITY" to "المجتمع والحوكمة 🗳️",
+        "ROLES" to "مراكز الإدارة 🛡️",
+        "SETTINGS" to "النظام والإعدادات ⚙️"
+    )
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(MidnightBackground)
             .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(top = 12.dp, bottom = 32.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 48.dp)
     ) {
         // Hero Header Banner
         item {
@@ -64,43 +74,43 @@ fun ExtraSectionsHubScreen(
                         )
                     )
                     .border(1.dp, CyanGlow.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-                    .padding(20.dp)
+                    .padding(18.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(44.dp)
                                 .clip(CircleShape)
                                 .background(CyanGlow.copy(alpha = 0.3f))
-                                .border(1.dp, CyanAccent, CircleShape),
+                                .border(1.5.dp, CyanAccent, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("✨", fontSize = 20.sp)
+                            Text("✨", fontSize = 22.sp)
                         }
                         Column {
                             Text(
-                                text = "أقسام تـنـويـر الإضافية",
-                                fontSize = 19.sp,
+                                text = "أقسام تـنـويـر والخدمات",
+                                fontSize = 18.sp,
                                 fontWeight = FontWeight.Black,
                                 color = CyanAccent
                             )
                             Text(
-                                text = "بوابة المناهج، الحوكمة، الإدارة والخدمات التراكمية",
+                                text = "بوابة الخدمات التعليمية، الحوكمة، الإدارة والملفات",
                                 fontSize = 12.sp,
                                 color = TextSecondary
                             )
                         }
                     }
 
-                    // Search within extra sections
+                    // Search inside sections
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("ابحث في أقسام المنظومة...", fontSize = 13.sp, color = TextMuted) },
+                        placeholder = { Text("ابحث في أقسام المنظومة...", fontSize = 12.sp, color = TextMuted) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث", tint = CyanAccent) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
@@ -111,7 +121,7 @@ fun ExtraSectionsHubScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp),
+                            .padding(top = 2.dp),
                         shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = CyanAccent,
@@ -123,128 +133,165 @@ fun ExtraSectionsHubScreen(
                         ),
                         singleLine = true
                     )
+
+                    // Quick Category Filter Row
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+                    ) {
+                        items(categories) { (catKey, catLabel) ->
+                            val isSelected = selectedCategoryFilter == catKey
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { selectedCategoryFilter = catKey },
+                                label = { Text(catLabel, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = CyanAccent,
+                                    selectedLabelColor = TextOnAccent
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }
 
         // Section 1: الأكاديمية والتعلم (Academic & Learning Hub)
-        item {
-            HubCategoryHeader(title = "📚 التعلم والمناهج الأكاديمية", color = CyanAccent)
-        }
+        if (selectedCategoryFilter == "ALL" || selectedCategoryFilter == "ACADEMIC") {
+            item {
+                HubCategoryHeader(title = "📚 التعلم والمناهج الأكاديمية", color = CyanAccent)
+            }
 
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (searchQuery.isEmpty() || "مكتبة الكتب المناهج pdf".contains(searchQuery.trim())) {
-                    HubActionCard(
-                        title = "مكتبة الكتب والمناهج المعتمدة",
-                        subtitle = "الكتب الدراسية المعتمدة مع قارئ PDF الذكي وتقليب الصفحات",
-                        badge = "PDF تفاعلي 📖",
-                        badgeColor = CyanAccent,
-                        icon = Icons.Default.LocalLibrary,
-                        accentColor = CyanAccent,
-                        onClick = { viewModel.setSubScreen(SubScreen.LIBRARY) }
-                    )
-                }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (searchQuery.isEmpty() || "مكتبة الكتب المناهج pdf دراسية تحميل تخزين".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "مكتبة الكتب والمناهج المعتمدة",
+                            subtitle = "الكتب الدراسية المعتمدة مع قارئ PDF الذكي وخاصية القراءة بدون إنترنت",
+                            badge = "PDF تفاعلي 📖",
+                            badgeColor = CyanAccent,
+                            icon = Icons.Default.LocalLibrary,
+                            accentColor = CyanAccent,
+                            onClick = { viewModel.setSubScreen(SubScreen.LIBRARY) }
+                        )
+                    }
 
-                if (searchQuery.isEmpty() || "ماذا فاتني غياب واجبات دروس سابقة".contains(searchQuery.trim())) {
-                    HubActionCard(
-                        title = "ماذا فاتني أثناء الغياب؟",
-                        subtitle = "تجميع ذكي لكل الواجبات والدروس والاختبارات المضافة أثناء غيابك",
-                        badge = "استدراك ذكي 🎒",
-                        badgeColor = WarmAmber,
-                        icon = Icons.Default.WorkHistory,
-                        accentColor = WarmAmber,
-                        onClick = { viewModel.setSubScreen(SubScreen.WHAT_DID_I_MISS) }
-                    )
-                }
+                    if (searchQuery.isEmpty() || "ماذا فاتني غياب واجبات دروس سابقة استدراك".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "ماذا فاتني أثناء الغياب؟",
+                            subtitle = "تجميع ذكي وشامل لكل الواجبات والدروس والاختبارات المضافة أثناء الغياب",
+                            badge = "استدراك ذكي 🎒",
+                            badgeColor = WarmAmber,
+                            icon = Icons.Default.WorkHistory,
+                            accentColor = WarmAmber,
+                            onClick = { viewModel.setSubScreen(SubScreen.WHAT_DID_I_MISS) }
+                        )
+                    }
 
-                if (searchQuery.isEmpty() || "جدول حصص أسبوعي مواعيد".contains(searchQuery.trim())) {
-                    HubActionCard(
-                        title = "جدول الحصص الأسبوعي",
-                        subtitle = "استعراض جدول الشعبة وتقديم مقترحات تعديل الحصص والتصويت عليها",
-                        badge = "تفاعلي 📅",
-                        badgeColor = EmeraldGreen,
-                        icon = Icons.Default.Schedule,
-                        accentColor = EmeraldGreen,
-                        onClick = { viewModel.setSubScreen(SubScreen.SCHEDULE) }
-                    )
-                }
+                    if (searchQuery.isEmpty() || "جدول حصص أسبوعي مواعيد مقترحات".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "جدول الحصص الأسبوعي",
+                            subtitle = "استعراض جدول الشعبة وتقديم مقترحات تعديل الحصص والتصويت الجماعي عليها",
+                            badge = "تفاعلي 📅",
+                            badgeColor = EmeraldGreen,
+                            icon = Icons.Default.Schedule,
+                            accentColor = EmeraldGreen,
+                            onClick = { viewModel.setSubScreen(SubScreen.SCHEDULE) }
+                        )
+                    }
 
-                if (searchQuery.isEmpty() || "رحلة المادة خريطة تراكمية خط زمني".contains(searchQuery.trim())) {
-                    HubActionCard(
-                        title = "رحلة المادة والخط الزمني",
-                        subtitle = "الخريطة التراكمية والتسلسل الزمني للدروس والمراجعات",
-                        badge = "تراكمي 🗺️",
-                        badgeColor = PurpleAccent,
-                        icon = Icons.Default.Timeline,
-                        accentColor = PurpleAccent,
-                        onClick = { viewModel.setSubScreen(SubScreen.TIMELINE) }
-                    )
-                }
+                    if (searchQuery.isEmpty() || "رحلة المادة خط زمني دروس مستودع معرفة".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "رحلة المادة والخط الزمني",
+                            subtitle = "الخريطة التراكمية والتسلسل الزمني للدروس والمراجعات الدورية",
+                            badge = "تراكمي 🗺️",
+                            badgeColor = PurpleAccent,
+                            icon = Icons.Default.Timeline,
+                            accentColor = PurpleAccent,
+                            onClick = { viewModel.setSubScreen(SubScreen.TIMELINE) }
+                        )
+                    }
 
-                if (searchQuery.isEmpty() || "أرشيف أكاديمي سجل سنوي".contains(searchQuery.trim())) {
-                    HubActionCard(
-                        title = "الأرشيف الأكاديمي والسنوات السابقة",
-                        subtitle = "استعراض سجلات الأعوام والمواد المؤرشفة للرجوع إليها",
-                        badge = "أرشيف 🏛️",
-                        badgeColor = TextSecondary,
-                        icon = Icons.Default.Archive,
-                        accentColor = TextSecondary,
-                        onClick = { viewModel.setSubScreen(SubScreen.ACADEMIC_HISTORY) }
-                    )
+                    if (searchQuery.isEmpty() || "أرشيف أكاديمي سجل سنوي سنوات سابقة".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "الأرشيف الأكاديمي والسنوات السابقة",
+                            subtitle = "استعراض سجلات الأعوام والمواد المؤرشفة والرجوع إليها في أي وقت",
+                            badge = "أرشيف 🏛️",
+                            badgeColor = TextSecondary,
+                            icon = Icons.Default.Archive,
+                            accentColor = TextSecondary,
+                            onClick = { viewModel.setSubScreen(SubScreen.ACADEMIC_HISTORY) }
+                        )
+                    }
                 }
             }
         }
 
         // Section 2: المجتمع والحوكمة (Community & Governance)
-        item {
-            HubCategoryHeader(title = "🗳️ المجتمع والحوكمة الطلابية", color = EmeraldGreen)
-        }
+        if (selectedCategoryFilter == "ALL" || selectedCategoryFilter == "COMMUNITY") {
+            item {
+                HubCategoryHeader(title = "🗳️ المجتمع والحوكمة المدرسية", color = EmeraldGreen)
+            }
 
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (searchQuery.isEmpty() || "قرارات تصويت جماعي حوكمة ديمقراطية".contains(searchQuery.trim())) {
-                    HubActionCard(
-                        title = "القرارات والتصويتات الجماعية",
-                        subtitle = "محرك الحوكمة الموحد للتصويت على الحذف، التصويب، الجداول والاعتمادات",
-                        badge = "حوكمة موحدة 🗳️",
-                        badgeColor = EmeraldGreen,
-                        icon = Icons.Default.HowToVote,
-                        accentColor = EmeraldGreen,
-                        onClick = { viewModel.setSubScreen(SubScreen.COMMUNITY_DECISIONS) }
-                    )
-                }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (searchQuery.isEmpty() || "قرارات تصويت جماعي حوكمة ديمقراطية نصاب".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "القرارات والتصويتات الجماعية",
+                            subtitle = "محرك الحوكمة الموحد للتصويت على الحذف، التصويب، وتعديل الجداول",
+                            badge = "حوكمة موحدة 🗳️",
+                            badgeColor = EmeraldGreen,
+                            icon = Icons.Default.HowToVote,
+                            accentColor = EmeraldGreen,
+                            onClick = { viewModel.setSubScreen(SubScreen.COMMUNITY_DECISIONS) }
+                        )
+                    }
 
-                if (searchQuery.isEmpty() || "مجموعات شعب دردشة حية صف".contains(searchQuery.trim())) {
-                    HubActionCard(
-                        title = "المجموعات والشعب الدراسية",
-                        subtitle = "الانضمام إلى مجموعات الصف، إدارة الأعضاء، والمحادثة الفورية",
-                        badge = "شعب ونوادي 👥",
-                        badgeColor = CyanAccent,
-                        icon = Icons.Default.Groups,
-                        accentColor = CyanAccent,
-                        onClick = { viewModel.setSubScreen(SubScreen.GROUPS) }
-                    )
-                }
+                    if (searchQuery.isEmpty() || "مجموعات شعب دردشة حية صف أعضاء".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "المجموعات والشعب الدراسية",
+                            subtitle = "الانضمام إلى مجموعات الصف، والمحادثة الفورية التفاعلية مع الزملاء",
+                            badge = "شعب ونوادي 👥",
+                            badgeColor = CyanAccent,
+                            icon = Icons.Default.Groups,
+                            accentColor = CyanAccent,
+                            onClick = { viewModel.setSubScreen(SubScreen.GROUPS) }
+                        )
+                    }
 
-                if (searchQuery.isEmpty() || "بحث شامل دروس واجبات كتب".contains(searchQuery.trim())) {
-                    HubActionCard(
-                        title = "محرك البحث الشامل",
-                        subtitle = "البحث الفوري في كافة الدروس، الوسائط، الواجبات والكتب",
-                        badge = "بحث فوري 🔍",
-                        badgeColor = CyanAccent,
-                        icon = Icons.Default.Search,
-                        accentColor = CyanAccent,
-                        onClick = { viewModel.setSubScreen(SubScreen.SEARCH) }
-                    )
+                    if (searchQuery.isEmpty() || "فعاليات انشطة مسابقات مناسبات اجازات احداث".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "الفعاليات والأنشطة المدرسية",
+                            subtitle = "جدول المسابقات، الاحتفالات، العطل الرسمية والورش التفاعلية",
+                            badge = "أنشطة ومناسبات 🎪",
+                            badgeColor = PurpleAccent,
+                            icon = Icons.Default.Event,
+                            accentColor = PurpleAccent,
+                            onClick = { viewModel.setSubScreen(SubScreen.EVENTS) }
+                        )
+                    }
+
+                    if (searchQuery.isEmpty() || "بحث شامل دروس واجبات كتب وسائط".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "محرك البحث الشامل",
+                            subtitle = "البحث الفوري الدقيق في كافة الدروس والواجبات والاختبارات والكتب",
+                            badge = "بحث فوري 🔍",
+                            badgeColor = CyanAccent,
+                            icon = Icons.Default.Search,
+                            accentColor = CyanAccent,
+                            onClick = { viewModel.setSubScreen(SubScreen.SEARCH) }
+                        )
+                    }
                 }
             }
         }
 
         // Section 3: مراكز الإدارة والرتب (Role Centers)
-        if (userRole == Role.TEACHER || userRole == Role.MODERATOR || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
+        if ((selectedCategoryFilter == "ALL" || selectedCategoryFilter == "ROLES") &&
+            (userRole == Role.TEACHER || userRole == Role.MODERATOR || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER)
+        ) {
             item {
-                HubCategoryHeader(title = "🛡️ مراكز الرتب والإدارة", color = WarmAmber)
+                HubCategoryHeader(title = "🛡️ مراكز الرتب والإدارة المدرسية", color = WarmAmber)
             }
 
             item {
@@ -252,7 +299,7 @@ fun ExtraSectionsHubScreen(
                     if (userRole == Role.TEACHER || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
                         HubActionCard(
                             title = "مركز التعليم للأستاذ المعتمد",
-                            subtitle = "إدارة الواجبات الرسمية، الاختبارات الدورية، وتوثيق الإجابات النموذجية",
+                            subtitle = "إدارة وتثبيت الواجبات الرسمية، الاختبارات الدورية، وتوثيق الإجابات النموذجية",
                             badge = "أستاذ معتمد 🎓",
                             badgeColor = PurpleAccent,
                             icon = Icons.Default.School,
@@ -264,7 +311,7 @@ fun ExtraSectionsHubScreen(
                     if (userRole == Role.MODERATOR || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
                         HubActionCard(
                             title = "مركز إشراف الشعبة والتدقيق",
-                            subtitle = "مراجعة طلبات الانضمام، تقارير الشات، وتدقيق مقترحات الطلاب",
+                            subtitle = "مراجعة تقارير المحادثة، اعتماد التصحيحات، وتدقيق مقترحات الطلاب",
                             badge = "مشرف الشعبة 🛡️",
                             badgeColor = WarmAmber,
                             icon = Icons.Default.Shield,
@@ -276,8 +323,8 @@ fun ExtraSectionsHubScreen(
                     if (userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
                         HubActionCard(
                             title = "لوحة مدير المدرسة والنظام",
-                            subtitle = "إدارة الشعب، كادر المعلمين، سجلات التدقيق والأمان",
-                            badge = "مدير النظام 👑",
+                            subtitle = "إدارة كاملة للشعب، كادر المعلمين، سجلات التدقيق، القرارات الإدارية والتنبيهات",
+                            badge = "إدارة المدرسة 👑",
                             badgeColor = RubyRed,
                             icon = Icons.Default.AdminPanelSettings,
                             accentColor = RubyRed,
@@ -288,35 +335,49 @@ fun ExtraSectionsHubScreen(
             }
         }
 
-        // Section 4: الحساب والتخصيص (Account & Preferences)
-        item {
-            HubCategoryHeader(title = "⚙️ الحساب والإعدادات", color = TextSecondary)
-        }
+        // Section 4: الحساب والتحديثات (Account & System Updates)
+        if (selectedCategoryFilter == "ALL" || selectedCategoryFilter == "SETTINGS") {
+            item {
+                HubCategoryHeader(title = "⚙️ الحساب وإدارة النظام", color = TextSecondary)
+            }
 
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (searchQuery.isEmpty() || "ملف شخصي مساهمات رتبة أوسمة".contains(searchQuery.trim())) {
-                    HubActionCard(
-                        title = "الملف الشخصي والمساهمات",
-                        subtitle = "بيانات الحساب، الأوسمة المحصلة، وسجل المشاركات الفعالة",
-                        badge = "حسابي 👤",
-                        badgeColor = CyanAccent,
-                        icon = Icons.Default.Person,
-                        accentColor = CyanAccent,
-                        onClick = { viewModel.setSubScreen(SubScreen.PROFILE) }
-                    )
-                }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (searchQuery.isEmpty() || "ملف شخصي مساهمات رتبة أوسمة ترقية حساب".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "الملف الشخصي والمساهمات",
+                            subtitle = "بيانات الحساب، الأوسمة المحصلة، وسجل المشاركات الفعالة وطلب الترقية",
+                            badge = "حسابي 👤",
+                            badgeColor = CyanAccent,
+                            icon = Icons.Default.Person,
+                            accentColor = CyanAccent,
+                            onClick = { viewModel.setSubScreen(SubScreen.PROFILE) }
+                        )
+                    }
 
-                if (searchQuery.isEmpty() || "إعدادات حجم الخط سمة مظهر مزامنة".contains(searchQuery.trim())) {
-                    HubActionCard(
-                        title = "إعدادات التطبيق وتخصيص الخط",
-                        subtitle = "تخصيص حجم الخط (افتراضي 12px)، السمة، والمزامنة السحابية",
-                        badge = "تخصيص ⚙️",
-                        badgeColor = TextSecondary,
-                        icon = Icons.Default.Settings,
-                        accentColor = TextSecondary,
-                        onClick = { viewModel.setSubScreen(SubScreen.SETTINGS) }
-                    )
+                    if (searchQuery.isEmpty() || "تحديثات إصدار فحص النسخة ترقية changelog".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "فحص التحديثات والإصدار",
+                            subtitle = "التحقق من توافق النسخة، سجل التحديثات، والميزات الجديدة في المنظومة",
+                            badge = "الإصدار 1.2.0 🚀",
+                            badgeColor = EmeraldGreen,
+                            icon = Icons.Default.SystemUpdate,
+                            accentColor = EmeraldGreen,
+                            onClick = { viewModel.setSubScreen(SubScreen.VERSION_CHECK) }
+                        )
+                    }
+
+                    if (searchQuery.isEmpty() || "إعدادات حجم الخط سمة مظهر مزامنة إشعارات".contains(searchQuery.trim())) {
+                        HubActionCard(
+                            title = "إعدادات التطبيق وتخصيص المظهر",
+                            subtitle = "تخصيص حجم الخط المفضل، السمة الليلية، والمزامنة السحابية الذكية",
+                            badge = "تخصيص ⚙️",
+                            badgeColor = TextSecondary,
+                            icon = Icons.Default.Settings,
+                            accentColor = TextSecondary,
+                            onClick = { viewModel.setSubScreen(SubScreen.SETTINGS) }
+                        )
+                    }
                 }
             }
         }
@@ -348,6 +409,9 @@ private fun HubCategoryHeader(title: String, color: Color) {
     }
 }
 
+/**
+ * Robust responsive card layout that prevents character wrapping / cutting on any screen size.
+ */
 @Composable
 private fun HubActionCard(
     title: String,
@@ -365,70 +429,79 @@ private fun HubActionCard(
         backgroundColor = MidnightSurface.copy(alpha = 0.85f),
         borderColor = accentColor.copy(alpha = 0.25f)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(accentColor.copy(alpha = 0.15f))
-                    .border(1.dp, accentColor.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center
+            // Header Row with Icon, Title, and Badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    tint = accentColor,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f, fill = false)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(accentColor.copy(alpha = 0.15f))
+                            .border(1.dp, accentColor.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = title,
+                            tint = accentColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
                     Text(
                         text = title,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(badgeColor.copy(alpha = 0.15f))
-                            .border(0.5.dp, badgeColor.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = badge,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = badgeColor
-                        )
-                    }
                 }
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = subtitle,
-                    fontSize = 11.sp,
-                    color = TextSecondary,
-                    lineHeight = 16.sp
+
+                GlassPill(
+                    text = badge,
+                    color = badgeColor,
+                    bgColor = badgeColor.copy(alpha = 0.15f)
                 )
             }
 
-            Icon(
-                imageVector = Icons.Default.ChevronLeft,
-                contentDescription = "فتح",
-                tint = TextMuted,
-                modifier = Modifier.size(20.dp)
-            )
+            // Description & Forward Indicator
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    lineHeight = 17.sp,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Icon(
+                    imageVector = Icons.Default.ChevronLeft,
+                    contentDescription = "فتح",
+                    tint = CyanAccent,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }

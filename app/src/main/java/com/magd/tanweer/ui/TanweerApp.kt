@@ -155,6 +155,9 @@ fun TanweerApp(
                                         SubScreen.MODERATOR_DASHBOARD -> "مركز إشراف الشعبة 🛡️"
                                         SubScreen.ADMIN_DASHBOARD -> "إدارة المدرسة 👑"
                                         SubScreen.COMMUNITY_DECISIONS -> "القرارات والتصويتات الجماعية 🗳️"
+                                        SubScreen.EVENTS -> "الفعاليات والأنشطة المدرسية 🎪"
+                                        SubScreen.VERSION_CHECK -> "فحص التحديثات والإصدار 🚀"
+                                        SubScreen.STORAGE_MANAGER -> "إدارة تخزين ومساحة الكتب 💾"
                                         else -> ""
                                     },
                                     fontSize = 17.sp,
@@ -167,7 +170,7 @@ fun TanweerApp(
                         when (subScreen) {
                             SubScreen.EXTRA_SECTIONS_HUB -> ExtraSectionsHubScreen(viewModel = viewModel)
                             SubScreen.GROUPS -> GroupsScreen(viewModel = viewModel)
-                            SubScreen.LIBRARY -> LibraryScreen(viewModel = viewModel)
+                            SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> LibraryScreen(viewModel = viewModel)
                             SubScreen.SCHEDULE -> ScheduleScreen(viewModel = viewModel)
                             SubScreen.TIMELINE -> SubjectTimelineScreen(viewModel = viewModel)
                             SubScreen.PROFILE -> ProfileScreen(viewModel = viewModel)
@@ -180,6 +183,8 @@ fun TanweerApp(
                             SubScreen.MODERATOR_DASHBOARD -> ModeratorDashboardScreen(viewModel = viewModel)
                             SubScreen.ADMIN_DASHBOARD -> AdminDashboardScreen(viewModel = viewModel)
                             SubScreen.COMMUNITY_DECISIONS -> CommunityDecisionsScreen(viewModel = viewModel)
+                            SubScreen.EVENTS -> EventsScreen(viewModel = viewModel)
+                            SubScreen.VERSION_CHECK -> VersionCheckScreen(viewModel = viewModel)
                             else -> HomeScreen(viewModel = viewModel)
                         }
                     }
@@ -281,23 +286,27 @@ fun GlassBottomNavigationBar(
 ) {
     val isSubScreenActive = (subScreen != SubScreen.NONE)
 
-    // Compute dynamic label & icon for the 6th tab
+    // Compute dynamic label & icon for the 6th tab (clean text and icon without emojis)
     val (moreLabel, moreIcon) = when (subScreen) {
-        SubScreen.LIBRARY -> "المكتبة 📚" to Icons.Default.LocalLibrary
-        SubScreen.COMMUNITY_DECISIONS -> "القرارات 🗳️" to Icons.Default.HowToVote
-        SubScreen.GROUPS -> "الشعب 👥" to Icons.Default.Groups
-        SubScreen.SCHEDULE -> "الجدول 📅" to Icons.Default.Schedule
-        SubScreen.TIMELINE -> "الرحلة 🗺️" to Icons.Default.Timeline
-        SubScreen.WHAT_DID_I_MISS -> "فاتني 🎒" to Icons.Default.WorkHistory
-        SubScreen.SEARCH -> "البحث 🔍" to Icons.Default.Search
-        SubScreen.TEACHER_DASHBOARD -> "الأستاذ 🎓" to Icons.Default.School
-        SubScreen.MODERATOR_DASHBOARD -> "الإشراف 🛡️" to Icons.Default.Shield
-        SubScreen.ADMIN_DASHBOARD -> "الإدارة 👑" to Icons.Default.AdminPanelSettings
-        SubScreen.PROFILE -> "ملفي 👤" to Icons.Default.Person
-        SubScreen.SETTINGS -> "إعدادات ⚙️" to Icons.Default.Settings
-        SubScreen.ACADEMIC_HISTORY -> "الأرشيف 🏛️" to Icons.Default.Archive
-        SubScreen.SUBJECT_KNOWLEDGE_BASE -> "المادة 📖" to Icons.Default.MenuBook
-        SubScreen.EXTRA_SECTIONS_HUB, SubScreen.NONE, SubScreen.PDF_VIEWER -> "الأقسام ✨" to Icons.Default.DashboardCustomize
+        SubScreen.LIBRARY -> "المكتبة" to Icons.Default.LocalLibrary
+        SubScreen.COMMUNITY_DECISIONS -> "القرارات" to Icons.Default.HowToVote
+        SubScreen.EVENTS -> "الفعاليات" to Icons.Default.Event
+        SubScreen.GROUPS -> "الشعب" to Icons.Default.Groups
+        SubScreen.SCHEDULE -> "الجدول" to Icons.Default.Schedule
+        SubScreen.TIMELINE -> "الرحلة" to Icons.Default.Timeline
+        SubScreen.WHAT_DID_I_MISS -> "ماذا فاتني" to Icons.Default.WorkHistory
+        SubScreen.SEARCH -> "البحث" to Icons.Default.Search
+        SubScreen.TEACHER_DASHBOARD -> "الأستاذ" to Icons.Default.School
+        SubScreen.MODERATOR_DASHBOARD -> "الإشراف" to Icons.Default.Shield
+        SubScreen.ADMIN_DASHBOARD -> "الإدارة" to Icons.Default.AdminPanelSettings
+        SubScreen.PROFILE -> "الملف الشخصي" to Icons.Default.Person
+        SubScreen.SETTINGS -> "الإعدادات" to Icons.Default.Settings
+        SubScreen.ACADEMIC_HISTORY -> "الأرشيف" to Icons.Default.Archive
+        SubScreen.SUBJECT_KNOWLEDGE_BASE -> "المادة" to Icons.Default.MenuBook
+        SubScreen.VERSION_CHECK -> "التحديثات" to Icons.Default.SystemUpdate
+        SubScreen.STORAGE_MANAGER -> "التخزين" to Icons.Default.SdCard
+        SubScreen.EXTRA_SECTIONS_HUB, SubScreen.NONE, SubScreen.PDF_VIEWER -> "الأقسام" to Icons.Default.DashboardCustomize
+        else -> "الأقسام" to Icons.Default.DashboardCustomize
     }
 
     NavigationBar(

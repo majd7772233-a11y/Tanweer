@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
@@ -71,6 +72,9 @@ fun HomeScreen(
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
+    val dailyPlanItems by viewModel.getDailyPlanForDate(todayDate)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
     // Group subjects into Documented vs Needs Contribution
     val documentedSubjectIds = remember(todayContents) {
         todayContents.map { it.subjectId }.toSet()
@@ -118,12 +122,27 @@ fun HomeScreen(
     val sectionAr = currentUser?.sectionId?.let { SchoolHierarchy.getSectionArabicName(it) } ?: ""
     val studentFirstName = currentUser?.fullName?.split(" ")?.firstOrNull() ?: "طالبنا العزيز"
 
-    // Time of day greeting
-    val currentHour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
-    val greeting = when (currentHour) {
-        in 5..11 -> "صباح الخير"
-        in 12..16 -> "طاب يومك"
-        else -> "مساء الخير"
+    // Time of day dynamic greeting ticker
+    var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000L)
+            currentTimeMs = System.currentTimeMillis()
+        }
+    }
+
+    val currentCalendar = remember(currentTimeMs) {
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = currentTimeMs
+        cal
+    }
+    val currentHour = remember(currentCalendar) { currentCalendar.get(Calendar.HOUR_OF_DAY) }
+    val greeting = remember(currentHour) {
+        when (currentHour) {
+            in 5..11 -> "صباح الخير"
+            in 12..16 -> "طاب يومك"
+            else -> "مساء الخير"
+        }
     }
 
     // Determine current & next period dynamically
@@ -137,12 +156,10 @@ fun HomeScreen(
         6 to ("12:25" to "01:10")
     )
 
-    val currentSlotInfo = remember(sortedSlots, currentHour) {
+    val currentSlotInfo = remember(sortedSlots, currentCalendar) {
         if (isWeekend || sortedSlots.isEmpty()) null
         else {
-            // Check based on hour / order
-            val cal = Calendar.getInstance()
-            val totalMinutes = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+            val totalMinutes = currentCalendar.get(Calendar.HOUR_OF_DAY) * 60 + currentCalendar.get(Calendar.MINUTE)
             val currentOrder = when (totalMinutes) {
                 in (8 * 60)..(8 * 60 + 45) -> 1
                 in (8 * 60 + 50)..(9 * 60 + 35) -> 2
@@ -354,6 +371,97 @@ fun HomeScreen(
                             color = CyanAccent
                         )
                         Text(text = "التوثيق", fontSize = 10.sp, color = TextMuted)
+                    }
+                }
+            }
+        }
+
+        // Daily Plan (خطة إنجاز اليوم)
+        if (dailyPlanItems.isNotEmpty()) {
+            item {
+                val completedPlanCount = dailyPlanItems.count { it.isCompleted }
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    borderColor = WarmAmber.copy(alpha = 0.5f),
+                    backgroundColor = MidnightSurface
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("📌", fontSize = 18.sp)
+                                Text(
+                                    text = "خطة إنجاز اليوم (${completedPlanCount}/${dailyPlanItems.size})",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = WarmAmber
+                                )
+                            }
+                            Text(
+                                text = "${((completedPlanCount.toFloat() / dailyPlanItems.size.toFloat()) * 100).toInt()}%",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (completedPlanCount == dailyPlanItems.size) EmeraldGreen else WarmAmber
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        dailyPlanItems.forEach { planItem ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = planItem.isCompleted,
+                                        onCheckedChange = { viewModel.toggleDailyPlanItem(planItem.id, planItem.isCompleted) },
+                                        colors = CheckboxDefaults.colors(
+                                            checkedColor = EmeraldGreen,
+                                            uncheckedColor = TextSecondary
+                                        )
+                                    )
+                                    Column {
+                                        Text(
+                                            text = planItem.title,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (planItem.isCompleted) FontWeight.Normal else FontWeight.Medium,
+                                            color = if (planItem.isCompleted) TextMuted else TextPrimary,
+                                            style = if (planItem.isCompleted) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle()
+                                        )
+                                        if (!planItem.subjectName.isNullOrBlank()) {
+                                            Text(
+                                                text = planItem.subjectName,
+                                                fontSize = 11.sp,
+                                                color = CyanAccent
+                                            )
+                                        }
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = { viewModel.removeDailyPlanItem(planItem.id) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "حذف من الخطة",
+                                        tint = TextMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

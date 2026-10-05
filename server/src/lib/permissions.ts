@@ -76,12 +76,24 @@ export async function hasPermission(
     return true;
   }
 
-  // 2. OWNER-only permission restriction
+  // 2. Strict Owner-Only Permissions (SYSTEM_OWNER only)
   if (permission === Permission.ACCESS_OWNER_DASHBOARD) {
     return false;
   }
 
-  // 3. ADMIN has full administrative capabilities
+  // 3. Strict Global System Permissions (Must have global ADMIN)
+  const GLOBAL_SYSTEM_PERMISSIONS = new Set<Permission>([
+    Permission.MANAGE_USERS,
+    Permission.REVOKE_SESSIONS,
+    Permission.VIEW_AUDIT_LOG,
+    Permission.REVIEW_ROLE_REQUESTS,
+  ]);
+
+  if (GLOBAL_SYSTEM_PERMISSIONS.has(permission)) {
+    return globalRole === Role.ADMIN;
+  }
+
+  // 3. Global ADMIN has full access to all resources
   if (globalRole === Role.ADMIN) {
     return true;
   }

@@ -59,11 +59,17 @@ interface ScheduleDao {
 
 @Dao
 interface ContentDao {
+    @Query("SELECT * FROM cached_contents WHERE groupId = :groupId ORDER BY studyDate DESC, createdAt DESC")
+    fun getAllContents(groupId: String): Flow<List<ContentEntity>>
+
     @Query("SELECT * FROM cached_contents WHERE groupId = :groupId AND studyDate = :date ORDER BY createdAt ASC")
     fun getContentsByDate(groupId: String, date: String): Flow<List<ContentEntity>>
 
     @Query("SELECT * FROM cached_contents WHERE groupId = :groupId AND subjectId = :subjectId ORDER BY studyDate DESC, createdAt DESC")
     fun getContentsBySubject(groupId: String, subjectId: String): Flow<List<ContentEntity>>
+
+    @Query("SELECT * FROM cached_contents WHERE groupId = :groupId AND (title LIKE '%' || :query || '%' OR subjectName LIKE '%' || :query || '%' OR description LIKE '%' || :query || '%') ORDER BY studyDate DESC")
+    fun searchContents(groupId: String, query: String): Flow<List<ContentEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertContents(contents: List<ContentEntity>)
@@ -146,6 +152,9 @@ interface ExamDao {
     @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND examDate = :date")
     fun getExamsByDate(groupId: String, date: String): Flow<List<ExamEntity>>
 
+    @Query("SELECT * FROM cached_exams WHERE id = :id LIMIT 1")
+    suspend fun getExamById(id: String): ExamEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExams(exams: List<ExamEntity>)
 
@@ -175,6 +184,9 @@ interface EventDao {
 
     @Query("SELECT * FROM cached_events WHERE groupId = :groupId AND eventDate = :date")
     fun getEventsByDate(groupId: String, date: String): Flow<List<EventEntity>>
+
+    @Query("SELECT * FROM cached_events WHERE id = :id LIMIT 1")
+    suspend fun getEventById(id: String): EventEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvents(events: List<EventEntity>)
@@ -209,6 +221,9 @@ interface IssueDao {
     @Query("SELECT * FROM cached_issue_comments WHERE issueId = :issueId ORDER BY isBestAnswer DESC, createdAt ASC")
     fun getComments(issueId: String): Flow<List<IssueCommentEntity>>
 
+    @Query("SELECT * FROM cached_issue_comments WHERE id = :id LIMIT 1")
+    suspend fun getCommentById(id: String): IssueCommentEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertIssues(issues: List<IssueEntity>)
 
@@ -235,6 +250,12 @@ interface IssueDao {
 
     @Query("UPDATE cached_issues SET bestCommentId = :commentId, status = 'SOLVED' WHERE id = :issueId")
     suspend fun markIssueSolved(issueId: String, commentId: String)
+
+    @Query("UPDATE cached_issues SET bestCommentId = :bestCommentId, status = :status WHERE id = :issueId")
+    suspend fun revertIssueStatus(issueId: String, bestCommentId: String?, status: String)
+
+    @Query("UPDATE cached_issue_comments SET isBestAnswer = (id = :bestCommentId) WHERE issueId = :issueId")
+    suspend fun revertCommentBestAnswer(issueId: String, bestCommentId: String?)
 
     @Query("DELETE FROM cached_issues WHERE groupId = :groupId")
     suspend fun clearIssues(groupId: String)
@@ -353,6 +374,9 @@ interface OutboxDao {
     @Query("DELETE FROM outbox WHERE id = :id")
     suspend fun deleteOutbox(id: String)
 
+    @Query("DELETE FROM outbox WHERE entityId = :entityId")
+    suspend fun deleteByEntityId(entityId: String)
+
     @Query("DELETE FROM outbox WHERE status = 'SYNCED'")
     suspend fun clearSynced()
 }
@@ -376,4 +400,25 @@ interface CorrectionDao {
 
     @Query("UPDATE correction_requests SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: String, status: String)
+}
+
+@Dao
+interface DailyPlanDao {
+    @Query("SELECT * FROM cached_daily_plan WHERE userId = :userId AND planDate = :date ORDER BY isCompleted ASC, createdAt DESC")
+    fun getPlanForDate(userId: String, date: String): Flow<List<DailyPlanEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPlanItem(item: DailyPlanEntity)
+
+    @Query("UPDATE cached_daily_plan SET isCompleted = :completed WHERE id = :id")
+    suspend fun setItemCompleted(id: String, completed: Boolean)
+
+    @Query("DELETE FROM cached_daily_plan WHERE id = :id")
+    suspend fun deletePlanItem(id: String)
+
+    @Query("DELETE FROM cached_daily_plan WHERE homeworkId = :homeworkId AND userId = :userId")
+    suspend fun deleteByHomeworkId(homeworkId: String, userId: String)
+
+    @Query("SELECT homeworkId FROM cached_daily_plan WHERE userId = :userId AND planDate = :date AND homeworkId IS NOT NULL")
+    fun getPlannedHomeworkIds(userId: String, date: String): Flow<List<String>>
 }

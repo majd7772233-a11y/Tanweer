@@ -33,6 +33,7 @@ import android.net.Uri
 import com.magd.tanweer.data.model.SubmitRoleUpgradeResponse
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.data.model.getRoleEnum
+import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -427,12 +428,37 @@ fun ProfileScreen(
                             Text("📚", fontSize = 20.sp)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("مساحة المادة الموحدة (Knowledge Base)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                Text("بنك معرفة المادة ومستودع الدروس 📚", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                                 Text("دروس، واجبات، اختبارات، وأسئلة كل مادة في مكان واحد", fontSize = 11.sp, color = TextSecondary)
                             }
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = CyanAccent)
                     }
+                }
+            }
+        }
+
+        // Version & Update Check Shortcut Card
+        item {
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = GlassSurface,
+                onClick = { viewModel.setSubScreen(SubScreen.VERSION_CHECK) }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🚀", fontSize = 20.sp)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("فحص التحديثات والإصدار (1.2.0)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("التحقق من حالة النسخة، سجل الميزات وما الجديد", fontSize = 11.sp, color = TextSecondary)
+                        }
+                    }
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = EmeraldGreen)
                 }
             }
         }

@@ -66,16 +66,14 @@ class OwnershipMockDb {
         const table = match[1];
         const rows = this.tables[table] || [];
         if (table === 'contents' && trimmed.includes('WHERE id = ?')) {
-          const contentId = params[params.length - 1];
-          const c = rows.find((r) => r.id === contentId);
+          const c = rows.find((r) => params.includes(r.id));
           if (c) {
             if (params[0] !== null && params[0] !== undefined) c.title = params[0];
             if (params[1] !== null && params[1] !== undefined) c.description = params[1];
           }
         }
         if (table === 'content_corrections' && trimmed.includes('WHERE id = ?')) {
-          const corrId = params[params.length - 1];
-          const corr = rows.find((r) => r.id === corrId);
+          const corr = rows.find((r) => params.includes(r.id));
           if (corr) {
             if (trimmed.includes("status = 'APPROVED'")) corr.status = 'APPROVED';
             if (trimmed.includes("status = 'REJECTED'")) corr.status = 'REJECTED';

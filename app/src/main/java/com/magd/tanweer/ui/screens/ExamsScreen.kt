@@ -150,10 +150,17 @@ fun ExamsScreen(
                         title = title,
                         requiredChapters = chapters,
                         notes = notes,
-                        examDate = date
+                        examDate = date,
+                        onResult = { res ->
+                            if (res.isSuccess) {
+                                Toast.makeText(context, "تمت إضافة الاختبار بنجاح ✨", Toast.LENGTH_SHORT).show()
+                                isAddExamModalOpen = false
+                            } else {
+                                val err = res.exceptionOrNull()?.message ?: "حدث خطأ أثناء حفظ الاختبار"
+                                Toast.makeText(context, "تعذر حفظ الاختبار: $err", Toast.LENGTH_LONG).show()
+                            }
+                        }
                     )
-                    Toast.makeText(context, "تمت إضافة الاختبار بنجاح", Toast.LENGTH_SHORT).show()
-                    isAddExamModalOpen = false
                 }
             )
         }
@@ -471,6 +478,7 @@ fun AddExamSheet(
 ) {
     var selectedSubj by remember { mutableStateOf(gradeSubjects.firstOrNull()) }
     var title by remember { mutableStateOf("") }
+    var examType by remember { mutableStateOf("MONTHLY") } // MONTHLY, QUIZ, MIDTERM, FINAL
     var chapters by remember { mutableStateOf("") }
     var teacherNotes by remember { mutableStateOf("") }
     var examDate by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
@@ -487,12 +495,59 @@ fun AddExamSheet(
                 .padding(horizontal = 18.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = "جدولة اختبار جديد 🧪",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Black,
-                color = RubyRed
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "جدولة وتثبيت اختبار رسمي 🧪",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    color = RubyRed
+                )
+                GlassPill(
+                    text = when (examType) {
+                        "QUIZ" -> "تسميع / كويز"
+                        "MIDTERM" -> "اختبار نصفي"
+                        "FINAL" -> "اختبار نهائي"
+                        else -> "اختبار شهري"
+                    },
+                    color = RubyRed,
+                    bgColor = RubyRed.copy(alpha = 0.15f)
+                )
+            }
+
+            // Exam Type Selection Chips
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                listOf(
+                    "MONTHLY" to "شهري 📝",
+                    "QUIZ" to "كويز ⚡",
+                    "MIDTERM" to "نصفي 📑",
+                    "FINAL" to "نهائي 🏆"
+                ).forEach { (key, label) ->
+                    val isSelected = examType == key
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isSelected) RubyRed else GlassSurface)
+                            .clickable { examType = key }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) Color.White else TextSecondary
+                        )
+                    }
+                }
+            }
 
             // Subject Selector Horizontal Row
             Column {

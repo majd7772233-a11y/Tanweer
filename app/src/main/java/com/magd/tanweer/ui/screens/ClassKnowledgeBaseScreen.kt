@@ -57,7 +57,7 @@ fun ClassKnowledgeBaseScreen(
     }
 
     // Load data for active subject
-    val contents by viewModel.repository.getDayContents(activeGroupId, "")
+    val contents by viewModel.repository.getContentsBySubject(activeGroupId, currentSubject.id)
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val subjectContents = remember(contents, currentSubject) {
         contents.filter { it.subjectId == currentSubject.id }
@@ -126,7 +126,7 @@ fun ClassKnowledgeBaseScreen(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
-                        text = "مساحة المادة الموحدة (Class Knowledge Base)",
+                        text = "بنك معرفة المادة ومستودع الدروس 📚",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
@@ -582,33 +582,41 @@ fun CorrectionRequestModal(
     onDismiss: () -> Unit,
     onSubmit: (String, String, String, String?) -> Unit
 ) {
-    var fieldName by remember { mutableStateOf("studyDate") }
+    var fieldName by remember { mutableStateOf("TITLE") }
     var proposedValue by remember { mutableStateOf("") }
     var reason by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("اقتراح تصحيح للدرس ❌", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+        title = { Text("اقتراح تصحيح للدرس ✍️", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("عنوان الدرس: ${contentItem.title}", fontSize = 12.sp, color = TextSecondary)
 
-                Text("ما هو الشيء الخطأ؟", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("ما هو الحقل المراد تصويبه؟", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     FilterChip(
-                        selected = fieldName == "studyDate",
-                        onClick = { fieldName = "studyDate" },
-                        label = { Text("التاريخ", fontSize = 11.sp) }
-                    )
-                    FilterChip(
-                        selected = fieldName == "title",
-                        onClick = { fieldName = "title" },
+                        selected = fieldName == "TITLE",
+                        onClick = { fieldName = "TITLE" },
                         label = { Text("العنوان", fontSize = 11.sp) }
                     )
                     FilterChip(
-                        selected = fieldName == "order",
-                        onClick = { fieldName = "order" },
-                        label = { Text("ترتيب الصفحات", fontSize = 11.sp) }
+                        selected = fieldName == "DESCRIPTION",
+                        onClick = { fieldName = "DESCRIPTION" },
+                        label = { Text("الوصف والشرح", fontSize = 11.sp) }
+                    )
+                    FilterChip(
+                        selected = fieldName == "STUDY_DATE",
+                        onClick = { fieldName = "STUDY_DATE" },
+                        label = { Text("التاريخ", fontSize = 11.sp) }
+                    )
+                    FilterChip(
+                        selected = fieldName == "PAGE_NUMBERS",
+                        onClick = { fieldName = "PAGE_NUMBERS" },
+                        label = { Text("الصفحات", fontSize = 11.sp) }
                     )
                 }
 
@@ -616,13 +624,23 @@ fun CorrectionRequestModal(
                     value = proposedValue,
                     onValueChange = { proposedValue = it },
                     label = { Text("القيمة الصحيحة المقترحة") },
+                    placeholder = {
+                        Text(
+                            when (fieldName) {
+                                "TITLE" -> "مثال: مراجعة الوحدة الأولى"
+                                "DESCRIPTION" -> "اكتب الشرح والتفاصيل الصحيحة..."
+                                "STUDY_DATE" -> "YYYY-MM-DD"
+                                else -> "مثال: ص 15-20"
+                            }
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 OutlinedTextField(
                     value = reason,
                     onValueChange = { reason = it },
-                    label = { Text("سبب التصحيح (اختياري)") },
+                    label = { Text("سبب ومبرر التصحيح (اختياري)") },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -632,16 +650,17 @@ fun CorrectionRequestModal(
                 onClick = {
                     if (proposedValue.isNotBlank()) {
                         val orig = when (fieldName) {
-                            "studyDate" -> contentItem.studyDate
-                            "title" -> contentItem.title
+                            "TITLE" -> contentItem.title
+                            "DESCRIPTION" -> contentItem.description ?: ""
+                            "STUDY_DATE" -> contentItem.studyDate
                             else -> ""
                         }
-                        onSubmit(fieldName, orig, proposedValue, reason.ifBlank { null })
+                        onSubmit(fieldName, orig, proposedValue.trim(), reason.trim().ifBlank { null })
                     }
                 },
                 enabled = proposedValue.isNotBlank()
             ) {
-                Text("إرسال الاقتراح")
+                Text("إرسال الاقتراح ✨")
             }
         },
         dismissButton = {
