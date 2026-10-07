@@ -24,6 +24,7 @@ export async function handleGetEvents(groupId: string, user: UserContext, env: E
 
 export async function handleCreateEvent(user: UserContext, request: Request, env: Env): Promise<Response> {
   const body = await request.json() as {
+    id?: string;
     groupId?: string;
     eventDate?: string;
     timeStr?: string;

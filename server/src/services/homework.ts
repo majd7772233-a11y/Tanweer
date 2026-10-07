@@ -30,6 +30,7 @@ export async function handleGetHomeworks(groupId: string, user: UserContext, env
 
 export async function handleCreateHomework(user: UserContext, request: Request, env: Env): Promise<Response> {
   const body = await request.json() as {
+    id?: string;
     groupId?: string;
     studyDate?: string;
     dueDate?: string;

@@ -68,6 +68,7 @@ export async function handleGetIssueDetails(issueId: string, user: UserContext, 
 
 export async function handleCreateIssue(user: UserContext, request: Request, env: Env): Promise<Response> {
   const body = await request.json() as {
+    id?: string;
     groupId?: string;
     subjectId?: string;
     homeworkId?: string;
@@ -120,7 +121,7 @@ export async function handleAddIssueComment(issueId: string, user: UserContext, 
   const memberCheck = await requireGroupMember(user, issue.group_id, env.DB);
   if (memberCheck) return memberCheck;
 
-  const body = await request.json() as { comment?: string };
+  const body = await request.json() as { id?: string; comment?: string };
   if (!body.comment || !body.comment.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى كتابة نص الإجابة أو التعليق');
   }

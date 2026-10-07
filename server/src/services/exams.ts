@@ -28,6 +28,7 @@ export async function handleGetExams(groupId: string, user: UserContext, env: En
 
 export async function handleCreateExam(user: UserContext, request: Request, env: Env): Promise<Response> {
   const body = await request.json() as {
+    id?: string;
     groupId?: string;
     examDate?: string;
     date?: string;

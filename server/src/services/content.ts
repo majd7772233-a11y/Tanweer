@@ -18,6 +18,7 @@ interface MediaPayloadItem {
 
 export async function handleCreateContent(user: UserContext, request: Request, env: Env): Promise<Response> {
   const body = await request.json() as {
+    id?: string;
     groupId?: string;
     studyDate?: string;
     date?: string;
