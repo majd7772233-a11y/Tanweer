@@ -109,6 +109,7 @@ data class DayDetailResponse(
 
 @JsonClass(generateAdapter = true)
 data class CreateContentRequest(
+    val id: String? = null,
     val groupId: String,
     val studyDate: String,
     val subjectId: String,
@@ -120,6 +121,7 @@ data class CreateContentRequest(
 
 @JsonClass(generateAdapter = true)
 data class CreateHomeworkRequest(
+    val id: String? = null,
     val groupId: String,
     val studyDate: String,
     val dueDate: String,
@@ -134,6 +136,7 @@ data class CreateHomeworkRequest(
 
 @JsonClass(generateAdapter = true)
 data class CreateExamRequest(
+    val id: String? = null,
     val groupId: String,
     val examDate: String,
     val subjectId: String,
@@ -144,6 +147,7 @@ data class CreateExamRequest(
 
 @JsonClass(generateAdapter = true)
 data class CreateEventRequest(
+    val id: String? = null,
     val groupId: String,
     val eventDate: String,
     val timeStr: String? = null,
@@ -186,6 +190,7 @@ data class IssueDetailResponse(
 
 @JsonClass(generateAdapter = true)
 data class CreateIssueRequest(
+    val id: String? = null,
     val groupId: String,
     val subjectId: String? = null,
     val homeworkId: String? = null,
@@ -196,6 +201,7 @@ data class CreateIssueRequest(
 
 @JsonClass(generateAdapter = true)
 data class AddCommentRequest(
+    val id: String? = null,
     val comment: String
 )
 
@@ -226,6 +232,19 @@ data class BooksResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class SystemVersionResponse(
+    val success: Boolean = true,
+    val currentVersion: String,
+    val versionCode: Int,
+    val minSupportedVersion: String? = null,
+    val minSupportedVersionCode: Int = 1,
+    val isUpdateRequired: Boolean = false,
+    val releaseDate: String? = null,
+    val changelog: List<String> = emptyList(),
+    val downloadUrl: String? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class GenericResponse(
     val success: Boolean,
     val message: String? = null,
@@ -233,6 +252,12 @@ data class GenericResponse(
     val isCompleted: Boolean? = null,
     val isDuplicate: Boolean? = null,
     val contentId: String? = null,
+    val homeworkId: String? = null,
+    val examId: String? = null,
+    val eventId: String? = null,
+    val issueId: String? = null,
+    val commentId: String? = null,
+    val id: String? = null,
     val error: ApiError? = null
 )
 
@@ -442,11 +467,17 @@ interface TanweerApiService {
     @POST("api/v1/homeworks/{id}/toggle")
     suspend fun toggleHomework(@Path("id") id: String): Response<GenericResponse>
 
+    @GET("api/v1/system/version")
+    suspend fun getSystemVersion(): Response<SystemVersionResponse>
+
     @GET("api/v1/exams")
     suspend fun getExams(@Query("groupId") groupId: String): Response<ExamsResponse>
 
     @POST("api/v1/exams")
     suspend fun createExam(@Body req: CreateExamRequest): Response<GenericResponse>
+
+    @DELETE("api/v1/exams/{id}")
+    suspend fun deleteExam(@Path("id") id: String): Response<GenericResponse>
 
     @GET("api/v1/events")
     suspend fun getEvents(@Query("groupId") groupId: String): Response<EventsResponse>

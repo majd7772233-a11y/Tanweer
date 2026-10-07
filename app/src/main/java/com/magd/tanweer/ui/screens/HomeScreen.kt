@@ -145,34 +145,9 @@ fun HomeScreen(
         }
     }
 
-    // Determine current & next period dynamically
-    val sortedSlots = remember(slots) { slots.sortedBy { it.slotOrder } }
-    val periodTimes = listOf(
-        1 to ("08:00" to "08:45"),
-        2 to ("08:50" to "09:35"),
-        3 to ("09:40" to "10:25"),
-        4 to ("10:45" to "11:30"),
-        5 to ("11:35" to "12:20"),
-        6 to ("12:25" to "01:10")
-    )
-
-    val currentSlotInfo = remember(sortedSlots, currentCalendar) {
-        if (isWeekend || sortedSlots.isEmpty()) null
-        else {
-            val totalMinutes = currentCalendar.get(Calendar.HOUR_OF_DAY) * 60 + currentCalendar.get(Calendar.MINUTE)
-            val currentOrder = when (totalMinutes) {
-                in (8 * 60)..(8 * 60 + 45) -> 1
-                in (8 * 60 + 50)..(9 * 60 + 35) -> 2
-                in (9 * 60 + 40)..(10 * 60 + 25) -> 3
-                in (10 * 60 + 45)..(11 * 60 + 30) -> 4
-                in (11 * 60 + 35)..(12 * 60 + 20) -> 5
-                in (12 * 60 + 25)..(13 * 60 + 10) -> 6
-                else -> if (totalMinutes < 8 * 60) 1 else null
-            }
-            val active = sortedSlots.find { it.slotOrder == currentOrder } ?: sortedSlots.firstOrNull()
-            val next = sortedSlots.find { it.slotOrder == (active?.slotOrder ?: 0) + 1 }
-            Pair(active, next)
-        }
+    // Determine current & next period dynamically from single source of truth (AcademicTimeEngine)
+    val academicStatus = remember(slots, currentCalendar, isWeekend) {
+        com.magd.tanweer.util.AcademicTimeEngine.computeDayStatus(slots, currentCalendar, isWeekend)
     }
 
     LazyColumn(
@@ -218,68 +193,65 @@ fun HomeScreen(
                     }
 
                     // Active & Next Class Live Status
-                    if (!isWeekend && currentSlotInfo?.first != null) {
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MidnightSurface)
-                                .border(1.dp, CyanGlow, RoundedCornerShape(14.dp))
-                                .padding(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                    when (val status = academicStatus) {
+                        is com.magd.tanweer.util.AcademicDayStatus.InSession -> {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MidnightSurface)
+                                    .border(1.dp, CyanGlow, RoundedCornerShape(14.dp))
+                                    .padding(12.dp)
                             ) {
-                                // Current Period
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text("الآن:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Current Period
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text("الآن:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                text = "${status.activeSlot.subjectIcon} ${status.activeSlot.subjectName}",
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = CyanAccent
+                                            )
+                                        }
                                         Text(
-                                            text = "${currentSlotInfo.first?.subjectIcon} ${currentSlotInfo.first?.subjectName}",
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Black,
-                                            color = CyanAccent
-                                        )
-                                    }
-                                    val time = periodTimes.find { it.first == currentSlotInfo.first?.slotOrder }?.second
-                                    if (time != null) {
-                                        Text(
-                                            text = "الحصة ${currentSlotInfo.first?.slotOrder} • ${time.first} — ${time.second}",
+                                            text = "الحصة ${status.activeSlot.slotOrder} • ${status.startTime} — ${status.endTime}",
                                             fontSize = 11.sp,
                                             color = TextSecondary
                                         )
                                     }
-                                }
 
-                                // Next Period
-                                if (currentSlotInfo.second != null) {
-                                    Box(
-                                        modifier = Modifier
-                                            .width(1.dp)
-                                            .height(32.dp)
-                                            .background(GlassBorderSubtle)
-                                    )
-                                    Column(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .padding(start = 12.dp)
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            Text("التالي:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                                    // Next Period
+                                    if (status.nextSlot != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(1.dp)
+                                                .height(32.dp)
+                                                .background(GlassBorderSubtle)
+                                        )
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(start = 12.dp)
+                                        ) {
+                                            val (nextStart, _) = com.magd.tanweer.util.AcademicTimeEngine.getSlotEffectiveTimes(status.nextSlot)
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Text("التالي:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    text = "${status.nextSlot.subjectIcon} ${status.nextSlot.subjectName}",
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = TextPrimary
+                                                )
+                                            }
                                             Text(
-                                                text = "${currentSlotInfo.second?.subjectIcon} ${currentSlotInfo.second?.subjectName}",
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = TextPrimary
-                                            )
-                                        }
-                                        val nextTime = periodTimes.find { it.first == currentSlotInfo.second?.slotOrder }?.second
-                                        if (nextTime != null) {
-                                            Text(
-                                                text = "الحصة ${currentSlotInfo.second?.slotOrder} • ${nextTime.first}",
+                                                text = "الحصة ${status.nextSlot.slotOrder} • $nextStart",
                                                 fontSize = 11.sp,
                                                 color = TextSecondary
                                             )
@@ -288,6 +260,88 @@ fun HomeScreen(
                                 }
                             }
                         }
+                        is com.magd.tanweer.util.AcademicDayStatus.BreakTime -> {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MidnightSurface)
+                                    .border(1.dp, WarmAmber.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("☕ استراحة بين الحصص", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+                                        Text("استعد للحصة القادمة", fontSize = 11.sp, color = TextSecondary)
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "الحصة ${status.nextSlot.slotOrder}: ${status.nextSlot.subjectName}",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary
+                                        )
+                                        Text("تبدأ الساعة ${status.nextStartTime}", fontSize = 11.sp, color = CyanAccent)
+                                    }
+                                }
+                            }
+                        }
+                        is com.magd.tanweer.util.AcademicDayStatus.BeforeSchool -> {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MidnightSurface)
+                                    .border(1.dp, GlassBorderSubtle, RoundedCornerShape(14.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text("🌅 يبدأ الدوام قريبًا", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                        Text("الحصة الأولى: ${status.firstSlot.subjectName}", fontSize = 11.sp, color = TextSecondary)
+                                    }
+                                    GlassPill(
+                                        text = "تبدأ ${status.startTime}",
+                                        color = CyanAccent,
+                                        bgColor = CyanGlow
+                                    )
+                                }
+                            }
+                        }
+                        is com.magd.tanweer.util.AcademicDayStatus.AfterSchool -> {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MidnightSurface)
+                                    .border(1.dp, GlassBorderSubtle, RoundedCornerShape(14.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text("🏁", fontSize = 20.sp)
+                                    Column {
+                                        Text("انتهى اليوم الدراسي لهذا اليوم ✓", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                        Text("أحسنت! راجع واجباتك ومهامك المدرسية القادمة", fontSize = 11.sp, color = TextSecondary)
+                                    }
+                                }
+                            }
+                        }
+                        else -> { /* Weekend or NoSchedule: Clean, no misleading first period */ }
                     }
                 }
             }

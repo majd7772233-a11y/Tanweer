@@ -47,9 +47,40 @@ class PdfBookManager(private val context: Context) {
     private var currentBookId: String? = null
     private var pageCount: Int = 0
 
+    fun getCanonicalBookId(bookId: String): String {
+        if (bookId.startsWith("book_")) {
+            return bookId.lowercase().replace("-", "_")
+        }
+        val cleanName = bookId.substringBeforeLast(".pdf")
+        val parts = cleanName.split("-", "_")
+        if (parts.size >= 2) {
+            val subjectPart = parts[0].trim()
+            val gradePart = parts.getOrNull(1)?.toIntOrNull()
+            val partNum = parts.getOrNull(2)?.toIntOrNull()
+            if (gradePart != null) {
+                val normSubj = com.magd.tanweer.util.BookCatalogResolver.normalizeSubjectKey(subjectPart)
+                return com.magd.tanweer.util.BookCatalogResolver.getCanonicalBookId(gradePart, normSubj, partNum)
+            }
+        }
+        return bookId.lowercase().replace("[^a-zA-Z0-9_-]".toRegex(), "_")
+    }
+
     fun getCachedFile(bookId: String): File {
         val dir = File(context.filesDir, "pdf_books").apply { mkdirs() }
-        return File(dir, "${bookId.replace("[^a-zA-Z0-9_-]".toRegex(), "_")}.pdf")
+        val canonicalId = getCanonicalBookId(bookId)
+        val canonicalFile = File(dir, "${canonicalId}.pdf")
+        if (canonicalFile.exists() && canonicalFile.length() > 1024) {
+            return canonicalFile
+        }
+
+        // Check fallback direct raw sanitized name
+        val rawSanitized = bookId.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
+        val rawFile = File(dir, "${rawSanitized}.pdf")
+        if (rawFile.exists() && rawFile.length() > 1024) {
+            return rawFile
+        }
+
+        return canonicalFile
     }
 
     fun isBookDownloaded(bookId: String): Boolean {

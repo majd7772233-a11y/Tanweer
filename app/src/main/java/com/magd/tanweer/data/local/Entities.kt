@@ -119,6 +119,7 @@ data class ExamEntity(
     val subjectName: String,
     val subjectIcon: String,
     val colorHex: String,
+    val isCompleted: Boolean = false,
     val syncStatus: String = "SYNCED"
 )
 
@@ -276,3 +277,15 @@ data class CorrectionRequestEntity(
     val upvotes: Int = 1,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+sealed class ScheduleMutationResult(val message: String) {
+    class SavedDirectly(message: String = "تم حفظ وتثبيت الحصة في الجدول بنجاح ✓") : ScheduleMutationResult(message)
+    class SubmittedAsProposal(message: String = "تم إرسال التعديل كاقتراح بانتظار اعتماد المشرفين/الإدارة 📋") : ScheduleMutationResult(message)
+    class QueuedOffline(message: String = "تم الحفظ محلياً بانتظار المزامنة مع السيرفر عند توفر الإنترنت ⏳") : ScheduleMutationResult(message)
+}
+
+sealed class HomeworkToggleResult(val isCompleted: Boolean) {
+    class SyncedWithServer(isCompleted: Boolean, val message: String = "تم تأكيد الحالة على السيرفر بنجاح ✓") : HomeworkToggleResult(isCompleted)
+    class QueuedOffline(isCompleted: Boolean, val message: String = "تم الحفظ محلياً بانتظار الرفع إلى السيرفر 🟡") : HomeworkToggleResult(isCompleted)
+    class Failed(isCompleted: Boolean, val error: String) : HomeworkToggleResult(isCompleted)
+}

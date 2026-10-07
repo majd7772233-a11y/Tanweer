@@ -62,7 +62,9 @@ export async function handleCreateContent(user: UserContext, request: Request, e
     }
   }
 
-  const contentId = generateId('cnt');
+  const contentId = (body.id && typeof body.id === 'string' && body.id.trim())
+    ? body.id.trim()
+    : generateId('cnt');
   const now = Date.now();
   const gradeNameMap: Record<number, string> = {
     7: 'سابع', 8: 'ثامن', 9: 'تاسع', 10: 'أول ثانوي', 11: 'ثاني ثانوي', 12: 'ثالث ثانوي'

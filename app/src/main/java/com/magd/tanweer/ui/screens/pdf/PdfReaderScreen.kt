@@ -95,7 +95,39 @@ fun PdfReaderScreen(
     val db = remember { TanweerDatabase.getInstance(context) }
     val repository = remember { TanweerRepository(db) }
 
-    // Real TextToSpeech Engine
+    // Real Audio Reader State (TTS Assistant)
+    var isAudioPlaying by remember { mutableStateOf(false) }
+    var audioSpeed by remember { mutableFloatStateOf(1.0f) }
+
+    // Study Stopwatch & Real Reading Time (Point 47.5)
+    var sessionReadingSeconds by remember { mutableLongStateOf(0L) }
+    var lifetimeStudySeconds by remember { mutableLongStateOf(0L) }
+    var isTimerRunning by remember { mutableStateOf(false) }
+
+    // Pomodoro (25m study / 5m break)
+    var isPomodoroActive by remember { mutableStateOf(false) }
+    var pomodoroSecondsLeft by remember { mutableIntStateOf(25 * 60) }
+    var isPomodoroBreak by remember { mutableStateOf(false) }
+
+    // Fullscreen Immersive Sticky Mode (Point 47.7: Hide system navigation bars)
+    val activity = context as? Activity
+    DisposableEffect(Unit) {
+        val window = activity?.window
+        if (window != null) {
+            val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+            insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+        }
+        onDispose {
+            val win = activity?.window
+            if (win != null) {
+                val insetsController = androidx.core.view.WindowCompat.getInsetsController(win, win.decorView)
+                insetsController.show(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+            }
+        }
+    }
+
+    // Real TextToSpeech Engine with Utterance Listener (Point 47.6)
     var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
     var isTtsReady by remember { mutableStateOf(false) }
 
@@ -108,11 +140,24 @@ fun PdfReaderScreen(
                     if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                         tts?.setLanguage(Locale.getDefault())
                     }
+                    tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) {
+                            coroutineScope.launch { isAudioPlaying = true }
+                        }
+                        override fun onDone(utteranceId: String?) {
+                            coroutineScope.launch { isAudioPlaying = false }
+                        }
+                        override fun onError(utteranceId: String?) {
+                            coroutineScope.launch { isAudioPlaying = false }
+                        }
+                    })
                     isTtsReady = true
                 }
             }
             ttsEngine = tts
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            android.util.Log.e("PdfReaderScreen", "TTS init error", e)
+        }
 
         onDispose {
             try {
@@ -180,19 +225,6 @@ fun PdfReaderScreen(
     val bookmarksList = remember { mutableStateListOf<PageBookmark>() }
     val notesList = remember { mutableStateListOf<PageStudyNote>() }
     val vocabList = remember { mutableStateListOf<PageVocabulary>() }
-
-    // Study Stopwatch & Real Reading Time
-    var readingTimeSeconds by remember { mutableLongStateOf(0L) }
-    var isTimerRunning by remember { mutableStateOf(false) }
-
-    // Pomodoro (25m study / 5m break)
-    var isPomodoroActive by remember { mutableStateOf(false) }
-    var pomodoroSecondsLeft by remember { mutableIntStateOf(25 * 60) }
-    var isPomodoroBreak by remember { mutableStateOf(false) }
-
-    // Real Audio Reader (TTS Assistant)
-    var isAudioPlaying by remember { mutableStateOf(false) }
-    var audioSpeed by remember { mutableFloatStateOf(1.0f) }
 
     // Unique Pages Read Counter
     var visitedPages by remember { mutableStateOf(setOf<Int>()) }
@@ -284,7 +316,7 @@ fun PdfReaderScreen(
                 lastPage = currentPageIndex,
                 zoom = zoomScale,
                 theme = readingTheme.name,
-                totalStudySeconds = readingTimeSeconds,
+                totalStudySeconds = lifetimeStudySeconds + sessionReadingSeconds,
                 uniquePagesCount = visitedPages.size.coerceAtLeast(1)
             )
         }
@@ -315,11 +347,11 @@ fun PdfReaderScreen(
         }
     }
 
-    // Study Stopwatch ticker (only runs when document is downloaded and reader is active)
+    // Study Stopwatch ticker (Point 47.5: tracks current session reading time)
     LaunchedEffect(isTimerRunning, downloadState) {
         while (isTimerRunning && downloadState is PdfDownloadState.Ready) {
             delay(1000)
-            readingTimeSeconds++
+            sessionReadingSeconds++
         }
     }
 
@@ -361,7 +393,8 @@ fun PdfReaderScreen(
         if (savedState != null) {
             currentPageIndex = savedState.lastPage
             zoomScale = savedState.zoom
-            readingTimeSeconds = savedState.totalStudySeconds
+            lifetimeStudySeconds = savedState.totalStudySeconds
+            sessionReadingSeconds = 0L
             readingTheme = try { ReadingTheme.valueOf(savedState.theme) } catch (_: Exception) { ReadingTheme.DAY }
         }
 
@@ -742,21 +775,27 @@ fun PdfReaderScreen(
                     }
                 }
 
-                // Pomodoro Pill Floating Badge
+                // Pomodoro Pill Floating Badge (Point 47.4 & 47.5: Compact badge with hh:mm:ss)
                 if (isPomodoroActive) {
-                    val minutes = pomodoroSecondsLeft / 60
+                    val hrs = pomodoroSecondsLeft / 3600
+                    val minutes = (pomodoroSecondsLeft % 3600) / 60
                     val seconds = pomodoroSecondsLeft % 60
-                    val timeStr = String.format("%02d:%02d", minutes, seconds)
+                    val timeStr = if (hrs > 0) {
+                        String.format(Locale.US, "%02d:%02d:%02d", hrs, minutes, seconds)
+                    } else {
+                        String.format(Locale.US, "%02d:%02d", minutes, seconds)
+                    }
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .padding(top = 58.dp, start = 22.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (isPomodoroBreak) EmeraldGreen.copy(alpha = 0.9f) else RubyRed.copy(alpha = 0.9f))
+                            .padding(top = 56.dp, start = 16.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isPomodoroBreak) EmeraldGreen.copy(alpha = 0.95f) else RubyRed.copy(alpha = 0.95f))
+                            .clickable { isStudyToolsSheetOpen = true }
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(text = if (isPomodoroBreak) "☕ استراحة" else "🍅 بومودورو", fontSize = 11.sp, color = TextOnAccent, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(text = if (isPomodoroBreak) "☕ استراحة" else "🍅 تركيز", fontSize = 11.sp, color = TextOnAccent, fontWeight = FontWeight.Bold)
                             Text(text = timeStr, fontSize = 11.sp, color = TextOnAccent, fontWeight = FontWeight.Black)
                         }
                     }
@@ -773,7 +812,7 @@ fun PdfReaderScreen(
                         book = book,
                         currentPage = currentPageIndex + 1,
                         totalPages = totalPages,
-                        readingTimeSeconds = readingTimeSeconds,
+                        sessionReadingSeconds = sessionReadingSeconds,
                         isDrawingMode = isDrawingMode,
                         onBack = {
                             pdfManager.closeRenderer()
@@ -1048,7 +1087,7 @@ fun PdfReaderScreen(
                     BookInfoDialog(
                         book = book,
                         totalPages = totalPages,
-                        readingTimeSeconds = readingTimeSeconds,
+                        readingTimeSeconds = lifetimeStudySeconds + sessionReadingSeconds,
                         onDismiss = { isBookInfoDialogOpen = false }
                     )
                 }
@@ -1065,7 +1104,7 @@ fun TopReaderBar(
     book: BookItem,
     currentPage: Int,
     totalPages: Int,
-    readingTimeSeconds: Long,
+    sessionReadingSeconds: Long,
     isDrawingMode: Boolean,
     onBack: () -> Unit,
     onToggleDrawing: () -> Unit,
@@ -1076,9 +1115,14 @@ fun TopReaderBar(
     onOpenThumbnails: () -> Unit,
     onOpenBookInfo: () -> Unit
 ) {
-    val minutes = readingTimeSeconds / 60
-    val secs = readingTimeSeconds % 60
-    val timeFormatted = String.format("%02d:%02d", minutes, secs)
+    val hrs = sessionReadingSeconds / 3600
+    val mins = (sessionReadingSeconds % 3600) / 60
+    val secs = sessionReadingSeconds % 60
+    val timeFormatted = if (hrs > 0) {
+        String.format(Locale.US, "%02d:%02d:%02d", hrs, mins, secs)
+    } else {
+        String.format(Locale.US, "%02d:%02d", mins, secs)
+    }
 
     Box(
         modifier = Modifier
@@ -1095,7 +1139,7 @@ fun TopReaderBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Back button + Book title
+            // Back button + Book title (Compact and responsive)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
@@ -1116,10 +1160,14 @@ fun TopReaderBar(
 
                 Spacer(modifier = Modifier.width(10.dp))
 
-                Column(modifier = Modifier.clickable { onOpenBookInfo() }) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .clickable { onOpenBookInfo() }
+                ) {
                     Text(
                         text = book.title,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
                         maxLines = 1,
@@ -1145,7 +1193,9 @@ fun TopReaderBar(
                 }
             }
 
-            // Quick Tool Icons
+            Spacer(modifier = Modifier.width(6.dp))
+
+            // Quick Tool Icons (Compact & Responsive)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -1154,18 +1204,18 @@ fun TopReaderBar(
                 IconButton(
                     onClick = onOpenStudyTools,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
                         .background(WarmAmber.copy(alpha = 0.15f))
                 ) {
-                    Text(text = "⚡", fontSize = 16.sp)
+                    Text(text = "⚡", fontSize = 15.sp)
                 }
 
                 // Drawing Pen Toggle
                 IconButton(
                     onClick = onToggleDrawing,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
                         .background(if (isDrawingMode) CyanGlow else GlassSurface)
                 ) {
@@ -1173,7 +1223,7 @@ fun TopReaderBar(
                         Icons.Default.Edit,
                         contentDescription = "قلم الرسم والتظليل",
                         tint = if (isDrawingMode) CyanAccent else TextPrimary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
@@ -1181,44 +1231,44 @@ fun TopReaderBar(
                 IconButton(
                     onClick = onOpenThumbnails,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.Default.GridView, contentDescription = "الفهرس المصغر", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.GridView, contentDescription = "الفهرس المصغر", tint = TextPrimary, modifier = Modifier.size(17.dp))
                 }
 
                 // Bookmarks
                 IconButton(
                     onClick = onOpenBookmarks,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.Default.BookmarkBorder, contentDescription = "الإشارات المرجعية", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.BookmarkBorder, contentDescription = "الإشارات المرجعية", tint = TextPrimary, modifier = Modifier.size(17.dp))
                 }
 
                 // Notes
                 IconButton(
                     onClick = onOpenNotes,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.Default.Description, contentDescription = "الملاحظات", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Description, contentDescription = "الملاحظات", tint = TextPrimary, modifier = Modifier.size(17.dp))
                 }
 
                 // Settings
                 IconButton(
                     onClick = onOpenSettings,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.Default.Tune, contentDescription = "الإعدادات وثيمات القراءة", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Tune, contentDescription = "الإعدادات وثيمات القراءة", tint = TextPrimary, modifier = Modifier.size(17.dp))
                 }
             }
         }

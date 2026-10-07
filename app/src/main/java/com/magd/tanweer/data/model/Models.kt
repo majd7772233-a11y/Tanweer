@@ -460,6 +460,7 @@ data class ExamItem(
     val subjectName: String = "",
     val subjectIcon: String = "🔴",
     val colorHex: String = "#FF3366",
+    val isCompleted: Boolean = false,
     val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
 )
 
@@ -595,9 +596,10 @@ object BookParser {
         val gradeName = SchoolHierarchy.getGradeName(gradePart)
         val title = "كتاب $subjectName ($partAr)"
         val sizeMb = Math.round((asset.size.toDouble() / (1024.0 * 1024.0)) * 10.0) / 10.0
+        val canonicalId = com.magd.tanweer.util.BookCatalogResolver.getCanonicalBookId(gradePart, subjectId, partNumber)
 
         return BookItem(
-            id = "gh_${asset.id}_${gradePart}_${subjectId}_${partNumber ?: 0}",
+            id = canonicalId,
             gradeId = gradePart,
             subjectId = subjectId,
             title = title,

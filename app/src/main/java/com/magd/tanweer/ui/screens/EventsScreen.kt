@@ -39,7 +39,7 @@ fun EventsScreen(
 ) {
     val context = LocalContext.current
     BackHandler {
-        viewModel.setSubScreen(SubScreen.NONE)
+        viewModel.navigateBack()
     }
 
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()

@@ -55,7 +55,9 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
   });
 
   const isOfficial = (body.isOfficial && canPublishOfficial) || canPublishOfficial ? 1 : 0;
-  const examId = generateId('exm');
+  const examId = (body.id && typeof body.id === 'string' && body.id.trim())
+    ? body.id.trim()
+    : generateId('exm');
 
   await env.DB.prepare(
     `INSERT INTO exams (id, group_id, exam_date, subject_id, title, required_chapters, notes, is_official, created_by, created_at)

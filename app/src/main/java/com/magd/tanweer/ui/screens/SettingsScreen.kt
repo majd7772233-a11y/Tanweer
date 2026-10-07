@@ -269,12 +269,10 @@ fun SettingsScreen(
                         GlassButton(
                             text = "مزامنة الكل ⚡",
                             onClick = {
-                                viewModel.syncHome(isRefresh = true)
-                                viewModel.syncSchedule(isRefresh = true)
-                                viewModel.syncHomeworks(isRefresh = true)
-                                viewModel.syncExams(isRefresh = true)
-                                viewModel.syncIssues(isRefresh = true)
-                                Toast.makeText(context, "تم بدء المزامنة الشاملة لجميع الأقسام", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "جاري المزامنة الشاملة لجميع الأقسام والكتب والفعاليات...", Toast.LENGTH_SHORT).show()
+                                viewModel.syncAllComprehensive {
+                                    Toast.makeText(context, "اكتملت المزامنة الشاملة بنجاح ✓", Toast.LENGTH_SHORT).show()
+                                }
                             },
                             modifier = Modifier.height(36.dp)
                         )

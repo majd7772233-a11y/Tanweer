@@ -61,7 +61,6 @@ fun ExamsScreen(
     var selectedExamForDetail by remember { mutableStateOf<ExamItem?>(null) }
     var examToDelete by remember { mutableStateOf<ExamItem?>(null) }
 
-    val manualCompletedMap = remember { mutableStateMapOf<String, Boolean>() }
     val todayDateStr = remember { TanweerViewModel.getTodayDateString() }
 
     Box(
@@ -124,9 +123,8 @@ fun ExamsScreen(
                     CanvasExamsTableBoard(
                         exams = exams,
                         todayDateStr = todayDateStr,
-                        manualCompletedMap = manualCompletedMap,
-                        onToggleDone = { examId, currentVal ->
-                            manualCompletedMap[examId] = !currentVal
+                        onToggleDone = { examId, currentDone ->
+                            viewModel.toggleExamCompletion(examId, !currentDone)
                         },
                         onRowClick = { exam ->
                             selectedExamForDetail = exam
@@ -190,9 +188,14 @@ fun ExamsScreen(
                         color = RubyRed,
                         textColor = Color.White,
                         onClick = {
-                            viewModel.deleteExam(exam.id)
+                            viewModel.deleteExam(exam.id) { res ->
+                                if (res.isSuccess) {
+                                    Toast.makeText(context, "تم حذف الاختبار من الجدول بنجاح ✓", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, res.exceptionOrNull()?.message ?: "تعذر حذف الاختبار من السيرفر", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                             examToDelete = null
-                            Toast.makeText(context, "تم حذف الاختبار", Toast.LENGTH_SHORT).show()
                         }
                     )
                 },
@@ -213,7 +216,6 @@ fun ExamsScreen(
 fun CanvasExamsTableBoard(
     exams: List<ExamItem>,
     todayDateStr: String,
-    manualCompletedMap: Map<String, Boolean>,
     onToggleDone: (examId: String, currentDone: Boolean) -> Unit,
     onRowClick: (ExamItem) -> Unit,
     onDeleteClick: (ExamItem) -> Unit
@@ -253,7 +255,7 @@ fun CanvasExamsTableBoard(
 
             // 2. Table Rows
             exams.forEachIndexed { index, exam ->
-                val isDone = manualCompletedMap[exam.id] ?: isExamDatePassed(exam.examDate, todayDateStr)
+                val isDone = exam.isCompleted || isExamDatePassed(exam.examDate, todayDateStr)
                 val dayName = remember(exam.examDate) { getArabicDayOfWeek(exam.examDate) }
                 val teacherOrHall = remember(exam.notes) {
                     if (!exam.notes.isNullOrBlank()) exam.notes.take(18) else "أستاذ المادة"

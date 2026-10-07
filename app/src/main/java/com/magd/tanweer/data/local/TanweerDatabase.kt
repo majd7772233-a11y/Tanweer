@@ -31,7 +31,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CorrectionRequestEntity::class,
         DailyPlanEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class TanweerDatabase : RoomDatabase() {
@@ -55,12 +55,17 @@ abstract class TanweerDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: TanweerDatabase? = null
 
-        val MIGRATION_PRESERVE_ALL = object : Migration(1, 10) {
+        val MIGRATION_PRESERVE_ALL = object : Migration(1, 11) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 // Non-destructive schema migration preserving all local user data
                 database.execSQL("CREATE TABLE IF NOT EXISTS `daily_plans` (`id` TEXT NOT NULL, `userId` TEXT NOT NULL, `title` TEXT NOT NULL, `category` TEXT NOT NULL, `relatedHomeworkId` TEXT, `date` TEXT NOT NULL, `time` TEXT, `isDone` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
                 database.execSQL("CREATE TABLE IF NOT EXISTS `correction_requests` (`id` TEXT NOT NULL, `contentId` TEXT NOT NULL, `groupId` TEXT NOT NULL, `fieldName` TEXT NOT NULL, `originalValue` TEXT NOT NULL, `proposedValue` TEXT NOT NULL, `reason` TEXT, `authorName` TEXT NOT NULL, `status` TEXT NOT NULL, PRIMARY KEY(`id`))")
                 database.execSQL("CREATE TABLE IF NOT EXISTS `outbox` (`id` TEXT NOT NULL, `entityType` TEXT NOT NULL, `entityId` TEXT NOT NULL, `payload` TEXT NOT NULL, `status` TEXT NOT NULL, `retryCount` INTEGER NOT NULL, `lastError` TEXT, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                try {
+                    database.execSQL("ALTER TABLE `cached_exams` ADD COLUMN `isCompleted` INTEGER NOT NULL DEFAULT 0")
+                } catch (e: Exception) {
+                    // Column might already exist
+                }
             }
         }
 

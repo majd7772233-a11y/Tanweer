@@ -94,6 +94,15 @@ object TanweerNotificationManager {
                 val groupId = user.defaultGroupId
                 if (groupId.isBlank()) return@launch
 
+                // Pre-sync with server before sending notifications so data is fresh (Points 15 & 16)
+                try {
+                    val repo = com.magd.tanweer.data.repository.TanweerRepository(db)
+                    repo.syncHomeworks(groupId)
+                    repo.syncExams(groupId)
+                    repo.syncSchedule(groupId)
+                    repo.syncEvents(groupId)
+                } catch (_: Exception) {}
+
                 val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
                 val todayStr = sdf.format(Date())
 
@@ -211,7 +220,7 @@ object TanweerNotificationManager {
                 if (due != null) {
                     val dueCal = Calendar.getInstance().apply {
                         time = due
-                        set(Calendar.HOUR_OF_DAY, 8)
+                        set(Calendar.HOUR_OF_DAY, 16) // 4:00 PM evening study reminder
                         set(Calendar.MINUTE, 0)
                         set(Calendar.SECOND, 0)
                     }
@@ -219,14 +228,24 @@ object TanweerNotificationManager {
                     if (dueCal.timeInMillis > System.currentTimeMillis()) {
                         triggerTime = dueCal.timeInMillis
                     } else {
-                        // If date is today or earlier, schedule a test reminder in 15 seconds
-                        triggerTime = System.currentTimeMillis() + 15_000L
+                        // If due date is today and 4:00 PM has already passed, schedule for tonight 8:00 PM
+                        val tonightCal = Calendar.getInstance().apply {
+                            set(Calendar.HOUR_OF_DAY, 20)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                        }
+                        if (tonightCal.timeInMillis > System.currentTimeMillis()) {
+                            triggerTime = tonightCal.timeInMillis
+                        } else {
+                            // If it's already late night, schedule in 2 hours
+                            triggerTime = System.currentTimeMillis() + (2 * 3600 * 1000L)
+                        }
                     }
                 } else {
-                    triggerTime = System.currentTimeMillis() + 15_000L
+                    triggerTime = System.currentTimeMillis() + (3600 * 1000L)
                 }
             } catch (_: Exception) {
-                triggerTime = System.currentTimeMillis() + 15_000L
+                triggerTime = System.currentTimeMillis() + (3600 * 1000L)
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

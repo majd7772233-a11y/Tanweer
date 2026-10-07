@@ -449,13 +449,29 @@ fun ScheduleScreen(
                         colorHex = color,
                         startTime = startTime,
                         endTime = endTime
-                    )
-                    Toast.makeText(context, "تم حفظ حصة $subjName", Toast.LENGTH_SHORT).show()
+                    ) { result ->
+                        result.fold(
+                            onSuccess = { mutationResult ->
+                                Toast.makeText(context, mutationResult.message, Toast.LENGTH_LONG).show()
+                            },
+                            onFailure = { error ->
+                                Toast.makeText(context, error.localizedMessage ?: "تعذر حفظ الحصة في الجدول", Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    }
                     activeEditingCell = null
                 },
                 onDelete = {
-                    viewModel.deleteScheduleSlot(dayOfWeek = dayIndex, slotOrder = slotOrder)
-                    Toast.makeText(context, "تم تفريغ الخانة", Toast.LENGTH_SHORT).show()
+                    viewModel.deleteScheduleSlot(dayOfWeek = dayIndex, slotOrder = slotOrder) { result ->
+                        result.fold(
+                            onSuccess = { msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            },
+                            onFailure = { error ->
+                                Toast.makeText(context, error.localizedMessage ?: "تعذر تفريغ الخانة في السيرفر", Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    }
                     activeEditingCell = null
                 }
             )

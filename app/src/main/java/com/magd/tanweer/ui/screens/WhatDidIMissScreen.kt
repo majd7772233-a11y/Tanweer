@@ -1,6 +1,8 @@
 package com.magd.tanweer.ui.screens
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,16 +13,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.data.local.HomeworkToggleResult
 import com.magd.tanweer.data.model.*
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.SubScreen
@@ -31,10 +37,19 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 enum class MissedTimeRange(val label: String, val daysBack: Int) {
+    SINCE_LAST_VISIT("منذ آخر دخول ⏳", 0),
     YESTERDAY("يوم أمس ⏪", 1),
     LAST_3_DAYS("آخر 3 أيام 📅", 3),
     THIS_WEEK("الأسبوع الحالي 🗓️", 7),
     LAST_TWO_WEEKS("آخر أسبوعين 📚", 14)
+}
+
+enum class CatchupCategoryFilter(val label: String, val icon: String) {
+    ALL("الكل", "✨"),
+    LESSONS("الدروس", "📝"),
+    HOMEWORK("الواجبات", "📋"),
+    EXAMS("الاختبارات", "🔴"),
+    EVENTS("الفعاليات", "🎪")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,35 +57,65 @@ enum class MissedTimeRange(val label: String, val daysBack: Int) {
 fun WhatDidIMissScreen(
     viewModel: TanweerViewModel
 ) {
+    val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val previousSessionTime by viewModel.previousSessionTimestamp.collectAsStateWithLifecycle()
 
-    var selectedRange by remember { mutableStateOf(MissedTimeRange.LAST_3_DAYS) }
+    var selectedRange by remember { mutableStateOf(MissedTimeRange.SINCE_LAST_VISIT) }
+    var selectedCategoryFilter by remember { mutableStateOf(CatchupCategoryFilter.ALL) }
 
     val sdf = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
-    val cutoffDate = remember(selectedRange) {
-        val cal = Calendar.getInstance()
-        cal.add(Calendar.DAY_OF_YEAR, -selectedRange.daysBack)
-        sdf.format(cal.time)
+    val timeFormatter = remember { SimpleDateFormat("yyyy-MM-dd hh:mm a", Locale.getDefault()) }
+    val todayStr = remember { sdf.format(Date()) }
+
+    val (startDateStr, endDateStr) = remember(selectedRange, previousSessionTime) {
+        val today = sdf.format(Date())
+        if (selectedRange == MissedTimeRange.SINCE_LAST_VISIT) {
+            val sinceDate = sdf.format(Date(previousSessionTime))
+            Pair(sinceDate, today)
+        } else {
+            val cal = Calendar.getInstance()
+            cal.add(Calendar.DAY_OF_YEAR, -selectedRange.daysBack)
+            val from = sdf.format(cal.time)
+            Pair(from, today)
+        }
     }
 
+    val allContents by viewModel.repository.getAllContents(activeGroupId)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
     val allHomeworks by viewModel.repository.getHomeworks(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val allExams by viewModel.repository.getExams(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val allEvents by viewModel.repository.getEvents(activeGroupId)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
 
-    // Filter relevant items within missed range
-    val missedHomeworks = remember(allHomeworks, cutoffDate) {
-        allHomeworks.filter { it.studyDate >= cutoffDate && !it.isCompleted }
+    // 1. Filter Lessons documented in that range
+    val missedLessons = remember(allContents, startDateStr, endDateStr) {
+        allContents.filter { it.studyDate in startDateStr..endDateStr }
     }
 
-    val missedExams = remember(allExams, cutoffDate) {
-        allExams.filter { it.examDate >= cutoffDate }
+    // 2. Filter Homeworks assigned in that range
+    val missedHomeworks = remember(allHomeworks, startDateStr, endDateStr) {
+        allHomeworks.filter { it.studyDate in startDateStr..endDateStr }
     }
+
+    // 3. Filter Exams announced or occurring upcoming
+    val relevantExams = remember(allExams, startDateStr, todayStr) {
+        allExams.filter { it.examDate >= startDateStr }
+    }
+
+    // 4. Filter Events in that range or upcoming
+    val relevantEvents = remember(allEvents, startDateStr) {
+        allEvents.filter { it.eventDate >= startDateStr }
+    }
+
+    val totalCatchupItems = missedLessons.size + missedHomeworks.size + relevantExams.size + relevantEvents.size
 
     BackHandler {
-        viewModel.setSubScreen(SubScreen.NONE)
+        viewModel.navigateBack()
     }
 
     LazyColumn(
@@ -113,9 +158,12 @@ fun WhatDidIMissScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
+                            val lastVisitStr = remember(previousSessionTime) {
+                                try { timeFormatter.format(Date(previousSessionTime)) } catch (_: Exception) { "سابقاً" }
+                            }
                             Text(
-                                text = "راجع كل الدروس والواجبات والاختبارات التي تمت إضافتها",
-                                fontSize = 12.sp,
+                                text = "ملخص الاستدراك الذكي (آخر دخول: $lastVisitStr)",
+                                fontSize = 11.sp,
                                 color = TextSecondary
                             )
                         }
@@ -155,124 +203,185 @@ fun WhatDidIMissScreen(
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                GlassCard(
+                StatPillCard(
+                    icon = "📝",
+                    count = missedLessons.size,
+                    label = "دروس موثقة",
+                    color = CyanAccent,
                     modifier = Modifier.weight(1f),
-                    backgroundColor = GlassSurface
-                ) {
+                    isSelected = selectedCategoryFilter == CatchupCategoryFilter.LESSONS,
+                    onClick = {
+                        selectedCategoryFilter = if (selectedCategoryFilter == CatchupCategoryFilter.LESSONS) CatchupCategoryFilter.ALL else CatchupCategoryFilter.LESSONS
+                    }
+                )
+                StatPillCard(
+                    icon = "📋",
+                    count = missedHomeworks.size,
+                    label = "واجبات",
+                    color = WarmAmber,
+                    modifier = Modifier.weight(1f),
+                    isSelected = selectedCategoryFilter == CatchupCategoryFilter.HOMEWORK,
+                    onClick = {
+                        selectedCategoryFilter = if (selectedCategoryFilter == CatchupCategoryFilter.HOMEWORK) CatchupCategoryFilter.ALL else CatchupCategoryFilter.HOMEWORK
+                    }
+                )
+                StatPillCard(
+                    icon = "🔴",
+                    count = relevantExams.size,
+                    label = "اختبارات",
+                    color = RubyRed,
+                    modifier = Modifier.weight(1f),
+                    isSelected = selectedCategoryFilter == CatchupCategoryFilter.EXAMS,
+                    onClick = {
+                        selectedCategoryFilter = if (selectedCategoryFilter == CatchupCategoryFilter.EXAMS) CatchupCategoryFilter.ALL else CatchupCategoryFilter.EXAMS
+                    }
+                )
+                StatPillCard(
+                    icon = "🎪",
+                    count = relevantEvents.size,
+                    label = "فعاليات",
+                    color = EmeraldGreen,
+                    modifier = Modifier.weight(1f),
+                    isSelected = selectedCategoryFilter == CatchupCategoryFilter.EVENTS,
+                    onClick = {
+                        selectedCategoryFilter = if (selectedCategoryFilter == CatchupCategoryFilter.EVENTS) CatchupCategoryFilter.ALL else CatchupCategoryFilter.EVENTS
+                    }
+                )
+            }
+        }
+
+        if (totalCatchupItems == 0) {
+            item {
+                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                     Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.fillMaxWidth()
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(text = "📋", fontSize = 22.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = "✨", fontSize = 32.sp)
                         Text(
-                            text = "${missedHomeworks.size}",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = WarmAmber
+                            text = "لا توجد مواد أو واجبات أو أحداث جديدة خلال هذه الفترة!",
+                            fontSize = 14.sp,
+                            color = EmeraldGreen,
+                            fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "واجبات مستحقة",
-                            fontSize = 11.sp,
+                            text = "أنت مواكب لكافة متطلبات الشعبة الدراسية بنجاح ✓",
+                            fontSize = 12.sp,
                             color = TextSecondary
                         )
                     }
                 }
+            }
+        }
 
-                GlassCard(
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = GlassSurface
+        // -------------------------------------------------------------
+        // 1. LESSONS & BOARD DOCUMENTATION SECTION
+        // -------------------------------------------------------------
+        if (selectedCategoryFilter in listOf(CatchupCategoryFilter.ALL, CatchupCategoryFilter.LESSONS) && missedLessons.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(text = "🎯", fontSize = 22.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "📝", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "${missedExams.size}",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = RubyRed
-                        )
-                        Text(
-                            text = "اختبارات قادمة",
-                            fontSize = 11.sp,
-                            color = TextSecondary
-                        )
-                    }
-                }
-
-                GlassCard(
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = GlassSurface
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(text = "🗓️", fontSize = 22.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "${selectedRange.daysBack}",
-                            fontSize = 20.sp,
+                            text = "الدروس وشروحات السبورة الموثقة (${missedLessons.size})",
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = CyanAccent
                         )
+                    }
+                    TextButton(onClick = { viewModel.setTab(NavigationTab.TODAY) }) {
+                        Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            items(missedLessons) { lesson ->
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            GlassPill(
+                                text = lesson.subjectName,
+                                color = CyanAccent,
+                                bgColor = CyanGlow
+                            )
+                            Text(
+                                text = "📅 ${lesson.studyDate}",
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "أيام سابقة",
-                            fontSize = 11.sp,
-                            color = TextSecondary
+                            text = lesson.title,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
                         )
+                        if (!lesson.description.isNullOrBlank()) {
+                            Text(
+                                text = lesson.description,
+                                fontSize = 12.sp,
+                                color = TextSecondary,
+                                maxLines = 2
+                            )
+                        }
+                        if (lesson.media.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "📷 يتضمن ${lesson.media.size} صور موثقة للسبورة/الدفتر",
+                                fontSize = 11.sp,
+                                color = CyanAccent,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // Homework Section
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "📋", fontSize = 18.sp)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "الواجبات والمهام المطلوبة",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                }
-                TextButton(onClick = { viewModel.setTab(NavigationTab.HOMEWORK) }) {
-                    Text(text = "عرض الكل", color = CyanAccent, fontSize = 13.sp)
-                }
-            }
-        }
-
-        if (missedHomeworks.isEmpty()) {
+        // -------------------------------------------------------------
+        // 2. HOMEWORK SECTION
+        // -------------------------------------------------------------
+        if (selectedCategoryFilter in listOf(CatchupCategoryFilter.ALL, CatchupCategoryFilter.HOMEWORK) && missedHomeworks.isNotEmpty()) {
             item {
-                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(text = "✨", fontSize = 24.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "📋", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "لا توجد واجبات غير مكتملة في هذه الفترة، عمل رائع!",
-                            fontSize = 13.sp,
-                            color = EmeraldGreen,
-                            fontWeight = FontWeight.Medium
+                            text = "الواجبات والتكليفات المدرسية (${missedHomeworks.size})",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = WarmAmber
                         )
+                    }
+                    TextButton(onClick = { viewModel.setTab(NavigationTab.HOMEWORK) }) {
+                        Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
                     }
                 }
             }
-        } else {
+
             items(missedHomeworks) { hw ->
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -290,8 +399,8 @@ fun WhatDidIMissScreen(
                             ) {
                                 GlassPill(
                                     text = hw.subjectName,
-                                    color = CyanAccent,
-                                    bgColor = CyanGlow
+                                    color = WarmAmber,
+                                    bgColor = WarmAmber.copy(alpha = 0.15f)
                                 )
                                 Text(
                                     text = "تاريخ الحصة: ${hw.studyDate}",
@@ -314,7 +423,7 @@ fun WhatDidIMissScreen(
                                     maxLines = 2
                                 )
                             }
-                            if (!hw.dueDate.isBlank()) {
+                            if (hw.dueDate.isNotBlank()) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = "⏳ موعد التسليم: ${hw.dueDate}",
@@ -326,7 +435,21 @@ fun WhatDidIMissScreen(
                         }
 
                         IconButton(
-                            onClick = { viewModel.toggleHomework(hw.id, hw.isCompleted) },
+                            onClick = {
+                                viewModel.toggleHomework(hw.id, hw.isCompleted) { res ->
+                                    when (res) {
+                                        is HomeworkToggleResult.SyncedWithServer -> {
+                                            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                        }
+                                        is HomeworkToggleResult.QueuedOffline -> {
+                                            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                        }
+                                        is HomeworkToggleResult.Failed -> {
+                                            Toast.makeText(context, res.error, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            },
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(CircleShape)
@@ -343,48 +466,33 @@ fun WhatDidIMissScreen(
             }
         }
 
-        // Exams Section
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "🎯", fontSize = 18.sp)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "الاختبارات المعلنة",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                }
-                TextButton(onClick = { viewModel.setTab(NavigationTab.EXAMS) }) {
-                    Text(text = "عرض الكل", color = CyanAccent, fontSize = 13.sp)
-                }
-            }
-        }
-
-        if (missedExams.isEmpty()) {
+        // -------------------------------------------------------------
+        // 3. EXAMS SECTION
+        // -------------------------------------------------------------
+        if (selectedCategoryFilter in listOf(CatchupCategoryFilter.ALL, CatchupCategoryFilter.EXAMS) && relevantExams.isNotEmpty()) {
             item {
-                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(text = "🎉", fontSize = 24.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "🔴", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "لا توجد اختبارات مجدولة مسبقاً في هذه الفترة",
-                            fontSize = 13.sp,
-                            color = TextSecondary
+                            text = "الاختبارات المعلنة (${relevantExams.size})",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = RubyRed
                         )
+                    }
+                    TextButton(onClick = { viewModel.setTab(NavigationTab.EXAMS) }) {
+                        Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
                     }
                 }
             }
-        } else {
-            items(missedExams) { exam ->
+
+            items(relevantExams) { exam ->
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = GlassSurface
@@ -422,12 +530,96 @@ fun WhatDidIMissScreen(
                                 maxLines = 2
                             )
                         }
+                        if (!exam.notes.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "ملاحظات: ${exam.notes}",
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // Quick Shortcut Links
+        // -------------------------------------------------------------
+        // 4. EVENTS & ACTIVITIES SECTION
+        // -------------------------------------------------------------
+        if (selectedCategoryFilter in listOf(CatchupCategoryFilter.ALL, CatchupCategoryFilter.EVENTS) && relevantEvents.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "🎪", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "الأنشطة والفعاليات المدرسية (${relevantEvents.size})",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldGreen
+                        )
+                    }
+                    TextButton(onClick = { viewModel.setSubScreen(SubScreen.EVENTS) }) {
+                        Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            items(relevantEvents) { event ->
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            GlassPill(
+                                text = event.category,
+                                color = EmeraldGreen,
+                                bgColor = EmeraldGreen.copy(alpha = 0.15f)
+                            )
+                            Text(
+                                text = "📅 ${event.eventDate} ${event.timeStr ?: ""}".trim(),
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = event.title,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        if (!event.description.isNullOrBlank()) {
+                            Text(
+                                text = event.description,
+                                fontSize = 12.sp,
+                                color = TextSecondary,
+                                maxLines = 2
+                            )
+                        }
+                        if (!event.location.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "📍 المكان: ${event.location}",
+                                fontSize = 11.sp,
+                                color = CyanAccent
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Quick Navigation Shortcuts
         item {
             Spacer(modifier = Modifier.height(8.dp))
             Row(
@@ -445,6 +637,48 @@ fun WhatDidIMissScreen(
                     modifier = Modifier.weight(1f)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun StatPillCard(
+    icon: String,
+    count: Int,
+    label: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    isSelected: Boolean = false,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (isSelected) color.copy(alpha = 0.25f) else GlassSurface)
+            .border(
+                1.dp,
+                if (isSelected) color else GlassBorderSubtle,
+                RoundedCornerShape(14.dp)
+            )
+            .clickable { onClick() }
+            .padding(vertical = 10.dp, horizontal = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(text = icon, fontSize = 18.sp)
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "$count",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) color else TextPrimary
+            )
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                color = if (isSelected) color else TextSecondary,
+                maxLines = 1
+            )
         }
     }
 }

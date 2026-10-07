@@ -44,6 +44,7 @@ enum class IssueFilter(val label: String) {
 fun IssuesScreen(
     viewModel: TanweerViewModel
 ) {
+    val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
@@ -181,7 +182,13 @@ fun IssuesScreen(
                         title = title,
                         description = desc,
                         subjectId = subjId
-                    )
+                    ) { res ->
+                        if (res.isSuccess) {
+                            Toast.makeText(context, "تم طرح الاستفسار بنجاح ❓", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "فشل طرح الاستفسار", Toast.LENGTH_LONG).show()
+                        }
+                    }
                     isAddModalOpen = false
                 }
             )

@@ -202,13 +202,15 @@ fun GlassTextField(
     testTag: String = "glass_text_field"
 ) {
     Column(modifier = modifier) {
-        Text(
-            text = label,
-            fontSize = 13.sp,
-            color = TextSecondary,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(bottom = 6.dp)
-        )
+        if (label.isNotBlank()) {
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                color = TextSecondary,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+        }
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,

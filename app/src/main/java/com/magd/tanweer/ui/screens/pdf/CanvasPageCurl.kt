@@ -1,7 +1,11 @@
 package com.magd.tanweer.ui.screens.pdf
 
 import android.graphics.Bitmap
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -11,38 +15,35 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import kotlin.math.*
+import kotlin.math.abs
 
 enum class PageTurnMode {
     CANVAS_CURL_3D,
     HORIZONTAL_SLIDE,
-    VERTICAL_SCROLL,
-    SINGLE_PAGE_SNAP,
-    DUAL_PAGE_SPREAD
+    VERTICAL_CONTINUOUS,
+    FLIP_BOOK
 }
 
 enum class ReadingTheme(
     val title: String,
     val backgroundColor: Color,
-    val filterColor: Color,
-    val blendMode: BlendMode
+    val textColor: Color
 ) {
-    DAY("الصباحي الفاتح", Color(0xFFFBFBFB), Color.Transparent, BlendMode.SrcOver),
-    SEPIA("الورق الكلاسيكي", Color(0xFFF7EED9), Color(0x33D7C49E), BlendMode.Multiply),
-    NIGHT("الوضع الليلي", Color(0xFF12151C), Color(0x2200E5FF), BlendMode.SrcOver),
-    OBSIDIAN("سواد OLED", Color(0xFF000000), Color(0x33000000), BlendMode.SrcOver),
-    EMERALD("حماية العين", Color(0xFFE8F5E9), Color(0x2281C784), BlendMode.Multiply),
-    INVERTED("التباين المعكوس", Color(0xFF0D1117), Color.White, BlendMode.Difference)
+    DAY("الوضع الافتراضي (نهاري)", Color(0xFFFFFFFF), Color(0xFF1E293B)),
+    SEPIA("ورق قديم (سيبيا مريح)", Color(0xFFFBF0D9), Color(0xFF5F4B32)),
+    DARK("الوضع الليلي (كحلي هادئ)", Color(0xFF0F172A), Color(0xFFF1F5F9)),
+    OLED_BLACK("أسود مطلق (توفير بطارية)", Color(0xFF000000), Color(0xFFE2E8F0)),
+    WARM_YELLOW("أصفر دافئ (حماية العين)", Color(0xFFFFFBEB), Color(0xFF451A03)),
+    FOREST_GREEN("أخضر هادئ (تركيز عميق)", Color(0xFFF0FDF4), Color(0xFF14532D))
 }
 
 data class DrawnStroke(
@@ -94,7 +95,7 @@ fun CanvasPageCurlViewer(
         modifier = modifier
             .fillMaxSize()
             .background(readingTheme.backgroundColor)
-            // Gesture Layer 1: Drawing Mode Handler
+            // Gesture Layer 1: Drawing Mode Handler (Active when user taps Pen)
             .pointerInput(isDrawingMode) {
                 if (isDrawingMode) {
                     detectDragGestures(
@@ -125,39 +126,50 @@ fun CanvasPageCurlViewer(
                     )
                 }
             }
-            // Gesture Layer 2: Pinch Zoom & Pan when zoomed
-            .pointerInput(isDrawingMode, zoomScale) {
-                if (!isDrawingMode && zoomScale > 1.05f) {
-                    detectTransformGestures { centroid, pan, zoom, _ ->
-                        val newScale = (zoomScale * zoom).coerceIn(1.0f, 5.0f)
-                        val maxPanX = (size.width * (newScale - 1f)) / 2f
-                        val maxPanY = (size.height * (newScale - 1f)) / 2f
-                        val newPan = Offset(
-                            x = (panOffset.x + pan.x).coerceIn(-maxPanX, maxPanX),
-                            y = (panOffset.y + pan.y).coerceIn(-maxPanY, maxPanY)
-                        )
-                        onZoomChange(newScale, newPan)
+            // Gesture Layer 2: Seamless Pinch-to-Zoom and Viewport Panning (Point 47.1)
+            .pointerInput(isDrawingMode, zoomScale, panOffset) {
+                if (!isDrawingMode) {
+                    detectTransformGestures(
+                        panZoomLock = false
+                    ) { centroid, pan, zoom, _ ->
+                        if (zoom != 1.0f || zoomScale > 1.05f) {
+                            val newScale = (zoomScale * zoom).coerceIn(1.0f, 5.0f)
+                            val maxPanX = (size.width * (newScale - 1f)) / 2f
+                            val maxPanY = (size.height * (newScale - 1f)) / 2f
+                            val newPan = if (newScale <= 1.02f) {
+                                Offset.Zero
+                            } else {
+                                Offset(
+                                    x = (panOffset.x + pan.x).coerceIn(-maxPanX, maxPanX),
+                                    y = (panOffset.y + pan.y).coerceIn(-maxPanY, maxPanY)
+                                )
+                            }
+                            onZoomChange(newScale, newPan)
+                        }
                     }
                 }
             }
-            // Gesture Layer 3: Tap, Double Tap, and Realistic Page Curl Drag (at zoom 1.0x)
-            .pointerInput(isDrawingMode, zoomScale, pageTurnMode, currentPageIndex, totalPages) {
-                if (!isDrawingMode && zoomScale <= 1.05f) {
+            // Gesture Layer 3: Tap, Double Tap, and Edge Quick Nav
+            .pointerInput(isDrawingMode, zoomScale, currentPageIndex, totalPages) {
+                if (!isDrawingMode) {
                     detectTapGestures(
                         onTap = { offset ->
                             val screenWidth = size.width
-                            // Edge tap zones for rapid navigation:
-                            // Right 12% = next page in RTL, Left 12% = prev page
-                            if (offset.x > screenWidth * 0.88f && hasNextPage) {
-                                onNextPage()
-                            } else if (offset.x < screenWidth * 0.12f && hasPrevPage) {
-                                onPrevPage()
+                            // Edge tap navigation at normal 1.0x scale
+                            if (zoomScale <= 1.05f) {
+                                if (offset.x > screenWidth * 0.88f && hasNextPage) {
+                                    onNextPage()
+                                } else if (offset.x < screenWidth * 0.12f && hasPrevPage) {
+                                    onPrevPage()
+                                } else {
+                                    onTap()
+                                }
                             } else {
                                 onTap()
                             }
                         },
                         onDoubleTap = {
-                            if (zoomScale > 1.1f) {
+                            if (zoomScale > 1.15f) {
                                 onZoomChange(1.0f, Offset.Zero)
                             } else {
                                 onZoomChange(2.2f, Offset.Zero)
@@ -166,6 +178,7 @@ fun CanvasPageCurlViewer(
                     )
                 }
             }
+            // Gesture Layer 4: 3D Page Curl Drag (Only active when scale == 1.0x and not in drawing mode)
             .pointerInput(isDrawingMode, zoomScale, pageTurnMode, currentPageIndex, totalPages) {
                 if (!isDrawingMode && zoomScale <= 1.05f) {
                     detectDragGestures(
@@ -173,39 +186,41 @@ fun CanvasPageCurlViewer(
                             isCurlingForward = startOffset.x > size.width / 2f
                         },
                         onDrag = { change, dragAmount ->
-                            change.consume()
-                            val dragDeltaX = dragAmount.x
-                            val width = size.width.toFloat().coerceAtLeast(1f)
-                            var progressDelta = -(dragDeltaX / width) * 1.55f
+                            // Only capture primarily horizontal drags for page curl
+                            if (abs(dragAmount.x) > abs(dragAmount.y) * 0.6f) {
+                                change.consume()
+                                val dragDeltaX = dragAmount.x
+                                val width = size.width.toFloat().coerceAtLeast(1f)
+                                var progressDelta = -(dragDeltaX / width) * 1.55f
 
-                            // STRICT BOUNDARY RULES:
-                            // If on First Page, DO NOT allow curling backwards (progressDelta < 0)
-                            if (!hasPrevPage && (curlProgress.value + progressDelta) < 0f) {
-                                progressDelta = 0f
-                            }
-                            // If on Last Page, DO NOT allow curling forwards (progressDelta > 0)
-                            if (!hasNextPage && (curlProgress.value + progressDelta) > 0f) {
-                                progressDelta = 0f
-                            }
+                                // STRICT BOUNDARY RULES:
+                                if (!hasPrevPage && (curlProgress.value + progressDelta) < 0f) {
+                                    progressDelta = 0f
+                                }
+                                if (!hasNextPage && (curlProgress.value + progressDelta) > 0f) {
+                                    progressDelta = 0f
+                                }
 
-                            coroutineScope.launch {
-                                val currentVal = curlProgress.value
-                                val targetVal = (currentVal + progressDelta).coerceIn(
-                                    if (hasPrevPage) -1f else 0f,
-                                    if (hasNextPage) 1f else 0f
-                                )
-                                curlProgress.snapTo(targetVal)
+                                coroutineScope.launch {
+                                    val currentVal = curlProgress.value
+                                    val targetVal = (currentVal + progressDelta).coerceIn(
+                                        if (hasPrevPage) -1f else 0f,
+                                        if (hasNextPage) 1f else 0f
+                                    )
+                                    curlProgress.snapTo(targetVal)
+                                }
                             }
                         },
                         onDragEnd = {
                             coroutineScope.launch {
                                 val currentVal = curlProgress.value
-                                if (currentVal > 0.22f && hasNextPage) {
-                                    curlProgress.animateTo(1f, tween(240, easing = FastOutSlowInEasing))
+                                // Point 47.2: Smooth transition without previous page flash
+                                if (currentVal > 0.20f && hasNextPage) {
+                                    curlProgress.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
                                     onNextPage()
                                     curlProgress.snapTo(0f)
-                                } else if (currentVal < -0.22f && hasPrevPage) {
-                                    curlProgress.animateTo(-1f, tween(240, easing = FastOutSlowInEasing))
+                                } else if (currentVal < -0.20f && hasPrevPage) {
+                                    curlProgress.animateTo(-1f, tween(200, easing = FastOutSlowInEasing))
                                     onPrevPage()
                                     curlProgress.snapTo(0f)
                                 } else {
@@ -248,93 +263,45 @@ fun CanvasPageCurlViewer(
                     readingTheme = readingTheme,
                     size = size
                 )
-            } else if (pageTurnMode == PageTurnMode.DUAL_PAGE_SPREAD && canvasWidth > canvasHeight) {
-                // Dual Page Spread for Landscape / Tablets
-                drawDualPageSpread(
-                    leftPage = prevPageBitmap ?: currentPageBitmap,
-                    rightPage = if (prevPageBitmap != null) currentPageBitmap else nextPageBitmap,
-                    size = size,
-                    readingTheme = readingTheme
-                )
             } else {
-                // Standard Single Page Display
-                if (currentPageBitmap != null && !currentPageBitmap.isRecycled) {
-                    drawScaledBitmap(
-                        bitmap = currentPageBitmap,
-                        containerSize = size,
-                        readingTheme = readingTheme
-                    )
-                }
+                // Standard Flat Page Drawing with Theme Filters
+                drawStandardPage(
+                    bitmap = currentPageBitmap,
+                    readingTheme = readingTheme,
+                    size = size
+                )
             }
 
-            // Draw Persistent Annotations & Freehand Drawings for current page
-            currentStrokes.forEach { stroke ->
-                drawStrokePath(stroke)
-            }
+            // Draw Freehand Annotations & Drawings on Top of Page
+            drawPageStrokes(currentStrokes)
 
-            // Draw Currently Active In-Progress Stroke
+            // Draw Live Active Stroke
             if (activeStrokePoints.size > 1) {
-                val activeStroke = DrawnStroke(
-                    points = activeStrokePoints.toList(),
+                val livePath = Path().apply {
+                    moveTo(activeStrokePoints.first().x, activeStrokePoints.first().y)
+                    for (i in 1 until activeStrokePoints.size) {
+                        lineTo(activeStrokePoints[i].x, activeStrokePoints[i].y)
+                    }
+                }
+                drawPath(
+                    path = livePath,
                     color = if (isHighlighter) currentPenColor.copy(alpha = 0.38f) else currentPenColor,
-                    strokeWidth = if (isHighlighter) currentPenWidth * 2.6f else currentPenWidth,
-                    isHighlighter = isHighlighter
-                )
-                drawStrokePath(activeStroke)
-            }
-
-            // Draw Reading Focus Ruler / Focus Line
-            if (focusRulerY != null) {
-                val rulerHeight = 48f
-                val clampedY = focusRulerY.coerceIn(rulerHeight / 2f, canvasHeight - rulerHeight / 2f)
-
-                // Dim outer top/bottom regions
-                drawRect(
-                    color = Color(0x44000000),
-                    topLeft = Offset(0f, 0f),
-                    size = Size(canvasWidth, clampedY - rulerHeight / 2f)
-                )
-                drawRect(
-                    color = Color(0x44000000),
-                    topLeft = Offset(0f, clampedY + rulerHeight / 2f),
-                    size = Size(canvasWidth, canvasHeight - (clampedY + rulerHeight / 2f))
-                )
-
-                // Glowing reading slit
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0x3300E5FF),
-                            Color(0x1100E5FF),
-                            Color(0x3300E5FF)
-                        ),
-                        startY = clampedY - rulerHeight / 2f,
-                        endY = clampedY + rulerHeight / 2f
-                    ),
-                    topLeft = Offset(0f, clampedY - rulerHeight / 2f),
-                    size = Size(canvasWidth, rulerHeight)
-                )
-                drawLine(
-                    color = Color(0xFF00E5FF),
-                    start = Offset(0f, clampedY - rulerHeight / 2f),
-                    end = Offset(canvasWidth, clampedY - rulerHeight / 2f),
-                    strokeWidth = 2.5f
-                )
-                drawLine(
-                    color = Color(0xFF00E5FF),
-                    start = Offset(0f, clampedY + rulerHeight / 2f),
-                    end = Offset(canvasWidth, clampedY + rulerHeight / 2f),
-                    strokeWidth = 2.5f
+                    style = Stroke(
+                        width = if (isHighlighter) currentPenWidth * 2.6f else currentPenWidth,
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round
+                    )
                 )
             }
 
-            // Watermark / School Seal
+            // Draw Focus Reading Ruler (if active)
+            focusRulerY?.let { rulerY ->
+                drawFocusRuler(rulerY = rulerY, size = size)
+            }
+
+            // Draw Watermark (if enabled)
             if (isWatermarkEnabled) {
-                drawCircle(
-                    color = Color(0x0C00E5FF),
-                    radius = canvasWidth * 0.32f,
-                    center = Offset(canvasWidth / 2f, canvasHeight / 2f)
-                )
+                drawWatermark("تنوير - نسخة دراسية رسمية", size = size)
             }
 
             drawContext.canvas.restore()
@@ -342,113 +309,109 @@ fun CanvasPageCurlViewer(
     }
 }
 
-private fun DrawScope.drawScaledBitmap(
-    bitmap: Bitmap,
-    containerSize: Size,
-    readingTheme: ReadingTheme
+private fun DrawScope.drawStandardPage(
+    bitmap: Bitmap?,
+    readingTheme: ReadingTheme,
+    size: Size
 ) {
-    val srcW = bitmap.width.toFloat()
-    val srcH = bitmap.height.toFloat()
+    if (bitmap == null || bitmap.isRecycled) {
+        // Draw elegant placeholder skeleton
+        drawRect(
+            color = readingTheme.backgroundColor,
+            size = size
+        )
+        return
+    }
 
-    val scale = minOf(containerSize.width / srcW, containerSize.height / srcH)
-    val dstW = srcW * scale
-    val dstH = srcH * scale
+    val imageBitmap = bitmap.asImageBitmap()
+    val srcWidth = imageBitmap.width.toFloat()
+    val srcHeight = imageBitmap.height.toFloat()
 
-    val left = (containerSize.width - dstW) / 2f
-    val top = (containerSize.height - dstH) / 2f
+    // Calculate aspect fit inside canvas
+    val scaleX = size.width / srcWidth
+    val scaleY = size.height / srcHeight
+    val scale = minOf(scaleX, scaleY)
 
-    // Draw realistic page elevation shadow
-    drawRoundRect(
-        color = Color(0x35000000),
-        topLeft = Offset(left + 2f, top + 5f),
-        size = Size(dstW, dstH),
-        cornerRadius = CornerRadius(6f, 6f)
+    val destWidth = srcWidth * scale
+    val destHeight = srcHeight * scale
+    val destLeft = (size.width - destWidth) / 2f
+    val destTop = (size.height - destHeight) / 2f
+
+    // Background paper fill
+    drawRect(
+        color = readingTheme.backgroundColor,
+        topLeft = Offset(destLeft, destTop),
+        size = Size(destWidth, destHeight)
     )
+
+    // Color Filter based on Reading Theme
+    val colorFilter = when (readingTheme) {
+        ReadingTheme.DAY -> null
+        ReadingTheme.SEPIA -> ColorFilter.colorMatrix(
+            ColorMatrix(
+                floatArrayOf(
+                    0.95f, 0.05f, 0.00f, 0f, 15f,
+                    0.00f, 0.88f, 0.05f, 0f, 10f,
+                    0.00f, 0.05f, 0.70f, 0f, 0f,
+                    0.00f, 0.00f, 0.00f, 1f, 0f
+                )
+            )
+        )
+        ReadingTheme.DARK -> ColorFilter.colorMatrix(
+            ColorMatrix(
+                floatArrayOf(
+                    -0.85f, 0f, 0f, 0f, 215f,
+                    0f, -0.85f, 0f, 0f, 215f,
+                    0f, 0f, -0.85f, 0f, 215f,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+        )
+        ReadingTheme.OLED_BLACK -> ColorFilter.colorMatrix(
+            ColorMatrix(
+                floatArrayOf(
+                    -0.95f, 0f, 0f, 0f, 235f,
+                    0f, -0.95f, 0f, 0f, 235f,
+                    0f, 0f, -0.95f, 0f, 235f,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+        )
+        ReadingTheme.WARM_YELLOW -> ColorFilter.colorMatrix(
+            ColorMatrix(
+                floatArrayOf(
+                    1.05f, 0f, 0f, 0f, 20f,
+                    0f, 0.98f, 0f, 0f, 15f,
+                    0f, 0f, 0.72f, 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+        )
+        ReadingTheme.FOREST_GREEN -> ColorFilter.colorMatrix(
+            ColorMatrix(
+                floatArrayOf(
+                    0.75f, 0f, 0f, 0f, 0f,
+                    0f, 0.95f, 0f, 0f, 18f,
+                    0f, 0f, 0.75f, 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+        )
+    }
 
     drawImage(
-        image = bitmap.asImageBitmap(),
-        srcOffset = IntOffset.Zero,
-        srcSize = IntSize(bitmap.width, bitmap.height),
-        dstOffset = IntOffset(left.toInt(), top.toInt()),
-        dstSize = IntSize(dstW.toInt(), dstH.toInt())
-    )
-
-    // Apply Reading Theme Tint Overlay
-    if (readingTheme.filterColor != Color.Transparent) {
-        drawRect(
-            color = readingTheme.filterColor,
-            topLeft = Offset(left, top),
-            size = Size(dstW, dstH),
-            blendMode = readingTheme.blendMode
-        )
-    }
-}
-
-private fun DrawScope.drawDualPageSpread(
-    leftPage: Bitmap?,
-    rightPage: Bitmap?,
-    size: Size,
-    readingTheme: ReadingTheme
-) {
-    val halfW = size.width / 2f
-    val h = size.height
-
-    // Draw left page
-    if (leftPage != null && !leftPage.isRecycled) {
-        val srcW = leftPage.width.toFloat()
-        val srcH = leftPage.height.toFloat()
-        val scale = minOf(halfW / srcW, h / srcH)
-        val dstW = srcW * scale
-        val dstH = srcH * scale
-        val left = halfW - dstW
-        val top = (h - dstH) / 2f
-
-        drawImage(
-            image = leftPage.asImageBitmap(),
-            srcOffset = IntOffset.Zero,
-            srcSize = IntSize(leftPage.width, leftPage.height),
-            dstOffset = IntOffset(left.toInt(), top.toInt()),
-            dstSize = IntSize(dstW.toInt(), dstH.toInt())
-        )
-    }
-
-    // Draw right page
-    if (rightPage != null && !rightPage.isRecycled) {
-        val srcW = rightPage.width.toFloat()
-        val srcH = rightPage.height.toFloat()
-        val scale = minOf(halfW / srcW, h / srcH)
-        val dstW = srcW * scale
-        val dstH = srcH * scale
-        val left = halfW
-        val top = (h - dstH) / 2f
-
-        drawImage(
-            image = rightPage.asImageBitmap(),
-            srcOffset = IntOffset.Zero,
-            srcSize = IntSize(rightPage.width, rightPage.height),
-            dstOffset = IntOffset(left.toInt(), top.toInt()),
-            dstSize = IntSize(dstW.toInt(), dstH.toInt())
-        )
-    }
-
-    // Spine Center Crease Shadow
-    drawRect(
-        brush = Brush.horizontalGradient(
-            colors = listOf(
-                Color.Transparent,
-                Color(0x33000000),
-                Color(0x77000000),
-                Color(0x33000000),
-                Color.Transparent
-            ),
-            startX = halfW - 20f,
-            endX = halfW + 20f
-        ),
-        topLeft = Offset(halfW - 20f, 0f),
-        size = Size(40f, h)
+        image = imageBitmap,
+        srcOffset = androidx.compose.ui.unit.IntOffset.Zero,
+        srcSize = androidx.compose.ui.unit.IntSize(imageBitmap.width, imageBitmap.height),
+        dstOffset = androidx.compose.ui.unit.IntOffset(destLeft.toInt(), destTop.toInt()),
+        dstSize = androidx.compose.ui.unit.IntSize(destWidth.toInt(), destHeight.toInt()),
+        colorFilter = colorFilter
     )
 }
 
+/**
+ * 3D Page Curl Effect on Canvas with Realistic Bezier Curves, Underneath Peeking, and Spine Shading.
+ */
 private fun DrawScope.drawPageCurlEffect(
     currentPage: Bitmap?,
     nextPage: Bitmap?,
@@ -457,98 +420,206 @@ private fun DrawScope.drawPageCurlEffect(
     readingTheme: ReadingTheme,
     size: Size
 ) {
-    val w = size.width
-    val h = size.height
+    val width = size.width
+    val height = size.height
 
-    // 1. Draw Next / Background Revealed Page Underneath
-    if (nextPage != null && !nextPage.isRecycled) {
-        drawScaledBitmap(nextPage, size, readingTheme)
+    // 1. Draw Next Page underneath the curled region
+    drawStandardPage(
+        bitmap = nextPage,
+        readingTheme = readingTheme,
+        size = size
+    )
+
+    if (currentPage == null || currentPage.isRecycled) return
+
+    val imageBitmap = currentPage.asImageBitmap()
+    val curlX = if (isForward) {
+        width * (1f - progress)
+    } else {
+        width * progress
     }
 
-    // 2. Draw Current Page with Curling Corner / Fold Clipping
-    if (currentPage != null && !currentPage.isRecycled) {
-        val curlAmount = progress.coerceIn(0f, 1f)
-        val foldX = if (isForward) w * (1f - curlAmount) else w * curlAmount
-
-        // Draw flat remaining part of current page
-        val visiblePath = Path().apply {
+    // 2. Draw remaining visible part of current page using clip path
+    drawIntoCanvas { canvas ->
+        canvas.save()
+        val clipPath = Path().apply {
             if (isForward) {
                 moveTo(0f, 0f)
-                lineTo(foldX, 0f)
+                lineTo(curlX, 0f)
                 cubicTo(
-                    foldX - 30f * curlAmount, h * 0.3f,
-                    foldX - 60f * curlAmount, h * 0.7f,
-                    max(0f, foldX - 100f * curlAmount), h
+                    curlX - 40f, height * 0.3f,
+                    curlX + 20f, height * 0.7f,
+                    curlX, height
                 )
-                lineTo(0f, h)
+                lineTo(0f, height)
+                close()
             } else {
-                moveTo(w, 0f)
-                lineTo(foldX, 0f)
+                moveTo(curlX, 0f)
+                lineTo(width, 0f)
+                lineTo(width, height)
+                lineTo(curlX, height)
                 cubicTo(
-                    foldX + 30f * curlAmount, h * 0.3f,
-                    foldX + 60f * curlAmount, h * 0.7f,
-                    min(w, foldX + 100f * curlAmount), h
+                    curlX + 40f, height * 0.7f,
+                    curlX - 20f, height * 0.3f,
+                    curlX, 0f
                 )
-                lineTo(w, h)
+                close()
             }
-            close()
         }
+        canvas.clipPath(clipPath)
 
-        clipPath(visiblePath) {
-            drawScaledBitmap(currentPage, size, readingTheme)
-        }
+        drawImage(
+            image = imageBitmap,
+            dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
+            dstSize = androidx.compose.ui.unit.IntSize(width.toInt(), height.toInt())
+        )
 
-        // 3. Draw 3D Fold Crease & Back-of-Page Curl Lighting & Shadow
-        val shadowWidth = 70f * (1f - abs(0.5f - curlAmount))
+        // Add soft curl shadow along the fold edge
         val shadowBrush = if (isForward) {
             Brush.horizontalGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    Color(0x35000000),
-                    Color(0x75000000),
-                    Color(0x30FFFFFF),
-                    Color.Transparent
-                ),
-                startX = foldX - shadowWidth,
-                endX = foldX + shadowWidth
+                colors = listOf(Color.Transparent, Color(0x66000000), Color(0x99000000)),
+                startX = (curlX - 80f).coerceAtLeast(0f),
+                endX = curlX
             )
         } else {
             Brush.horizontalGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    Color(0x30FFFFFF),
-                    Color(0x75000000),
-                    Color(0x35000000),
-                    Color.Transparent
-                ),
-                startX = foldX - shadowWidth,
-                endX = foldX + shadowWidth
+                colors = listOf(Color(0x99000000), Color(0x66000000), Color.Transparent),
+                startX = curlX,
+                endX = (curlX + 80f).coerceAtMost(width)
             )
         }
 
         drawRect(
             brush = shadowBrush,
-            topLeft = Offset(foldX - shadowWidth, 0f),
-            size = Size(shadowWidth * 2f, h)
+            topLeft = Offset(if (isForward) (curlX - 80f).coerceAtLeast(0f) else curlX, 0f),
+            size = Size(80f, height)
+        )
+
+        canvas.restore()
+    }
+
+    // 3. Draw 3D Curling Page Flap (The back / curled cylinder)
+    val flapWidth = (width * 0.22f * (1f - abs(progress - 0.5f) * 1.2f)).coerceAtLeast(15f)
+    val flapBrush = Brush.horizontalGradient(
+        colors = listOf(
+            Color(0x33000000),
+            Color(0xFFE0E0E0),
+            Color(0xFFFAFAFA),
+            Color(0x44000000)
+        ),
+        startX = curlX - flapWidth / 2f,
+        endX = curlX + flapWidth / 2f
+    )
+
+    val flapPath = Path().apply {
+        if (isForward) {
+            moveTo(curlX, 0f)
+            lineTo(curlX + flapWidth, 0f)
+            cubicTo(
+                curlX + flapWidth + 30f, height * 0.4f,
+                curlX + flapWidth - 20f, height * 0.8f,
+                curlX + flapWidth, height
+            )
+            lineTo(curlX, height)
+            cubicTo(
+                curlX + 20f, height * 0.7f,
+                curlX - 40f, height * 0.3f,
+                curlX, 0f
+            )
+            close()
+        } else {
+            moveTo(curlX, 0f)
+            lineTo(curlX - flapWidth, 0f)
+            cubicTo(
+                curlX - flapWidth - 30f, height * 0.4f,
+                curlX - flapWidth + 20f, height * 0.8f,
+                curlX - flapWidth, height
+            )
+            lineTo(curlX, height)
+            cubicTo(
+                curlX - 20f, height * 0.7f,
+                curlX + 40f, height * 0.3f,
+                curlX, 0f
+            )
+            close()
+        }
+    }
+
+    drawPath(path = flapPath, brush = flapBrush)
+}
+
+private fun DrawScope.drawPageStrokes(strokes: List<DrawnStroke>) {
+    for (stroke in strokes) {
+        if (stroke.points.size < 2) continue
+        val path = Path().apply {
+            moveTo(stroke.points.first().x, stroke.points.first().y)
+            for (i in 1 until stroke.points.size) {
+                lineTo(stroke.points[i].x, stroke.points[i].y)
+            }
+        }
+        drawPath(
+            path = path,
+            color = stroke.color,
+            style = Stroke(
+                width = stroke.strokeWidth,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
         )
     }
 }
 
-private fun DrawScope.drawStrokePath(stroke: DrawnStroke) {
-    if (stroke.points.size < 2) return
-    val path = Path().apply {
-        moveTo(stroke.points[0].x, stroke.points[0].y)
-        for (i in 1 until stroke.points.size) {
-            lineTo(stroke.points[i].x, stroke.points[i].y)
-        }
-    }
-    drawPath(
-        path = path,
-        color = stroke.color,
-        style = androidx.compose.ui.graphics.drawscope.Stroke(
-            width = stroke.strokeWidth,
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round
+private fun DrawScope.drawFocusRuler(rulerY: Float, size: Size) {
+    val rulerHeight = 65f
+    val topDimHeight = (rulerY - rulerHeight / 2f).coerceAtLeast(0f)
+    val bottomDimTop = (rulerY + rulerHeight / 2f).coerceAtMost(size.height)
+    val bottomDimHeight = (size.height - bottomDimTop).coerceAtLeast(0f)
+
+    // Dim top area
+    if (topDimHeight > 0) {
+        drawRect(
+            color = Color(0x88000000),
+            topLeft = Offset.Zero,
+            size = Size(size.width, topDimHeight)
         )
+    }
+
+    // Highlight band borders
+    drawLine(
+        color = Color(0xFFFFD54F),
+        start = Offset(0f, topDimHeight),
+        end = Offset(size.width, topDimHeight),
+        strokeWidth = 3f
     )
+
+    drawLine(
+        color = Color(0xFFFFD54F),
+        start = Offset(0f, bottomDimTop),
+        end = Offset(size.width, bottomDimTop),
+        strokeWidth = 3f
+    )
+
+    // Dim bottom area
+    if (bottomDimHeight > 0) {
+        drawRect(
+            color = Color(0x88000000),
+            topLeft = Offset(0f, bottomDimTop),
+            size = Size(size.width, bottomDimHeight)
+        )
+    }
+}
+
+private fun DrawScope.drawWatermark(text: String, size: Size) {
+    drawIntoCanvas { canvas ->
+        val paint = android.graphics.Paint().apply {
+            color = android.graphics.Color.argb(30, 255, 255, 255)
+            textSize = 36f
+            isAntiAlias = true
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+        canvas.nativeCanvas.save()
+        canvas.nativeCanvas.rotate(-30f, size.width / 2f, size.height / 2f)
+        canvas.nativeCanvas.drawText(text, size.width / 2f, size.height / 2f, paint)
+        canvas.nativeCanvas.restore()
+    }
 }

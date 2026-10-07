@@ -47,7 +47,9 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
   });
 
   const isOfficial = (body.isOfficial && canPublishOfficial) || canPublishOfficial ? 1 : 0;
-  const eventId = generateId('evt');
+  const eventId = (body.id && typeof body.id === 'string' && body.id.trim())
+    ? body.id.trim()
+    : generateId('evt');
 
   await env.DB.prepare(
     `INSERT INTO events (id, group_id, event_date, time_str, title, description, category, location, is_official, created_by, created_at)

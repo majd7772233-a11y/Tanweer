@@ -22,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -51,8 +52,47 @@ fun TanweerApp(
     val isUploadModalOpen by viewModel.isUploadModalOpen.collectAsStateWithLifecycle()
     val uploadInitialSubjectId by viewModel.uploadInitialSubjectId.collectAsStateWithLifecycle()
     val recoveryCodeDialog by viewModel.recoveryCodeDialog.collectAsStateWithLifecycle()
+    val isCheckingAuth by viewModel.isCheckingAuth.collectAsStateWithLifecycle()
 
-    if (currentUser == null) {
+    if (isCheckingAuth) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MidnightBackground),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            Brush.linearGradient(listOf(CyanAccent, ElectricBlue, PurpleAccent))
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "📚",
+                        fontSize = 34.sp
+                    )
+                }
+                Text(
+                    text = "تنوير",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                CircularProgressIndicator(
+                    color = CyanAccent,
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp
+                )
+            }
+        }
+    } else if (currentUser == null) {
         AuthScreen(viewModel = viewModel)
     } else {
         Scaffold(
@@ -110,11 +150,7 @@ fun TanweerApp(
                     )
                 } else if (subScreen != SubScreen.NONE) {
                     BackHandler {
-                        if (subScreen == SubScreen.EXTRA_SECTIONS_HUB) {
-                            viewModel.setSubScreen(SubScreen.NONE)
-                        } else {
-                            viewModel.setSubScreen(SubScreen.EXTRA_SECTIONS_HUB)
-                        }
+                        viewModel.navigateBack()
                     }
                     Column(modifier = Modifier.fillMaxSize()) {
                         // SubScreen Top Header with Back Button (omitted if on Hub itself)
@@ -126,7 +162,7 @@ fun TanweerApp(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 IconButton(
-                                    onClick = { viewModel.setSubScreen(SubScreen.EXTRA_SECTIONS_HUB) },
+                                    onClick = { viewModel.navigateBack() },
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(CircleShape)
@@ -134,7 +170,7 @@ fun TanweerApp(
                                 ) {
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "رجوع للأقسام",
+                                        contentDescription = "رجوع",
                                         tint = CyanAccent
                                     )
                                 }

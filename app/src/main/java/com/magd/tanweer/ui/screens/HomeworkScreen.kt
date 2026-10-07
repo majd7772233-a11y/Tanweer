@@ -309,8 +309,16 @@ fun HomeworkScreen(
                         isPlanned = plannedHwIds.contains(hw.id),
                         onToggle = {
                             viewModel.toggleHomework(hw.id, hw.isCompleted) { res ->
-                                if (res.isFailure) {
-                                    Toast.makeText(context, res.exceptionOrNull()?.message ?: "تعذر تحديث الواجب", Toast.LENGTH_SHORT).show()
+                                when (res) {
+                                    is com.magd.tanweer.data.local.HomeworkToggleResult.SyncedWithServer -> {
+                                        Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                    }
+                                    is com.magd.tanweer.data.local.HomeworkToggleResult.QueuedOffline -> {
+                                        Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                    }
+                                    is com.magd.tanweer.data.local.HomeworkToggleResult.Failed -> {
+                                        Toast.makeText(context, res.error, Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         },
@@ -361,9 +369,14 @@ fun HomeworkScreen(
                                 description = "ما هو المطلوب في هذا الواجب؟ صفحة: ${hw.pageNumbers ?: "-"}، أسئلة: ${hw.questionNumbers ?: "-"}",
                                 subjectId = hw.subjectId,
                                 homeworkId = hw.id
-                            )
-                            Toast.makeText(context, "تم فتح استفسار مرتبط بالواجب بنجاح ❓", Toast.LENGTH_SHORT).show()
-                            viewModel.setTab(NavigationTab.ISSUES)
+                            ) { res ->
+                                if (res.isSuccess) {
+                                    Toast.makeText(context, "تم فتح استفسار مرتبط بالواجب بنجاح ❓", Toast.LENGTH_SHORT).show()
+                                    viewModel.setTab(NavigationTab.ISSUES)
+                                } else {
+                                    Toast.makeText(context, res.exceptionOrNull()?.message ?: "تعذر فتح الاستفسار", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }
                     )
                 }

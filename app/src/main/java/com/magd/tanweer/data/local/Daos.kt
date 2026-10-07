@@ -53,6 +53,9 @@ interface ScheduleDao {
     @Query("DELETE FROM cached_schedule_slots WHERE id = :id")
     suspend fun deleteSlotById(id: String)
 
+    @Query("SELECT * FROM cached_schedule_slots WHERE id = :id LIMIT 1")
+    suspend fun getSlotById(id: String): ScheduleSlotEntity?
+
     @Query("DELETE FROM cached_schedule_slots WHERE groupId = :groupId")
     suspend fun clearSlots(groupId: String)
 }
@@ -88,6 +91,12 @@ interface ContentDao {
 
     @Query("SELECT * FROM cached_contents WHERE id = :id LIMIT 1")
     suspend fun getContentById(id: String): ContentEntity?
+
+    @Transaction
+    suspend fun replaceContentId(oldId: String, newEntity: ContentEntity) {
+        deleteContentById(oldId)
+        insertContent(newEntity)
+    }
 
     @Query("DELETE FROM cached_contents WHERE groupId = :groupId")
     suspend fun clearContents(groupId: String)
@@ -137,6 +146,16 @@ interface HomeworkDao {
     @Query("DELETE FROM cached_homework_completions WHERE homeworkId = :homeworkId AND userId = :userId")
     suspend fun deleteCompletion(homeworkId: String, userId: String)
 
+    @Query("UPDATE cached_homework_completions SET homeworkId = :newId WHERE homeworkId = :oldId")
+    suspend fun updateCompletionHomeworkId(oldId: String, newId: String)
+
+    @Transaction
+    suspend fun replaceHomeworkId(oldId: String, newEntity: HomeworkEntity) {
+        deleteHomeworkById(oldId)
+        insertHomework(newEntity)
+        updateCompletionHomeworkId(oldId, newEntity.id)
+    }
+
     @Query("DELETE FROM cached_homework_completions WHERE userId = :userId")
     suspend fun clearCompletionsForUser(userId: String)
 
@@ -161,11 +180,20 @@ interface ExamDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExam(exam: ExamEntity)
 
+    @Query("UPDATE cached_exams SET isCompleted = :isCompleted WHERE id = :id")
+    suspend fun updateExamCompletion(id: String, isCompleted: Boolean)
+
     @Query("UPDATE cached_exams SET syncStatus = :status WHERE id = :id")
     suspend fun updateSyncStatus(id: String, status: String)
 
     @Query("DELETE FROM cached_exams WHERE id = :id")
     suspend fun deleteExamById(id: String)
+
+    @Transaction
+    suspend fun replaceExamId(oldId: String, newEntity: ExamEntity) {
+        deleteExamById(oldId)
+        insertExam(newEntity)
+    }
 
     @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
     suspend fun clearSyncedExams(groupId: String)
@@ -197,6 +225,15 @@ interface EventDao {
     @Query("UPDATE cached_events SET syncStatus = :status WHERE id = :id")
     suspend fun updateSyncStatus(id: String, status: String)
 
+    @Query("DELETE FROM cached_events WHERE id = :id")
+    suspend fun deleteEventById(id: String)
+
+    @Transaction
+    suspend fun replaceEventId(oldId: String, newEntity: EventEntity) {
+        deleteEventById(oldId)
+        insertEvent(newEntity)
+    }
+
     @Query("DELETE FROM cached_events WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
     suspend fun clearSyncedEvents(groupId: String)
 
@@ -217,6 +254,19 @@ interface IssueDao {
 
     @Query("SELECT * FROM cached_issues WHERE id = :issueId LIMIT 1")
     suspend fun getIssueSync(issueId: String): IssueEntity?
+
+    @Query("DELETE FROM cached_issues WHERE id = :id")
+    suspend fun deleteIssueById(id: String)
+
+    @Query("UPDATE cached_issue_comments SET issueId = :newId WHERE issueId = :oldId")
+    suspend fun updateCommentIssueId(oldId: String, newId: String)
+
+    @Transaction
+    suspend fun replaceIssueId(oldId: String, newEntity: IssueEntity) {
+        deleteIssueById(oldId)
+        insertIssue(newEntity)
+        updateCommentIssueId(oldId, newEntity.id)
+    }
 
     @Query("SELECT * FROM cached_issue_comments WHERE issueId = :issueId ORDER BY isBestAnswer DESC, createdAt ASC")
     fun getComments(issueId: String): Flow<List<IssueCommentEntity>>
@@ -269,8 +319,35 @@ interface BookDao {
     @Query("SELECT * FROM cached_books")
     fun getAllBooks(): Flow<List<BookEntity>>
 
+    @Query("SELECT * FROM cached_books WHERE id = :id LIMIT 1")
+    suspend fun getBookById(id: String): BookEntity?
+
+    @Query("SELECT id FROM cached_books")
+    suspend fun getAllBookIds(): List<String>
+
+    @Query("DELETE FROM cached_books WHERE id NOT IN (:validIds)")
+    suspend fun pruneBooksNotIn(validIds: List<String>)
+
+    @Query("DELETE FROM cached_books WHERE gradeId = :gradeId AND id NOT IN (:validIds)")
+    suspend fun pruneBooksForGradeNotIn(gradeId: Int, validIds: List<String>)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBooks(books: List<BookEntity>)
+
+    @Transaction
+    suspend fun reconcileBooksSnapshot(gradeId: Int, newBooks: List<BookEntity>) {
+        val validIds = newBooks.map { it.id }
+        if (gradeId == 0) {
+            if (validIds.isNotEmpty()) {
+                pruneBooksNotIn(validIds)
+            }
+        } else {
+            if (validIds.isNotEmpty()) {
+                pruneBooksForGradeNotIn(gradeId, validIds)
+            }
+        }
+        insertBooks(newBooks)
+    }
 
     @Query("DELETE FROM cached_books")
     suspend fun clearBooks()
@@ -341,6 +418,9 @@ interface ChatDao {
     @Query("UPDATE cached_chat_messages SET status = :status WHERE id = :id")
     suspend fun updateMessageStatus(id: String, status: String)
 
+    @Query("SELECT * FROM cached_chat_messages WHERE status = 'SENDING' AND timestamp < :threshold")
+    suspend fun getSendingMessagesSync(threshold: Long): List<ChatMessageEntity>
+
     @Query("DELETE FROM cached_chat_messages WHERE groupId = :groupId")
     suspend fun clearMessages(groupId: String)
 }
@@ -376,6 +456,9 @@ interface OutboxDao {
 
     @Query("DELETE FROM outbox WHERE entityId = :entityId")
     suspend fun deleteByEntityId(entityId: String)
+
+    @Query("UPDATE outbox SET entityId = :newEntityId WHERE entityId = :oldEntityId")
+    suspend fun updateEntityId(oldEntityId: String, newEntityId: String)
 
     @Query("DELETE FROM outbox WHERE status = 'SYNCED'")
     suspend fun clearSynced()

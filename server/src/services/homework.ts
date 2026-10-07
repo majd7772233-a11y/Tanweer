@@ -58,7 +58,9 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
 
   const isOfficial = (body.isOfficial && canPublishOfficial) || canPublishOfficial ? 1 : 0;
 
-  const hwId = generateId('hw');
+  const hwId = (body.id && typeof body.id === 'string' && body.id.trim())
+    ? body.id.trim()
+    : generateId('hw');
   const now = Date.now();
   const mediaUrlsJson = (body.mediaUrls && Array.isArray(body.mediaUrls) && body.mediaUrls.length > 0)
     ? JSON.stringify(body.mediaUrls)

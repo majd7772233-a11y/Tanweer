@@ -90,16 +90,16 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
       minSupportedVersion: '1.0.0',
       minSupportedVersionCode: 1,
       isUpdateRequired: false,
-      releaseDate: '2026-10-05',
+      releaseDate: '2026-10-06',
       changelog: [
-        '✨ نظام الحوكمة الموحد والتصويت الشامل على القرارات',
-        '📷 ماسح السبورة الذكي عالي الدقة ومعالجة التباين',
+        '✨ نظام الحوكمة الموحد والتصويت الشامل على القرارات المدرسية',
+        '📷 ماسح السبورة الذكي عالي الدقة ومعالجة التباين التلقائي',
         '📚 مكتبة المناهج الذكية مع إدارة متقدمة لتخزين الكتب وحجم الذاكرة',
         '🛡️ محرك الصلاحيات الهرمي وتأمين الرتب المدرسية',
-        '🚀 توافق عالي ودعم للأجهزة القديمة بدءاً من Android 5.0 (API 21)',
-        '⚡ مزامنة ذكية وسريعة دون استهلاك الذاكرة أو البيانات'
+        '🚀 توافق متقدم مع أجهزة Android بدءاً من Android 6.0 (API 23+) وما فوق',
+        '⚡ بنية مزامنة متكاملة Offline-First تضمن موثوقية العمل دون انقطاع'
       ],
-      downloadUrl: 'https://github.com/magd-tanweer/tanweer-releases/releases/latest'
+      downloadUrl: 'https://github.com/majd7772233-a11y/tanweer/releases/latest'
     });
   }
 

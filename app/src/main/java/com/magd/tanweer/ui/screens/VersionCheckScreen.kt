@@ -27,12 +27,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.magd.tanweer.BuildConfig
+import com.magd.tanweer.data.remote.SystemVersionResponse
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.GlassButton
 import com.magd.tanweer.ui.components.GlassCard
 import com.magd.tanweer.ui.components.GlassPill
 import com.magd.tanweer.ui.theme.*
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -42,37 +42,55 @@ fun VersionCheckScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val installedVersionName = BuildConfig.VERSION_NAME
+    val installedVersionCode = BuildConfig.VERSION_CODE
+
     var isChecking by remember { mutableStateOf(false) }
-    var lastCheckedTime by remember { mutableStateOf("الآن") }
-    var serverVersionInfo by remember {
-        mutableStateOf(
-            AppVersionData(
-                currentVersion = "1.2.0",
-                versionCode = 2,
-                minSupportedVersion = "1.0.0",
-                isUpdateRequired = false,
-                releaseDate = "2026-10-05",
-                changelog = listOf(
-                    "✨ نظام الحوكمة الموحد والتصويت الشامل على القرارات المدرسية",
-                    "📷 ماسح السبورة الذكي عالي الدقة ومعالجة التباين التلقائي",
-                    "📚 مكتبة المناهج الذكية مع إدارة متقدمة للتخزين والذاكرة",
-                    "🛡️ محرك الصلاحيات الهرمي وتأمين ترقيات الرتب المدرسية",
-                    "🚀 دعم الأجهزة بدءاً من Android 5.0 (minSdk 21)",
-                    "⚡ مزامنة ذكية Offline-First وسرعة استجابة فائقة"
-                )
-            )
-        )
-    }
+    var lastCheckedTime by remember { mutableStateOf<String?>("لم يتم الفحص بعد") }
+    var checkErrorMessage by remember { mutableStateOf<String?>(null) }
+    var remoteVersionResponse by remember { mutableStateOf<SystemVersionResponse?>(null) }
+
+    val defaultChangelog = listOf(
+        "✨ نظام الحوكمة الموحد والتصويت الشامل على القرارات المدرسية",
+        "📷 ماسح السبورة الذكي عالي الدقة ومعالجة التباين التلقائي",
+        "📚 مكتبة المناهج الذكية مع إدارة متقدمة للتخزين والذاكرة",
+        "🛡️ محرك الصلاحيات الهرمي وتأمين ترقيات الرتب المدرسية",
+        "🚀 دعم واسع للأجهزة بدءاً من Android 6.0 (API 23+) فما فوق",
+        "⚡ مزامنة متكاملة Offline-First وموثوقية عالية دون انقطاع"
+    )
 
     fun performVersionCheck() {
         scope.launch {
             isChecking = true
-            delay(800) // Simulated smooth network verification
+            checkErrorMessage = null
+            val result = viewModel.repository.getSystemVersion()
             isChecking = false
-            lastCheckedTime = "منذ لحظات"
-            Toast.makeText(context, "أنت تستخدم أحدث إصدار معتمد من تـنـويـر ✓", Toast.LENGTH_SHORT).show()
+            result.fold(
+                onSuccess = { res ->
+                    remoteVersionResponse = res
+                    lastCheckedTime = "منذ لحظات"
+                    if (res.versionCode > installedVersionCode) {
+                        Toast.makeText(context, "يتوفر تحديث جديد: الإصدار ${res.currentVersion} 🚀", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "أنت تستخدم أحدث إصدار معتمد من تـنـويـر ✓", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onFailure = { err ->
+                    checkErrorMessage = err.localizedMessage ?: "تعذر الوصول إلى خادم التحديثات"
+                    lastCheckedTime = "فشل الاتصال"
+                    Toast.makeText(context, "تعذر فحص التحديثات: تأكد من اتصال الإنترنت", Toast.LENGTH_SHORT).show()
+                }
+            )
         }
     }
+
+    LaunchedEffect(Unit) {
+        performVersionCheck()
+    }
+
+    val remoteVersion = remoteVersionResponse
+    val isUpdateAvailable = remoteVersion != null && remoteVersion.versionCode > installedVersionCode
+    val changelogToDisplay = remoteVersion?.changelog?.takeIf { it.isNotEmpty() } ?: defaultChangelog
 
     LazyColumn(
         modifier = Modifier
@@ -123,19 +141,19 @@ fun VersionCheckScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         GlassPill(
-                            text = "الإصدار ${serverVersionInfo.currentVersion}",
+                            text = "الإصدار $installedVersionName",
                             color = CyanAccent,
                             bgColor = CyanGlow
                         )
                         GlassPill(
-                            text = "Build ${serverVersionInfo.versionCode}",
+                            text = "Build $installedVersionCode",
                             color = TextSecondary,
                             bgColor = GlassSurface
                         )
                         GlassPill(
-                            text = "مستقر وموثق ✓",
-                            color = EmeraldGreen,
-                            bgColor = EmeraldGreen.copy(alpha = 0.15f)
+                            text = if (isUpdateAvailable) "يتوفر تحديث ⚠️" else "نسخة رسمية ✓",
+                            color = if (isUpdateAvailable) WarmAmber else EmeraldGreen,
+                            bgColor = if (isUpdateAvailable) WarmAmber.copy(alpha = 0.15f) else EmeraldGreen.copy(alpha = 0.15f)
                         )
                     }
 
@@ -154,7 +172,7 @@ fun VersionCheckScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         GlassButton(
-                            text = if (isChecking) "جاري الفحص..." else "فحص التحديثات الآن 🔄",
+                            text = if (isChecking) "جاري الفحص من السيرفر..." else "فحص التحديثات الآن 🔄",
                             icon = Icons.Default.Refresh,
                             onClick = { performVersionCheck() },
                             modifier = Modifier.weight(1f),
@@ -163,7 +181,7 @@ fun VersionCheckScreen(
                     }
 
                     Text(
-                        text = "آخر فحص: $lastCheckedTime",
+                        text = "آخر فحص: ${lastCheckedTime ?: "الآن"}",
                         fontSize = 11.sp,
                         color = TextMuted
                     )
@@ -171,40 +189,135 @@ fun VersionCheckScreen(
             }
         }
 
-        // Status Card
+        // Status Card / Update Notice
         item {
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = GlassSurface,
-                borderColor = EmeraldGreen.copy(alpha = 0.3f)
-            ) {
-                Row(
+            if (isUpdateAvailable && remoteVersion != null) {
+                GlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    backgroundColor = MidnightSurface,
+                    borderColor = WarmAmber.copy(alpha = 0.7f)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(EmeraldGreen.copy(alpha = 0.15f))
-                            .border(1.dp, EmeraldGreen, CircleShape),
-                        contentAlignment = Alignment.Center
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldGreen, modifier = Modifier.size(24.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(WarmAmber.copy(alpha = 0.15f))
+                                    .border(1.dp, WarmAmber, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Notifications, contentDescription = null, tint = WarmAmber, modifier = Modifier.size(24.dp))
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "يتوفر إصدار جديد من تنوير (${remoteVersion.currentVersion})",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = WarmAmber
+                                )
+                                Text(
+                                    text = "تاريخ الإطلاق: ${remoteVersion.releaseDate ?: "2026-10-06"}",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+
+                        val downloadUrl = remoteVersion.downloadUrl ?: "https://github.com/majd7772233-a11y/tanweer/releases/latest"
+                        GlassButton(
+                            text = "تحميل وتحديث التطبيق الآن 🚀",
+                            icon = Icons.Default.ArrowForward,
+                            color = WarmAmber,
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "تعذر فتح رابط التحميل", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "تطبيقك محدث إلى أحدث نسخة معتمدة",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "تاريخ الإصدار الأخير: ${serverVersionInfo.releaseDate}",
-                            fontSize = 11.sp,
-                            color = TextSecondary
-                        )
+                }
+            } else if (checkErrorMessage != null) {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface,
+                    borderColor = Color(0xFFFF5252).copy(alpha = 0.3f)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF5252).copy(alpha = 0.15f))
+                                .border(1.dp, Color(0xFFFF5252), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF5252), modifier = Modifier.size(24.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "وضع عدم الاتصال / تعذر فحص الخادم",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = checkErrorMessage ?: "يرجى التحقق من الشبكة لمعرفة آخر الإصدارات",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+            } else {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface,
+                    borderColor = EmeraldGreen.copy(alpha = 0.3f)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(EmeraldGreen.copy(alpha = 0.15f))
+                                .border(1.dp, EmeraldGreen, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldGreen, modifier = Modifier.size(24.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "أنت تستخدم أحدث إصدار معتمد من تـنـويـر ✓",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "النسخة الحالية $installedVersionName مثبتة ومحدثة بالكامل",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
                     }
                 }
             }
@@ -213,7 +326,7 @@ fun VersionCheckScreen(
         // Changelog Section
         item {
             Text(
-                text = "سجل التحديثات وما الجديد في الإصدار ${serverVersionInfo.currentVersion}:",
+                text = "سجل التحديثات والميزات الجديدة في الإصدار ${remoteVersion?.currentVersion ?: installedVersionName}:",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = CyanAccent,
@@ -221,7 +334,7 @@ fun VersionCheckScreen(
             )
         }
 
-        items(serverVersionInfo.changelog) { change ->
+        items(changelogToDisplay) { change ->
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 backgroundColor = MidnightSurface.copy(alpha = 0.7f)
@@ -250,25 +363,16 @@ fun VersionCheckScreen(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "📱 معلومات بيئة التشغيل والتوافق:",
+                        text = "📱 معلومات بيئة التشغيل والتوافق المعتمدة:",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
-                    Text("• متوافق مع كافة أجهزة Android بدءاً من Android 5.0 (API 21+)", fontSize = 12.sp, color = TextSecondary)
-                    Text("• هيكلية Jetpack Compose الحديثة مع Material 3", fontSize = 12.sp, color = TextSecondary)
-                    Text("• قاعدة بيانات Room المحلية المشفرة تدعم العمل Offline بدون إنترنت", fontSize = 12.sp, color = TextSecondary)
+                    Text("• متوافق مع كافة أجهزة Android بدءاً من Android 6.0 (API 23+) فما فوق", fontSize = 12.sp, color = TextSecondary)
+                    Text("• واجهات مستخدم حديثة مبنية بتقنية Jetpack Compose و Material 3", fontSize = 12.sp, color = TextSecondary)
+                    Text("• قاعدة بيانات Room المحلية عالية الأداء والمعزولة أمنيًا مع دعم كامل لنمط Offline-First", fontSize = 12.sp, color = TextSecondary)
                 }
             }
         }
     }
 }
-
-data class AppVersionData(
-    val currentVersion: String,
-    val versionCode: Int,
-    val minSupportedVersion: String,
-    val isUpdateRequired: Boolean,
-    val releaseDate: String,
-    val changelog: List<String>
-)

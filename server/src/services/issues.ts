@@ -83,7 +83,9 @@ export async function handleCreateIssue(user: UserContext, request: Request, env
   const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
   if (memberCheck) return memberCheck;
 
-  const issueId = generateId('iss');
+  const issueId = (body.id && typeof body.id === 'string' && body.id.trim())
+    ? body.id.trim()
+    : generateId('iss');
   const now = Date.now();
   await env.DB.prepare(
     `INSERT INTO issues (id, group_id, subject_id, homework_id, exam_id, title, description, status, created_by, author_name, created_at, updated_at)
@@ -128,7 +130,9 @@ export async function handleAddIssueComment(issueId: string, user: UserContext, 
     groupId: issue.group_id,
   });
 
-  const commentId = generateId('com');
+  const commentId = (body.id && typeof body.id === 'string' && body.id.trim())
+    ? body.id.trim()
+    : generateId('com');
   const now = Date.now();
   await env.DB.prepare(
     `INSERT INTO issue_comments (id, issue_id, user_id, author_name, comment, is_best_answer, is_teacher_answer, author_role, created_at)

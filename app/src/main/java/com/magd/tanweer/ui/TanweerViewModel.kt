@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.magd.tanweer.data.local.TanweerDatabase
 import com.magd.tanweer.data.model.*
 import com.magd.tanweer.data.remote.ConnectionStatus
+import com.magd.tanweer.data.remote.NetworkModule
 import com.magd.tanweer.data.repository.SyncResult
 import com.magd.tanweer.data.repository.TanweerRepository
 import kotlinx.coroutines.flow.*
@@ -76,6 +77,31 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _hapticsEnabled = MutableStateFlow(prefs.getBoolean("haptics_enabled", true))
     val hapticsEnabled: StateFlow<Boolean> = _hapticsEnabled.asStateFlow()
+
+    private val _previousSessionTimestamp = MutableStateFlow(
+        prefs.getLong("previous_session_time", System.currentTimeMillis() - (86400000L * 2))
+    )
+    val previousSessionTimestamp: StateFlow<Long> = _previousSessionTimestamp.asStateFlow()
+
+    private val _isCheckingAuth = MutableStateFlow(true)
+    val isCheckingAuth: StateFlow<Boolean> = _isCheckingAuth.asStateFlow()
+
+    init {
+        val lastActive = prefs.getLong("last_active_time", System.currentTimeMillis() - (86400000L * 2))
+        _previousSessionTimestamp.value = lastActive
+        prefs.edit()
+            .putLong("previous_session_time", lastActive)
+            .putLong("last_active_time", System.currentTimeMillis())
+            .apply()
+
+        viewModelScope.launch {
+            val user = db.userDao().getUserSync()
+            if (user != null) {
+                NetworkModule.setAuthToken(user.token)
+            }
+            _isCheckingAuth.value = false
+        }
+    }
 
     fun setFontScale(scale: Float) {
         _fontSizeScale.value = scale
@@ -284,6 +310,45 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun navigateBack() {
+        if (_activeReadingBook.value != null) {
+            closePdfReader()
+            return
+        }
+        when (_subScreen.value) {
+            SubScreen.NONE -> {
+                // Already on root screen
+            }
+            SubScreen.EXTRA_SECTIONS_HUB -> {
+                _subScreen.value = SubScreen.NONE
+            }
+            SubScreen.TIMELINE,
+            SubScreen.SEARCH,
+            SubScreen.WHAT_DID_I_MISS,
+            SubScreen.SUBJECT_KNOWLEDGE_BASE,
+            SubScreen.ACADEMIC_HISTORY,
+            SubScreen.TEACHER_DASHBOARD,
+            SubScreen.MODERATOR_DASHBOARD,
+            SubScreen.ADMIN_DASHBOARD,
+            SubScreen.COMMUNITY_DECISIONS,
+            SubScreen.EVENTS,
+            SubScreen.VERSION_CHECK,
+            SubScreen.STORAGE_MANAGER -> {
+                _subScreen.value = SubScreen.EXTRA_SECTIONS_HUB
+            }
+            SubScreen.GROUPS,
+            SubScreen.LIBRARY,
+            SubScreen.SCHEDULE,
+            SubScreen.PROFILE,
+            SubScreen.SETTINGS -> {
+                _subScreen.value = SubScreen.NONE
+            }
+            SubScreen.PDF_VIEWER -> {
+                closePdfReader()
+            }
+        }
+    }
+
     fun openBookInPdfReader(book: BookItem, targetPage: Int? = null) {
         _activeReadingBook.value = book
         _activeReadingInitialPage.value = targetPage
@@ -393,11 +458,29 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun syncCalendar(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
         viewModelScope.launch {
             _calendarSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncEvents(groupId)) {
+            val currentMonth = SimpleDateFormat("yyyy-MM", Locale.US).format(Date())
+            when (val result = repository.syncCalendarMonth(groupId, currentMonth)) {
                 is SyncResult.Success -> _calendarSyncState.value = SyncState.Success()
                 is SyncResult.Offline -> _calendarSyncState.value = SyncState.OfflineCached()
                 is SyncResult.Error -> _calendarSyncState.value = SyncState.Error(result.message, result.isNetworkError)
             }
+        }
+    }
+
+    fun syncCalendarMonth(groupId: String = getActiveGroupId(), month: String, isRefresh: Boolean = false) {
+        viewModelScope.launch {
+            _calendarSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
+            when (val result = repository.syncCalendarMonth(groupId, month)) {
+                is SyncResult.Success -> _calendarSyncState.value = SyncState.Success()
+                is SyncResult.Offline -> _calendarSyncState.value = SyncState.OfflineCached()
+                is SyncResult.Error -> _calendarSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+            }
+        }
+    }
+
+    fun toggleExamCompletion(examId: String, isCompleted: Boolean) {
+        viewModelScope.launch {
+            repository.toggleExamCompletion(examId, isCompleted)
         }
     }
 
@@ -473,12 +556,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         subjectIcon: String,
         colorHex: String?,
         startTime: String? = null,
-        endTime: String? = null
+        endTime: String? = null,
+        onResult: ((Result<com.magd.tanweer.data.local.ScheduleMutationResult>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
         viewModelScope.launch {
-            repository.addScheduleSlot(
+            val res = repository.addScheduleSlot(
                 groupId = groupId,
                 dayOfWeek = dayOfWeek,
                 slotOrder = slotOrder,
@@ -489,14 +573,20 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 startTime = startTime,
                 endTime = endTime
             )
+            onResult?.invoke(res)
         }
     }
 
-    fun deleteScheduleSlot(dayOfWeek: Int, slotOrder: Int) {
+    fun deleteScheduleSlot(
+        dayOfWeek: Int,
+        slotOrder: Int,
+        onResult: ((Result<String>) -> Unit)? = null
+    ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
         viewModelScope.launch {
-            repository.deleteScheduleSlot(groupId, dayOfWeek, slotOrder)
+            val res = repository.deleteScheduleSlot(groupId, dayOfWeek, slotOrder)
+            onResult?.invoke(res)
         }
     }
 
@@ -1144,7 +1234,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun toggleHomework(
         homeworkId: String,
         currentStatus: Boolean,
-        onResult: ((Result<Boolean>) -> Unit)? = null
+        onResult: ((com.magd.tanweer.data.local.HomeworkToggleResult) -> Unit)? = null
     ) {
         viewModelScope.launch {
             val res = repository.toggleHomeworkCompletion(homeworkId, currentStatus)
@@ -1175,9 +1265,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun deleteExam(examId: String) {
+    fun deleteExam(examId: String, onResult: ((Result<Unit>) -> Unit)? = null) {
         viewModelScope.launch {
-            repository.deleteExamById(examId)
+            val res = repository.deleteExamById(examId)
+            onResult?.invoke(res)
         }
     }
 
@@ -1199,7 +1290,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 timeStr = timeStr,
                 title = title,
                 description = description,
-                category = category
+                category = category,
+                location = location
             )
             onResult?.invoke(res)
         }
@@ -1210,12 +1302,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         description: String?,
         subjectId: String? = null,
         homeworkId: String? = null,
-        examId: String? = null
+        examId: String? = null,
+        onResult: ((Result<String>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
         viewModelScope.launch {
-            repository.createIssue(
+            val res = repository.createIssue(
                 groupId = groupId,
                 title = title,
                 description = description,
@@ -1224,6 +1317,28 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 homeworkId = homeworkId,
                 examId = examId
             )
+            onResult?.invoke(res)
+        }
+    }
+
+    fun syncAllComprehensive(onFinished: (() -> Unit)? = null) {
+        viewModelScope.launch {
+            val user = currentUser.value
+            val groupId = getActiveGroupId()
+            repository.syncProfile()
+            repository.syncGroups()
+            if (groupId.isNotBlank()) {
+                repository.syncSchedule(groupId)
+                repository.syncDay(groupId, _selectedDate.value)
+                repository.syncHomeworks(groupId)
+                repository.syncExams(groupId)
+                repository.syncIssues(groupId)
+                repository.syncEvents(groupId)
+                if (user != null) {
+                    repository.syncBooks(user.gradeId)
+                }
+            }
+            onFinished?.invoke()
         }
     }
 

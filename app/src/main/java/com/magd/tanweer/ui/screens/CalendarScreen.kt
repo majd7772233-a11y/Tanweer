@@ -50,6 +50,14 @@ fun CalendarScreen(
 
     val monthYearFormat = remember { SimpleDateFormat("MMMM yyyy", Locale("ar")) }
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
+    val monthQueryFormat = remember { SimpleDateFormat("yyyy-MM", Locale.US) }
+
+    LaunchedEffect(activeGroupId, currentCalendar.timeInMillis) {
+        if (activeGroupId.isNotBlank()) {
+            val ym = monthQueryFormat.format(currentCalendar.time)
+            viewModel.syncCalendarMonth(activeGroupId, ym)
+        }
+    }
 
     // Day content queries
     val dayContents by viewModel.repository.getDayContents(activeGroupId, selectedDateStr)

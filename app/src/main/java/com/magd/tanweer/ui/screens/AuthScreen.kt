@@ -270,7 +270,7 @@ fun AuthScreen(
                             // 1. Full Name with Smart Arabic/English Validator
                             Column {
                                 Text(
-                                    text = "الاسم الثلاثي للطالب (عربي أو إنجليزي):",
+                                    text = "الاسم الثلاثي للطالب:",
                                     fontSize = 13.sp,
                                     color = TextSecondary,
                                     fontWeight = FontWeight.Medium,
@@ -280,7 +280,7 @@ fun AuthScreen(
                                     value = fullName,
                                     onValueChange = { fullName = it },
                                     label = "",
-                                    placeholder = "مثال: أحمد محمد علي أو Ahmed Mohammed Ali",
+                                    placeholder = "الاسم الثلاثي",
                                     leadingIcon = Icons.Default.Person,
                                     isError = nameValidation != null && !nameValidation.isValid,
                                     errorMessage = nameValidation?.errorMessage
@@ -497,7 +497,7 @@ fun AuthScreen(
                                     value = recoveryCodeInput,
                                     onValueChange = { recoveryCodeInput = it.uppercase() },
                                     label = "",
-                                    placeholder = "مثال: SEC-8X92-K4M1 أو K4M1",
+                                    placeholder = "الرمز السري للاسترداد",
                                     leadingIcon = Icons.Default.Key
                                 )
                                 Text(
@@ -559,7 +559,7 @@ fun YemenPhoneInputField(
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = "رقم الهاتف اليمني (9 أرقام تبدأ بـ 7):",
+            text = "رقم الهاتف:",
             fontSize = 13.sp,
             color = TextSecondary,
             fontWeight = FontWeight.Medium,
@@ -635,7 +635,7 @@ fun YemenPhoneInputField(
                     decorationBox = { innerTextField ->
                         if (phoneDigits.isEmpty()) {
                             Text(
-                                text = "7XX XXX XXX (مثال: 777123456)",
+                                text = "7XX XXX XXX",
                                 color = TextMuted,
                                 fontSize = 14.sp
                             )
