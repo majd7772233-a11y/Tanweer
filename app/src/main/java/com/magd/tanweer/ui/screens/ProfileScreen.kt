@@ -88,6 +88,24 @@ fun ProfileScreen(
         if (editFullName.isEmpty()) null else ArabicNameValidator.validate(editFullName)
     }
 
+    val currentUserId = currentUser?.id ?: ""
+    val verifiedBestAnswersCount by viewModel.repository.getBestAnswersCountForUser(currentUserId)
+        .collectAsStateWithLifecycle(initialValue = 0)
+
+    val (currentMonthStart, currentMonthEnd) = remember {
+        val cal = java.util.Calendar.getInstance()
+        val year = cal.get(java.util.Calendar.YEAR)
+        val month = cal.get(java.util.Calendar.MONTH) + 1
+        val start = String.format(java.util.Locale.US, "%04d-%02d-01", year, month)
+        val maxDay = cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+        val end = String.format(java.util.Locale.US, "%04d-%02d-%02d", year, month, maxDay)
+        Pair(start, end)
+    }
+
+    val currentUserName = currentUser?.fullName ?: ""
+    val monthLessonsCount by viewModel.repository.countContentsForAuthorBetween(currentUserName, currentMonthStart, currentMonthEnd)
+        .collectAsStateWithLifecycle(initialValue = 0)
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -350,8 +368,8 @@ fun ProfileScreen(
 
             val isLessonDoc = lessonsCount >= 1 || photosCount >= 3
             val isHelper = issuesCount >= 1 || homeworksCount >= 2
-            val isBestAnswerOwner = issuesCount >= 2
-            val isMonthContributor = (lessonsCount + photosCount + homeworksCount + issuesCount) >= 5
+            val isBestAnswerOwner = verifiedBestAnswersCount >= 1
+            val isMonthContributor = monthLessonsCount >= 3
 
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -417,7 +435,7 @@ fun ProfileScreen(
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = GlassSurface,
-                    onClick = { viewModel.setSubScreen(com.magd.tanweer.ui.SubScreen.SUBJECT_KNOWLEDGE_BASE) }
+                    onClick = { viewModel.openSubjectKnowledgeBase(null) }
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -454,7 +472,7 @@ fun ProfileScreen(
                         Text("🚀", fontSize = 20.sp)
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text("فحص التحديثات والإصدار (1.2.0)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("فحص التحديثات والإصدار (${com.magd.tanweer.BuildConfig.VERSION_NAME})", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                             Text("التحقق من حالة النسخة، سجل الميزات وما الجديد", fontSize = 11.sp, color = TextSecondary)
                         }
                     }
@@ -488,7 +506,7 @@ fun ProfileScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(text = "إعدادات التطبيق وتخصيص الخط", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text(text = "الخط (12px)، السمة، المزامنة والكاش", fontSize = 11.sp, color = TextSecondary)
+                            Text(text = "الخط (12sp)، السمة، المزامنة والكاش", fontSize = 11.sp, color = TextSecondary)
                         }
                     }
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = TextSecondary)

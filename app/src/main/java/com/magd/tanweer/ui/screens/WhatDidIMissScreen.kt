@@ -61,19 +61,20 @@ fun WhatDidIMissScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
-    val previousSessionTime by viewModel.previousSessionTimestamp.collectAsStateWithLifecycle()
+    val lastOpenDate by viewModel.lastOpenDate.collectAsStateWithLifecycle()
 
     var selectedRange by remember { mutableStateOf(MissedTimeRange.SINCE_LAST_VISIT) }
     var selectedCategoryFilter by remember { mutableStateOf(CatchupCategoryFilter.ALL) }
+    var activeTranscriptionContent by remember { mutableStateOf<ContentItem?>(null) }
 
     val sdf = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
     val timeFormatter = remember { SimpleDateFormat("yyyy-MM-dd hh:mm a", Locale.getDefault()) }
     val todayStr = remember { sdf.format(Date()) }
 
-    val (startDateStr, endDateStr) = remember(selectedRange, previousSessionTime) {
+    val (startDateStr, endDateStr) = remember(selectedRange, lastOpenDate) {
         val today = sdf.format(Date())
         if (selectedRange == MissedTimeRange.SINCE_LAST_VISIT) {
-            val sinceDate = sdf.format(Date(previousSessionTime))
+            val sinceDate = lastOpenDate.ifBlank { today }
             Pair(sinceDate, today)
         } else {
             val cal = Calendar.getInstance()
@@ -92,27 +93,33 @@ fun WhatDidIMissScreen(
     val allEvents by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
-    // 1. Filter Lessons documented in that range
+    // 1. Lessons documented strictly in the absence window
     val missedLessons = remember(allContents, startDateStr, endDateStr) {
         allContents.filter { it.studyDate in startDateStr..endDateStr }
     }
 
-    // 2. Filter Homeworks assigned in that range
+    // 2. Homework assigned strictly in the absence window
     val missedHomeworks = remember(allHomeworks, startDateStr, endDateStr) {
         allHomeworks.filter { it.studyDate in startDateStr..endDateStr }
     }
 
-    // 3. Filter Exams announced or occurring upcoming
-    val relevantExams = remember(allExams, startDateStr, todayStr) {
-        allExams.filter { it.examDate >= startDateStr }
+    // 3. Exams: Distinguish between exams missed during absence vs upcoming future exams
+    val missedExams = remember(allExams, startDateStr, endDateStr) {
+        allExams.filter { it.examDate in startDateStr..endDateStr }
+    }
+    val upcomingExams = remember(allExams, endDateStr) {
+        allExams.filter { it.examDate > endDateStr }
     }
 
-    // 4. Filter Events in that range or upcoming
-    val relevantEvents = remember(allEvents, startDateStr) {
-        allEvents.filter { it.eventDate >= startDateStr }
+    // 4. Events: Distinguish between events that took place during absence vs upcoming future events
+    val missedEvents = remember(allEvents, startDateStr, endDateStr) {
+        allEvents.filter { it.eventDate in startDateStr..endDateStr }
+    }
+    val upcomingEvents = remember(allEvents, endDateStr) {
+        allEvents.filter { it.eventDate > endDateStr }
     }
 
-    val totalCatchupItems = missedLessons.size + missedHomeworks.size + relevantExams.size + relevantEvents.size
+    val totalCatchupItems = missedLessons.size + missedHomeworks.size + missedExams.size + upcomingExams.size + missedEvents.size + upcomingEvents.size
 
     BackHandler {
         viewModel.navigateBack()
@@ -158,9 +165,7 @@ fun WhatDidIMissScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
-                            val lastVisitStr = remember(previousSessionTime) {
-                                try { timeFormatter.format(Date(previousSessionTime)) } catch (_: Exception) { "سابقاً" }
-                            }
+                            val lastVisitStr = lastOpenDate.ifBlank { "سابقاً" }
                             Text(
                                 text = "ملخص الاستدراك الذكي (آخر دخول: $lastVisitStr)",
                                 fontSize = 11.sp,
@@ -229,7 +234,7 @@ fun WhatDidIMissScreen(
                 )
                 StatPillCard(
                     icon = "🔴",
-                    count = relevantExams.size,
+                    count = missedExams.size + upcomingExams.size,
                     label = "اختبارات",
                     color = RubyRed,
                     modifier = Modifier.weight(1f),
@@ -240,7 +245,7 @@ fun WhatDidIMissScreen(
                 )
                 StatPillCard(
                     icon = "🎪",
-                    count = relevantEvents.size,
+                    count = missedEvents.size + upcomingEvents.size,
                     label = "فعاليات",
                     color = EmeraldGreen,
                     modifier = Modifier.weight(1f),
@@ -308,7 +313,8 @@ fun WhatDidIMissScreen(
             items(missedLessons) { lesson ->
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface
+                    backgroundColor = GlassSurface,
+                    onClick = { activeTranscriptionContent = lesson }
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
@@ -467,76 +473,133 @@ fun WhatDidIMissScreen(
         }
 
         // -------------------------------------------------------------
-        // 3. EXAMS SECTION
+        // 3. EXAMS SECTION (Missed during absence + Upcoming announced)
         // -------------------------------------------------------------
-        if (selectedCategoryFilter in listOf(CatchupCategoryFilter.ALL, CatchupCategoryFilter.EXAMS) && relevantExams.isNotEmpty()) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "🔴", fontSize = 18.sp)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "الاختبارات المعلنة (${relevantExams.size})",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = RubyRed
-                        )
+        if (selectedCategoryFilter in listOf(CatchupCategoryFilter.ALL, CatchupCategoryFilter.EXAMS)) {
+            if (missedExams.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = "🔴", fontSize = 18.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "اختبارات أُجريت أثناء فترة الغياب (${missedExams.size})",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = RubyRed
+                            )
+                        }
+                        TextButton(onClick = { viewModel.setTab(NavigationTab.EXAMS) }) {
+                            Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                        }
                     }
-                    TextButton(onClick = { viewModel.setTab(NavigationTab.EXAMS) }) {
-                        Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                }
+
+                items(missedExams) { exam ->
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = GlassSurface
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                GlassPill(
+                                    text = exam.subjectName,
+                                    color = RubyRed,
+                                    bgColor = RubyRed.copy(alpha = 0.15f)
+                                )
+                                Text(
+                                    text = "📅 ${exam.examDate} (مضى)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = RubyRed
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = exam.title,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            if (!exam.requiredChapters.isNullOrBlank()) {
+                                Text(
+                                    text = "المقرر: ${exam.requiredChapters}",
+                                    fontSize = 12.sp,
+                                    color = TextSecondary,
+                                    maxLines = 2
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            items(relevantExams) { exam ->
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            GlassPill(
-                                text = exam.subjectName,
-                                color = RubyRed,
-                                bgColor = RubyRed.copy(alpha = 0.15f)
-                            )
+            if (upcomingExams.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = "🗓️", fontSize = 18.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "📅 ${exam.examDate}",
-                                fontSize = 12.sp,
+                                text = "اختبارات قادمة تم الإعلان عنها (${upcomingExams.size})",
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = WarmAmber
                             )
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = exam.title,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        if (!exam.requiredChapters.isNullOrBlank()) {
+                    }
+                }
+
+                items(upcomingExams) { exam ->
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = GlassSurface
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                GlassPill(
+                                    text = exam.subjectName,
+                                    color = WarmAmber,
+                                    bgColor = WarmAmber.copy(alpha = 0.15f)
+                                )
+                                Text(
+                                    text = "📅 موعده: ${exam.examDate}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = WarmAmber
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "المقرر: ${exam.requiredChapters}",
-                                fontSize = 12.sp,
-                                color = TextSecondary,
-                                maxLines = 2
+                                text = exam.title,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
                             )
-                        }
-                        if (!exam.notes.isNullOrBlank()) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "ملاحظات: ${exam.notes}",
-                                fontSize = 11.sp,
-                                color = TextMuted
-                            )
+                            if (!exam.requiredChapters.isNullOrBlank()) {
+                                Text(
+                                    text = "المقرر: ${exam.requiredChapters}",
+                                    fontSize = 12.sp,
+                                    color = TextSecondary,
+                                    maxLines = 2
+                                )
+                            }
                         }
                     }
                 }
@@ -544,74 +607,114 @@ fun WhatDidIMissScreen(
         }
 
         // -------------------------------------------------------------
-        // 4. EVENTS & ACTIVITIES SECTION
+        // 4. EVENTS & ACTIVITIES SECTION (Missed during absence + Upcoming)
         // -------------------------------------------------------------
-        if (selectedCategoryFilter in listOf(CatchupCategoryFilter.ALL, CatchupCategoryFilter.EVENTS) && relevantEvents.isNotEmpty()) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "🎪", fontSize = 18.sp)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "الأنشطة والفعاليات المدرسية (${relevantEvents.size})",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = EmeraldGreen
-                        )
+        if (selectedCategoryFilter in listOf(CatchupCategoryFilter.ALL, CatchupCategoryFilter.EVENTS)) {
+            if (missedEvents.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = "🎪", fontSize = 18.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "فعاليات أقيمت أثناء فترة الغياب (${missedEvents.size})",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldGreen
+                            )
+                        }
                     }
-                    TextButton(onClick = { viewModel.setSubScreen(SubScreen.EVENTS) }) {
-                        Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                }
+
+                items(missedEvents) { event ->
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = GlassSurface
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                GlassPill(
+                                    text = event.category,
+                                    color = EmeraldGreen,
+                                    bgColor = EmeraldGreen.copy(alpha = 0.15f)
+                                )
+                                Text(
+                                    text = "📅 ${event.eventDate} ${event.timeStr ?: ""}".trim(),
+                                    fontSize = 11.sp,
+                                    color = TextMuted
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = event.title,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        }
                     }
                 }
             }
 
-            items(relevantEvents) { event ->
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            GlassPill(
-                                text = event.category,
-                                color = EmeraldGreen,
-                                bgColor = EmeraldGreen.copy(alpha = 0.15f)
-                            )
+            if (upcomingEvents.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = "🎪", fontSize = 18.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "📅 ${event.eventDate} ${event.timeStr ?: ""}".trim(),
-                                fontSize = 11.sp,
-                                color = TextMuted
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = event.title,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        if (!event.description.isNullOrBlank()) {
-                            Text(
-                                text = event.description,
-                                fontSize = 12.sp,
-                                color = TextSecondary,
-                                maxLines = 2
-                            )
-                        }
-                        if (!event.location.isNullOrBlank()) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "📍 المكان: ${event.location}",
-                                fontSize = 11.sp,
+                                text = "فعاليات قادمة (${upcomingEvents.size})",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
                                 color = CyanAccent
+                            )
+                        }
+                        TextButton(onClick = { viewModel.setSubScreen(SubScreen.EVENTS) }) {
+                            Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                items(upcomingEvents) { event ->
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = GlassSurface
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                GlassPill(
+                                    text = event.category,
+                                    color = CyanAccent,
+                                    bgColor = CyanGlow
+                                )
+                                Text(
+                                    text = "📅 ${event.eventDate} ${event.timeStr ?: ""}".trim(),
+                                    fontSize = 11.sp,
+                                    color = TextMuted
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = event.title,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
                             )
                         }
                     }
@@ -638,6 +741,13 @@ fun WhatDidIMissScreen(
                 )
             }
         }
+    }
+
+    activeTranscriptionContent?.let { content ->
+        NotebookTranscriptionDialog(
+            content = content,
+            onDismiss = { activeTranscriptionContent = null }
+        )
     }
 }
 

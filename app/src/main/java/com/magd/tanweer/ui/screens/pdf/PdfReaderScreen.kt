@@ -228,7 +228,8 @@ fun PdfReaderScreen(
 
     // Unique Pages Read Counter
     var visitedPages by remember { mutableStateOf(setOf<Int>()) }
-    val pagesReadCount = visitedPages.size.coerceAtLeast(1)
+    var lifetimeUniquePagesBase by remember { mutableIntStateOf(0) }
+    val pagesReadCount = (lifetimeUniquePagesBase + visitedPages.size).coerceAtLeast(visitedPages.size)
     val targetPagesGoal = 15
 
     // Helper functions for strokes serialization
@@ -311,13 +312,14 @@ fun PdfReaderScreen(
     // Save Reading State on exit or state changes
     fun persistReadingState() {
         coroutineScope.launch {
+            val totalUniquePages = (lifetimeUniquePagesBase + visitedPages.size).coerceAtLeast(visitedPages.size)
             repository.saveBookReadingState(
                 bookId = book.id,
                 lastPage = currentPageIndex,
                 zoom = zoomScale,
                 theme = readingTheme.name,
                 totalStudySeconds = lifetimeStudySeconds + sessionReadingSeconds,
-                uniquePagesCount = visitedPages.size.coerceAtLeast(1)
+                uniquePagesCount = totalUniquePages
             )
         }
     }
@@ -395,6 +397,7 @@ fun PdfReaderScreen(
             zoomScale = savedState.zoom
             lifetimeStudySeconds = savedState.totalStudySeconds
             sessionReadingSeconds = 0L
+            lifetimeUniquePagesBase = savedState.uniquePagesCount
             readingTheme = try { ReadingTheme.valueOf(savedState.theme) } catch (_: Exception) { ReadingTheme.DAY }
         }
 
@@ -744,7 +747,7 @@ fun PdfReaderScreen(
                         ) {
                             Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
                             Text(
-                                text = "المساعد الصوتي يقرأ صفحة ${currentPageIndex + 1} (${audioSpeed}x)",
+                                text = "🔊 قراءة معلومات الصفحة والملاحظات (${currentPageIndex + 1}) • ${audioSpeed}x",
                                 fontSize = 12.sp,
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold
@@ -1525,7 +1528,7 @@ fun StudyToolsHubSheet(
                 ) {
                     Text(text = "🎙️", fontSize = 24.sp)
                     Text(
-                        text = if (isAudioPlaying) "إيقاف القارئ" else "القارئ الصوتي الذكي",
+                        text = if (isAudioPlaying) "إيقاف القارئ" else "قراءة بيانات وملاحظات الصفحة 🔊",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,

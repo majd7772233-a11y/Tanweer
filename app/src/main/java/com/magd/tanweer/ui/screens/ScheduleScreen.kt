@@ -403,7 +403,7 @@ fun ScheduleScreen(
                 // 6 Periods Cards for the selected day
                 items((1..6).toList()) { periodOrder ->
                     val slot = allSlots.find { it.dayOfWeek == selectedDayForList && it.slotOrder == periodOrder }
-                    val defaultTime = PERIOD_DEFAULT_TIMES.find { it.first == periodOrder }?.second ?: ("08:00" to "08:45")
+                    val defaultTime = com.magd.tanweer.util.AcademicTimeEngine.getDefaultPeriodTime(periodOrder)
 
                     SinglePeriodSlotCard(
                         dayOfWeek = selectedDayForList,
@@ -429,7 +429,7 @@ fun ScheduleScreen(
         activeEditingCell?.let { (dayIndex, slotOrder) ->
             val existingSlot = allSlots.find { it.dayOfWeek == dayIndex && it.slotOrder == slotOrder }
             val dayName = SCHEDULE_DAYS.find { it.first == dayIndex }?.second ?: "اليوم"
-            val defaultTime = PERIOD_DEFAULT_TIMES.find { it.first == slotOrder }?.second ?: ("08:00" to "08:45")
+            val defaultTime = com.magd.tanweer.util.AcademicTimeEngine.getDefaultPeriodTime(slotOrder)
 
             SubjectPickerSheet(
                 dayName = dayName,

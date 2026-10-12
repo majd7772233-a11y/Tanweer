@@ -1,5 +1,6 @@
 package com.magd.tanweer.data.remote
 
+import com.magd.tanweer.BuildConfig
 import com.magd.tanweer.data.model.*
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
@@ -515,6 +516,12 @@ interface GitHubApiService {
     @GET("repos/majd7772233-a11y/tanweer-books/releases")
     suspend fun getReleases(): Response<List<GitHubRelease>>
 
+    @GET("repos/majd7772233-a11y/tanweer-books/releases/latest")
+    suspend fun getBooksLatestRelease(): Response<GitHubRelease>
+
+    @GET("repos/majd7772233-a11y/tanweer/releases/latest")
+    suspend fun getAppLatestRelease(): Response<GitHubRelease>
+
     @GET
     suspend fun getCatalog(
         @Url url: String = "https://raw.githubusercontent.com/majd7772233-a11y/tanweer-books/main/catalog.json"
@@ -542,7 +549,8 @@ object NetworkModule {
         authToken?.let {
             builder.addHeader("Authorization", "Bearer $it")
         }
-        builder.addHeader("X-App-Version", "1.0")
+        builder.addHeader("X-App-Version", BuildConfig.VERSION_NAME)
+        builder.addHeader("X-App-Version-Code", BuildConfig.VERSION_CODE.toString())
         val response = chain.proceed(builder.build())
         if (response.code == 401 && !original.url.encodedPath.contains("/auth/")) {
             onSessionExpired?.invoke()

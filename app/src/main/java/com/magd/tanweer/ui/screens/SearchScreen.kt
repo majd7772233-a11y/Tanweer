@@ -70,8 +70,8 @@ fun SearchScreen(
     val books by viewModel.repository.getBooks(currentUser?.gradeId ?: 10)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
-    // Selected items for Deep-Link modals
     var selectedContentForDetail by remember { mutableStateOf<ContentItem?>(null) }
+    var activeTranscriptionContent by remember { mutableStateOf<ContentItem?>(null) }
     var selectedHomeworkForDetail by remember { mutableStateOf<HomeworkItem?>(null) }
     var selectedExamForDetail by remember { mutableStateOf<ExamItem?>(null) }
     var selectedEventForDetail by remember { mutableStateOf<SchoolEventItem?>(null) }
@@ -652,15 +652,23 @@ fun SearchScreen(
                         }
 
                         if (content.media.isNotEmpty()) {
-                            Text("📷 صور السبورة الموثقة (${content.media.size}):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-                            Text("تم توثيق لوحات الشرح بالسبورة الذكية وتخزينها محلياً.", fontSize = 11.sp, color = TextSecondary)
+                            Text("📷 لوحات الشرح والسبورة (${content.media.size} لوحات):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                            Text("لوحات الشرح موثقة سحابياً — اضغط 'نقل الدرس للدفتر' لمطالعتها وتنزيلها لمذاكرتها أوفلاين.", fontSize = 11.sp, color = TextSecondary)
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             GlassButton(
-                                text = "فتح مساحة المادة 📚",
+                                text = "✍️ نقل الدرس للدفتر",
+                                onClick = {
+                                    activeTranscriptionContent = content
+                                    selectedContentForDetail = null
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            GlassOutlinedButton(
+                                text = "مساحة المادة 📚",
                                 onClick = {
                                     val subjId = content.subjectId
                                     selectedContentForDetail = null
@@ -874,16 +882,28 @@ fun SearchScreen(
                         Spacer(modifier = Modifier.height(6.dp))
 
                         GlassButton(
-                            text = "فتح محادثة الشعبة 💬",
+                            text = "فتح الرسالة في محادثة الشعبة 💬",
                             onClick = {
+                                val targetMsg = selectedChatMessageForDetail
                                 selectedChatMessageForDetail = null
-                                viewModel.setSubScreen(SubScreen.GROUPS)
+                                if (targetMsg != null) {
+                                    viewModel.navigateToGroupChatMessage(targetMsg.groupId, targetMsg.id)
+                                } else {
+                                    viewModel.setSubScreen(SubScreen.GROUPS)
+                                }
                             },
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
             }
+        }
+
+        activeTranscriptionContent?.let { content ->
+            NotebookTranscriptionDialog(
+                content = content,
+                onDismiss = { activeTranscriptionContent = null }
+            )
         }
     }
 }

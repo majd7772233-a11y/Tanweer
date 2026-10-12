@@ -781,7 +781,7 @@ export async function handleGetDashboardHomeworks(request: Request, env: Env): P
  */
 export async function handleDeleteDashboardHomework(hwId: string, actorId: string, env: Env): Promise<Response> {
   await env.DB.prepare(`DELETE FROM homeworks WHERE id = ?`).bind(hwId).run();
-  await env.DB.prepare(`DELETE FROM user_homework_completions WHERE homework_id = ?`).bind(hwId).run();
+  await env.DB.prepare(`DELETE FROM homework_completions WHERE homework_id = ?`).bind(hwId).run();
   await logRoleAudit(env.DB, 'OWNER_DELETE_HOMEWORK', actorId, 'SYSTEM_OWNER', null, `حذف الواجب (${hwId}) من لوحة المالك`);
   return jsonResponse({ success: true, message: 'تم حذف الواجب بنجاح' });
 }

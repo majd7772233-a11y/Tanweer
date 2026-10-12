@@ -69,6 +69,19 @@ abstract class TanweerDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                try {
+                    database.execSQL(
+                        "ALTER TABLE `cached_exams` " +
+                        "ADD COLUMN `isCompleted` INTEGER NOT NULL DEFAULT 0"
+                    )
+                } catch (e: Exception) {
+                    // Column might already exist
+                }
+            }
+        }
+
         fun getInstance(context: Context): TanweerDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -76,7 +89,7 @@ abstract class TanweerDatabase : RoomDatabase() {
                     TanweerDatabase::class.java,
                     "tanweer_local.db"
                 )
-                    .addMigrations(MIGRATION_PRESERVE_ALL)
+                    .addMigrations(MIGRATION_PRESERVE_ALL, MIGRATION_10_11)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
                 INSTANCE = instance

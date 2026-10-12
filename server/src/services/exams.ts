@@ -60,6 +60,22 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
     ? body.id.trim()
     : generateId('exm');
 
+  // Idempotency check
+  const existing = await env.DB.prepare(`SELECT id, is_official FROM exams WHERE id = ?`).bind(examId).first<{
+    id: string;
+    is_official: number;
+  }>();
+  if (existing) {
+    return jsonResponse({
+      success: true,
+      examId: existing.id,
+      isOfficial: existing.is_official === 1,
+      message: existing.is_official === 1
+        ? 'تم اعتماد وتثبيت موعد الاختبار الرسمي في التقويم الدراسي 🔴'
+        : 'تمت إضافة مقترح موعد الاختبار بنجاح ومشاركته مع الزملاء 📅',
+    });
+  }
+
   await env.DB.prepare(
     `INSERT INTO exams (id, group_id, exam_date, subject_id, title, required_chapters, notes, is_official, created_by, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`

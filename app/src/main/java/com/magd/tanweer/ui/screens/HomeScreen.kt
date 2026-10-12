@@ -51,6 +51,8 @@ fun HomeScreen(
     val effectiveDayForSlots = if (isWeekend) -1 else dayOfWeek
 
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val shouldShowCatchUpCard by viewModel.shouldShowCatchUpCard.collectAsStateWithLifecycle()
+    val lastOpenDate by viewModel.lastOpenDate.collectAsStateWithLifecycle()
 
     val slots: List<ScheduleSlot> by remember(activeGroupId, effectiveDayForSlots, isWeekend) {
         if (isWeekend) {
@@ -608,45 +610,60 @@ fun HomeScreen(
             }
         }
 
-        // Quick Catch-up Banner
-        item {
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = CyanGlow.copy(alpha = 0.08f),
-                borderColor = CyanAccent.copy(alpha = 0.3f),
-                onClick = { viewModel.setSubScreen(SubScreen.WHAT_DID_I_MISS) }
-            ) {
-                Row(
+        // Quick Catch-up Banner (Displayed ONLY when student was absent on previous days)
+        if (shouldShowCatchUpCard) {
+            item {
+                GlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    backgroundColor = CyanGlow.copy(alpha = 0.08f),
+                    borderColor = CyanAccent.copy(alpha = 0.3f),
+                    onClick = { viewModel.setSubScreen(SubScreen.WHAT_DID_I_MISS) }
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "🎒", fontSize = 22.sp)
-                        Column {
-                            Text(
-                                text = "ماذا فاتك مؤخراً؟",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = CyanAccent
-                            )
-                            Text(
-                                text = "تصفح الواجبات والاختبارات والدروس السابقة أثناء الغياب",
-                                fontSize = 11.sp,
-                                color = TextSecondary
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(text = "🎒", fontSize = 22.sp)
+                            Column {
+                                Text(
+                                    text = "ماذا فاتك أثناء الغياب؟",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyanAccent
+                                )
+                                Text(
+                                    text = "تصفح ما وثقه زملاؤك منذ $lastOpenDate وحتى اليوم",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { viewModel.dismissCatchUpCard() },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "إخفاء",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "فتح",
+                                tint = CyanAccent,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = "فتح",
-                        tint = CyanAccent,
-                        modifier = Modifier.size(18.dp)
-                    )
                 }
             }
         }

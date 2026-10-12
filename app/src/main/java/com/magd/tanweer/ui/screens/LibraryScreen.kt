@@ -57,7 +57,13 @@ fun LibraryScreen(
     val isSyncing by viewModel.isSyncingBooks.collectAsStateWithLifecycle()
     val pdfManager = remember { PdfBookManager(context) }
 
-    var selectedGradeId by remember { mutableIntStateOf(currentUser?.gradeId ?: 10) }
+    var selectedGradeId by remember(currentUser?.gradeId) { mutableIntStateOf(currentUser?.gradeId ?: 10) }
+
+    LaunchedEffect(currentUser?.gradeId) {
+        currentUser?.gradeId?.let { newGradeId ->
+            selectedGradeId = newGradeId
+        }
+    }
     var searchQuery by remember { mutableStateOf("") }
     var selectedSubjectFilter by remember { mutableStateOf<String?>(null) }
     // DEFAULT VIEW MODE IS WOODEN BOOKSHELF AS REQUESTED
@@ -72,6 +78,7 @@ fun LibraryScreen(
     // Track downloaded books dynamically
     var downloadedBooksMap by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
     var refreshTrigger by remember { mutableIntStateOf(0) }
+    var storedReleaseTag by remember { mutableStateOf<String?>(null) }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -89,8 +96,10 @@ fun LibraryScreen(
     LaunchedEffect(allBooks, refreshTrigger) {
         withContext(Dispatchers.IO) {
             val map = allBooks.associate { it.id to pdfManager.isBookDownloaded(it.id) }
+            val relTag = viewModel.repository.getStoredBooksReleaseTag()
             withContext(Dispatchers.Main) {
                 downloadedBooksMap = map
+                storedReleaseTag = relTag
             }
         }
     }
@@ -108,8 +117,9 @@ fun LibraryScreen(
         )
     }
 
+    val distinctAllBooks = remember(allBooks) { allBooks.distinctBy { it.id } }
     val gradeBooks = remember(allBooks, selectedGradeId) {
-        allBooks.filter { it.gradeId == selectedGradeId }
+        allBooks.filter { it.gradeId == selectedGradeId }.distinctBy { it.id }
     }
 
     val filteredBooks = remember(gradeBooks, searchQuery, selectedSubjectFilter) {
@@ -155,11 +165,19 @@ fun LibraryScreen(
                             color = CyanAccent
                         )
                         Text(
-                            text = "${allBooks.size} كتاباً دراسياً معتمداً",
+                            text = "${gradeBooks.size} كتاباً معتمداً لـ $currentGradeName (إجمالي المناهج: ${distinctAllBooks.size})",
                             fontSize = 11.sp,
                             color = TextSecondary,
                             modifier = Modifier.padding(top = 2.dp)
                         )
+                        if (!storedReleaseTag.isNullOrBlank()) {
+                            Text(
+                                text = "🏷️ إصدار المناهج المعتمد: $storedReleaseTag",
+                                fontSize = 10.sp,
+                                color = CyanAccent.copy(alpha = 0.85f),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -207,6 +225,7 @@ fun LibraryScreen(
                         IconButton(
                             onClick = {
                                 viewModel.syncBooks(selectedGradeId, isRefresh = true) { _, msg ->
+                                    refreshTrigger++
                                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 }
                             },

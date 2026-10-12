@@ -108,7 +108,7 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
   await env.DB.prepare(
     `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at)
      VALUES (?, ?, ?, 'ACTIVE', ?)`
-  ).bind(classGroupId, user.userId, Role.STUDENT, now).run();
+  ).bind(classGroupId, user.userId, user.role || Role.STUDENT, now).run();
 
   return jsonResponse({
     success: true,

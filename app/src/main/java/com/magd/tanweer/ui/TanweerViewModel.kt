@@ -78,20 +78,40 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _hapticsEnabled = MutableStateFlow(prefs.getBoolean("haptics_enabled", true))
     val hapticsEnabled: StateFlow<Boolean> = _hapticsEnabled.asStateFlow()
 
+    private val todayDateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    private val storedLastOpenDate = prefs.getString("last_open_date", null)
+    private val isFirstEverLaunch = storedLastOpenDate == null
+
+    private val _isNewAccountOrFirstLaunch = MutableStateFlow(isFirstEverLaunch)
+    val isNewAccountOrFirstLaunch: StateFlow<Boolean> = _isNewAccountOrFirstLaunch.asStateFlow()
+
+    private val _lastOpenDate = MutableStateFlow(storedLastOpenDate ?: todayDateStr)
+    val lastOpenDate: StateFlow<String> = _lastOpenDate.asStateFlow()
+
+    // Show Catch-up card ONLY if: Not first launch AND last open date is before today
+    private val _shouldShowCatchUpCard = MutableStateFlow(!isFirstEverLaunch && (storedLastOpenDate != null && storedLastOpenDate < todayDateStr))
+    val shouldShowCatchUpCard: StateFlow<Boolean> = _shouldShowCatchUpCard.asStateFlow()
+
     private val _previousSessionTimestamp = MutableStateFlow(
-        prefs.getLong("previous_session_time", System.currentTimeMillis() - (86400000L * 2))
+        prefs.getLong("last_active_time", System.currentTimeMillis())
     )
     val previousSessionTimestamp: StateFlow<Long> = _previousSessionTimestamp.asStateFlow()
 
     private val _isCheckingAuth = MutableStateFlow(true)
     val isCheckingAuth: StateFlow<Boolean> = _isCheckingAuth.asStateFlow()
 
+    fun dismissCatchUpCard() {
+        _shouldShowCatchUpCard.value = false
+        prefs.edit().putString("last_open_date", todayDateStr).apply()
+    }
+
     init {
-        val lastActive = prefs.getLong("last_active_time", System.currentTimeMillis() - (86400000L * 2))
+        val lastActive = prefs.getLong("last_active_time", System.currentTimeMillis())
         _previousSessionTimestamp.value = lastActive
         prefs.edit()
             .putLong("previous_session_time", lastActive)
             .putLong("last_active_time", System.currentTimeMillis())
+            .putString("last_open_date", todayDateStr)
             .apply()
 
         viewModelScope.launch {
@@ -188,19 +208,47 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _uploadInitialSubjectId = MutableStateFlow<String?>(null)
     val uploadInitialSubjectId: StateFlow<String?> = _uploadInitialSubjectId.asStateFlow()
 
+    // Add Homework Dialog trigger & initial date from Calendar or context
+    private val _isAddHomeworkModalOpen = MutableStateFlow(false)
+    val isAddHomeworkModalOpen: StateFlow<Boolean> = _isAddHomeworkModalOpen.asStateFlow()
+
+    private val _initialHomeworkDueDate = MutableStateFlow<String?>(null)
+    val initialHomeworkDueDate: StateFlow<String?> = _initialHomeworkDueDate.asStateFlow()
+
+    // Add Exam Dialog trigger & initial date
+    private val _isAddExamModalOpen = MutableStateFlow(false)
+    val isAddExamModalOpen: StateFlow<Boolean> = _isAddExamModalOpen.asStateFlow()
+
+    private val _initialExamDate = MutableStateFlow<String?>(null)
+    val initialExamDate: StateFlow<String?> = _initialExamDate.asStateFlow()
+
+    // Add Event Dialog trigger & initial date
+    private val _isAddEventModalOpen = MutableStateFlow(false)
+    val isAddEventModalOpen: StateFlow<Boolean> = _isAddEventModalOpen.asStateFlow()
+
+    private val _initialEventDate = MutableStateFlow<String?>(null)
+    val initialEventDate: StateFlow<String?> = _initialEventDate.asStateFlow()
+
+    // Deep link target for Groups Chat from Search
+    private val _pendingDeepLinkChatGroupId = MutableStateFlow<String?>(null)
+    val pendingDeepLinkChatGroupId: StateFlow<String?> = _pendingDeepLinkChatGroupId.asStateFlow()
+
+    private val _pendingDeepLinkMessageId = MutableStateFlow<String?>(null)
+    val pendingDeepLinkMessageId: StateFlow<String?> = _pendingDeepLinkMessageId.asStateFlow()
+
     private val _recoveryCodeDialog = MutableStateFlow<String?>(null)
     val recoveryCodeDialog: StateFlow<String?> = _recoveryCodeDialog.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private val _selectedKnowledgeBaseSubjectId = MutableStateFlow<String?>("math")
+    private val _selectedKnowledgeBaseSubjectId = MutableStateFlow<String?>(null)
     val selectedKnowledgeBaseSubjectId: StateFlow<String?> = _selectedKnowledgeBaseSubjectId.asStateFlow()
 
     private val _selectedAcademicYear = MutableStateFlow("2026-2027")
     val selectedAcademicYear: StateFlow<String> = _selectedAcademicYear.asStateFlow()
 
-    fun openSubjectKnowledgeBase(subjectId: String) {
+    fun openSubjectKnowledgeBase(subjectId: String? = null) {
         _selectedKnowledgeBaseSubjectId.value = subjectId
         setSubScreen(SubScreen.SUBJECT_KNOWLEDGE_BASE)
     }
@@ -263,15 +311,17 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         viewModelScope.launch {
-            currentUser.collect { user ->
-                if (user != null) {
-                    if (_selectedGroupId.value.isEmpty()) {
-                        _selectedGroupId.value = user.defaultGroupId
+            currentUser
+                .distinctUntilChangedBy { it?.id }
+                .collect { user ->
+                    if (user != null) {
+                        if (_selectedGroupId.value.isEmpty()) {
+                            _selectedGroupId.value = user.defaultGroupId
+                        }
+                        syncInitialData(user.defaultGroupId, _selectedDate.value)
+                        syncBooks(user.gradeId)
                     }
-                    syncInitialData(user.defaultGroupId, _selectedDate.value)
-                    syncBooks(user.gradeId)
                 }
-            }
         }
     }
 
@@ -385,6 +435,39 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _uploadInitialSubjectId.value = null
     }
 
+    fun openAddHomeworkDialog(initialDate: String? = null) {
+        _initialHomeworkDueDate.value = initialDate ?: _selectedDate.value
+        _isAddHomeworkModalOpen.value = true
+        setTab(NavigationTab.HOMEWORK)
+    }
+
+    fun closeAddHomeworkDialog() {
+        _isAddHomeworkModalOpen.value = false
+        _initialHomeworkDueDate.value = null
+    }
+
+    fun openAddExamDialog(initialDate: String? = null) {
+        _initialExamDate.value = initialDate ?: _selectedDate.value
+        _isAddExamModalOpen.value = true
+        setTab(NavigationTab.EXAMS)
+    }
+
+    fun closeAddExamDialog() {
+        _isAddExamModalOpen.value = false
+        _initialExamDate.value = null
+    }
+
+    fun openAddEventDialog(initialDate: String? = null) {
+        _initialEventDate.value = initialDate ?: _selectedDate.value
+        _isAddEventModalOpen.value = true
+        setSubScreen(SubScreen.EVENTS)
+    }
+
+    fun closeAddEventDialog() {
+        _isAddEventModalOpen.value = false
+        _initialEventDate.value = null
+    }
+
     fun dismissRecoveryDialog() {
         _recoveryCodeDialog.value = null
     }
@@ -412,6 +495,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncHome(groupId: String = getActiveGroupId(), date: String = _selectedDate.value, isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
         viewModelScope.launch {
             _homeSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
             when (val result = repository.syncDay(groupId, date)) {
@@ -423,6 +507,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncSchedule(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
         viewModelScope.launch {
             _scheduleSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
             when (val result = repository.syncSchedule(groupId)) {
@@ -434,6 +519,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncHomeworks(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
         viewModelScope.launch {
             _homeworkSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
             when (val result = repository.syncHomeworks(groupId)) {
@@ -445,6 +531,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncExams(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
         viewModelScope.launch {
             _examsSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
             when (val result = repository.syncExams(groupId)) {
@@ -456,6 +543,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncCalendar(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
         viewModelScope.launch {
             _calendarSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
             val currentMonth = SimpleDateFormat("yyyy-MM", Locale.US).format(Date())
@@ -541,10 +629,27 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     // ACTIONS & MUTATIONS
     // =========================================================================
 
+    fun navigateToGroupChatMessage(groupId: String, messageId: String) {
+        _pendingDeepLinkChatGroupId.value = groupId
+        _pendingDeepLinkMessageId.value = messageId
+        setSubScreen(SubScreen.GROUPS)
+    }
+
+    fun clearPendingDeepLink() {
+        _pendingDeepLinkChatGroupId.value = null
+        _pendingDeepLinkMessageId.value = null
+    }
+
     fun connectGroupChat(groupId: String) {
         val user = currentUser.value ?: return
         viewModelScope.launch {
             repository.connectToGroupChat(groupId, user.id)
+        }
+    }
+
+    fun disconnectGroupChat() {
+        viewModelScope.launch {
+            repository.disconnectFromGroupChat()
         }
     }
 
@@ -590,9 +695,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun deleteScheduleSlotById(slotId: String) {
+    fun deleteScheduleSlotById(slotId: String, onResult: ((Result<String>) -> Unit)? = null) {
         viewModelScope.launch {
-            repository.deleteScheduleSlotById(slotId)
+            val res = repository.deleteScheduleSlotById(slotId)
+            onResult?.invoke(res)
         }
     }
 
@@ -1248,7 +1354,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         requiredChapters: String?,
         notes: String?,
         examDate: String,
-        onResult: ((Result<String>) -> Unit)? = null
+        onResult: ((Result<com.magd.tanweer.data.local.ExamAddResult>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
@@ -1265,7 +1371,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun deleteExam(examId: String, onResult: ((Result<Unit>) -> Unit)? = null) {
+    fun deleteExam(examId: String, onResult: ((Result<com.magd.tanweer.data.local.ExamDeleteResult>) -> Unit)? = null) {
         viewModelScope.launch {
             val res = repository.deleteExamById(examId)
             onResult?.invoke(res)
@@ -1279,7 +1385,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         eventDate: String,
         timeStr: String?,
         location: String?,
-        onResult: ((Result<String>) -> Unit)? = null
+        onResult: ((Result<com.magd.tanweer.data.local.EventAddResult>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
@@ -1303,7 +1409,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         subjectId: String? = null,
         homeworkId: String? = null,
         examId: String? = null,
-        onResult: ((Result<String>) -> Unit)? = null
+        onResult: ((Result<com.magd.tanweer.data.local.IssueAddResult>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
@@ -1351,7 +1457,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun addIssueComment(
         issueId: String,
         comment: String,
-        onDone: (Result<Unit>) -> Unit = {}
+        onDone: (Result<com.magd.tanweer.data.local.CommentAddResult>) -> Unit = {}
     ) {
         viewModelScope.launch {
             val res = repository.addIssueComment(issueId, comment)
@@ -1404,12 +1510,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun sendChatMessage(text: String, targetGroupId: String? = null) {
-        val user = currentUser.value ?: return
+    suspend fun sendChatMessageSuspend(
+        text: String,
+        targetGroupId: String? = null
+    ): Boolean {
+        val user = currentUser.value ?: return false
         val groupId = targetGroupId ?: getActiveGroupId()
         val cleanText = text.trim()
-        if (cleanText.isBlank() || groupId.isBlank()) return
-        viewModelScope.launch {
+        if (cleanText.isBlank() || groupId.isBlank()) return false
+        return try {
             val gradeName = SchoolHierarchy.getGradeName(user.gradeId)
             val secAr = SchoolHierarchy.getSectionArabicName(user.sectionId)
             repository.sendChatMessage(
@@ -1419,6 +1528,19 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 senderGradeSection = "$gradeName — $secAr",
                 text = cleanText
             )
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun sendChatMessage(
+        text: String,
+        targetGroupId: String? = null,
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            val success = sendChatMessageSuspend(text, targetGroupId)
+            onComplete?.invoke(success)
         }
     }
 

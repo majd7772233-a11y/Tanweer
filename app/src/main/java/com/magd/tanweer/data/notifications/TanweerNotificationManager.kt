@@ -188,16 +188,44 @@ object TanweerNotificationManager {
         }
     }
 
+    enum class ScheduleReminderResult {
+        SUCCESS,
+        PERMISSION_NOTIFICATIONS_DENIED,
+        PERMISSION_EXACT_ALARM_DENIED,
+        ALARM_SERVICE_UNAVAILABLE,
+        GENERAL_ERROR
+    }
+
     fun scheduleHomeworkReminder(
         context: Context,
         homeworkId: String,
         title: String,
         subjectName: String,
         dueDate: String
-    ): Boolean {
+    ): ScheduleReminderResult {
         initChannel(context)
         return try {
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return false
+            // Check Notification permission on Android 13+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val hasNotif = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (!hasNotif) {
+                    return ScheduleReminderResult.PERMISSION_NOTIFICATIONS_DENIED
+                }
+            }
+
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+                ?: return ScheduleReminderResult.ALARM_SERVICE_UNAVAILABLE
+
+            // Check Exact Alarm permission on Android 12+ (API 31+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (!alarmManager.canScheduleExactAlarms()) {
+                    return ScheduleReminderResult.PERMISSION_EXACT_ALARM_DENIED
+                }
+            }
+
             val intent = Intent(context, TanweerAlarmReceiver::class.java).apply {
                 action = TanweerAlarmReceiver.ACTION_HOMEWORK_REMINDER
                 putExtra(TanweerAlarmReceiver.EXTRA_HOMEWORK_ID, homeworkId)
@@ -254,10 +282,13 @@ object TanweerNotificationManager {
                 alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
             }
             Log.d("TanweerNotifications", "Exact homework reminder scheduled at $triggerTime for $homeworkId")
-            true
+            ScheduleReminderResult.SUCCESS
+        } catch (e: SecurityException) {
+            Log.e("TanweerNotifications", "SecurityException scheduling homework reminder", e)
+            ScheduleReminderResult.PERMISSION_EXACT_ALARM_DENIED
         } catch (e: Exception) {
             Log.e("TanweerNotifications", "Failed to schedule homework reminder", e)
-            false
+            ScheduleReminderResult.GENERAL_ERROR
         }
     }
 

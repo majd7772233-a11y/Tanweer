@@ -62,6 +62,23 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
   const hwId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
     : generateId('hw');
+
+  // Idempotency check: if item with same ID already exists, return success
+  const existing = await env.DB.prepare(`SELECT id, is_official FROM homeworks WHERE id = ?`).bind(hwId).first<{
+    id: string;
+    is_official: number;
+  }>();
+  if (existing) {
+    return jsonResponse({
+      success: true,
+      homeworkId: existing.id,
+      isOfficial: existing.is_official === 1,
+      message: existing.is_official === 1
+        ? 'تم نشر الواجب الرسمي المعتمد للشعبة بنجاح 🎓'
+        : 'تمت إضافة مساهمة الواجب بنجاح ومشاركتها مع الزملاء 📝',
+    });
+  }
+
   const now = Date.now();
   const mediaUrlsJson = (body.mediaUrls && Array.isArray(body.mediaUrls) && body.mediaUrls.length > 0)
     ? JSON.stringify(body.mediaUrls)

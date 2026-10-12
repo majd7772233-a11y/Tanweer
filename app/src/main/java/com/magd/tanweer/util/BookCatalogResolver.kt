@@ -7,8 +7,38 @@ import com.magd.tanweer.data.model.GitHubRelease
 import com.magd.tanweer.data.model.GitHubReleaseAsset
 import com.magd.tanweer.data.model.SchoolHierarchy
 
+data class CanonicalBook(
+    val canonicalId: String,
+    val gradeId: Int,
+    val subjectId: String,
+    val title: String,
+    val edition: String?,
+    val fileSizeMb: Double,
+    val fileUrl: String,
+    val releaseTag: String? = null,
+    val assetName: String? = null,
+    val sha256: String? = null,
+    val localFileName: String = "${canonicalId}.pdf",
+    val catalogRecord: CatalogBookItem? = null,
+    val releaseAsset: GitHubReleaseAsset? = null
+) {
+    fun toEntity(): BookEntity = BookEntity(
+        id = canonicalId,
+        gradeId = gradeId,
+        subjectId = subjectId,
+        title = title,
+        edition = edition ?: "إصدار رسمي - المناهج المعتمدة",
+        fileSizeMb = fileSizeMb,
+        fileUrl = fileUrl,
+        thumbnailUrl = null,
+        subjectName = BookCatalogResolver.mapSubjectMeta(subjectId).second,
+        subjectIcon = BookCatalogResolver.mapSubjectMeta(subjectId).third
+    )
+}
+
 data class ResolvedBookCatalog(
     val books: List<BookEntity>,
+    val canonicalBooks: List<CanonicalBook> = emptyList(),
     val releaseTag: String?,
     val catalogVersion: String?,
     val totalCount: Int
@@ -35,9 +65,8 @@ object BookCatalogResolver {
             s.contains("chemistry") || s.contains("كيمياء") -> "chemistry"
             s.contains("physicsactivities") || s.contains("physics_act") -> "physics_act"
             s.contains("physics") || s.contains("فيزياء") -> "physics"
-            s.contains("englishpubils") || s.contains("englishpupils") || s.contains("english_pupils") -> "english_pupils"
             s.contains("englishwork") || s.contains("english_work") -> "english_work"
-            s.contains("english") || s.contains("إنجليزي") || s.contains("انجليزي") -> "english"
+            s.contains("englishpubils") || s.contains("englishpupils") || s.contains("english_pupils") || s.contains("english") || s.contains("إنجليزي") || s.contains("انجليزي") -> "english"
             s.contains("syntax") || s.contains("نحو") -> "syntax"
             s.contains("literature") || s.contains("أدب") || s.contains("ادب") -> "literature"
             s.contains("reading") || s.contains("قراءة") -> "reading"
@@ -171,45 +200,52 @@ object BookCatalogResolver {
     ): ResolvedBookCatalog {
         val mergedMap = LinkedHashMap<String, BookEntity>()
 
-        var releaseTag: String? = null
-        var catalogVersion: String? = catalogResponse?.version?.toString()
-
-        // 1. Process GitHub Releases assets (Live direct CDN URLs + exact byte sizes)
-        releases?.forEach { rel ->
-            if (releaseTag == null && !rel.tag_name.isNullOrBlank()) {
-                releaseTag = rel.tag_name
-            }
-            rel.assets.forEach { asset ->
-                parseAssetToCanonical(asset)?.let { book ->
-                    mergedMap[book.id] = book
-                }
-            }
-        }
-
-        // 2. Process and merge catalog.json items (Rich descriptions, editions, curated Arabic titles)
-        catalogResponse?.books?.forEach { item ->
-            val catalogBook = parseCatalogItemToCanonical(item)
-            val existing = mergedMap[catalogBook.id]
-
-            if (existing != null) {
-                // Merge: Prefer curated title, subjectName, icon, and edition from catalog,
-                // while preserving live verified asset download URL & exact file size
-                mergedMap[catalogBook.id] = existing.copy(
-                    title = if (catalogBook.title.isNotBlank()) catalogBook.title else existing.title,
-                    subjectName = if (catalogBook.subjectName.isNotBlank()) catalogBook.subjectName else existing.subjectName,
-                    subjectIcon = if (catalogBook.subjectIcon.isNotBlank()) catalogBook.subjectIcon else existing.subjectIcon,
-                    edition = if (!catalogBook.edition.isNullOrBlank()) catalogBook.edition else existing.edition,
-                    fileUrl = if (existing.fileUrl.isNotBlank()) existing.fileUrl else catalogBook.fileUrl,
-                    fileSizeMb = if (existing.fileSizeMb > 0) existing.fileSizeMb else catalogBook.fileSizeMb
-                )
-            } else {
+        // 1. Authoritative base: Start with catalog.json if available (exactly 58 official curriculum books)
+        if (catalogResponse != null && catalogResponse.books.isNotEmpty()) {
+            catalogResponse.books.forEach { item ->
+                val catalogBook = parseCatalogItemToCanonical(item)
                 mergedMap[catalogBook.id] = catalogBook
             }
         }
 
-        val allBooks = mergedMap.values.toList()
+        // 2. Determine active release tag and latest release assets
+        val latestRelease = releases?.firstOrNull { !it.assets.isNullOrEmpty() }
+        val releaseTag = latestRelease?.tag_name ?: releases?.firstOrNull()?.tag_name
+        val catalogVersion = catalogResponse?.version?.toString()
+
+        // 3. Enrich existing catalog items with live release download URLs and file sizes
+        latestRelease?.assets?.forEach { asset ->
+            parseAssetToCanonical(asset)?.let { assetBook ->
+                val existing = mergedMap[assetBook.id]
+                if (existing != null) {
+                    mergedMap[assetBook.id] = existing.copy(
+                        fileUrl = if (assetBook.fileUrl.isNotBlank()) assetBook.fileUrl else existing.fileUrl,
+                        fileSizeMb = if (assetBook.fileSizeMb > 0) assetBook.fileSizeMb else existing.fileSizeMb
+                    )
+                } else if (catalogResponse == null || catalogResponse.books.isEmpty()) {
+                    // Only insert asset as standalone book if catalog.json is completely absent
+                    mergedMap[assetBook.id] = assetBook
+                }
+            }
+        }
+
+        val allBooks = mergedMap.values.toList().distinctBy { it.id }
+        val canonicalBooks = allBooks.map { book ->
+            CanonicalBook(
+                canonicalId = book.id,
+                gradeId = book.gradeId,
+                subjectId = book.subjectId,
+                title = book.title,
+                edition = book.edition,
+                fileSizeMb = book.fileSizeMb,
+                fileUrl = book.fileUrl,
+                releaseTag = releaseTag,
+                localFileName = "${book.id}.pdf"
+            )
+        }
         return ResolvedBookCatalog(
             books = allBooks,
+            canonicalBooks = canonicalBooks,
             releaseTag = releaseTag,
             catalogVersion = catalogVersion,
             totalCount = allBooks.size

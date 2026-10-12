@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.BuildConfig
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
@@ -59,6 +60,7 @@ fun SettingsScreen(
     val notifySchedule by viewModel.notifySchedule.collectAsStateWithLifecycle()
     val notifyExams by viewModel.notifyExams.collectAsStateWithLifecycle()
     val hapticsEnabled by viewModel.hapticsEnabled.collectAsStateWithLifecycle()
+    val pendingOutboxCount by viewModel.repository.getPendingOutboxCount().collectAsStateWithLifecycle(initialValue = 0)
 
     var cacheSizeBytes by remember { mutableLongStateOf(0L) }
     var isClearingCache by remember { mutableStateOf(false) }
@@ -254,6 +256,49 @@ fun SettingsScreen(
                         checked = autoSyncEnabled,
                         onCheckedChange = { viewModel.setAutoSyncEnabled(it) }
                     )
+
+                    HorizontalDivider(color = GlassBorderSubtle)
+
+                    // Honest Outbox Queue State
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (pendingOutboxCount == 0) EmeraldGreen.copy(alpha = 0.12f) else WarmAmber.copy(alpha = 0.15f))
+                            .border(1.dp, if (pendingOutboxCount == 0) EmeraldGreen.copy(alpha = 0.4f) else WarmAmber.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(if (pendingOutboxCount == 0) "🟢" else "🟡", fontSize = 14.sp)
+                                Text(
+                                    text = if (pendingOutboxCount == 0) "قائمة الانتظار السحابية: متزامنة تماماً" else "قائمة الانتظار السحابية (Outbox): $pendingOutboxCount عمليات معلقة",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (pendingOutboxCount == 0) EmeraldGreen else WarmAmber
+                                )
+                            }
+                            Text(
+                                text = if (pendingOutboxCount == 0) "كافة تعديلاتك وواجباتك متزامنة ومؤكدة على السيرفر." else "هناك عمليات محفوظة محلياً بانتظار رفعها للسيرفر عند توفر الاتصال.",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+
+                        if (pendingOutboxCount > 0) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            GlassOutlinedButton(
+                                text = "إرسال 📤",
+                                onClick = {
+                                    viewModel.repository.mutationQueue.triggerDrain()
+                                    Toast.makeText(context, "جاري إرسال العمليات المعلقة في قائمة الانتظار...", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.height(32.dp)
+                            )
+                        }
+                    }
 
                     HorizontalDivider(color = GlassBorderSubtle)
 
@@ -509,7 +554,7 @@ fun SettingsScreen(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("🚀", fontSize = 22.sp)
                         Column {
-                            Text("فحص التحديثات والإصدار (1.2.0)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("فحص التحديثات والإصدار (${BuildConfig.VERSION_NAME})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                             Text("التحقق من توافق النسخة مع الخادم وما الجديد", fontSize = 11.sp, color = TextSecondary)
                         }
                     }
@@ -530,7 +575,7 @@ fun SettingsScreen(
                     Text(text = "تـنـويـر ✨", fontSize = 20.sp, fontWeight = FontWeight.Black, color = CyanAccent)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(text = "المنصة التعليمية للطلاب والمعلمين", fontSize = 12.sp, color = TextSecondary)
-                    Text(text = "الإصدار 1.2.0 (Build 2) • معمارية Cloudflare Workers + SQLite Room", fontSize = 11.sp, color = TextMuted)
+                    Text(text = "الإصدار ${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE}) • معمارية Cloudflare Workers + SQLite Room", fontSize = 11.sp, color = TextMuted)
                 }
             }
         }

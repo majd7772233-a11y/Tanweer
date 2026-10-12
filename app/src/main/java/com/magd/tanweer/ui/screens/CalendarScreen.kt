@@ -617,7 +617,7 @@ fun CalendarScreen(
                     onClick = {
                         showAddActionSheet = false
                         viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.setTab(com.magd.tanweer.ui.NavigationTab.HOMEWORK)
+                        viewModel.openAddHomeworkDialog(selectedDateStr)
                     }
                 ) {
                     Row(
@@ -640,7 +640,7 @@ fun CalendarScreen(
                     onClick = {
                         showAddActionSheet = false
                         viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.setTab(com.magd.tanweer.ui.NavigationTab.EXAMS)
+                        viewModel.openAddExamDialog(selectedDateStr)
                     }
                 ) {
                     Row(
@@ -662,7 +662,8 @@ fun CalendarScreen(
                     backgroundColor = GlassSurface,
                     onClick = {
                         showAddActionSheet = false
-                        viewModel.setSubScreen(SubScreen.EVENTS)
+                        viewModel.setSelectedDate(selectedDateStr)
+                        viewModel.openAddEventDialog(selectedDateStr)
                     }
                 ) {
                     Row(

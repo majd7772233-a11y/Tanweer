@@ -359,7 +359,7 @@ fun ExtraSectionsHubScreen(
                         HubActionCard(
                             title = "فحص التحديثات والإصدار",
                             subtitle = "التحقق من توافق النسخة، سجل التحديثات، والميزات الجديدة في المنظومة",
-                            badge = "الإصدار 1.2.0 🚀",
+                            badge = "الإصدار ${com.magd.tanweer.BuildConfig.VERSION_NAME} 🚀",
                             badgeColor = EmeraldGreen,
                             icon = Icons.Default.SystemUpdate,
                             accentColor = EmeraldGreen,

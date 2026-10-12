@@ -57,7 +57,10 @@ fun ExamsScreen(
         viewModel.getScheduleSubjectsForCurrentGrade()
     }
 
-    var isAddExamModalOpen by remember { mutableStateOf(false) }
+    val isAddExamModalOpenFromVm by viewModel.isAddExamModalOpen.collectAsStateWithLifecycle()
+    val initialExamDateFromVm by viewModel.initialExamDate.collectAsStateWithLifecycle()
+    var isLocalAddExamModalOpen by remember { mutableStateOf(false) }
+    val isAddExamModalOpen = isLocalAddExamModalOpen || isAddExamModalOpenFromVm
     var selectedExamForDetail by remember { mutableStateOf<ExamItem?>(null) }
     var examToDelete by remember { mutableStateOf<ExamItem?>(null) }
 
@@ -101,7 +104,7 @@ fun ExamsScreen(
                         text = "إضافة اختبار ＋",
                         color = RubyRed,
                         textColor = Color.White,
-                        onClick = { isAddExamModalOpen = true },
+                        onClick = { isLocalAddExamModalOpen = true },
                         modifier = Modifier.height(40.dp)
                     )
                 }
@@ -114,7 +117,7 @@ fun ExamsScreen(
                         subtitle = "يمكنك إضافة موعد اختبار وتحديد الفصول المطلوبة",
                         icon = "📋",
                         actionButtonText = "إضافة اختبار جديد",
-                        onActionClick = { isAddExamModalOpen = true }
+                        onActionClick = { isLocalAddExamModalOpen = true }
                     )
                 }
             } else {
@@ -141,7 +144,11 @@ fun ExamsScreen(
         if (isAddExamModalOpen) {
             AddExamSheet(
                 gradeSubjects = gradeSubjects,
-                onDismiss = { isAddExamModalOpen = false },
+                initialExamDate = initialExamDateFromVm,
+                onDismiss = {
+                    isLocalAddExamModalOpen = false
+                    viewModel.closeAddExamDialog()
+                },
                 onAdd = { subjId, title, chapters, notes, date ->
                     viewModel.addExam(
                         subjectId = subjId,
@@ -150,13 +157,17 @@ fun ExamsScreen(
                         notes = notes,
                         examDate = date,
                         onResult = { res ->
-                            if (res.isSuccess) {
-                                Toast.makeText(context, "تمت إضافة الاختبار بنجاح ✨", Toast.LENGTH_SHORT).show()
-                                isAddExamModalOpen = false
-                            } else {
-                                val err = res.exceptionOrNull()?.message ?: "حدث خطأ أثناء حفظ الاختبار"
-                                Toast.makeText(context, "تعذر حفظ الاختبار: $err", Toast.LENGTH_LONG).show()
-                            }
+                            res.fold(
+                                onSuccess = { addRes ->
+                                    Toast.makeText(context, addRes.message, Toast.LENGTH_SHORT).show()
+                                    isLocalAddExamModalOpen = false
+                                    viewModel.closeAddExamDialog()
+                                },
+                                onFailure = { error ->
+                                    val err = error.message ?: "حدث خطأ أثناء حفظ الاختبار"
+                                    Toast.makeText(context, "تعذر حفظ الاختبار: $err", Toast.LENGTH_LONG).show()
+                                }
+                            )
                         }
                     )
                 }
@@ -190,9 +201,11 @@ fun ExamsScreen(
                         onClick = {
                             viewModel.deleteExam(exam.id) { res ->
                                 if (res.isSuccess) {
-                                    Toast.makeText(context, "تم حذف الاختبار من الجدول بنجاح ✓", Toast.LENGTH_SHORT).show()
+                                    val deleteResult = res.getOrNull()
+                                    val msg = deleteResult?.message ?: "تم حذف الاختبار من الجدول بنجاح"
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 } else {
-                                    Toast.makeText(context, res.exceptionOrNull()?.message ?: "تعذر حذف الاختبار من السيرفر", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, res.exceptionOrNull()?.message ?: "❌ تعذر حذف نسخة السيرفر", Toast.LENGTH_SHORT).show()
                                 }
                             }
                             examToDelete = null
@@ -475,6 +488,7 @@ fun CanvasSmartStatusBadge(
 @Composable
 fun AddExamSheet(
     gradeSubjects: List<SubjectItem>,
+    initialExamDate: String? = null,
     onDismiss: () -> Unit,
     onAdd: (subjectId: String, title: String, chapters: String?, notes: String?, date: String) -> Unit
 ) {
@@ -483,7 +497,7 @@ fun AddExamSheet(
     var examType by remember { mutableStateOf("MONTHLY") } // MONTHLY, QUIZ, MIDTERM, FINAL
     var chapters by remember { mutableStateOf("") }
     var teacherNotes by remember { mutableStateOf("") }
-    var examDate by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
+    var examDate by remember(initialExamDate) { mutableStateOf(initialExamDate ?: TanweerViewModel.getTodayDateString()) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,

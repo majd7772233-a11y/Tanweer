@@ -26,6 +26,9 @@ interface GroupDao {
     @Query("SELECT * FROM cached_groups WHERE isDiscoverable = 0")
     fun getMyGroups(): Flow<List<GroupEntity>>
 
+    @Query("SELECT * FROM cached_groups WHERE isDiscoverable = 0")
+    suspend fun getMyGroupsSync(): List<GroupEntity>
+
     @Query("SELECT * FROM cached_groups WHERE isDiscoverable = 1")
     fun getDiscoverGroups(): Flow<List<GroupEntity>>
 
@@ -62,6 +65,9 @@ interface ScheduleDao {
 
 @Dao
 interface ContentDao {
+    @Query("SELECT * FROM cached_contents ORDER BY studyDate DESC, createdAt DESC")
+    fun getAllHistoricalContents(): Flow<List<ContentEntity>>
+
     @Query("SELECT * FROM cached_contents WHERE groupId = :groupId ORDER BY studyDate DESC, createdAt DESC")
     fun getAllContents(groupId: String): Flow<List<ContentEntity>>
 
@@ -106,10 +112,16 @@ interface ContentDao {
 
     @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
     suspend fun clearSyncedContents(groupId: String)
+
+    @Query("SELECT COUNT(*) FROM cached_contents WHERE authorName = :authorName AND studyDate BETWEEN :startDate AND :endDate")
+    fun countContentsForAuthorBetween(authorName: String, startDate: String, endDate: String): Flow<Int>
 }
 
 @Dao
 interface HomeworkDao {
+    @Query("SELECT * FROM cached_homeworks ORDER BY dueDate ASC")
+    fun getAllHistoricalHomeworks(): Flow<List<HomeworkEntity>>
+
     @Query("SELECT * FROM cached_homeworks WHERE groupId = :groupId ORDER BY dueDate ASC")
     fun getHomeworks(groupId: String): Flow<List<HomeworkEntity>>
 
@@ -165,6 +177,9 @@ interface HomeworkDao {
 
 @Dao
 interface ExamDao {
+    @Query("SELECT * FROM cached_exams ORDER BY examDate ASC")
+    fun getAllHistoricalExams(): Flow<List<ExamEntity>>
+
     @Query("SELECT * FROM cached_exams WHERE groupId = :groupId ORDER BY examDate ASC")
     fun getExams(groupId: String): Flow<List<ExamEntity>>
 
@@ -309,6 +324,12 @@ interface IssueDao {
 
     @Query("DELETE FROM cached_issues WHERE groupId = :groupId")
     suspend fun clearIssues(groupId: String)
+
+    @Query("SELECT COUNT(*) FROM cached_issue_comments WHERE userId = :userId AND isBestAnswer = 1")
+    fun countBestAnswersForUser(userId: String): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM cached_issue_comments WHERE userId = :userId AND isBestAnswer = 1")
+    suspend fun countBestAnswersForUserSync(userId: String): Int
 }
 
 @Dao
@@ -430,12 +451,18 @@ interface SyncMetaDao {
     @Query("SELECT lastSyncedAt FROM cached_sync_meta WHERE `key` = :key LIMIT 1")
     suspend fun getLastSyncTime(key: String): Long?
 
+    @Query("SELECT etag FROM cached_sync_meta WHERE `key` = :key LIMIT 1")
+    suspend fun getSyncEtag(key: String): String?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun setLastSyncTime(meta: SyncMetaEntity)
 }
 
 @Dao
 interface OutboxDao {
+    @Query("SELECT COUNT(*) FROM outbox WHERE status IN ('PENDING', 'FAILED')")
+    fun getPendingCount(): Flow<Int>
+
     @Query("SELECT * FROM outbox WHERE status IN ('PENDING', 'FAILED') ORDER BY createdAt ASC")
     fun getPendingItems(): Flow<List<OutboxEntity>>
 

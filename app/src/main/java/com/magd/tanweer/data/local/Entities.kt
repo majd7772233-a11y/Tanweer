@@ -289,3 +289,33 @@ sealed class HomeworkToggleResult(val isCompleted: Boolean) {
     class QueuedOffline(isCompleted: Boolean, val message: String = "تم الحفظ محلياً بانتظار الرفع إلى السيرفر 🟡") : HomeworkToggleResult(isCompleted)
     class Failed(isCompleted: Boolean, val error: String) : HomeworkToggleResult(isCompleted)
 }
+
+sealed class ExamDeleteResult(val message: String) {
+    class Synced(message: String = "✅ تم حذف الاختبار من السيرفر والجدول بنجاح") : ExamDeleteResult(message)
+    class QueuedOffline(message: String = "🟡 أزيل من جهازك وسيتم حذف نسخة السيرفر تلقائياً عند توفر الإنترنت") : ExamDeleteResult(message)
+    class Failed(message: String = "❌ تعذر حذف نسخة السيرفر، يرجى المحاولة لاحقاً") : ExamDeleteResult(message)
+}
+
+sealed class CommentAddResult(val message: String) {
+    class Synced(message: String = "✅ تم نشر تعليقك على السيرفر بنجاح ✨") : CommentAddResult(message)
+    class QueuedOffline(message: String = "🟡 تم حفظ التعليق محلياً وسيتم رفعه للسيرفر تلقائياً عند توفر الإنترنت") : CommentAddResult(message)
+    class Failed(message: String = "❌ تعذر إرسال التعليق إلى السيرفر") : CommentAddResult(message)
+}
+
+sealed class ExamAddResult(val isSynced: Boolean, val message: String) {
+    class Synced(val id: String, message: String = "✅ تمت إضافة الاختبار إلى السيرفر والجدول بنجاح") : ExamAddResult(true, message)
+    class QueuedOffline(val id: String, message: String = "🟡 تم حفظ الاختبار في جهازك وسيتم رفعه للسيرفر تلقائياً عند توفر الإنترنت") : ExamAddResult(false, message)
+    class Failed(val error: String) : ExamAddResult(false, error)
+}
+
+sealed class EventAddResult(val isSynced: Boolean, val message: String) {
+    class Synced(val id: String, message: String = "✅ تم توثيق الفعالية على السيرفر بنجاح") : EventAddResult(true, message)
+    class QueuedOffline(val id: String, message: String = "🟡 تم حفظ الفعالية محلياً وسيتم رفعها للسيرفر تلقائياً عند توفر الإنترنت") : EventAddResult(false, message)
+    class Failed(val error: String) : EventAddResult(false, error)
+}
+
+sealed class IssueAddResult(val isSynced: Boolean, val message: String) {
+    class Synced(val id: String, message: String = "✅ تم نشر الاستفسار على السيرفر بنجاح") : IssueAddResult(true, message)
+    class QueuedOffline(val id: String, message: String = "🟡 تم حفظ الاستفسار محلياً وسيتم رفعه للسيرفر تلقائياً عند توفر الإنترنت") : IssueAddResult(false, message)
+    class Failed(val error: String) : IssueAddResult(false, error)
+}

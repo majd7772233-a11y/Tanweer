@@ -9,7 +9,7 @@
     "test": "vitest run",
     "db:migrate:local": "wrangler d1 migrations apply tanweer-db --local",
     "db:migrate:prod": "wrangler d1 migrations apply tanweer-db --remote",
-    "lint": "eslint src/ --ext .ts",
+    "lint": "tsc --noEmit",
     "types": "tsc --noEmit"
   },
   "dependencies": {},

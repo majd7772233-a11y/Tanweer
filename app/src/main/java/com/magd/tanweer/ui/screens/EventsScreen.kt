@@ -58,7 +58,10 @@ fun EventsScreen(
     val todayStr = remember { TanweerViewModel.getTodayDateString() }
 
     var selectedCategory by remember { mutableStateOf("ALL") }
-    var showAddDialog by remember { mutableStateOf(false) }
+    val isAddEventModalOpenFromVm by viewModel.isAddEventModalOpen.collectAsStateWithLifecycle()
+    val initialEventDateFromVm by viewModel.initialEventDate.collectAsStateWithLifecycle()
+    var isLocalAddDialog by remember { mutableStateOf(false) }
+    val showAddDialog = isLocalAddDialog || isAddEventModalOpenFromVm
     var activeTab by remember { mutableIntStateOf(0) } // 0 = قادمة, 1 = أرشيف سابقة
 
     val categories = listOf(
@@ -85,7 +88,7 @@ fun EventsScreen(
     Scaffold(
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { showAddDialog = true },
+                onClick = { isLocalAddDialog = true },
                 containerColor = PurpleAccent,
                 contentColor = TextOnAccent,
                 shape = CircleShape,
@@ -146,7 +149,7 @@ fun EventsScreen(
                     GlassButton(
                         text = "إضافة فعالية",
                         icon = Icons.Default.Add,
-                        onClick = { showAddDialog = true },
+                        onClick = { isLocalAddDialog = true },
                         modifier = Modifier.height(36.dp)
                     )
                 }
@@ -239,7 +242,7 @@ fun EventsScreen(
                         subtitle = "يمكن لأي عضو في الشعبة أو المدرسة إضافة وتوثيق فعالية جديدة ليراها الجميع في التقويم وصفحة الفعاليات.",
                         icon = "🎪",
                         actionButtonText = "إضافة فعالية للشعبة",
-                        onActionClick = { showAddDialog = true }
+                        onActionClick = { isLocalAddDialog = true }
                     )
                 }
             } else {
@@ -338,12 +341,17 @@ fun EventsScreen(
     if (showAddDialog) {
         var title by remember { mutableStateOf("") }
         var category by remember { mutableStateOf("ACTIVITY") }
-        var eventDate by remember { mutableStateOf(todayStr) }
+        var eventDate by remember(initialEventDateFromVm) { mutableStateOf(initialEventDateFromVm ?: todayStr) }
         var timeStr by remember { mutableStateOf("") }
         var location by remember { mutableStateOf("") }
         var description by remember { mutableStateOf("") }
 
-        Dialog(onDismissRequest = { showAddDialog = false }) {
+        val dismissDialog = {
+            isLocalAddDialog = false
+            viewModel.closeAddEventDialog()
+        }
+
+        Dialog(onDismissRequest = dismissDialog) {
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -459,7 +467,7 @@ fun EventsScreen(
                             .padding(top = 8.dp),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = { showAddDialog = false }) {
+                        TextButton(onClick = dismissDialog) {
                             Text("إلغاء", color = TextSecondary)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
@@ -477,13 +485,16 @@ fun EventsScreen(
                                     timeStr = timeStr.trim().ifBlank { null },
                                     location = location.trim().ifBlank { null },
                                     onResult = { res ->
-                                        if (res.isSuccess) {
-                                            Toast.makeText(context, "تمت إضافة الفعالية بنجاح وسوف تظهر في التقويم 🎪", Toast.LENGTH_SHORT).show()
-                                            showAddDialog = false
-                                        } else {
-                                            val err = res.exceptionOrNull()?.message ?: "حدث خطأ أثناء حفظ الفعالية"
-                                            Toast.makeText(context, "تعذر إضافة الفعالية: $err", Toast.LENGTH_LONG).show()
-                                        }
+                                        res.fold(
+                                            onSuccess = { addRes ->
+                                                Toast.makeText(context, addRes.message, Toast.LENGTH_SHORT).show()
+                                                dismissDialog()
+                                            },
+                                            onFailure = { error ->
+                                                val err = error.message ?: "حدث خطأ أثناء حفظ الفعالية"
+                                                Toast.makeText(context, "تعذر إضافة الفعالية: $err", Toast.LENGTH_LONG).show()
+                                            }
+                                        )
                                     }
                                 )
                             },

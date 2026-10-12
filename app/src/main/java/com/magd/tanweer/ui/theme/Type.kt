@@ -112,3 +112,17 @@ val Typography = Typography(
     labelMedium = TanweerTypographyTokens.LabelMedium,
     labelSmall = TanweerTypographyTokens.LabelSmall
 )
+
+// Semantic Tanweer Typography Hierarchy Accessors for unified design across screens
+object AppTypography {
+    val Hero: TextStyle get() = TanweerTypographyTokens.DisplayHero
+    val SectionHeader: TextStyle get() = TanweerTypographyTokens.HeadlineMedium
+    val CardTitle: TextStyle get() = TanweerTypographyTokens.TitleMedium
+    val CardSubtitle: TextStyle get() = TanweerTypographyTokens.BodySmall
+    val Title: TextStyle get() = TanweerTypographyTokens.TitleSmall
+    val Body: TextStyle get() = TanweerTypographyTokens.BodyMedium
+    val Caption: TextStyle get() = TanweerTypographyTokens.LabelMedium
+    val Meta: TextStyle get() = TanweerTypographyTokens.LabelSmall
+    val Button: TextStyle get() = TanweerTypographyTokens.LabelLarge
+    val Nav: TextStyle get() = TanweerTypographyTokens.LabelMedium
+}

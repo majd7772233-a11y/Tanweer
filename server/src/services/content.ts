@@ -66,6 +66,17 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   const contentId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
     : generateId('cnt');
+
+  // Idempotency check
+  const existing = await env.DB.prepare(`SELECT id FROM contents WHERE id = ?`).bind(contentId).first<{ id: string }>();
+  if (existing) {
+    return jsonResponse({
+      success: true,
+      contentId: existing.id,
+      message: 'تم توثيق الدرس بنجاح',
+    });
+  }
+
   const now = Date.now();
   const gradeNameMap: Record<number, string> = {
     7: 'سابع', 8: 'ثامن', 9: 'تاسع', 10: 'أول ثانوي', 11: 'ثاني ثانوي', 12: 'ثالث ثانوي'

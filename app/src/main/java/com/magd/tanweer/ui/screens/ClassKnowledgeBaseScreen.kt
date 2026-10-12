@@ -53,7 +53,22 @@ fun ClassKnowledgeBaseScreen(
     }
 
     val currentSubject = remember(selectedSubjectId, gradeSubjects) {
-        gradeSubjects.find { it.id == selectedSubjectId } ?: gradeSubjects.firstOrNull() ?: DefaultSubjects.first()
+        gradeSubjects.find { it.id == selectedSubjectId }
+    }
+
+    if (currentSubject == null) {
+        // Show comprehensive Subject Catalog Grid for selecting any subject without forcing Math
+        SubjectHubCatalog(
+            subjects = gradeSubjects,
+            gradeName = currentUser?.gradeName ?: "المرحلة الدراسية",
+            onSelectSubject = { subjId ->
+                viewModel.openSubjectKnowledgeBase(subjId)
+            },
+            onBack = {
+                viewModel.setSubScreen(SubScreen.NONE)
+            }
+        )
+        return
     }
 
     // Load data for active subject
@@ -148,6 +163,23 @@ fun ClassKnowledgeBaseScreen(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(GlassSurface)
+                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(20.dp))
+                        .clickable { viewModel.openSubjectKnowledgeBase(null) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "📚 جميع المواد",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = CyanAccent
+                    )
+                }
+            }
             items(gradeSubjects, key = { it.id }) { subj ->
                 val isSelected = subj.id == currentSubject.id
                 val subjColor = try {
@@ -670,3 +702,99 @@ fun CorrectionRequestModal(
 }
 
 private fun String?.isNull_or_empty(): Boolean = this == null || this.trim().isEmpty()
+
+@Composable
+private fun SubjectHubCatalog(
+    subjects: List<com.magd.tanweer.data.model.SubjectItem>,
+    gradeName: String,
+    onSelectSubject: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MidnightBackground)
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(GlassSurface)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "رجوع",
+                    tint = CyanAccent
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = "بنك معرفة المواد الدراسية 📚",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    color = CyanAccent
+                )
+                Text(
+                    text = "$gradeName • اختر المادة لتصفح مستودعها",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
+            items(subjects.size) { index ->
+                val subj = subjects[index]
+                val subjColor = try {
+                    Color(android.graphics.Color.parseColor(subj.colorHex))
+                } catch (_: Exception) {
+                    CyanAccent
+                }
+
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = subjColor.copy(alpha = 0.12f),
+                    borderColor = subjColor.copy(alpha = 0.4f),
+                    onClick = { onSelectSubject(subj.id) }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(text = subj.icon, fontSize = 32.sp)
+                        Text(
+                            text = subj.name,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        GlassPill(
+                            text = "استعراض المستودع 📂",
+                            color = subjColor,
+                            bgColor = subjColor.copy(alpha = 0.2f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

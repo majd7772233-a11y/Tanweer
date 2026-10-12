@@ -652,10 +652,12 @@ fun IssueDetailView(
                             viewModel.addIssueComment(issueId, textToSend) { res ->
                                 if (res.isSuccess) {
                                     replyText = ""
-                                    Toast.makeText(context, "تم نشر تعليقك بنجاح ✨", Toast.LENGTH_SHORT).show()
+                                    val commentResult = res.getOrNull()
+                                    val msg = commentResult?.message ?: "تم تسجيل تعليقك بنجاح ✨"
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 } else {
                                     val err = res.exceptionOrNull()?.message ?: "فشل إرسال التعليق"
-                                    Toast.makeText(context, "تعذر إرسال التعليق: $err", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "❌ تعذر إرسال التعليق: $err", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }

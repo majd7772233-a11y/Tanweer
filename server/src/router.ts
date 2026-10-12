@@ -213,15 +213,15 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     return handleGetScheduleVersions(groupId, user, env);
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/vote') && method === 'POST') {
-    const proposalId = path.split('/')[4];
+    const proposalId = path.split('/')[5];
     return handleVoteScheduleProposal(proposalId, user, request, env);
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/approve') && method === 'POST') {
-    const proposalId = path.split('/')[4];
+    const proposalId = path.split('/')[5];
     return handleApproveScheduleProposal(proposalId, user, env);
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/reject') && method === 'POST') {
-    const proposalId = path.split('/')[4];
+    const proposalId = path.split('/')[5];
     return handleRejectScheduleProposal(proposalId, user, request, env);
   }
   if ((path === '/api/v1/schedule/proposals' || (path.startsWith('/api/v1/schedule/') && path.endsWith('/proposals'))) && method === 'POST') {
@@ -255,8 +255,13 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     const contentId = path.split('/')[4];
     return handleVoteUseful(contentId, user, env);
   }
-  if (path.startsWith('/api/v1/content/') && !path.endsWith('/useful')) {
+  if (path.startsWith('/api/v1/content/') && path.endsWith('/corrections') && method === 'POST') {
     const contentId = path.split('/')[4];
+    return handleCreateContentCorrection(contentId, user, request, env);
+  }
+  const contentParts = path.split('/');
+  if (path.startsWith('/api/v1/content/') && contentParts.length === 5) {
+    const contentId = contentParts[4];
     if (method === 'PUT' || method === 'PATCH' || method === 'POST') {
       return handleUpdateContent(contentId, user, request, env);
     }
@@ -371,10 +376,6 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
 
   // Content Corrections
-  if (path.startsWith('/api/v1/content/') && path.endsWith('/corrections') && method === 'POST') {
-    const contentId = path.split('/')[4];
-    return handleCreateContentCorrection(contentId, user, request, env);
-  }
   if (path.startsWith('/api/v1/groups/') && path.endsWith('/corrections') && method === 'GET') {
     const groupId = path.split('/')[4];
     return handleGetGroupCorrections(groupId, user, env);

@@ -136,9 +136,10 @@ export function evaluatePasswordStrength(password: string): {
 }
 
 export function isValidGradeSection(gradeId: number, sectionId: string): boolean {
-  if (gradeId === 7) return ['A'].includes(sectionId);
-  if (gradeId === 8 || gradeId === 9) return ['A', 'B'].includes(sectionId);
-  if (gradeId === 10 || gradeId === 11) return ['A', 'B', 'C', 'D'].includes(sectionId);
-  if (gradeId === 12) return ['A', 'B', 'C'].includes(sectionId);
+  const cleanSec = (sectionId || '').trim().toUpperCase();
+  if (gradeId === 7) return ['A'].includes(cleanSec);
+  if (gradeId === 8 || gradeId === 9) return ['A', 'B'].includes(cleanSec);
+  if (gradeId === 10 || gradeId === 11) return ['A', 'B', 'C', 'D'].includes(cleanSec);
+  if (gradeId === 12) return ['A', 'B', 'C'].includes(cleanSec);
   return false;
 }

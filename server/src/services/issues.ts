@@ -87,6 +87,17 @@ export async function handleCreateIssue(user: UserContext, request: Request, env
   const issueId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
     : generateId('iss');
+
+  // Idempotency check
+  const existing = await env.DB.prepare(`SELECT id FROM issues WHERE id = ?`).bind(issueId).first<{ id: string }>();
+  if (existing) {
+    return jsonResponse({
+      success: true,
+      issueId: existing.id,
+      message: 'تم طرح الاستفسار بنجاح',
+    });
+  }
+
   const now = Date.now();
   await env.DB.prepare(
     `INSERT INTO issues (id, group_id, subject_id, homework_id, exam_id, title, description, status, created_by, author_name, created_at, updated_at)

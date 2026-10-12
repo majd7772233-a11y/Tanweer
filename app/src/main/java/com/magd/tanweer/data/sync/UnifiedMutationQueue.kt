@@ -159,6 +159,47 @@ class UnifiedMutationQueue(
                         handleMutationFailure(item, "فشل حذف الامتحان من الخادم (${res.code()})")
                     }
                 }
+                "SCHEDULE_SLOT_DELETE" -> {
+                    val parts = item.entityId.split(":")
+                    if (parts.size >= 3) {
+                        val gId = parts[0]
+                        val day = parts[1].toIntOrNull() ?: 0
+                        val order = parts[2].toIntOrNull() ?: 0
+                        val res = api.deleteScheduleSlot(gId, day, order)
+                        if (res.isSuccessful || res.code() == 404) {
+                            outboxDao.deleteOutbox(item.id)
+                        } else {
+                            handleMutationFailure(item, "فشل حذف الحصة من الخادم (${res.code()})")
+                        }
+                    } else {
+                        outboxDao.deleteOutbox(item.id)
+                    }
+                }
+                "SCHEDULE_SLOT_UPDATE" -> {
+                    val slot = db.scheduleDao().getSlotById(item.entityId)
+                    if (slot != null) {
+                        val res = api.createScheduleSlot(
+                            groupId = slot.groupId,
+                            req = com.magd.tanweer.data.remote.CreateScheduleSlotRequest(
+                                dayOfWeek = slot.dayOfWeek,
+                                slotOrder = slot.slotOrder,
+                                subjectId = slot.subjectId,
+                                subjectName = slot.subjectName,
+                                subjectIcon = slot.subjectIcon,
+                                colorHex = slot.colorHex,
+                                startTime = slot.startTime,
+                                endTime = slot.endTime
+                            )
+                        )
+                        if (res.isSuccessful) {
+                            outboxDao.deleteOutbox(item.id)
+                        } else {
+                            handleMutationFailure(item, "فشل حفظ الحصة في الخادم (${res.code()})")
+                        }
+                    } else {
+                        outboxDao.deleteOutbox(item.id)
+                    }
+                }
                 else -> {
                     outboxDao.deleteOutbox(item.id)
                 }

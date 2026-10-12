@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -61,15 +62,61 @@ fun GroupsScreen(
     var chatInputText by remember { mutableStateOf("") }
     var isSendingChat by remember { mutableStateOf(false) }
 
+    val pendingChatGroupId by viewModel.pendingDeepLinkChatGroupId.collectAsStateWithLifecycle()
+    val pendingMessageId by viewModel.pendingDeepLinkMessageId.collectAsStateWithLifecycle()
+    val chatListState = rememberLazyListState()
+
+    // Handle incoming deep link from Search
+    LaunchedEffect(pendingChatGroupId, myGroups, discoverGroups) {
+        val targetGId = pendingChatGroupId
+        if (!targetGId.isNullOrBlank()) {
+            val targetGroup = myGroups.find { it.id == targetGId }
+                ?: discoverGroups.find { it.id == targetGId }
+                ?: GroupItem(id = targetGId, name = "نقاش المجموعة", type = "CLASS")
+            activeChatGroup = targetGroup
+        }
+    }
+
+    var highlightedMessageId by remember { mutableStateOf<String?>(null) }
+
+    // Scroll to message when deep linked
+    LaunchedEffect(pendingMessageId, chatMessages) {
+        val targetMsgId = pendingMessageId
+        if (!targetMsgId.isNullOrBlank() && chatMessages.isNotEmpty()) {
+            val index = chatMessages.indexOfFirst { it.id == targetMsgId }
+            if (index != -1) {
+                highlightedMessageId = targetMsgId
+                chatListState.animateScrollToItem(index)
+                viewModel.clearPendingDeepLink()
+                kotlinx.coroutines.delay(2500)
+                highlightedMessageId = null
+            }
+        }
+    }
+
+    // Connect WebSocket when inside chat, disconnect cleanly when activeChatGroup becomes null
     LaunchedEffect(activeChatGroup?.id) {
         val g = activeChatGroup
         if (g != null) {
             viewModel.connectGroupChat(g.id)
+        } else {
+            viewModel.disconnectGroupChat()
+        }
+    }
+
+    // Ensure disconnect when GroupsScreen is entirely disposed/left
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.disconnectGroupChat()
+            viewModel.clearPendingDeepLink()
         }
     }
 
     if (activeChatGroup != null) {
-        BackHandler { activeChatGroup = null }
+        BackHandler {
+            activeChatGroup = null
+            viewModel.disconnectGroupChat()
+        }
 
         // -------------------------------------------------------------
         // GROUP CHAT VIEW (Live WebSocket + REST Sync + Room Persistence)
@@ -95,7 +142,10 @@ fun GroupsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { activeChatGroup = null }) {
+                            IconButton(onClick = {
+                                activeChatGroup = null
+                                viewModel.disconnectGroupChat()
+                            }) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "عودة",
@@ -143,6 +193,7 @@ fun GroupsScreen(
 
                 // Chat Messages List
                 LazyColumn(
+                    state = chatListState,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
@@ -160,6 +211,7 @@ fun GroupsScreen(
                     } else {
                         items(chatMessages, key = { it.id }) { msg ->
                             val isMe = msg.senderId == currentUser?.id || msg.isMe
+                            val isHighlighted = msg.id == highlightedMessageId
                             Box(
                                 modifier = Modifier.fillMaxWidth(),
                                 contentAlignment = if (isMe) Alignment.CenterEnd else Alignment.CenterStart
@@ -175,10 +227,16 @@ fun GroupsScreen(
                                                 bottomEnd = if (isMe) 4.dp else 16.dp
                                             )
                                         )
-                                        .background(if (isMe) CyanGlow else MidnightSurface)
+                                        .background(
+                                            if (isHighlighted) WarmAmber.copy(alpha = 0.25f)
+                                            else if (isMe) CyanGlow
+                                            else MidnightSurface
+                                        )
                                         .border(
-                                            1.dp,
-                                            if (isMe) CyanAccent.copy(alpha = 0.4f) else GlassBorderSubtle,
+                                            if (isHighlighted) 2.dp else 1.dp,
+                                            if (isHighlighted) WarmAmber
+                                            else if (isMe) CyanAccent.copy(alpha = 0.4f)
+                                            else GlassBorderSubtle,
                                             RoundedCornerShape(16.dp)
                                         )
                                         .padding(10.dp)
@@ -256,18 +314,33 @@ fun GroupsScreen(
                             val gId = activeChatGroup?.id
                             if (text.isNotBlank() && gId != null && !isSendingChat) {
                                 isSendingChat = true
+                                val sentText = text
                                 chatInputText = ""
-                                viewModel.sendChatMessage(text, targetGroupId = gId)
-                                isSendingChat = false
+                                viewModel.sendChatMessage(sentText, targetGroupId = gId) { success ->
+                                    isSendingChat = false
+                                    if (!success) {
+                                        // restore input text if failed
+                                        chatInputText = sentText
+                                        android.widget.Toast.makeText(context, "تعذر إرسال الرسالة، تم استعادة النص في حقل الكتابة", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             }
                         },
                         enabled = !isSendingChat && chatInputText.isNotBlank(),
                         modifier = Modifier
                             .size(46.dp)
                             .clip(CircleShape)
-                            .background(if (chatInputText.isNotBlank()) CyanAccent else CyanAccent.copy(alpha = 0.5f))
+                            .background(if (chatInputText.isNotBlank() && !isSendingChat) CyanAccent else CyanAccent.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = "إرسال", tint = TextOnAccent)
+                        if (isSendingChat) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = TextOnAccent,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.Send, contentDescription = "إرسال", tint = TextOnAccent)
+                        }
                     }
                 }
             }

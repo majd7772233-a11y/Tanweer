@@ -52,6 +52,22 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
     ? body.id.trim()
     : generateId('evt');
 
+  // Idempotency check
+  const existing = await env.DB.prepare(`SELECT id, is_official FROM events WHERE id = ?`).bind(eventId).first<{
+    id: string;
+    is_official: number;
+  }>();
+  if (existing) {
+    return jsonResponse({
+      success: true,
+      eventId: existing.id,
+      isOfficial: existing.is_official === 1,
+      message: existing.is_official === 1
+        ? 'تم نشر الفعالية المدرسية الرسمية بنجاح 🎪'
+        : 'تمت إضافة مقترح الفعالية ومشاركته مع الزملاء 📅',
+    });
+  }
+
   await env.DB.prepare(
     `INSERT INTO events (id, group_id, event_date, time_str, title, description, category, location, is_official, created_by, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`

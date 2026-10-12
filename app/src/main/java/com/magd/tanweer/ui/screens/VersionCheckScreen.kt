@@ -33,6 +33,9 @@ import com.magd.tanweer.ui.components.GlassButton
 import com.magd.tanweer.ui.components.GlassCard
 import com.magd.tanweer.ui.components.GlassPill
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.AppVersionInfo
+import com.magd.tanweer.util.AppVersionManager
+import com.magd.tanweer.util.VersionSource
 import kotlinx.coroutines.launch
 
 @Composable
@@ -48,7 +51,7 @@ fun VersionCheckScreen(
     var isChecking by remember { mutableStateOf(false) }
     var lastCheckedTime by remember { mutableStateOf<String?>("لم يتم الفحص بعد") }
     var checkErrorMessage by remember { mutableStateOf<String?>(null) }
-    var remoteVersionResponse by remember { mutableStateOf<SystemVersionResponse?>(null) }
+    var versionInfoState by remember { mutableStateOf<AppVersionInfo?>(null) }
 
     val defaultChangelog = listOf(
         "✨ نظام الحوكمة الموحد والتصويت الشامل على القرارات المدرسية",
@@ -56,21 +59,21 @@ fun VersionCheckScreen(
         "📚 مكتبة المناهج الذكية مع إدارة متقدمة للتخزين والذاكرة",
         "🛡️ محرك الصلاحيات الهرمي وتأمين ترقيات الرتب المدرسية",
         "🚀 دعم واسع للأجهزة بدءاً من Android 6.0 (API 23+) فما فوق",
-        "⚡ مزامنة متكاملة Offline-First وموثوقية عالية دون انقطاع"
+        "🔄 دعم العمل بدون اتصال مع حفظ محلي وإعادة محاولة تلقائية عند توفر الإنترنت"
     )
 
     fun performVersionCheck() {
         scope.launch {
             isChecking = true
             checkErrorMessage = null
-            val result = viewModel.repository.getSystemVersion()
+            val result = AppVersionManager.checkVersion()
             isChecking = false
             result.fold(
                 onSuccess = { res ->
-                    remoteVersionResponse = res
+                    versionInfoState = res
                     lastCheckedTime = "منذ لحظات"
-                    if (res.versionCode > installedVersionCode) {
-                        Toast.makeText(context, "يتوفر تحديث جديد: الإصدار ${res.currentVersion} 🚀", Toast.LENGTH_LONG).show()
+                    if (res.isUpdateAvailable) {
+                        Toast.makeText(context, "يتوفر تحديث جديد: الإصدار ${res.currentVersionName} 🚀", Toast.LENGTH_LONG).show()
                     } else {
                         Toast.makeText(context, "أنت تستخدم أحدث إصدار معتمد من تـنـويـر ✓", Toast.LENGTH_SHORT).show()
                     }
@@ -88,9 +91,9 @@ fun VersionCheckScreen(
         performVersionCheck()
     }
 
-    val remoteVersion = remoteVersionResponse
-    val isUpdateAvailable = remoteVersion != null && remoteVersion.versionCode > installedVersionCode
-    val changelogToDisplay = remoteVersion?.changelog?.takeIf { it.isNotEmpty() } ?: defaultChangelog
+    val versionInfo = versionInfoState
+    val isUpdateAvailable = versionInfo?.isUpdateAvailable == true
+    val changelogToDisplay = versionInfo?.changelog?.takeIf { it.isNotEmpty() } ?: defaultChangelog
 
     LazyColumn(
         modifier = Modifier
@@ -191,11 +194,11 @@ fun VersionCheckScreen(
 
         // Status Card / Update Notice
         item {
-            if (isUpdateAvailable && remoteVersion != null) {
+            if (isUpdateAvailable && versionInfo != null) {
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = MidnightSurface,
-                    borderColor = WarmAmber.copy(alpha = 0.7f)
+                    borderColor = if (versionInfo.isMandatory) Color(0xFFFF5252).copy(alpha = 0.8f) else WarmAmber.copy(alpha = 0.7f)
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -210,38 +213,76 @@ fun VersionCheckScreen(
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(CircleShape)
-                                    .background(WarmAmber.copy(alpha = 0.15f))
-                                    .border(1.dp, WarmAmber, CircleShape),
+                                    .background((if (versionInfo.isMandatory) Color(0xFFFF5252) else WarmAmber).copy(alpha = 0.15f))
+                                    .border(1.dp, if (versionInfo.isMandatory) Color(0xFFFF5252) else WarmAmber, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Notifications, contentDescription = null, tint = WarmAmber, modifier = Modifier.size(24.dp))
+                                Icon(
+                                    Icons.Default.Notifications,
+                                    contentDescription = null,
+                                    tint = if (versionInfo.isMandatory) Color(0xFFFF5252) else WarmAmber,
+                                    modifier = Modifier.size(24.dp)
+                                )
                             }
                             Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        text = "يتوفر إصدار جديد (${versionInfo.currentVersionName})",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (versionInfo.isMandatory) Color(0xFFFF5252) else WarmAmber
+                                    )
+                                    GlassPill(
+                                        text = versionInfo.source.label,
+                                        color = CyanAccent,
+                                        bgColor = CyanGlow.copy(alpha = 0.2f)
+                                    )
+                                }
                                 Text(
-                                    text = "يتوفر إصدار جديد من تنوير (${remoteVersion.currentVersion})",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = WarmAmber
-                                )
-                                Text(
-                                    text = "تاريخ الإطلاق: ${remoteVersion.releaseDate ?: "2026-10-06"}",
+                                    text = "تاريخ الإطلاق: ${versionInfo.releaseDate ?: "معتمد"} • إصدار جهازك: v${versionInfo.installedVersionName}",
                                     fontSize = 11.sp,
                                     color = TextSecondary
                                 )
                             }
                         }
 
-                        val downloadUrl = remoteVersion.downloadUrl ?: "https://github.com/majd7772233-a11y/tanweer/releases/latest"
+                        if (versionInfo.isMandatory) {
+                            Text(
+                                text = "⚠️ هذا التحديث إلزامي لضمان توافق البيانات وأمان الحساب المدرسي.",
+                                fontSize = 12.sp,
+                                color = Color(0xFFFF8A80),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // Direct APK Download Option if available
+                        if (!versionInfo.directApkUrl.isNullOrBlank()) {
+                            GlassButton(
+                                text = "تنزيل وتثبيت التحديث (APK) مباشرة 📥",
+                                icon = Icons.Default.Download,
+                                color = EmeraldGreen,
+                                onClick = {
+                                    AppVersionManager.startNativeApkDownload(
+                                        context,
+                                        versionInfo.directApkUrl,
+                                        versionInfo.currentVersionName
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        // Honest Web Page button
                         GlassButton(
-                            text = "تحميل وتحديث التطبيق الآن 🚀",
-                            icon = Icons.Default.ArrowForward,
+                            text = "الانتقال إلى صفحة الإصدار في المتصفح 🌐",
+                            icon = Icons.Default.OpenInBrowser,
                             color = WarmAmber,
                             onClick = {
                                 try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl))
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(versionInfo.webpageUrl))
                                     context.startActivity(intent)
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "تعذر فتح رابط التحميل", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "تعذر فتح المتصفح", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -326,7 +367,7 @@ fun VersionCheckScreen(
         // Changelog Section
         item {
             Text(
-                text = "سجل التحديثات والميزات الجديدة في الإصدار ${remoteVersion?.currentVersion ?: installedVersionName}:",
+                text = "سجل التحديثات والميزات الجديدة في الإصدار ${versionInfo?.currentVersionName ?: installedVersionName}:",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = CyanAccent,

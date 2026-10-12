@@ -153,13 +153,23 @@ export async function handleGetMedia(mediaId: string, env: Env): Promise<Respons
 
   const row = await env.DB.prepare(
     `SELECT mime_type, data FROM media_blobs WHERE id = ? LIMIT 1`
-  ).bind(cleanId).first<{ mime_type: string; data: ArrayBuffer }>();
+  ).bind(cleanId).first<{ mime_type: string; data: ArrayBuffer | number[] | Uint8Array }>();
 
   if (!row || !row.data) {
     return errorResponse('NOT_FOUND', 'الصورة غير موجودة', 404);
   }
 
-  return new Response(row.data, {
+  const rawData: any = row.data;
+  let bodyData: BodyInit;
+  if (rawData instanceof ArrayBuffer || rawData instanceof Uint8Array) {
+    bodyData = rawData;
+  } else if (Array.isArray(rawData)) {
+    bodyData = new Uint8Array(rawData);
+  } else {
+    bodyData = rawData;
+  }
+
+  return new Response(bodyData, {
     status: 200,
     headers: {
       'Content-Type': row.mime_type || 'image/jpeg',

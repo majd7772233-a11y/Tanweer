@@ -30,6 +30,8 @@ import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.GlassCard
 import com.magd.tanweer.ui.components.GlassPill
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.AcademicArchiveEngine
+import com.magd.tanweer.util.AcademicYearManager
 
 @Composable
 fun AcademicHistoryScreen(
@@ -37,6 +39,10 @@ fun AcademicHistoryScreen(
 ) {
     BackHandler {
         viewModel.navigateBack()
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.repository.syncStudentAcademicArchive()
     }
 
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
@@ -48,49 +54,67 @@ fun AcademicHistoryScreen(
         SchoolHierarchy.getSubjectsForGrade(currentUser?.gradeId ?: 11)
     }
 
-    // Load full historical content across all dates, plus homeworks and exams
-    val allContents by viewModel.repository.getAllContents(activeGroupId)
+    // Load group-specific and all-historical cross-group content
+    val activeGroupContents by viewModel.repository.getAllContents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
-    val allHomeworks by viewModel.repository.getHomeworks(activeGroupId)
+    val activeGroupHomeworks by viewModel.repository.getHomeworks(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
-    val allExams by viewModel.repository.getExams(activeGroupId)
+    val activeGroupExams by viewModel.repository.getExams(activeGroupId)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val allHistoricalContents by viewModel.repository.getAllHistoricalContents()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val allHistoricalHomeworks by viewModel.repository.getAllHistoricalHomeworks()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val allHistoricalExams by viewModel.repository.getAllHistoricalExams()
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val academicYears = listOf("2026-2027", "2025-2026", "2024-2025")
 
-    // Mode: 0 = إنجازاتي الشخصية, 1 = أرشيف الشعبة
+    // Mode: 0 = إنجازاتي الشخصية (الأرشيف الشخصي الشامل عبر كل المجموعات), 1 = أرشيف الشعبة الحالية
     var viewMode by remember { mutableIntStateOf(0) }
 
-    // Helper to match dates with school years
-    fun isDateInAcademicYear(dateStr: String, year: String): Boolean {
-        if (dateStr.isBlank()) return false
-        val parts = year.split("-")
-        if (parts.size != 2) return true
-        val startYear = parts[0].trim()
-        val endYear = parts[1].trim()
-        val dateYear = dateStr.take(4)
-        return when (year) {
-            "2026-2027" -> dateYear == "2026" || dateYear == "2027"
-            "2025-2026" -> dateYear == "2025" || (dateYear == "2026" && dateStr < "2026-08-01")
-            "2024-2025" -> dateYear == "2024" || (dateYear == "2025" && dateStr < "2025-08-01")
-            else -> dateStr.startsWith(startYear) || dateStr.startsWith(endYear)
-        }
+    val allContents = remember(viewMode, activeGroupContents, allHistoricalContents) {
+        if (viewMode == 0) allHistoricalContents else activeGroupContents
+    }
+    val allHomeworks = remember(viewMode, activeGroupHomeworks, allHistoricalHomeworks) {
+        if (viewMode == 0) allHistoricalHomeworks else activeGroupHomeworks
+    }
+    val allExams = remember(viewMode, activeGroupExams, allHistoricalExams) {
+        if (viewMode == 0) allHistoricalExams else activeGroupExams
     }
 
-    // Filtered by selected year
+    val todayStr = remember { TanweerViewModel.getTodayDateString() }
+
+    // Generate comprehensive academic archive report
+    val archiveReport = remember(selectedYear, allContents, allHomeworks, allExams, currentUser) {
+        AcademicArchiveEngine.generateArchiveReport(
+            academicYear = selectedYear,
+            contents = allContents,
+            homeworks = allHomeworks,
+            exams = allExams,
+            userFullName = currentUser?.fullName,
+            currentDate = todayStr
+        )
+    }
+
+    // Filtered by selected year using deterministic academic calendar boundaries (Point 20)
     val yearContents = remember(allContents, selectedYear) {
-        allContents.filter { isDateInAcademicYear(it.studyDate, selectedYear) }
+        allContents.filter { AcademicYearManager.isDateInAcademicYear(it.studyDate, selectedYear) }
     }
     val yearHomeworks = remember(allHomeworks, selectedYear) {
-        allHomeworks.filter { isDateInAcademicYear(it.dueDate, selectedYear) || isDateInAcademicYear(it.studyDate, selectedYear) }
+        allHomeworks.filter {
+            AcademicYearManager.isDateInAcademicYear(it.dueDate, selectedYear) ||
+                    AcademicYearManager.isDateInAcademicYear(it.studyDate, selectedYear)
+        }
     }
     val yearExams = remember(allExams, selectedYear) {
-        allExams.filter { isDateInAcademicYear(it.examDate, selectedYear) }
+        allExams.filter { AcademicYearManager.isDateInAcademicYear(it.examDate, selectedYear) }
     }
 
-    // Personal achievements filtering
+    // Personal achievements filtering: matches student across all academic groups
     val myPersonalLessons = remember(yearContents, currentUser) {
-        yearContents.filter { it.authorName.isNotBlank() && it.authorName == currentUser?.fullName }
+        yearContents.filter { it.authorName.isNotBlank() && (it.authorName == currentUser?.fullName || it.authorName.contains(currentUser?.fullName ?: "")) }
     }
     val myCompletedHomeworks = remember(yearHomeworks) {
         yearHomeworks.filter { it.isCompleted }
@@ -265,6 +289,67 @@ fun AcademicHistoryScreen(
                             color = if (viewMode == 0) PurpleAccent else EmeraldGreen,
                             bgColor = if (viewMode == 0) PurpleAccent.copy(alpha = 0.15f) else EmeraldGreen.copy(alpha = 0.15f)
                         )
+                    }
+                }
+            }
+
+            // Structured Academic Archive Card (Point 19 & 20)
+            item {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "📊 النطاق الأكاديمي: ${archiveReport.startDate} إلى ${archiveReport.endDate}",
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
+                            if (archiveReport.isArchivedPastYear) {
+                                GlassPill(text = "سنة مؤرشفة 🔒", color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.15f))
+                            } else {
+                                GlassPill(text = "سنة دراسية جارية 🟢", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(CyanGlow.copy(alpha = 0.15f))
+                                    .padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("الفصل الدراسي الأول", fontSize = 11.sp, color = TextSecondary)
+                                    Text("${archiveReport.semester1Lessons} درس • ${archiveReport.semester1Homeworks} واجب", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(PurpleAccent.copy(alpha = 0.15f))
+                                    .padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("الفصل الدراسي الثاني", fontSize = 11.sp, color = TextSecondary)
+                                    Text("${archiveReport.semester2Lessons} درس • ${archiveReport.semester2Homeworks} واجب", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PurpleAccent)
+                                }
+                            }
+                        }
                     }
                 }
             }

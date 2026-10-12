@@ -424,7 +424,8 @@ data class MediaItem(
     val pageOrder: Int = 1,
     val url: String,
     val mimeType: String = "image/jpeg",
-    val fileSize: Int = 0
+    val fileSize: Int = 0,
+    val checksum: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -555,6 +556,10 @@ data class GitHubRelease(
     val id: Long = 0,
     val tag_name: String? = null,
     val name: String? = null,
+    val body: String? = null,
+    val published_at: String? = null,
+    val created_at: String? = null,
+    val html_url: String? = null,
     val assets: List<GitHubReleaseAsset> = emptyList()
 )
 
@@ -684,3 +689,17 @@ data class DailyPlanItem(
     val isCompleted: Boolean,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+enum class PublicationState {
+    SYNCED,
+    PENDING,
+    FAILED
+}
+
+data class PublicationResult(
+    val id: String,
+    val state: PublicationState,
+    val message: String,
+    val isOfficial: Boolean = false
+)
+

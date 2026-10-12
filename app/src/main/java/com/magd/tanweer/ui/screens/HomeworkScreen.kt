@@ -102,7 +102,10 @@ fun HomeworkScreen(
 
     var selectedFilter by remember { mutableStateOf(HomeworkFilter.ALL) }
     var selectedTaskTypeFilter by remember { mutableStateOf<String?>(null) }
-    var isAddModalOpen by remember { mutableStateOf(false) }
+    val isAddModalOpenFromVm by viewModel.isAddHomeworkModalOpen.collectAsStateWithLifecycle()
+    val initialDueDateFromVm by viewModel.initialHomeworkDueDate.collectAsStateWithLifecycle()
+    var isLocalAddModalOpen by remember { mutableStateOf(false) }
+    val isAddModalOpen = isLocalAddModalOpen || isAddModalOpenFromVm
     var fullScreenImagePreviewUrl by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(activeGroupId) {
@@ -185,7 +188,7 @@ fun HomeworkScreen(
                     GlassButton(
                         text = "إضافة واجب",
                         icon = Icons.Default.Add,
-                        onClick = { isAddModalOpen = true },
+                        onClick = { isLocalAddModalOpen = true },
                         modifier = Modifier.height(38.dp)
                     )
                 }
@@ -294,7 +297,7 @@ fun HomeworkScreen(
                         subtitle = "يمكنك إضافة واجب جديد وتضمين صور الحلول",
                         icon = "📝",
                         actionButtonText = "إضافة واجب جديد",
-                        onActionClick = { isAddModalOpen = true }
+                        onActionClick = { isLocalAddModalOpen = true }
                     )
                 }
             } else {
@@ -337,17 +340,29 @@ fun HomeworkScreen(
                             }
                         } else null,
                         onSetReminder = {
-                            val scheduled = TanweerNotificationManager.scheduleHomeworkReminder(
+                            val result = TanweerNotificationManager.scheduleHomeworkReminder(
                                 context = context,
                                 homeworkId = hw.id,
                                 title = hw.title,
                                 subjectName = hw.subjectName,
                                 dueDate = hw.dueDate
                             )
-                            if (scheduled) {
-                                Toast.makeText(context, "🔔 تم تفعيل تذكير حقيقي على جهازك للواجب: ${hw.title}", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "تعذر جدولة التذكير، يرجى تفعيل أذونات الإشعارات", Toast.LENGTH_SHORT).show()
+                            when (result) {
+                                TanweerNotificationManager.ScheduleReminderResult.SUCCESS -> {
+                                    Toast.makeText(context, "🔔 تم تفعيل تذكير دراسي دقيق على جهازك للواجب: ${hw.title}", Toast.LENGTH_SHORT).show()
+                                }
+                                TanweerNotificationManager.ScheduleReminderResult.PERMISSION_NOTIFICATIONS_DENIED -> {
+                                    Toast.makeText(context, "تعذر إرسال التنبيه. يرجى منح تنوير إذن الإشعارات من إعدادات الهاتف.", Toast.LENGTH_LONG).show()
+                                }
+                                TanweerNotificationManager.ScheduleReminderResult.PERMISSION_EXACT_ALARM_DENIED -> {
+                                    Toast.makeText(context, "تعذر ضبط المنبه الدقيق. يرجى السماح للتطبيق بجدولة التنبيهات والمنبهات (Alarms & Reminders) من إعدادات النظام.", Toast.LENGTH_LONG).show()
+                                }
+                                TanweerNotificationManager.ScheduleReminderResult.ALARM_SERVICE_UNAVAILABLE -> {
+                                    Toast.makeText(context, "خدمة التنبيهات غير متوفرة على هذا الجهاز حالياً.", Toast.LENGTH_SHORT).show()
+                                }
+                                TanweerNotificationManager.ScheduleReminderResult.GENERAL_ERROR -> {
+                                    Toast.makeText(context, "تعذر جدولة التذكير. تأكد من إعدادات النظام والبطارية في جهازك.", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         },
                         onAddToDailyPlan = {
@@ -387,7 +402,11 @@ fun HomeworkScreen(
         if (isAddModalOpen) {
             AddHomeworkDialog(
                 subjects = gradeSubjects,
-                onDismiss = { isAddModalOpen = false },
+                initialDueDate = initialDueDateFromVm,
+                onDismiss = {
+                    isLocalAddModalOpen = false
+                    viewModel.closeAddHomeworkDialog()
+                },
                 onAddWithPages = { subjId, title, details, pages, questions, dueDate, taskType, scanPages ->
                     viewModel.addHomework(
                         subjectId = subjId,
@@ -401,7 +420,8 @@ fun HomeworkScreen(
                         onResult = { result ->
                             if (result.isSuccess) {
                                 Toast.makeText(context, "تم حفظ ونشر الواجب بنجاح ✨", Toast.LENGTH_SHORT).show()
-                                isAddModalOpen = false
+                                isLocalAddModalOpen = false
+                                viewModel.closeAddHomeworkDialog()
                             } else {
                                 val err = result.exceptionOrNull()?.message ?: "حدث خطأ أثناء حفظ الواجب"
                                 Toast.makeText(context, "تعذر النشر: $err", Toast.LENGTH_LONG).show()
@@ -795,6 +815,7 @@ fun getRemainingTimeText(dueDateStr: String): String {
 @Composable
 fun AddHomeworkDialog(
     subjects: List<SubjectItem>,
+    initialDueDate: String? = null,
     onDismiss: () -> Unit,
     onAddWithPages: (subjectId: String, title: String, details: String?, pages: String?, questions: String?, dueDate: String, taskType: String, scanPages: List<HomeworkScanPage>) -> Unit
 ) {
@@ -806,7 +827,7 @@ fun AddHomeworkDialog(
     var details by remember { mutableStateOf("") }
     var pageNumbers by remember { mutableStateOf("") }
     var questionNumbers by remember { mutableStateOf("") }
-    var dueDate by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
+    var dueDate by remember(initialDueDate) { mutableStateOf(initialDueDate ?: TanweerViewModel.getTodayDateString()) }
     var taskType by remember { mutableStateOf("HOMEWORK") }
     var scannedPages by remember { mutableStateOf<List<HomeworkScanPage>>(emptyList()) }
 

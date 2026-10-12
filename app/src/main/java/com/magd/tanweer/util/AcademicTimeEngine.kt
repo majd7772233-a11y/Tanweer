@@ -19,7 +19,7 @@ sealed class AcademicDayStatus {
 
 object AcademicTimeEngine {
 
-    private val defaultPeriodTimes = listOf(
+    val defaultPeriodTimes = listOf(
         1 to ("08:00" to "08:45"),
         2 to ("08:50" to "09:35"),
         3 to ("09:40" to "10:25"),
@@ -28,6 +28,24 @@ object AcademicTimeEngine {
         6 to ("12:25" to "13:10"),
         7 to ("13:15" to "14:00")
     )
+
+    fun getDefaultPeriodTime(slotOrder: Int): Pair<String, String> {
+        val found = defaultPeriodTimes.find { it.first == slotOrder }
+        if (found != null) return found.second
+
+        val order = if (slotOrder > 0) slotOrder else 1
+        // Dynamic time fallback calculated strictly from slotOrder progression (never hardcoded 08:00 for periods 8, 9...)
+        val breakExtra = if (order > 3) 20 else 0
+        val startMins = 8 * 60 + (order - 1) * 50 + breakExtra
+        val endMins = startMins + 45
+        val startH = (startMins / 60) % 24
+        val startM = startMins % 60
+        val endH = (endMins / 60) % 24
+        val endM = endMins % 60
+        val startStr = String.format(java.util.Locale.US, "%02d:%02d", startH, startM)
+        val endStr = String.format(java.util.Locale.US, "%02d:%02d", endH, endM)
+        return startStr to endStr
+    }
 
     fun parseTimeToMinutes(timeStr: String?): Int? {
         if (timeStr.isNullOrBlank()) return null
@@ -42,8 +60,7 @@ object AcademicTimeEngine {
     }
 
     fun getSlotEffectiveTimes(slot: ScheduleSlot): Pair<String, String> {
-        val defaultPair = defaultPeriodTimes.find { it.first == slot.slotOrder }?.second
-            ?: ("08:00" to "08:45")
+        val defaultPair = getDefaultPeriodTime(slot.slotOrder)
         val start = if (!slot.startTime.isNullOrBlank()) slot.startTime else defaultPair.first
         val end = if (!slot.endTime.isNullOrBlank()) slot.endTime else defaultPair.second
         return Pair(start, end)
