@@ -296,8 +296,10 @@ fun NotebookTranscriptionDialog(
                             val nextState = !isCurrentPageCompleted
                             completedPages[currentPageIndex] = nextState
                             com.magd.tanweer.util.StudentNotebookManager.markPageCompleted(context, content, currentPageIndex, nextState)
+                            com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, true, if (nextState) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS else com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                             if (nextState) {
-                                Toast.makeText(context, "أحسنت! تم حفظ نقل اللوحة ${currentPageIndex + 1} إلى دفترك ✓", Toast.LENGTH_SHORT).show()
+                                val label = if (mediaList.isNotEmpty()) "اللوحة ${currentPageIndex + 1}" else "ملخص الدرس"
+                                Toast.makeText(context, "أحسنت! تم حفظ نقل $label إلى دفترك ✓", Toast.LENGTH_SHORT).show()
                             }
                         }
                         .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -310,6 +312,7 @@ fun NotebookTranscriptionDialog(
                             onCheckedChange = { checked ->
                                 completedPages[currentPageIndex] = checked
                                 com.magd.tanweer.util.StudentNotebookManager.markPageCompleted(context, content, currentPageIndex, checked)
+                                com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, true, if (checked) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS else com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                             },
                             colors = CheckboxDefaults.colors(
                                 checkedColor = EmeraldGreen,
@@ -317,15 +320,25 @@ fun NotebookTranscriptionDialog(
                             )
                         )
                         Column {
+                            val statusTitle = if (mediaList.isNotEmpty()) {
+                                if (isCurrentPageCompleted) "تم نقل هذه اللوحة إلى الدفتر المدرسي ✓" else "انقر هنا لتأكيد نقل هذه اللوحة إلى دفترك"
+                            } else {
+                                if (isCurrentPageCompleted) "تم تدوين ملخص الدرس في دفترك المدرسي ✓" else "انقر هنا لتأكيد تدوين ملخص الدرس في دفترك"
+                            }
                             Text(
-                                text = if (isCurrentPageCompleted) "تم نقل هذه اللوحة إلى الدفتر المدرسي ✓" else "انقر هنا لتأكيد نقل هذه اللوحة إلى دفترك",
+                                text = statusTitle,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isCurrentPageCompleted) EmeraldGreen else TextPrimary
                             )
                             val totalCompleted = completedPages.values.count { it }
+                            val progressSubtitle = if (mediaList.isNotEmpty()) {
+                                "إنجاز النقل للدفتر: $totalCompleted من ${mediaList.size} لوحات مكتملة"
+                            } else {
+                                if (isCurrentPageCompleted) "تم النقل للدفتر بنجاح (1 من 1)" else "بانتظار النقل للدفتر (0 من 1)"
+                            }
                             Text(
-                                text = "إنجاز النقل للدفتر: $totalCompleted من ${mediaList.size.coerceAtLeast(1)} لوحات مكتملة",
+                                text = progressSubtitle,
                                 fontSize = 10.sp,
                                 color = TextSecondary
                             )

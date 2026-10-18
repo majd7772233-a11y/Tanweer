@@ -238,7 +238,12 @@ fun UploadLessonDialog(
                                         )
                                         isUploading = false
                                         if (result.isSuccess) {
-                                            Toast.makeText(context, "تم توثيق ونشر الدرس بنجاح 🚀", Toast.LENGTH_SHORT).show()
+                                            val outcome = result.getOrNull()
+                                            if (outcome?.isSynced == true) {
+                                                Toast.makeText(context, "تم توثيق ونشر الدرس على الخادم بنجاح 🚀", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, outcome?.message ?: "تم حفظ الدرس محلياً، وجارٍ جدولة النشر تلقائياً فور توفر الاتصال ⏳", Toast.LENGTH_LONG).show()
+                                            }
                                             onDismiss()
                                         } else {
                                             val errorMsg = result.exceptionOrNull()?.message ?: "حدث خطأ أثناء نشر الدرس"
@@ -278,19 +283,18 @@ fun UploadLessonDialog(
                         Column {
                             Text(
                                 text = "🗓️ تاريخ الحصة الموثقة:",
-                                fontSize = 11.sp,
+                                style = AppTypography.Hint,
                                 color = TextSecondary
                             )
                             Text(
                                 text = TanweerViewModel.getFormattedArabicDate(studyDate),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
+                                style = AppTypography.Button,
                                 color = CyanAccent
                             )
                         }
                         Text(
                             text = "حفظ تلقائي في الجدول والشعبة",
-                            fontSize = 11.sp,
+                            style = AppTypography.Hint,
                             color = TextMuted
                         )
                     }
@@ -298,7 +302,7 @@ fun UploadLessonDialog(
 
                 // Subject Selector
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text("المادة الدراسية:", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.padding(bottom = 6.dp))
+                    Text("المادة الدراسية:", style = AppTypography.FieldLabel, color = TextSecondary, modifier = Modifier.padding(bottom = 6.dp))
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -316,7 +320,7 @@ fun UploadLessonDialog(
                             ) {
                                 Text(
                                     text = "${subj.icon} ${subj.name}",
-                                    fontSize = 11.sp,
+                                    style = AppTypography.Chip,
                                     color = if (isSelected) CyanAccent else TextPrimary,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                 )
@@ -354,14 +358,13 @@ fun UploadLessonDialog(
                         ) {
                             Text(
                                 text = "📑 صفحات وسبورة الدرس:",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
+                                style = AppTypography.CardTitle,
                                 color = TextPrimary
                             )
                             if (scannedPages.isNotEmpty()) {
                                 Text(
                                     text = "إجمالي: ${scannedPages.size} صفحات",
-                                    fontSize = 11.sp,
+                                    style = AppTypography.Caption,
                                     color = CyanAccent,
                                     fontWeight = FontWeight.Medium
                                 )
@@ -385,7 +388,7 @@ fun UploadLessonDialog(
                             ) {
                                 Icon(Icons.Default.CameraAlt, contentDescription = "تصوير", modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("📷 تصوير سبورة", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("📷 تصوير سبورة", style = AppTypography.Button)
                             }
 
                             // Gallery Button

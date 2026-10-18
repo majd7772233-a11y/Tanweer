@@ -101,18 +101,55 @@ object TanweerNotificationManager {
                     repo.syncExams(groupId)
                     repo.syncSchedule(groupId)
                     repo.syncEvents(groupId)
+
+                    // Point 31: Daily background book catalog & new release synchronization
+                    try {
+                        repo.syncBooks(user.gradeId)
+                    } catch (be: Exception) {
+                        Log.w("TanweerNotifications", "Background books sync note: ${be.message}")
+                    }
+
+                    // Point 24: Daily background periodic check for app updates
+                    try {
+                        com.magd.tanweer.util.AppVersionManager.checkPeriodicUpdate(context)
+                    } catch (ue: Exception) {
+                        Log.w("TanweerNotifications", "Background update check note: ${ue.message}")
+                    }
                 } catch (_: Exception) {}
 
                 val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
                 val todayStr = sdf.format(Date())
 
-                val openIntent = Intent(context, MainActivity::class.java).apply {
+                val openHomeworkIntent = Intent(context, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    putExtra(EXTRA_NAVIGATE_TO, "HOMEWORK")
                 }
-                val pendingIntent = PendingIntent.getActivity(
+                val pendingHwIntent = PendingIntent.getActivity(
                     context,
-                    0,
-                    openIntent,
+                    101,
+                    openHomeworkIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                val openExamIntent = Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    putExtra(EXTRA_NAVIGATE_TO, "EXAMS")
+                }
+                val pendingExamIntent = PendingIntent.getActivity(
+                    context,
+                    102,
+                    openExamIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                val openScheduleIntent = Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    putExtra(EXTRA_NAVIGATE_TO, "SCHEDULE")
+                }
+                val pendingScheduleIntent = PendingIntent.getActivity(
+                    context,
+                    103,
+                    openScheduleIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
 
@@ -130,7 +167,7 @@ object TanweerNotificationManager {
                             .setContentText("لديك ${pendingHw.size} واجبات مدرسية قيد الإنجاز للشعبة.")
                             .setStyle(NotificationCompat.BigTextStyle().bigText("لديك ${pendingHw.size} واجبات غير مكتملة، منها: ${pendingHw.first().title}."))
                             .setPriority(NotificationCompat.PRIORITY_HIGH)
-                            .setContentIntent(pendingIntent)
+                            .setContentIntent(pendingHwIntent)
                             .setAutoCancel(true)
                             .build()
 
@@ -152,7 +189,7 @@ object TanweerNotificationManager {
                             .setContentText("اختبار ${nextExam.subjectName} بتاريخ ${nextExam.examDate}")
                             .setStyle(NotificationCompat.BigTextStyle().bigText("اختبار ${nextExam.subjectName}: ${nextExam.title}، المقرر: ${nextExam.requiredChapters ?: "كامل المنهج"}."))
                             .setPriority(NotificationCompat.PRIORITY_HIGH)
-                            .setContentIntent(pendingIntent)
+                            .setContentIntent(pendingExamIntent)
                             .setAutoCancel(true)
                             .build()
 
@@ -162,29 +199,51 @@ object TanweerNotificationManager {
                     }
                 }
 
-                // 3. Check Schedule if user enabled it
+                // 3. Check Schedule if user enabled it (Point 20: Fix DAY_OF_WEEK conversion from Calendar to App indices)
                 if (notifySch) {
                     val calendar = Calendar.getInstance()
-                    val dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK) // 1=Sun, 7=Sat
-                    val slots = db.scheduleDao().getSlotsForDay(groupId, dayOfWeek).first()
-                    if (slots.isNotEmpty()) {
-                        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                            .setSmallIcon(R.mipmap.ic_launcher)
-                            .setContentTitle("🏫 جدول حصص اليوم")
-                            .setContentText("لديك ${slots.size} حصص دراسية مجدولة لليوم.")
-                            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                            .setContentIntent(pendingIntent)
-                            .setAutoCancel(true)
-                            .build()
+                    val rawDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK) // 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
+                    val appDayOfWeek = calendarDayToAppDayIndex(rawDayOfWeek)
 
-                        try {
-                            NotificationManagerCompat.from(context).notify(NOTIFICATION_SCHEDULE_ID, notification)
-                        } catch (_: SecurityException) {}
+                    if (appDayOfWeek >= 0) {
+                        val slots = db.scheduleDao().getSlotsForDay(groupId, appDayOfWeek).first()
+                        if (slots.isNotEmpty()) {
+                            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                                .setSmallIcon(R.mipmap.ic_launcher)
+                                .setContentTitle("🏫 جدول حصص اليوم")
+                                .setContentText("لديك ${slots.size} حصص دراسية مجدولة لليوم.")
+                                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                                .setContentIntent(pendingScheduleIntent)
+                                .setAutoCancel(true)
+                                .build()
+
+                            try {
+                                NotificationManagerCompat.from(context).notify(NOTIFICATION_SCHEDULE_ID, notification)
+                            } catch (_: SecurityException) {}
+                        }
                     }
                 }
             } catch (e: Exception) {
                 Log.e("TanweerNotifications", "Error checking academic reminders", e)
             }
+        }
+    }
+
+    const val EXTRA_NAVIGATE_TO = "extra_navigate_to"
+
+    /**
+     * Converts standard Java Calendar.DAY_OF_WEEK (Sunday = 1, Saturday = 7)
+     * to Tanweer application schedule day index (Sunday = 0 .. Thursday = 4, Weekend = -1).
+     * Point 20: Explicit unified conversion between systems.
+     */
+    fun calendarDayToAppDayIndex(calendarDayOfWeek: Int): Int {
+        return when (calendarDayOfWeek) {
+            Calendar.SUNDAY -> 0
+            Calendar.MONDAY -> 1
+            Calendar.TUESDAY -> 2
+            Calendar.WEDNESDAY -> 3
+            Calendar.THURSDAY -> 4
+            else -> -1 // Weekend (Friday / Saturday)
         }
     }
 
@@ -301,6 +360,7 @@ object TanweerNotificationManager {
         initChannel(context)
         val openIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra(EXTRA_NAVIGATE_TO, "HOMEWORK")
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
@@ -327,6 +387,160 @@ object TanweerNotificationManager {
         try {
             NotificationManagerCompat.from(context).notify(
                 (homeworkId.hashCode() and 0x7FFFFFFF),
+                notification
+            )
+        } catch (_: SecurityException) {}
+    }
+
+    fun scheduleExamReminder(
+        context: Context,
+        examId: String,
+        title: String,
+        subjectName: String,
+        examDate: String
+    ): ScheduleReminderResult {
+        initChannel(context)
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val hasNotif = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (!hasNotif) {
+                    return ScheduleReminderResult.PERMISSION_NOTIFICATIONS_DENIED
+                }
+            }
+
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+                ?: return ScheduleReminderResult.ALARM_SERVICE_UNAVAILABLE
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (!alarmManager.canScheduleExactAlarms()) {
+                    return ScheduleReminderResult.PERMISSION_EXACT_ALARM_DENIED
+                }
+            }
+
+            val intent = Intent(context, TanweerAlarmReceiver::class.java).apply {
+                action = TanweerAlarmReceiver.ACTION_EXAM_REMINDER
+                putExtra(TanweerAlarmReceiver.EXTRA_EXAM_ID, examId)
+                putExtra(TanweerAlarmReceiver.EXTRA_EXAM_TITLE, title)
+                putExtra(TanweerAlarmReceiver.EXTRA_SUBJECT_NAME, subjectName)
+            }
+            val requestCode = (examId.hashCode() and 0x7FFFFFFF)
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
+            var triggerTime = System.currentTimeMillis()
+
+            try {
+                val date = sdf.parse(examDate)
+                if (date != null) {
+                    val reminderCal = Calendar.getInstance().apply {
+                        time = date
+                        add(Calendar.DAY_OF_YEAR, -1)
+                        set(Calendar.HOUR_OF_DAY, 18) // 6:00 PM previous evening
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                    }
+
+                    if (reminderCal.timeInMillis > System.currentTimeMillis()) {
+                        triggerTime = reminderCal.timeInMillis
+                    } else {
+                        val morningCal = Calendar.getInstance().apply {
+                            time = date
+                            set(Calendar.HOUR_OF_DAY, 6)
+                            set(Calendar.MINUTE, 30)
+                            set(Calendar.SECOND, 0)
+                        }
+                        if (morningCal.timeInMillis > System.currentTimeMillis()) {
+                            triggerTime = morningCal.timeInMillis
+                        } else {
+                            triggerTime = System.currentTimeMillis() + (3600 * 1000L)
+                        }
+                    }
+                } else {
+                    triggerTime = System.currentTimeMillis() + (3600 * 1000L)
+                }
+            } catch (_: Exception) {
+                triggerTime = System.currentTimeMillis() + (3600 * 1000L)
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+            } else {
+                alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+            }
+            Log.d("TanweerNotifications", "Exact exam reminder scheduled at $triggerTime for $examId")
+            ScheduleReminderResult.SUCCESS
+        } catch (e: SecurityException) {
+            Log.e("TanweerNotifications", "SecurityException scheduling exam reminder", e)
+            ScheduleReminderResult.PERMISSION_EXACT_ALARM_DENIED
+        } catch (e: Exception) {
+            Log.e("TanweerNotifications", "Failed to schedule exam reminder", e)
+            ScheduleReminderResult.GENERAL_ERROR
+        }
+    }
+
+    fun cancelReminder(context: Context, itemId: String) {
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+            val intent = Intent(context, TanweerAlarmReceiver::class.java)
+            val requestCode = (itemId.hashCode() and 0x7FFFFFFF)
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (pendingIntent != null && alarmManager != null) {
+                alarmManager.cancel(pendingIntent)
+                pendingIntent.cancel()
+            }
+            NotificationManagerCompat.from(context).cancel(requestCode)
+        } catch (_: Exception) {}
+    }
+
+    fun showIndividualExamNotification(
+        context: Context,
+        examId: String,
+        title: String,
+        subjectName: String
+    ) {
+        initChannel(context)
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra(EXTRA_NAVIGATE_TO, "EXAMS")
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            (examId.hashCode() and 0x7FFFFFFF),
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("🔴 اقترب موعد اختبار: $subjectName")
+            .setContentText("تذكير: $title")
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText(
+                    "تذكير بموعد اختبار مادة $subjectName:\n$title\nراجع المقررات والفصول المطلوبة من جدول الاختبارات في تطبيق تنوير."
+                )
+            )
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setVibrate(longArrayOf(0, 400, 200, 400))
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(
+                (examId.hashCode() and 0x7FFFFFFF),
                 notification
             )
         } catch (_: SecurityException) {}

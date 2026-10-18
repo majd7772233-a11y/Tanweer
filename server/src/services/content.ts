@@ -3,6 +3,7 @@ import { generateId } from '../lib/ids';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
+import { mapContent } from '../lib/mappers';
 
 interface MediaPayloadItem {
   url: string;
@@ -67,9 +68,16 @@ export async function handleCreateContent(user: UserContext, request: Request, e
     ? body.id.trim()
     : generateId('cnt');
 
-  // Idempotency check
-  const existing = await env.DB.prepare(`SELECT id FROM contents WHERE id = ?`).bind(contentId).first<{ id: string }>();
+  // Idempotency check with ownership & scope validation
+  const existing = await env.DB.prepare(`SELECT id, group_id, created_by FROM contents WHERE id = ?`).bind(contentId).first<{
+    id: string;
+    group_id: string;
+    created_by: string;
+  }>();
   if (existing) {
+    if (existing.group_id !== body.groupId || existing.created_by !== user.userId) {
+      return errorResponse('CONFLICT', 'المعرّف مستخدم مسبقاً في نطاق آخر أو بواسطة مستخدم آخر', 409);
+    }
     return jsonResponse({
       success: true,
       contentId: existing.id,
@@ -283,3 +291,37 @@ export async function handleDeleteContent(
     message: 'تم حذف الدرس بنجاح',
   });
 }
+
+export async function handleGetContents(
+  groupId: string,
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
+
+  const contents = await env.DB.prepare(
+    `SELECT c.id, c.group_id, c.study_date, c.subject_id, c.type, c.title, c.description,
+            c.author_name, c.author_grade_section, c.views_count, c.useful_count, c.created_at,
+            s.name_ar as subject_name, s.icon as subject_icon, s.color_hex
+     FROM contents c
+     LEFT JOIN subjects s ON c.subject_id = s.id
+     WHERE c.group_id = ? AND c.status = 'PUBLISHED'
+     ORDER BY c.study_date DESC, c.created_at DESC`
+  ).bind(groupId).all();
+
+  const contentList = [];
+  for (const c of (contents.results as any[])) {
+    const media = await env.DB.prepare(
+      `SELECT id, page_order, url, mime_type, file_size FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
+    ).bind(c.id).all();
+    contentList.push(mapContent(c, media.results || []));
+  }
+
+  return jsonResponse({
+    success: true,
+    contents: contentList,
+    totalCount: contentList.length,
+  });
+}
+

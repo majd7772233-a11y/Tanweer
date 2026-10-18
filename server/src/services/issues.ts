@@ -88,9 +88,16 @@ export async function handleCreateIssue(user: UserContext, request: Request, env
     ? body.id.trim()
     : generateId('iss');
 
-  // Idempotency check
-  const existing = await env.DB.prepare(`SELECT id FROM issues WHERE id = ?`).bind(issueId).first<{ id: string }>();
+  // Idempotency check with ownership & scope validation
+  const existing = await env.DB.prepare(`SELECT id, group_id, created_by FROM issues WHERE id = ?`).bind(issueId).first<{
+    id: string;
+    group_id: string;
+    created_by: string;
+  }>();
   if (existing) {
+    if (existing.group_id !== body.groupId || existing.created_by !== user.userId) {
+      return errorResponse('CONFLICT', 'المعرّف مستخدم مسبقاً في نطاق آخر أو بواسطة مستخدم آخر', 409);
+    }
     return jsonResponse({
       success: true,
       issueId: existing.id,

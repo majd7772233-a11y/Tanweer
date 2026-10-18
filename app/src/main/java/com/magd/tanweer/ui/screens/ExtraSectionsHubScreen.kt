@@ -286,17 +286,17 @@ fun ExtraSectionsHubScreen(
             }
         }
 
-        // Section 3: مراكز الإدارة والرتب (Role Centers)
+        // Section 3: مركز الرتبة الحالية (Current Role Center Only)
         if ((selectedCategoryFilter == "ALL" || selectedCategoryFilter == "ROLES") &&
-            (userRole == Role.TEACHER || userRole == Role.MODERATOR || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER)
+            (userRole == Role.TEACHER || userRole == Role.MODERATOR || userRole == Role.ADMIN)
         ) {
             item {
-                HubCategoryHeader(title = "🛡️ مراكز الرتب والإدارة المدرسية", color = WarmAmber)
+                HubCategoryHeader(title = "🛡️ مركز الرتبة المعتمدة", color = WarmAmber)
             }
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (userRole == Role.TEACHER || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
+                    if (userRole == Role.TEACHER) {
                         HubActionCard(
                             title = "مركز التعليم للأستاذ المعتمد",
                             subtitle = "إدارة وتثبيت الواجبات الرسمية، الاختبارات الدورية، وتوثيق الإجابات النموذجية",
@@ -308,7 +308,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (userRole == Role.MODERATOR || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
+                    if (userRole == Role.MODERATOR) {
                         HubActionCard(
                             title = "مركز إشراف الشعبة والتدقيق",
                             subtitle = "مراجعة تقارير المحادثة، اعتماد التصحيحات، وتدقيق مقترحات الطلاب",
@@ -320,7 +320,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
+                    if (userRole == Role.ADMIN) {
                         HubActionCard(
                             title = "لوحة مدير المدرسة والنظام",
                             subtitle = "إدارة كاملة للشعب، كادر المعلمين، سجلات التدقيق، القرارات الإدارية والتنبيهات",

@@ -52,12 +52,17 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
     ? body.id.trim()
     : generateId('evt');
 
-  // Idempotency check
-  const existing = await env.DB.prepare(`SELECT id, is_official FROM events WHERE id = ?`).bind(eventId).first<{
+  // Idempotency check with ownership & scope validation
+  const existing = await env.DB.prepare(`SELECT id, is_official, group_id, created_by FROM events WHERE id = ?`).bind(eventId).first<{
     id: string;
     is_official: number;
+    group_id: string;
+    created_by: string;
   }>();
   if (existing) {
+    if (existing.group_id !== body.groupId || existing.created_by !== user.userId) {
+      return errorResponse('CONFLICT', 'المعرّف مستخدم مسبقاً في نطاق آخر أو بواسطة مستخدم آخر', 409);
+    }
     return jsonResponse({
       success: true,
       eventId: existing.id,

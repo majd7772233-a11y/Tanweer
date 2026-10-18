@@ -44,7 +44,8 @@ data class ScheduleSlotEntity(
     val subjectIcon: String,
     val colorHex: String?,
     val startTime: String?,
-    val endTime: String?
+    val endTime: String?,
+    val syncStatus: String = "SYNCED"
 )
 
 @Entity(tableName = "cached_contents")
@@ -120,6 +121,7 @@ data class ExamEntity(
     val subjectIcon: String,
     val colorHex: String,
     val isCompleted: Boolean = false,
+    val examType: String = "MONTHLY",
     val syncStatus: String = "SYNCED"
 )
 
@@ -318,4 +320,22 @@ sealed class IssueAddResult(val isSynced: Boolean, val message: String) {
     class Synced(val id: String, message: String = "✅ تم نشر الاستفسار على السيرفر بنجاح") : IssueAddResult(true, message)
     class QueuedOffline(val id: String, message: String = "🟡 تم حفظ الاستفسار محلياً وسيتم رفعه للسيرفر تلقائياً عند توفر الإنترنت") : IssueAddResult(false, message)
     class Failed(val error: String) : IssueAddResult(false, error)
+}
+
+sealed class HomeworkAddResult(val isSynced: Boolean, val message: String) {
+    class Synced(val id: String, message: String = "✅ تم حفظ ونشر الواجب على السيرفر بنجاح") : HomeworkAddResult(true, message)
+    class QueuedOffline(val id: String, message: String = "🟡 تم حفظ الواجب في جهازك وسيتم رفعه للسيرفر تلقائياً عند توفر الإنترنت") : HomeworkAddResult(false, message)
+    class Failed(val error: String) : HomeworkAddResult(false, error)
+}
+
+sealed class LessonAddResult(val isSynced: Boolean, val message: String) {
+    class Synced(val id: String, message: String = "✅ تم توثيق ونشر الدرس على السيرفر بنجاح") : LessonAddResult(true, message)
+    class QueuedOffline(val id: String, message: String = "🟡 تم حفظ الدرس محلياً بجهازك وسيتم رفعه للسيرفر تلقائياً عند توفر الإنترنت") : LessonAddResult(false, message)
+    class Failed(val error: String) : LessonAddResult(false, error)
+}
+
+sealed class ScheduleSlotDeleteResult(val isSynced: Boolean, val message: String) {
+    class Synced(message: String = "✅ تم تفريغ الحصة من السيرفر والجدول بنجاح") : ScheduleSlotDeleteResult(true, message)
+    class QueuedOffline(message: String = "🟡 فُرغت من جهازك وسيتم حذفها من السيرفر تلقائياً عند عودة الاتصال") : ScheduleSlotDeleteResult(false, message)
+    class Failed(val error: String) : ScheduleSlotDeleteResult(false, error)
 }

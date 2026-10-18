@@ -26,10 +26,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.BuildConfig
+import com.magd.tanweer.data.model.ComprehensiveSyncReport
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.TanweerHapticManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,6 +68,36 @@ fun SettingsScreen(
     var isClearingCache by remember { mutableStateOf(false) }
     var serverPingStatus by remember { mutableStateOf<String?>(null) }
     var isPingingServer by remember { mutableStateOf(false) }
+    var pendingNotifToggleAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var syncReportDialog by remember { mutableStateOf<ComprehensiveSyncReport?>(null) }
+    var isSyncingComprehensive by remember { mutableStateOf(false) }
+
+    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            pendingNotifToggleAction?.invoke()
+            Toast.makeText(context, "تم تفعيل إذن الإشعارات بنجاح 🔔", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "لم يتم منح إذن الإشعارات. يرجى تفعيله من إعدادات الهاتف لتلقي التنبيهات.", Toast.LENGTH_LONG).show()
+        }
+        pendingNotifToggleAction = null
+    }
+
+    fun requestNotificationPermissionIfNeeded(action: () -> Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!hasPerm) {
+                pendingNotifToggleAction = action
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+        }
+        action()
+    }
 
     fun calculateCacheSize() {
         coroutineScope.launch(Dispatchers.IO) {
@@ -93,7 +125,7 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // -------------------------------------------------------------
-        // SECTION 1: FONT SIZE (حجم الخط - الافتراضي 12px)
+        // SECTION 1: FONT SIZE (حجم الخط - الافتراضي 12sp)
         // -------------------------------------------------------------
         item {
             SettingsSectionHeader(title = "🔤 حجم الخط والنصوص", subtitle = "الافتراضي 12sp بدقة عالية ومريحة للعين")
@@ -231,9 +263,15 @@ fun SettingsScreen(
                     SettingsToggleRow(
                         icon = Icons.Default.Vibration,
                         title = "الاهتزاز التفاعلي (Haptic Feedback)",
-                        subtitle = "اهتزاز لطيف عند النقر وحفظ البيانات",
+                        subtitle = "اهتزاز لطيف فعلي عند النقر وحفظ البيانات",
                         checked = hapticsEnabled,
-                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
+                        onCheckedChange = { enabled ->
+                            viewModel.setHapticsEnabled(enabled)
+                            if (enabled) {
+                                TanweerHapticManager.performHaptic(context, true, TanweerHapticManager.HapticType.SUCCESS)
+                                Toast.makeText(context, "تم تفعيل الاهتزاز التفاعلي 📳", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     )
                 }
             }
@@ -309,14 +347,23 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("إعادة المزامنة الشاملة الآن", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تحديث كل البيانات من السيرفر وإعادة تخزينها محلياً", fontSize = 11.sp, color = TextSecondary)
+                            Text("تحديث كل البيانات والتحقق من نتيجة كل قسم", fontSize = 11.sp, color = TextSecondary)
                         }
                         GlassButton(
-                            text = "مزامنة الكل ⚡",
+                            text = if (isSyncingComprehensive) "جاري الفحص..." else "مزامنة الكل ⚡",
+                            enabled = !isSyncingComprehensive,
                             onClick = {
-                                Toast.makeText(context, "جاري المزامنة الشاملة لجميع الأقسام والكتب والفعاليات...", Toast.LENGTH_SHORT).show()
-                                viewModel.syncAllComprehensive {
-                                    Toast.makeText(context, "اكتملت المزامنة الشاملة بنجاح ✓", Toast.LENGTH_SHORT).show()
+                                isSyncingComprehensive = true
+                                TanweerHapticManager.performHaptic(context, hapticsEnabled, TanweerHapticManager.HapticType.CLICK)
+                                Toast.makeText(context, "جاري فحص وتحديث ومزامنة جميع أقسام تنوير...", Toast.LENGTH_SHORT).show()
+                                viewModel.syncAllComprehensive { report ->
+                                    isSyncingComprehensive = false
+                                    syncReportDialog = report
+                                    if (report.isAllSucceeded) {
+                                        TanweerHapticManager.performHaptic(context, hapticsEnabled, TanweerHapticManager.HapticType.SUCCESS)
+                                    } else {
+                                        TanweerHapticManager.performHaptic(context, hapticsEnabled, TanweerHapticManager.HapticType.WARNING)
+                                    }
                                 }
                             },
                             modifier = Modifier.height(36.dp)
@@ -394,7 +441,15 @@ fun SettingsScreen(
                         title = "تذكيرات تسليم الواجبات",
                         subtitle = "تنبيه قبل موعد استحقاق الواجب والتكليف",
                         checked = notifyHomework,
-                        onCheckedChange = { viewModel.setNotifyHomework(it) }
+                        onCheckedChange = { isChecked ->
+                            if (isChecked) {
+                                requestNotificationPermissionIfNeeded {
+                                    viewModel.setNotifyHomework(true)
+                                }
+                            } else {
+                                viewModel.setNotifyHomework(false)
+                            }
+                        }
                     )
                     HorizontalDivider(color = GlassBorderSubtle)
                     SettingsToggleRow(
@@ -402,7 +457,15 @@ fun SettingsScreen(
                         title = "تذكير جدول الحصص الصباحي",
                         subtitle = "إشعار صباحي بحصص اليوم الدراسي",
                         checked = notifySchedule,
-                        onCheckedChange = { viewModel.setNotifySchedule(it) }
+                        onCheckedChange = { isChecked ->
+                            if (isChecked) {
+                                requestNotificationPermissionIfNeeded {
+                                    viewModel.setNotifySchedule(true)
+                                }
+                            } else {
+                                viewModel.setNotifySchedule(false)
+                            }
+                        }
                     )
                     HorizontalDivider(color = GlassBorderSubtle)
                     SettingsToggleRow(
@@ -410,7 +473,15 @@ fun SettingsScreen(
                         title = "العد التنازلي للاختبارات",
                         subtitle = "تذكير بمواعيد الاختبارات الشهرية والنهائية",
                         checked = notifyExams,
-                        onCheckedChange = { viewModel.setNotifyExams(it) }
+                        onCheckedChange = { isChecked ->
+                            if (isChecked) {
+                                requestNotificationPermissionIfNeeded {
+                                    viewModel.setNotifyExams(true)
+                                }
+                            } else {
+                                viewModel.setNotifyExams(false)
+                            }
+                        }
                     )
                 }
             }
@@ -579,6 +650,86 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (syncReportDialog != null) {
+        val report = syncReportDialog!!
+        AlertDialog(
+            onDismissRequest = { syncReportDialog = null },
+            title = {
+                Text(
+                    text = if (report.isAllSucceeded) "تقرير المزامنة الشاملة ✅" else "نتيجة المزامنة الشاملة ⚠️",
+                    fontSize = 17.sp,
+                    color = if (report.isAllSucceeded) EmeraldGreen else WarmAmber,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = report.summaryMessage,
+                        fontSize = 13.sp,
+                        color = TextPrimary
+                    )
+                    HorizontalDivider(color = GlassBorderSubtle)
+                    if (report.succeededSections.isNotEmpty()) {
+                        Text(
+                            text = "الأقسام المكتملة بنجاح (${report.succeededSections.size}):",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldGreen
+                        )
+                        Text(
+                            text = report.succeededSections.joinToString(" • "),
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    if (report.failedSections.isNotEmpty()) {
+                        Text(
+                            text = "الأقسام المتعذرة (${report.failedSections.size}):",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = RubyRed
+                        )
+                        report.failedSections.forEach { (sec, err) ->
+                            Text(
+                                text = "• $sec: $err",
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        }
+                    }
+                    if (report.offlineSections.isNotEmpty()) {
+                        Text(
+                            text = "أقسام تعمل بالوضع المحلي المؤقت (${report.offlineSections.size}):",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = WarmAmber
+                        )
+                        Text(
+                            text = report.offlineSections.joinToString(" • "),
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    if (report.pendingOutboxCount > 0) {
+                        Text(
+                            text = "عمليات محفوظة في جهازك بانتظار الرفع: ${report.pendingOutboxCount}",
+                            fontSize = 11.sp,
+                            color = WarmAmber
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                GlassButton(
+                    text = "حسناً",
+                    onClick = { syncReportDialog = null }
+                )
+            },
+            containerColor = MidnightSurface
+        )
     }
 }
 

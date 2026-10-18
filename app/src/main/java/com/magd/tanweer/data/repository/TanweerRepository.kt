@@ -36,6 +36,11 @@ class TanweerRepository(
 ) {
     val mutationQueue = UnifiedMutationQueue(db, api)
 
+    init {
+        mutationQueue.onRetryHomework = { id -> retrySyncHomework(id) }
+        mutationQueue.onRetryContent = { id -> retrySyncContent(id) }
+    }
+
     val currentUser: Flow<User?> = db.userDao().getUser().map { entity ->
         entity?.let {
             NetworkModule.setAuthToken(it.token)
@@ -247,26 +252,81 @@ class TanweerRepository(
 
     suspend fun syncInitial(groupId: String, todayDate: String): SyncResult = withContext(Dispatchers.IO) {
         try {
-            syncProfile()
-            syncGroups()
+            val results = mutableListOf<SyncResult>()
+            results.add(syncProfile())
+            results.add(syncGroups())
             if (groupId.isNotBlank()) {
-                syncSchedule(groupId)
-                syncDay(groupId, todayDate)
-                syncHomeworks(groupId)
-                syncExams(groupId)
-                syncIssues(groupId)
-                syncEvents(groupId)
+                results.add(syncSchedule(groupId))
+                results.add(syncDay(groupId, todayDate))
+                results.add(syncHomeworks(groupId))
+                results.add(syncExams(groupId))
+                results.add(syncIssues(groupId))
+                results.add(syncEvents(groupId))
                 val user = db.userDao().getUserSync()
                 if (user != null) {
-                    syncBooks(user.gradeId)
+                    results.add(syncBooks(user.gradeId))
                 }
             }
             // Sync cross-group historical archive so moving between grades/groups preserves student's complete academic history
-            syncStudentAcademicArchive()
-            SyncResult.Success()
+            results.add(syncStudentAcademicArchive())
+
+            val errors = results.filterIsInstance<SyncResult.Error>()
+            val offlines = results.filterIsInstance<SyncResult.Offline>()
+            when {
+                errors.isNotEmpty() && errors.size == results.size ->
+                    SyncResult.Error(errors.first().message, errors.first().isNetworkError)
+                offlines.isNotEmpty() && offlines.size == results.size ->
+                    SyncResult.Offline("وضع عدم الاتصال: تعذر إكمال المزامنة الكاملة")
+                errors.isNotEmpty() || offlines.isNotEmpty() ->
+                    SyncResult.Offline("اكتملت مزامنة بعض الأقسام، وبقيت أقسام أخرى في وضع عدم الاتصال أو معلقة")
+                else -> SyncResult.Success()
+            }
         } catch (e: Exception) {
             Log.e("TanweerRepository", "Initial sync error", e)
             SyncResult.Offline("وضع عدم الاتصال: تعذر إكمال المزامنة الكاملة")
+        }
+    }
+
+    suspend fun syncContents(groupId: String): SyncResult = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getContents(groupId)
+            if (res.isSuccessful && res.body() != null) {
+                val list = res.body()!!.contents
+                if (list.isNotEmpty()) {
+                    val entities = list.map { it ->
+                        val mediaJson = if (it.media.isNotEmpty()) {
+                            try {
+                                org.json.JSONArray(it.media.map { m -> m.url }).toString()
+                            } catch (_: Exception) { "[]" }
+                        } else "[]"
+                        ContentEntity(
+                            id = it.id,
+                            groupId = it.groupId,
+                            studyDate = it.studyDate,
+                            subjectId = it.subjectId,
+                            type = it.type,
+                            title = it.title,
+                            description = it.description,
+                            authorName = it.authorName,
+                            authorGradeSection = it.authorGradeSection,
+                            viewsCount = it.viewsCount,
+                            usefulCount = it.usefulCount,
+                            createdAt = it.createdAt,
+                            subjectName = it.subjectName,
+                            subjectIcon = it.subjectIcon,
+                            colorHex = it.colorHex,
+                            mediaUrlsJson = mediaJson,
+                            syncStatus = "SYNCED"
+                        )
+                    }
+                    db.contentDao().insertContents(entities)
+                }
+                SyncResult.Success()
+            } else {
+                resolveHttpError(res, "فشل مزامنة الدروس للشعبة")
+            }
+        } catch (e: Exception) {
+            resolveException(e, "أوفلاين: تعذر جلب الدروس")
         }
     }
 
@@ -277,6 +337,7 @@ class TanweerRepository(
 
             for (grp in myGroups) {
                 try {
+                    syncContents(grp.id)
                     syncHomeworks(grp.id)
                     syncExams(grp.id)
                     syncEvents(grp.id)
@@ -404,12 +465,21 @@ class TanweerRepository(
                         subjectIcon = it.subjectIcon,
                         colorHex = it.colorHex,
                         startTime = it.startTime,
-                        endTime = it.endTime
+                        endTime = it.endTime,
+                        syncStatus = "SYNCED"
                     )
+                }
+                val localPending = try {
+                    db.scheduleDao().getSlotsSync(groupId).filter { it.syncStatus == "PENDING" }
+                } catch (_: Exception) {
+                    emptyList()
                 }
                 db.scheduleDao().clearSlots(groupId)
                 if (slots.isNotEmpty()) {
                     db.scheduleDao().insertSlots(slots)
+                }
+                if (localPending.isNotEmpty()) {
+                    db.scheduleDao().insertSlots(localPending)
                 }
                 mutationQueue.triggerDrain()
                 SyncResult.Success(slots.size)
@@ -580,7 +650,10 @@ class TanweerRepository(
                         notes = it.notes,
                         subjectName = it.subjectName,
                         subjectIcon = it.subjectIcon,
-                        colorHex = it.colorHex
+                        colorHex = it.colorHex,
+                        isCompleted = it.isCompleted,
+                        examType = it.examType,
+                        syncStatus = "SYNCED"
                     )
                 }
                 db.examDao().clearSyncedExams(groupId)
@@ -707,10 +780,6 @@ class TanweerRepository(
         } catch (e: Exception) {
             resolveException(e, "أوفلاين: التقويم الشامل")
         }
-    }
-
-    suspend fun toggleExamCompletion(examId: String, isCompleted: Boolean) = withContext(Dispatchers.IO) {
-        db.examDao().updateExamCompletion(examId, isCompleted)
     }
 
     suspend fun syncIssues(groupId: String): SyncResult = withContext(Dispatchers.IO) {
@@ -1063,7 +1132,8 @@ class TanweerRepository(
                     subjectIcon = it.subjectIcon,
                     colorHex = it.colorHex,
                     startTime = it.startTime,
-                    endTime = it.endTime
+                    endTime = it.endTime,
+                    syncStatus = it.syncStatus
                 )
             }
         }
@@ -1091,7 +1161,8 @@ class TanweerRepository(
             subjectIcon = subjectIcon,
             colorHex = colorHex,
             startTime = startTime,
-            endTime = endTime
+            endTime = endTime,
+            syncStatus = "PENDING"
         )
 
         try {
@@ -1109,7 +1180,7 @@ class TanweerRepository(
                 )
             )
             if (res.isSuccessful) {
-                db.scheduleDao().insertSlots(listOf(entity))
+                db.scheduleDao().insertSlots(listOf(entity.copy(syncStatus = "SYNCED")))
                 Result.success(ScheduleMutationResult.SavedDirectly())
             } else if (res.code() == 403) {
                 val propRes = api.proposeScheduleChange(
@@ -1128,11 +1199,12 @@ class TanweerRepository(
                     Result.failure(Exception("لا تملك صلاحية تعديل الجدول مباشرة، وتعذر إرسال الاقتراح: ${propRes.message()}"))
                 }
             } else {
+                db.scheduleDao().insertSlots(listOf(entity.copy(syncStatus = "FAILED")))
                 Result.failure(Exception(res.message().ifBlank { "تعذر حفظ الحصة في السيرفر (كود ${res.code()})" }))
             }
         } catch (e: Exception) {
-            // Offline fallback: save locally and enqueue in Outbox
-            db.scheduleDao().insertSlots(listOf(entity))
+            // Offline fallback: save locally as PENDING and enqueue in Outbox
+            db.scheduleDao().insertSlots(listOf(entity.copy(syncStatus = "PENDING")))
             val outboxItem = OutboxEntity(
                 id = "ob_sch_${slotId}_${System.currentTimeMillis()}",
                 entityType = "SCHEDULE_SLOT_UPDATE",
@@ -1145,12 +1217,12 @@ class TanweerRepository(
         }
     }
 
-    suspend fun deleteScheduleSlot(groupId: String, dayOfWeek: Int, slotOrder: Int): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun deleteScheduleSlot(groupId: String, dayOfWeek: Int, slotOrder: Int): Result<ScheduleSlotDeleteResult> = withContext(Dispatchers.IO) {
         try {
             val res = api.deleteScheduleSlot(groupId, dayOfWeek, slotOrder)
             if (res.isSuccessful) {
                 db.scheduleDao().deleteSlot(groupId, dayOfWeek, slotOrder)
-                Result.success("تم تفريغ الحصة من الجدول بنجاح ✓")
+                Result.success(ScheduleSlotDeleteResult.Synced())
             } else {
                 Result.failure(Exception(res.message().ifBlank { "تعذر تفريغ الخانة في السيرفر (كود ${res.code()})" }))
             }
@@ -1165,17 +1237,17 @@ class TanweerRepository(
                 payloadJson = "{}"
             )
             db.outboxDao().insertOutbox(outboxItem)
-            Result.success("تم تفريغ الخانة محلياً وجدولة الحذف عند عودة الاتصال ⏳")
+            Result.success(ScheduleSlotDeleteResult.QueuedOffline())
         }
     }
 
-    suspend fun deleteScheduleSlotById(slotId: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun deleteScheduleSlotById(slotId: String): Result<ScheduleSlotDeleteResult> = withContext(Dispatchers.IO) {
         val slot = db.scheduleDao().getSlotById(slotId)
         if (slot != null) {
             deleteScheduleSlot(slot.groupId, slot.dayOfWeek, slot.slotOrder)
         } else {
             db.scheduleDao().deleteSlotById(slotId)
-            Result.success("تم تفريغ الحصة من الجدول محلياً ✓")
+            Result.success(ScheduleSlotDeleteResult.QueuedOffline("تم تفريغ الحصة من الجدول محلياً ✓"))
         }
     }
 
@@ -1753,6 +1825,7 @@ class TanweerRepository(
                     subjectIcon = it.subjectIcon,
                     colorHex = it.colorHex,
                     isCompleted = it.isCompleted,
+                    examType = it.examType,
                     syncStatus = it.syncStatus
                 )
             }
@@ -1774,6 +1847,7 @@ class TanweerRepository(
                     subjectIcon = it.subjectIcon,
                     colorHex = it.colorHex,
                     isCompleted = it.isCompleted,
+                    examType = it.examType,
                     syncStatus = it.syncStatus
                 )
             }
@@ -2157,7 +2231,7 @@ class TanweerRepository(
         authorName: String,
         authorGradeSection: String,
         pages: List<ProcessedPageResult>
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<PublicationResult> = withContext(Dispatchers.IO) {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
         val subject = gradeSubjects.find { it.id == subjectId }
@@ -2282,22 +2356,32 @@ class TanweerRepository(
                 }
                 // Cleanup temporary pending files on success
                 pages.forEach { try { it.file.delete() } catch (_: Exception) {} }
-                Result.success(serverId ?: id)
+                val finalId = serverId ?: id
+                Result.success(PublicationResult(finalId, PublicationState.SYNCED, "تم توثيق ونشر الدرس على الخادم بنجاح 🚀"))
             } else {
                 db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), "FAILED")
                 Result.failure(Exception(res.message() ?: "فشل تسجيل الدرس على السيرفر"))
             }
         } catch (e: Exception) {
+            val payload = JSONObject().apply {
+                put("groupId", groupId)
+                put("studyDate", date)
+                put("subjectId", subjectId)
+                put("title", title)
+                put("description", description ?: "")
+                put("authorName", authorName)
+                put("authorGradeSection", authorGradeSection)
+            }.toString()
             val outboxItem = OutboxEntity(
                 id = "ob_lsc_${id}_${System.currentTimeMillis()}",
                 entityType = "LESSON_CREATE",
                 entityId = id,
                 operation = "CREATE",
-                payloadJson = "{}"
+                payloadJson = payload
             )
             db.outboxDao().insertOutbox(outboxItem)
             db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), "PENDING")
-            Result.success(id)
+            Result.success(PublicationResult(id, PublicationState.PENDING, "تم حفظ الدرس محلياً، وجارٍ جدولة الرفع عند توفر الاتصال ⏳"))
         }
     }
 
@@ -2401,7 +2485,7 @@ class TanweerRepository(
         questionNumbers: String?,
         taskType: String = "HOMEWORK",
         mediaUrls: List<String> = emptyList()
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<PublicationResult> = withContext(Dispatchers.IO) {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
         val subject = gradeSubjects.find { it.id == subjectId }
@@ -2448,10 +2532,10 @@ class TanweerRepository(
                 if (serverId != null && serverId != id) {
                     val updatedEntity = entity.copy(id = serverId, syncStatus = "SYNCED")
                     db.homeworkDao().replaceHomeworkId(id, updatedEntity)
-                    Result.success(serverId)
+                    Result.success(PublicationResult(serverId, PublicationState.SYNCED, "تم حفظ ونشر الواجب على الخادم بنجاح ✨"))
                 } else {
                     db.homeworkDao().updateSyncStatus(id, "SYNCED")
-                    Result.success(id)
+                    Result.success(PublicationResult(id, PublicationState.SYNCED, "تم حفظ ونشر الواجب على الخادم بنجاح ✨"))
                 }
             } else {
                 db.homeworkDao().updateSyncStatus(id, "FAILED")
@@ -2459,16 +2543,28 @@ class TanweerRepository(
             }
         } catch (e: Exception) {
             // Queue in Outbox for offline synchronization
+            val payload = JSONObject().apply {
+                put("groupId", groupId)
+                put("studyDate", studyDate)
+                put("dueDate", dueDate)
+                put("subjectId", subjectId)
+                put("title", title)
+                put("details", details ?: "")
+                put("pageNumbers", pageNumbers ?: "")
+                put("questionNumbers", questionNumbers ?: "")
+                put("taskType", taskType)
+                put("mediaUrls", serializeStringList(mediaUrls))
+            }.toString()
             val outboxItem = OutboxEntity(
                 id = "ob_hwc_${id}_${System.currentTimeMillis()}",
                 entityType = "HOMEWORK_CREATE",
                 entityId = id,
                 operation = "CREATE",
-                payloadJson = "{}"
+                payloadJson = payload
             )
             db.outboxDao().insertOutbox(outboxItem)
             db.homeworkDao().updateSyncStatus(id, "PENDING")
-            Result.success(id)
+            Result.success(PublicationResult(id, PublicationState.PENDING, "تم حفظ الواجب محلياً بنجاح، وسيتم رفعه للخادم فور توفر الاتصال ⏳"))
         }
     }
 
@@ -2483,7 +2579,7 @@ class TanweerRepository(
         questionNumbers: String?,
         taskType: String = "HOMEWORK",
         pages: List<ProcessedPageResult> = emptyList()
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<PublicationResult> = withContext(Dispatchers.IO) {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
         val subject = gradeSubjects.find { it.id == subjectId }
@@ -2585,7 +2681,7 @@ class TanweerRepository(
                     id
                 }
                 pages.forEach { try { it.file.delete() } catch (_: Exception) {} }
-                Result.success(finalId)
+                Result.success(PublicationResult(finalId, PublicationState.SYNCED, "تم حفظ ونشر الواجب على الخادم بنجاح ✨"))
             } else {
                 val updatedEntity = entity.copy(
                     mediaUrlsJson = serializeStringList(uploadedUrls),
@@ -2600,15 +2696,27 @@ class TanweerRepository(
                 syncStatus = "PENDING"
             )
             db.homeworkDao().insertHomework(updatedEntity)
+            val payload = JSONObject().apply {
+                put("groupId", groupId)
+                put("studyDate", studyDate)
+                put("dueDate", dueDate)
+                put("subjectId", subjectId)
+                put("title", title)
+                put("details", details ?: "")
+                put("pageNumbers", pageNumbers ?: "")
+                put("questionNumbers", questionNumbers ?: "")
+                put("taskType", taskType)
+                put("mediaUrls", serializeStringList(uploadedUrls))
+            }.toString()
             val outboxItem = OutboxEntity(
                 id = "ob_hwc_${id}_${System.currentTimeMillis()}",
                 entityType = "HOMEWORK_CREATE",
                 entityId = id,
                 operation = "CREATE",
-                payloadJson = "{}"
+                payloadJson = payload
             )
             db.outboxDao().insertOutbox(outboxItem)
-            Result.success(id)
+            Result.success(PublicationResult(id, PublicationState.PENDING, "تم حفظ الواجب محلياً بنجاح، وسيتم رفعه للخادم فور توفر الاتصال ⏳"))
         }
     }
 
@@ -2800,7 +2908,8 @@ class TanweerRepository(
         subjectId: String,
         title: String,
         requiredChapters: String?,
-        notes: String?
+        notes: String?,
+        examType: String = "MONTHLY"
     ): Result<ExamAddResult> = withContext(Dispatchers.IO) {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
@@ -2818,6 +2927,7 @@ class TanweerRepository(
             subjectName = subject?.name ?: subjectId,
             subjectIcon = subject?.icon ?: "🔴",
             colorHex = subject?.colorHex ?: "#FF3366",
+            examType = examType,
             syncStatus = "SYNCING"
         )
         db.examDao().insertExam(entity)
@@ -2831,7 +2941,8 @@ class TanweerRepository(
                     subjectId = subjectId,
                     title = title,
                     requiredChapters = requiredChapters,
-                    notes = notes
+                    notes = notes,
+                    examType = examType
                 )
             )
             if (res.isSuccessful) {
@@ -2872,6 +2983,22 @@ class TanweerRepository(
             db.outboxDao().insertOutbox(outboxItem)
             db.examDao().updateSyncStatus(id, "PENDING")
             Result.success(ExamAddResult.QueuedOffline(id))
+        }
+    }
+
+    suspend fun toggleExamCompletion(examId: String, targetStatus: Boolean): Result<Boolean> = withContext(Dispatchers.IO) {
+        db.examDao().updateExamCompletion(examId, targetStatus)
+        try {
+            val res = api.toggleExamCompletion(examId)
+            if (res.isSuccessful && res.body() != null) {
+                val serverCompleted = res.body()!!.isCompleted
+                db.examDao().updateExamCompletion(examId, serverCompleted)
+                Result.success(serverCompleted)
+            } else {
+                Result.success(targetStatus)
+            }
+        } catch (_: Exception) {
+            Result.success(targetStatus)
         }
     }
 
@@ -3215,6 +3342,14 @@ class TanweerRepository(
 
     fun getPendingOutboxCount(): Flow<Int> {
         return db.outboxDao().getPendingItems().map { it.size }
+    }
+
+    suspend fun getPendingOutboxCountSync(): Int = withContext(Dispatchers.IO) {
+        try {
+            db.outboxDao().getPendingItemsSync().size
+        } catch (_: Exception) {
+            0
+        }
     }
 
     suspend fun processOutboxQueue(): Result<Int> = withContext(Dispatchers.IO) {

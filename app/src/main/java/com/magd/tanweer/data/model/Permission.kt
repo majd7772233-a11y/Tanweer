@@ -59,8 +59,8 @@ object PermissionEvaluator {
         if (user == null) return false
         val globalRole = Role.fromString(user.role)
 
-        // 1. SYSTEM_OWNER has master bypass
-        if (globalRole == Role.SYSTEM_OWNER) return true
+        // 1. ADMIN has global administrative capabilities
+        if (globalRole == Role.ADMIN) return true
 
         // 2. Owner-only dashboard restriction
         if (permission == Permission.ACCESS_OWNER_DASHBOARD) return false
@@ -101,6 +101,7 @@ object PermissionEvaluator {
 
         // 7. Role-specific privilege evaluation (Teacher Level 3 vs Moderator Level 2)
         return when (effectiveRole) {
+            Role.STUDENT -> false
             Role.TEACHER -> permission in setOf(
                 Permission.MANAGE_SCHEDULE,
                 Permission.MODERATE_CONTENT,
@@ -120,8 +121,7 @@ object PermissionEvaluator {
                 Permission.MODERATE_ISSUES,
                 Permission.MANAGE_SCHEDULE
             )
-            Role.STUDENT -> false
-            Role.ADMIN, Role.SYSTEM_OWNER -> true
+            Role.ADMIN -> true
         }
     }
 }

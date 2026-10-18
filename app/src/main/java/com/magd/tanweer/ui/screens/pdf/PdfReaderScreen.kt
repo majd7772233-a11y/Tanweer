@@ -226,10 +226,18 @@ fun PdfReaderScreen(
     val notesList = remember { mutableStateListOf<PageStudyNote>() }
     val vocabList = remember { mutableStateListOf<PageVocabulary>() }
 
-    // Unique Pages Read Counter
-    var visitedPages by remember { mutableStateOf(setOf<Int>()) }
-    var lifetimeUniquePagesBase by remember { mutableIntStateOf(0) }
-    val pagesReadCount = (lifetimeUniquePagesBase + visitedPages.size).coerceAtLeast(visitedPages.size)
+    // Unique Pages Read Counter (Persisted set of unique page indices to prevent duplicates across sessions)
+    val readingPrefs = remember { context.getSharedPreferences("tanweer_book_reading_stats", Context.MODE_PRIVATE) }
+    val initialSavedPages = remember(book.id) {
+        val raw = readingPrefs.getString("unique_pages_${book.id}", "") ?: ""
+        if (raw.isNotBlank()) {
+            raw.split(",").mapNotNull { it.toIntOrNull() }.toSet()
+        } else {
+            emptySet()
+        }
+    }
+    var persistedUniquePages by remember { mutableStateOf(initialSavedPages) }
+    val pagesReadCount = persistedUniquePages.size.coerceAtLeast(1)
     val targetPagesGoal = 15
 
     // Helper functions for strokes serialization
@@ -283,23 +291,31 @@ fun PdfReaderScreen(
         }
     }
 
-    // TTS Control Functions
+    // TTS Control Functions (المساعد الصوتي لملخص وملاحظات ومصطلحات الصفحة)
     fun speakCurrentPage(customText: String? = null) {
         if (!isTtsReady || ttsEngine == null) {
             Toast.makeText(context, "جاري تهيئة المساعد الصوتي...", Toast.LENGTH_SHORT).show()
         }
         val textToRead = customText ?: run {
             val pageNotes = notesList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { it.noteText }
-            val baseNarration = "كتاب ${book.title}، الصفحة ${currentPageIndex + 1} من $totalPages."
+            val pageVocab = vocabList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { "${it.word}: ${it.meaning}" }
+            val baseNarration = "كتاب ${book.title}، ملخص وملاحظات الصفحة ${currentPageIndex + 1} من $totalPages."
+            val parts = mutableListOf(baseNarration)
             if (pageNotes.isNotBlank()) {
-                "$baseNarration. ملاحظات الصفحة: $pageNotes"
-            } else {
-                "$baseNarration. مادة ${book.subjectName}، قراءة دراسية موجهة."
+                parts.add("ملاحظاتك الدراسية على هذه الصفحة: $pageNotes")
             }
+            if (pageVocab.isNotBlank()) {
+                parts.add("المفردات والمصطلحات المحفوظة: $pageVocab")
+            }
+            if (pageNotes.isBlank() && pageVocab.isBlank()) {
+                parts.add("مادة ${book.subjectName}. لم تقم بإضافة ملاحظات خاصة بهذه الصفحة بعد. يمكنك إضافة ملاحظات أو مصطلحات من شريط الأدوات وسينطقها المساعد الصوتي فوراً.")
+            }
+            parts.joinToString(". ")
         }
         ttsEngine?.setSpeechRate(audioSpeed)
         ttsEngine?.speak(textToRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
         isAudioPlaying = true
+        com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, true, com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
     }
 
     fun stopAudioPlayback() {
@@ -312,7 +328,7 @@ fun PdfReaderScreen(
     // Save Reading State on exit or state changes
     fun persistReadingState() {
         coroutineScope.launch {
-            val totalUniquePages = (lifetimeUniquePagesBase + visitedPages.size).coerceAtLeast(visitedPages.size)
+            val totalUniquePages = persistedUniquePages.size.coerceAtLeast(1)
             repository.saveBookReadingState(
                 bookId = book.id,
                 lastPage = currentPageIndex,
@@ -397,7 +413,11 @@ fun PdfReaderScreen(
             zoomScale = savedState.zoom
             lifetimeStudySeconds = savedState.totalStudySeconds
             sessionReadingSeconds = 0L
-            lifetimeUniquePagesBase = savedState.uniquePagesCount
+            if (persistedUniquePages.isEmpty()) {
+                val seed = setOf(savedState.lastPage)
+                persistedUniquePages = seed
+                readingPrefs.edit().putString("unique_pages_${book.id}", seed.joinToString(",")).apply()
+            }
             readingTheme = try { ReadingTheme.valueOf(savedState.theme) } catch (_: Exception) { ReadingTheme.DAY }
         }
 
@@ -450,9 +470,12 @@ fun PdfReaderScreen(
     }
 
     // Track unique visited pages accurately
+    // Track unique visited pages accurately
     LaunchedEffect(currentPageIndex, downloadState) {
         if (downloadState is PdfDownloadState.Ready) {
-            visitedPages = visitedPages + currentPageIndex
+            val updated = persistedUniquePages + currentPageIndex
+            persistedUniquePages = updated
+            readingPrefs.edit().putString("unique_pages_${book.id}", updated.joinToString(",")).apply()
             persistReadingState()
             if (isAudioPlaying) {
                 speakCurrentPage()
@@ -747,7 +770,7 @@ fun PdfReaderScreen(
                         ) {
                             Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
                             Text(
-                                text = "🔊 قراءة معلومات الصفحة والملاحظات (${currentPageIndex + 1}) • ${audioSpeed}x",
+                                text = "🔊 ملخص وملاحظات الصفحة (${currentPageIndex + 1}) • ${audioSpeed}x",
                                 fontSize = 12.sp,
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold
@@ -1528,10 +1551,17 @@ fun StudyToolsHubSheet(
                 ) {
                     Text(text = "🎙️", fontSize = 24.sp)
                     Text(
-                        text = if (isAudioPlaying) "إيقاف القارئ" else "قراءة بيانات وملاحظات الصفحة 🔊",
+                        text = if (isAudioPlaying) "إيقاف المساعد الصوتي ⏹️" else "المساعد الصوتي للملاحظات 🔊",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "ينطق عنوان الصفحة والملاحظات والمفردات المدونة (لا يستخرج نصوص PDF المصورة)",
+                        fontSize = 9.sp,
+                        color = TextSecondary,
                         textAlign = TextAlign.Center
                     )
                 }

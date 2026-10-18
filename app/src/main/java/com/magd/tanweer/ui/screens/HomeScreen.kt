@@ -45,6 +45,7 @@ fun HomeScreen(
 ) {
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
+    var activeViewingContent by remember { mutableStateOf<ContentItem?>(null) }
     val todayDate = remember { TanweerViewModel.getTodayDateString() }
     val isWeekend = remember { TanweerViewModel.isWeekend() }
     val dayOfWeek = remember { TanweerViewModel.getDayOfWeekIndex() }
@@ -77,24 +78,27 @@ fun HomeScreen(
     val dailyPlanItems by viewModel.getDailyPlanForDate(todayDate)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
-    // Group subjects into Documented vs Needs Contribution
+    // Group academic subjects scheduled for today by subjectId (distinct subjects)
+    val scheduledAcademicSubjects = remember(slots) {
+        slots.filter { isAcademicSubjectRequiringDocumentation(it) }
+            .groupBy { it.subjectId }
+    }
+
     val documentedSubjectIds = remember(todayContents) {
         todayContents.map { it.subjectId }.toSet()
     }
 
-    val documentedSlots = remember(slots, documentedSubjectIds) {
-        slots.filter { documentedSubjectIds.contains(it.subjectId) }
+    val documentedSubjectsMap = remember(scheduledAcademicSubjects, documentedSubjectIds) {
+        scheduledAcademicSubjects.filterKeys { documentedSubjectIds.contains(it) }
     }
 
-    val pendingSlots = remember(slots, documentedSubjectIds) {
-        slots.filter { slot ->
-            !documentedSubjectIds.contains(slot.subjectId) && isAcademicSubjectRequiringDocumentation(slot)
-        }
+    val pendingSubjectsMap = remember(scheduledAcademicSubjects, documentedSubjectIds) {
+        scheduledAcademicSubjects.filterKeys { !documentedSubjectIds.contains(it) }
     }
 
-    val totalCount = slots.size.coerceAtLeast(1)
-    val docCount = documentedSlots.size
-    val progressPercent = if (slots.isEmpty()) 0f else (docCount.toFloat() / slots.size.toFloat())
+    val totalSubjectsCount = scheduledAcademicSubjects.size.coerceAtLeast(1)
+    val docCount = documentedSubjectsMap.size
+    val progressPercent = if (scheduledAcademicSubjects.isEmpty()) 0f else (docCount.toFloat() / totalSubjectsCount.toFloat())
 
     val upcomingHwCount = homeworks.count { !it.isCompleted }
     val upcomingExamsCount = remember(exams, todayDate) {
@@ -421,7 +425,7 @@ fun HomeScreen(
                         Text("📷", fontSize = 20.sp)
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (pendingSlots.isNotEmpty()) "${pendingSlots.size} للتوثيق" else "مكتملة ✨",
+                            text = if (pendingSubjectsMap.isNotEmpty()) "${pendingSubjectsMap.size} للتوثيق" else "مكتملة ✨",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = CyanAccent
@@ -559,12 +563,19 @@ fun HomeScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(text = "📚", fontSize = 20.sp)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "إنجاز توثيق اليوم",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
+                                Column {
+                                    Text(
+                                        text = "إنجاز توثيق مواد اليوم الأكاديمية",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "التوثيق معتمد حسب المادة ($docCount من $totalSubjectsCount مواد) لضمان عدم تكرار الحصص",
+                                        fontSize = 11.sp,
+                                        color = TextSecondary
+                                    )
+                                }
                             }
                             Text(
                                 text = "${(progressPercent * 100).toInt()}% مكتمل",
@@ -586,20 +597,20 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "${slots.size} حصص مجدولة",
-                                fontSize = 12.sp,
+                                text = "${slots.size} حصص مجدولة • $totalSubjectsCount مواد أصلية",
+                                fontSize = 11.sp,
                                 color = TextSecondary
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
-                                    text = "✅ $docCount موثقة",
-                                    fontSize = 12.sp,
+                                    text = "✅ $docCount مواد موثقة",
+                                    fontSize = 11.sp,
                                     color = EmeraldGreen,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "🟡 ${pendingSlots.size} متبقية",
-                                    fontSize = 12.sp,
+                                    text = "🟡 ${pendingSubjectsMap.size} متبقية",
+                                    fontSize = 11.sp,
                                     color = WarmAmber,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -669,10 +680,10 @@ fun HomeScreen(
         }
 
         // Section: Documented Subjects (المواد الموثقة)
-        if (documentedSlots.isNotEmpty()) {
+        if (documentedSubjectsMap.isNotEmpty()) {
             item {
                 Text(
-                    text = "✅ المواد الموثقة اليوم",
+                    text = "✅ المواد الموثقة اليوم (${documentedSubjectsMap.size} من $totalSubjectsCount مواد أصلية)",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = EmeraldGreen,
@@ -680,19 +691,26 @@ fun HomeScreen(
                 )
             }
 
-            items(documentedSlots, key = { it.id }) { slot ->
-                val lessons = todayContents.filter { it.subjectId == slot.subjectId }
+            items(documentedSubjectsMap.entries.toList(), key = { it.key }) { (subjectId, slotList) ->
+                val consolidatedSlot = if (slotList.size > 1) {
+                    val orders = slotList.map { it.slotOrder }.sorted().joinToString(" و ")
+                    slotList.first().copy(subjectName = "${slotList.first().subjectName} (الحصص $orders • مادة واحدة)")
+                } else {
+                    slotList.first()
+                }
+                val lessons = todayContents.filter { it.subjectId == subjectId }
                 DocumentedSubjectCard(
-                    slot = slot,
+                    slot = consolidatedSlot,
                     lessons = lessons,
-                    onAddMore = { viewModel.openUploadDialog(slot.subjectId) },
+                    onAddMore = { viewModel.openUploadDialog(subjectId) },
+                    onViewLesson = { activeViewingContent = it },
                     onRetryLesson = { lessonId -> viewModel.retrySyncContent(lessonId) }
                 )
             }
         }
 
         // Section: Needs Contribution (تحتاج مساهمة)
-        if (pendingSlots.isNotEmpty()) {
+        if (pendingSubjectsMap.isNotEmpty()) {
             item {
                 Row(
                     modifier = Modifier.padding(top = 6.dp),
@@ -706,20 +724,33 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "(${pendingSlots.size} مواد)",
+                        text = "(${pendingSubjectsMap.size} مواد)",
                         fontSize = 12.sp,
                         color = TextMuted
                     )
                 }
             }
 
-            items(pendingSlots, key = { it.id }) { slot ->
+            items(pendingSubjectsMap.entries.toList(), key = { it.key }) { (subjectId, slotList) ->
+                val consolidatedPendingSlot = if (slotList.size > 1) {
+                    val orders = slotList.map { it.slotOrder }.sorted().joinToString(" و ")
+                    slotList.first().copy(subjectName = "${slotList.first().subjectName} (الحصص $orders)")
+                } else {
+                    slotList.first()
+                }
                 NeedsContributionSubjectCard(
-                    slot = slot,
-                    onContribute = { viewModel.openUploadDialog(slot.subjectId) }
+                    slot = consolidatedPendingSlot,
+                    onContribute = { viewModel.openUploadDialog(subjectId) }
                 )
             }
         }
+    }
+
+    activeViewingContent?.let { content ->
+        NotebookTranscriptionDialog(
+            content = content,
+            onDismiss = { activeViewingContent = null }
+        )
     }
 }
 
@@ -728,6 +759,7 @@ fun DocumentedSubjectCard(
     slot: ScheduleSlot,
     lessons: List<ContentItem>,
     onAddMore: () -> Unit,
+    onViewLesson: (ContentItem) -> Unit,
     onRetryLesson: ((String) -> Unit)? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -741,11 +773,16 @@ fun DocumentedSubjectCard(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
                             .size(38.dp)
@@ -765,9 +802,9 @@ fun DocumentedSubjectCard(
                             color = TextPrimary
                         )
                         Text(
-                            text = "الحصة ${slot.slotOrder} • ${lessons.size} دروس موثقة",
+                            text = "الحصة ${slot.slotOrder} • ${lessons.size} دروس موثقة (اضغط ${if (expanded) "للإغلاق" else "لفتح الصور"})",
                             fontSize = 11.sp,
-                            color = TextSecondary
+                            color = if (expanded) CyanAccent else TextSecondary
                         )
                     }
                 }
@@ -780,6 +817,101 @@ fun DocumentedSubjectCard(
                             tint = CyanAccent,
                             modifier = Modifier.size(20.dp)
                         )
+                    }
+                    IconButton(onClick = { expanded = !expanded }) {
+                        Text(
+                            text = if (expanded) "▲" else "▼",
+                            color = CyanAccent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            if (expanded) {
+                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(color = GlassBorderSubtle.copy(alpha = 0.6f))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (lessons.isEmpty()) {
+                    Text(
+                        text = "لا توجد صفحات مسجلة لهذه المادة بعد",
+                        fontSize = 12.sp,
+                        color = TextMuted,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        lessons.forEach { lesson ->
+                            val photoCount = lesson.media.size
+                            GlassCard(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onViewLesson(lesson) },
+                                backgroundColor = MidnightSurface,
+                                borderColor = CyanAccent.copy(alpha = 0.25f)
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = lesson.title.ifBlank { "درس مادة ${slot.subjectName}" },
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = TextPrimary
+                                            )
+                                            val authorText = if (lesson.authorName.isNotBlank()) "بواسطة: ${lesson.authorName}" else ""
+                                            val dateText = lesson.studyDate
+                                            val metaText = listOf(authorText, dateText).filter { it.isNotBlank() }.joinToString(" • ")
+                                            if (metaText.isNotBlank()) {
+                                                Text(
+                                                    text = metaText,
+                                                    fontSize = 11.sp,
+                                                    color = TextMuted
+                                                )
+                                            }
+                                        }
+
+                                        GlassPill(
+                                            text = if (photoCount > 0) "📷 $photoCount صور" else "📝 ملخص",
+                                            color = if (photoCount > 0) CyanAccent else EmeraldGreen
+                                        )
+                                    }
+
+                                    if (!lesson.description.isNullOrBlank()) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = lesson.description,
+                                            fontSize = 12.sp,
+                                            color = TextSecondary,
+                                            maxLines = 2
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        GlassButton(
+                                            text = "📖 فتح صور السبورة ونقل الدرس للدفتر",
+                                            onClick = { onViewLesson(lesson) },
+                                            color = CyanAccent,
+                                            textColor = TextOnAccent,
+                                            modifier = Modifier.height(34.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

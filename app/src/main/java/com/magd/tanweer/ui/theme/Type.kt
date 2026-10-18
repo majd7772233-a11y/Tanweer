@@ -64,22 +64,22 @@ object TanweerTypographyTokens {
     val BodyMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
-        fontSize = 13.sp,
-        lineHeight = 18.sp
+        fontSize = 12.sp,
+        lineHeight = 17.sp
     )
 
     val BodySmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
-        fontSize = 12.sp,
-        lineHeight = 16.sp
+        fontSize = 11.sp,
+        lineHeight = 15.sp
     )
 
     val LabelLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 13.sp,
-        lineHeight = 18.sp
+        fontSize = 12.sp,
+        lineHeight = 16.sp
     )
 
     val LabelMedium = TextStyle(
@@ -125,4 +125,7 @@ object AppTypography {
     val Meta: TextStyle get() = TanweerTypographyTokens.LabelSmall
     val Button: TextStyle get() = TanweerTypographyTokens.LabelLarge
     val Nav: TextStyle get() = TanweerTypographyTokens.LabelMedium
+    val FieldLabel: TextStyle get() = TanweerTypographyTokens.BodyMedium
+    val Hint: TextStyle get() = TanweerTypographyTokens.BodySmall
+    val Chip: TextStyle get() = TanweerTypographyTokens.LabelMedium
 }

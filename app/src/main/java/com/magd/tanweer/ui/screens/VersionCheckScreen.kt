@@ -255,10 +255,45 @@ fun VersionCheckScreen(
                             )
                         }
 
-                        // Direct APK Download Option if available
-                        if (!versionInfo.directApkUrl.isNullOrBlank()) {
+                        // Check if APK was already downloaded in Downloads directory
+                        val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                        val expectedApkFile = java.io.File(downloadsDir, "tanweer-${versionInfo.currentVersionName}.apk")
+                        val isApkDownloaded = expectedApkFile.exists() && expectedApkFile.length() > 0L
+
+                        if (isApkDownloaded) {
                             GlassButton(
-                                text = "تنزيل وتثبيت التحديث (APK) مباشرة 📥",
+                                text = "فحص الحزمة وتثبيت التحديث الآن 📦",
+                                icon = Icons.Default.InstallMobile,
+                                color = EmeraldGreen,
+                                onClick = {
+                                    val verification = AppVersionManager.verifyDownloadedApk(
+                                        context = context,
+                                        apkFile = expectedApkFile,
+                                        expectedSha256 = versionInfo.sha256
+                                    )
+                                    when (verification) {
+                                        is com.magd.tanweer.util.ApkVerificationResult.Valid -> {
+                                            Toast.makeText(
+                                                context,
+                                                "تم التحقق بنجاح من سلامة الحزمة الرسمية (v${verification.versionName}) ✓",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            AppVersionManager.launchPackageInstaller(context, expectedApkFile)
+                                        }
+                                        is com.magd.tanweer.util.ApkVerificationResult.Invalid -> {
+                                            Toast.makeText(
+                                                context,
+                                                "فشل التحقق من الملف: ${verification.reason}",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else if (!versionInfo.directApkUrl.isNullOrBlank()) {
+                            GlassButton(
+                                text = "تنزيل ملف التحديث الرسمي (APK) 📥",
                                 icon = Icons.Default.Download,
                                 color = EmeraldGreen,
                                 onClick = {
@@ -271,6 +306,14 @@ fun VersionCheckScreen(
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
+
+                        Text(
+                            text = "ℹ️ وفق معايير أمان أندرويد، يتطلب التثبيت تأكيدك عبر مثبت الحزم الرسمي، ولا يتم تثبيت أي تطبيق صامتاً.",
+                            fontSize = 11.sp,
+                            color = TextMuted,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
 
                         // Honest Web Page button
                         GlassButton(

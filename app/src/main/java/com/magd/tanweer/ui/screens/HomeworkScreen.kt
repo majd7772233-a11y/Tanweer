@@ -107,6 +107,45 @@ fun HomeworkScreen(
     var isLocalAddModalOpen by remember { mutableStateOf(false) }
     val isAddModalOpen = isLocalAddModalOpen || isAddModalOpenFromVm
     var fullScreenImagePreviewUrl by remember { mutableStateOf<String?>(null) }
+    var pendingReminderHw by remember { mutableStateOf<com.magd.tanweer.data.model.HomeworkItem?>(null) }
+    var showExactAlarmDialog by remember { mutableStateOf(false) }
+    var showNotificationSettingsDialog by remember { mutableStateOf(false) }
+
+    val notificationLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            pendingReminderHw?.let { hw ->
+                val res = TanweerNotificationManager.scheduleHomeworkReminder(
+                    context = context,
+                    homeworkId = hw.id,
+                    title = hw.title,
+                    subjectName = hw.subjectName,
+                    dueDate = hw.dueDate
+                )
+                when (res) {
+                    TanweerNotificationManager.ScheduleReminderResult.SUCCESS -> {
+                        Toast.makeText(context, "🔔 تم تفعيل تذكير دراسي دقيق على جهازك للواجب: ${hw.title}", Toast.LENGTH_SHORT).show()
+                    }
+                    TanweerNotificationManager.ScheduleReminderResult.PERMISSION_EXACT_ALARM_DENIED -> {
+                        showExactAlarmDialog = true
+                    }
+                    TanweerNotificationManager.ScheduleReminderResult.PERMISSION_NOTIFICATIONS_DENIED -> {
+                        showNotificationSettingsDialog = true
+                    }
+                    TanweerNotificationManager.ScheduleReminderResult.ALARM_SERVICE_UNAVAILABLE -> {
+                        Toast.makeText(context, "خدمة المنبهات والتذكيرات غير متوفرة على هذا الجهاز حالياً", Toast.LENGTH_SHORT).show()
+                    }
+                    TanweerNotificationManager.ScheduleReminderResult.GENERAL_ERROR -> {
+                        Toast.makeText(context, "تعذر جدولة التذكير. يرجى التحقق من إعدادات النظام والبطارية في جهازك.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        } else {
+            showNotificationSettingsDialog = true
+        }
+        pendingReminderHw = null
+    }
 
     LaunchedEffect(activeGroupId) {
         if (activeGroupId.isNotBlank()) {
@@ -311,6 +350,10 @@ fun HomeworkScreen(
                         isDueToday = isDueToday,
                         isPlanned = plannedHwIds.contains(hw.id),
                         onToggle = {
+                            val willBeCompleted = !hw.isCompleted
+                            if (willBeCompleted) {
+                                TanweerNotificationManager.cancelReminder(context, hw.id)
+                            }
                             viewModel.toggleHomework(hw.id, hw.isCompleted) { res ->
                                 when (res) {
                                     is com.magd.tanweer.data.local.HomeworkToggleResult.SyncedWithServer -> {
@@ -340,6 +383,18 @@ fun HomeworkScreen(
                             }
                         } else null,
                         onSetReminder = {
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                val hasNotif = androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.POST_NOTIFICATIONS
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                if (!hasNotif) {
+                                    pendingReminderHw = hw
+                                    notificationLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                    return@HomeworkCard
+                                }
+                            }
+
                             val result = TanweerNotificationManager.scheduleHomeworkReminder(
                                 context = context,
                                 homeworkId = hw.id,
@@ -352,10 +407,15 @@ fun HomeworkScreen(
                                     Toast.makeText(context, "🔔 تم تفعيل تذكير دراسي دقيق على جهازك للواجب: ${hw.title}", Toast.LENGTH_SHORT).show()
                                 }
                                 TanweerNotificationManager.ScheduleReminderResult.PERMISSION_NOTIFICATIONS_DENIED -> {
-                                    Toast.makeText(context, "تعذر إرسال التنبيه. يرجى منح تنوير إذن الإشعارات من إعدادات الهاتف.", Toast.LENGTH_LONG).show()
+                                    pendingReminderHw = hw
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                        notificationLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                    } else {
+                                        Toast.makeText(context, "تعذر إرسال التنبيه. يرجى منح تنوير إذن الإشعارات من إعدادات الهاتف.", Toast.LENGTH_LONG).show()
+                                    }
                                 }
                                 TanweerNotificationManager.ScheduleReminderResult.PERMISSION_EXACT_ALARM_DENIED -> {
-                                    Toast.makeText(context, "تعذر ضبط المنبه الدقيق. يرجى السماح للتطبيق بجدولة التنبيهات والمنبهات (Alarms & Reminders) من إعدادات النظام.", Toast.LENGTH_LONG).show()
+                                    showExactAlarmDialog = true
                                 }
                                 TanweerNotificationManager.ScheduleReminderResult.ALARM_SERVICE_UNAVAILABLE -> {
                                     Toast.makeText(context, "خدمة التنبيهات غير متوفرة على هذا الجهاز حالياً.", Toast.LENGTH_SHORT).show()
@@ -419,7 +479,12 @@ fun HomeworkScreen(
                         pages = scanPages.mapNotNull { it.processedResult },
                         onResult = { result ->
                             if (result.isSuccess) {
-                                Toast.makeText(context, "تم حفظ ونشر الواجب بنجاح ✨", Toast.LENGTH_SHORT).show()
+                                val outcome = result.getOrNull()
+                                if (outcome?.isSynced == true) {
+                                    Toast.makeText(context, "تم حفظ ونشر الواجب على الخادم بنجاح ✨", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, outcome?.message ?: "تم حفظ الواجب محلياً بنجاح، وسيتم رفعه للخادم فور توفر الاتصال ⏳", Toast.LENGTH_LONG).show()
+                                }
                                 isLocalAddModalOpen = false
                                 viewModel.closeAddHomeworkDialog()
                             } else {
@@ -487,6 +552,97 @@ fun HomeworkScreen(
                     }
                 }
             }
+        }
+
+        if (showExactAlarmDialog) {
+            AlertDialog(
+                onDismissRequest = { showExactAlarmDialog = false },
+                title = { Text("تفعيل التنبيهات الدقيقة ⏰", color = CyanAccent, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "يتطلب إرسال تذكير الواجب في موعده الدقيق السماح للتطبيق بجدولة التنبيهات والمنبهات (Alarms & Reminders) من إعدادات الهاتف.",
+                        color = TextPrimary,
+                        fontSize = 13.sp
+                    )
+                },
+                confirmButton = {
+                    GlassButton(
+                        text = "فتح إعدادات النظام ⚙️",
+                        color = CyanAccent,
+                        onClick = {
+                            showExactAlarmDialog = false
+                            try {
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                    val intent = android.content.Intent(
+                                        android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    )
+                                    context.startActivity(intent)
+                                } else {
+                                    val intent = android.content.Intent(
+                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    )
+                                    context.startActivity(intent)
+                                }
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "يرجى الانتقال لإعدادات التطبيق وتفعيل المنبهات الدقيقة", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                },
+                dismissButton = {
+                    GlassOutlinedButton(text = "إلغاء", onClick = { showExactAlarmDialog = false })
+                },
+                containerColor = MidnightSurface,
+                shape = RoundedCornerShape(18.dp)
+            )
+        }
+
+        if (showNotificationSettingsDialog) {
+            AlertDialog(
+                onDismissRequest = { showNotificationSettingsDialog = false },
+                title = { Text("إذن التنبيهات والإشعارات 🔔", color = WarmAmber, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "لتذكيرك بموعد تسليم الواجب والمذاكرة، يحتاج تنوير إلى تفعيل إذن الإشعارات من إعدادات جهازك.",
+                        color = TextPrimary,
+                        fontSize = 13.sp
+                    )
+                },
+                confirmButton = {
+                    GlassButton(
+                        text = "إعدادات الإشعارات ⚙️",
+                        color = WarmAmber,
+                        onClick = {
+                            showNotificationSettingsDialog = false
+                            try {
+                                val intent = android.content.Intent(
+                                    android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                                ).apply {
+                                    putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                }
+                                context.startActivity(intent)
+                            } catch (_: Exception) {
+                                try {
+                                    val intent = android.content.Intent(
+                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    )
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "يرجى تفعيل الإشعارات من إعدادات الهاتف", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    )
+                },
+                dismissButton = {
+                    GlassOutlinedButton(text = "إلغاء", onClick = { showNotificationSettingsDialog = false })
+                },
+                containerColor = MidnightSurface,
+                shape = RoundedCornerShape(18.dp)
+            )
         }
     }
 }
@@ -986,7 +1142,7 @@ fun AddHomeworkDialog(
                     ) {
                         Text(
                             "واجب مدرسي 📝",
-                            fontSize = 12.sp,
+                            style = AppTypography.Button,
                             fontWeight = if (taskType == "HOMEWORK") FontWeight.Bold else FontWeight.Normal,
                             color = if (taskType == "HOMEWORK") TextOnAccent else TextPrimary
                         )
@@ -1003,14 +1159,14 @@ fun AddHomeworkDialog(
                     ) {
                         Text(
                             "مشروع / بحث 🎯",
-                            fontSize = 12.sp,
+                            style = AppTypography.Button,
                             fontWeight = if (taskType == "TASK") FontWeight.Bold else FontWeight.Normal,
                             color = if (taskType == "TASK") TextOnAccent else TextPrimary
                         )
                     }
                 }
 
-                Text("اختر المادة الدراسية:", fontSize = 12.sp, color = TextSecondary)
+                Text("اختر المادة الدراسية:", style = AppTypography.FieldLabel, color = TextSecondary)
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1028,7 +1184,7 @@ fun AddHomeworkDialog(
                         ) {
                             Text(
                                 text = "${subj.icon} ${subj.name}",
-                                fontSize = 11.sp,
+                                style = AppTypography.Chip,
                                 color = if (isSelected) CyanAccent else TextPrimary,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             )

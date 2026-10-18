@@ -43,6 +43,9 @@ class UnifiedMutationQueue(
 
     private val outboxDao: OutboxDao = db.outboxDao()
 
+    var onRetryHomework: (suspend (String) -> Result<Unit>)? = null
+    var onRetryContent: (suspend (String) -> Result<Unit>)? = null
+
     init {
         // Periodic background drain and reconciliation
         scope.launch {
@@ -132,12 +135,31 @@ class UnifiedMutationQueue(
                         handleMutationFailure(item, "خطأ في إرسال الرسالة (${res.code()})")
                     }
                 }
-                "HOMEWORK_UPLOAD" -> {
-                    // Handled by TanweerRepository sync engine or custom uploader
-                    outboxDao.deleteOutbox(item.id)
+                "HOMEWORK_UPLOAD", "HOMEWORK_CREATE" -> {
+                    val retryFunc = onRetryHomework
+                    if (retryFunc != null) {
+                        val res = retryFunc(item.entityId)
+                        if (res.isSuccess) {
+                            outboxDao.deleteOutbox(item.id)
+                        } else {
+                            handleMutationFailure(item, res.exceptionOrNull()?.message ?: "فشل مزامنة الواجب مع الخادم")
+                        }
+                    } else {
+                        handleMutationFailure(item, "محرك رفع الواجبات غير مهيأ بعد")
+                    }
                 }
-                "CONTENT_UPLOAD" -> {
-                    outboxDao.deleteOutbox(item.id)
+                "CONTENT_UPLOAD", "LESSON_CREATE" -> {
+                    val retryFunc = onRetryContent
+                    if (retryFunc != null) {
+                        val res = retryFunc(item.entityId)
+                        if (res.isSuccess) {
+                            outboxDao.deleteOutbox(item.id)
+                        } else {
+                            handleMutationFailure(item, res.exceptionOrNull()?.message ?: "فشل مزامنة الدرس مع الخادم")
+                        }
+                    } else {
+                        handleMutationFailure(item, "محرك رفع الدروس غير مهيأ بعد")
+                    }
                 }
                 "ISSUE_COMMENT" -> {
                     val obj = JSONObject(item.payloadJson)

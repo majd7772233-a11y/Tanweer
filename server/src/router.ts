@@ -23,9 +23,9 @@ import {
   handleGetScheduleVersions,
 } from './services/schedule';
 import { handleGetCalendarOverview, handleGetDayDetail } from './services/calendar';
-import { handleCreateContent, handleVoteUseful, handleUpdateContent, handleDeleteContent } from './services/content';
+import { handleCreateContent, handleVoteUseful, handleUpdateContent, handleDeleteContent, handleGetContents } from './services/content';
 import { handleCreateHomework, handleGetHomeworks, handleToggleHomeworkCompletion, handleUpdateHomework, handleDeleteHomework } from './services/homework';
-import { handleCreateExam, handleGetExams, handleUpdateExam, handleDeleteExam } from './services/exams';
+import { handleCreateExam, handleGetExams, handleUpdateExam, handleDeleteExam, handleToggleExamCompletion } from './services/exams';
 import { handleCreateEvent, handleGetEvents, handleUpdateEvent, handleDeleteEvent } from './services/events';
 import {
   handleAddIssueComment,
@@ -99,7 +99,8 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
         '🚀 توافق متقدم مع أجهزة Android بدءاً من Android 6.0 (API 23+) وما فوق',
         '⚡ بنية مزامنة متكاملة Offline-First تضمن موثوقية العمل دون انقطاع'
       ],
-      downloadUrl: 'https://github.com/majd7772233-a11y/tanweer/releases/latest'
+      downloadUrl: 'https://github.com/majd7772233-a11y/tanweer/releases/latest',
+      sha256: null
     });
   }
 
@@ -245,6 +246,10 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
 
   // Content / Lessons & Media Upload
+  if (path === '/api/v1/contents' && method === 'GET') {
+    const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
+    return handleGetContents(groupId, user, env);
+  }
   if (path === '/api/v1/media/upload' && method === 'POST') {
     return handleUploadMedia(user, request, env);
   }
@@ -301,12 +306,19 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     return handleCreateExam(user, request, env);
   }
   if (path.startsWith('/api/v1/exams/')) {
-    const examId = path.split('/')[4];
-    if (method === 'PUT' || method === 'PATCH' || method === 'POST') {
+    const parts = path.split('/');
+    const examId = parts[4];
+    if (parts[5] === 'toggle-completion' && method === 'POST') {
+      return handleToggleExamCompletion(examId, user, env);
+    }
+    if (method === 'PUT' || method === 'PATCH') {
       return handleUpdateExam(examId, user, request, env);
     }
     if (method === 'DELETE') {
       return handleDeleteExam(examId, user, env);
+    }
+    if (method === 'POST') {
+      return handleUpdateExam(examId, user, request, env);
     }
   }
 

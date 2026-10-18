@@ -73,6 +73,7 @@ fun ScheduleScreen(
     val allSlots by viewModel.repository.getAllScheduleSlots(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
+    val scheduleSyncState by viewModel.scheduleSyncState.collectAsStateWithLifecycle()
     val scheduleProposals by viewModel.scheduleProposals.collectAsStateWithLifecycle()
     val scheduleVersion by viewModel.scheduleVersion.collectAsStateWithLifecycle()
     val scheduleMeta by viewModel.scheduleMeta.collectAsStateWithLifecycle()
@@ -94,11 +95,16 @@ fun ScheduleScreen(
     var isProposalsReviewDialogOpen by remember { mutableStateOf(false) }
     var sourceDayToCopy by remember { mutableIntStateOf(0) }
 
-    val canManageSchedule = remember(currentUser, allSlots.size, scheduleMeta) {
-        (scheduleMeta?.isInitialSetup == true) ||
-        (scheduleMeta?.canEditDirectly == true) ||
+    val isStaffWithDirectEdit = remember(currentUser, scheduleMeta) {
+        val role = currentUser?.getRoleEnum() ?: com.magd.tanweer.data.model.Role.STUDENT
+        role == com.magd.tanweer.data.model.Role.TEACHER ||
+        role == com.magd.tanweer.data.model.Role.ADMIN ||
         (currentUser?.hasPermission(Permission.MANAGE_SCHEDULE) == true) ||
-        allSlots.isEmpty()
+        (scheduleMeta?.canEditDirectly == true)
+    }
+
+    val canManageSchedule = remember(currentUser, allSlots.size, scheduleMeta, isStaffWithDirectEdit) {
+        isStaffWithDirectEdit || (scheduleMeta?.isInitialSetup == true) || allSlots.isEmpty()
     }
     var isDirectEditMode by remember { mutableStateOf(false) }
 
@@ -195,13 +201,21 @@ fun ScheduleScreen(
                 }
             }
 
-            // Permission & Mode Status Banner
+            // Sync Status Indicator for Schedule (Point 15)
+            item {
+                SyncStatusBar(
+                    syncState = scheduleSyncState,
+                    onRefresh = { viewModel.syncSchedule(activeGroupId, isRefresh = true) }
+                )
+            }
+
+            // Permission & Mode Status Banner (Points 13 & 14 Policy)
             item {
                 val userRole = currentUser?.getRoleEnum() ?: com.magd.tanweer.data.model.Role.STUDENT
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = MidnightSurface,
-                    borderColor = if (canManageSchedule && isDirectEditMode) CyanAccent else GlassBorderSubtle
+                    borderColor = if (isStaffWithDirectEdit && isDirectEditMode) CyanAccent else GlassBorderSubtle
                 ) {
                     Row(
                         modifier = Modifier
@@ -213,13 +227,13 @@ fun ScheduleScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    text = if (allSlots.isEmpty()) "🌟 المساهمة في الجدول الأول"
-                                           else if (canManageSchedule && isDirectEditMode) "🛠️ وضع التحرير المباشر"
-                                           else if (canManageSchedule) "👁️ وضع العرض"
-                                           else "👁️ وضع العرض الرسمي",
+                                    text = if (allSlots.isEmpty()) "🌟 المساهمة في بناء الجدول"
+                                           else if (isStaffWithDirectEdit && isDirectEditMode) "🛠️ تحرير مباشر (معلم / إدارة)"
+                                           else if (isStaffWithDirectEdit) "👁️ وضع العرض (مصرّح بالإدارة)"
+                                           else "👁️ جدول الشعبة التشاركي",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (canManageSchedule && isDirectEditMode) CyanAccent else TextPrimary
+                                    color = if (isStaffWithDirectEdit && isDirectEditMode) CyanAccent else TextPrimary
                                 )
                                 GlassPill(
                                     text = "${userRole.badgeIcon} ${userRole.displayNameAr}",
@@ -228,17 +242,17 @@ fun ScheduleScreen(
                                 )
                             }
                             Text(
-                                text = if (allSlots.isEmpty()) "بصفتك عضواً في الشعبة يمكنك إدخال الحصص الأولى مباشرة لبناء الجدول!"
-                                       else if (canManageSchedule && isDirectEditMode) "اضغط على أي خانة لتعديل أو تغيير المادة مباشرة وتحديث الجدول."
-                                       else if (canManageSchedule) "اضغط على زر التحرير لتعديل الجدول، أو تصفح الحصص بحرية."
-                                       else "الجدول معتمد ومثبت. لتعديل أي حصة اضغط عليها لتقديم مقترح تعديل ليصوت عليه الزملاء.",
+                                text = if (allSlots.isEmpty()) "الجدول غير معبأ بعد: يمكن لجميع الطلاب والمعلمين إدخال الحصص الأولى مباشرة!"
+                                       else if (isStaffWithDirectEdit && isDirectEditMode) "وضع التحرير المباشر مفعل: تعديلاتك على أي حصة تُحفظ مباشرة في الخادم دون تصويت."
+                                       else if (isStaffWithDirectEdit) "بصفتك أستاذاً أو مديراً: يمكنك الضغط على زر التحرير لتعديل الحصص مباشرة دون تصويت."
+                                       else "قاعدة الجدول: الخانة الفارغة تُملأ مباشرة؛ والخانة المشغولة ينقلك الضغط عليها لتقديم مقترح تعديل مع سبب للتصويت 🗳️.",
                                 fontSize = 11.sp,
                                 color = TextSecondary,
                                 lineHeight = 15.sp
                             )
                         }
 
-                        if (canManageSchedule && allSlots.isNotEmpty()) {
+                        if (isStaffWithDirectEdit && allSlots.isNotEmpty()) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Box(
                                 modifier = Modifier
@@ -304,10 +318,10 @@ fun ScheduleScreen(
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = if (canManageSchedule && (isDirectEditMode || allSlots.isEmpty()))
-                                "اضغط على أي خانة لاختيار المادة أو تعديلها مباشرة:"
+                            text = if (isStaffWithDirectEdit && isDirectEditMode)
+                                "وضع التحرير المباشر مفعل: اضغط على أي خانة لتعديل المادة مباشرة وحفظها دون تصويت:"
                             else
-                                "اضغط على أي حصة لمعاينتها أو تقديم مقترح تعديل عليها:",
+                                "قاعدة الحصص: الخانات الفارغة تُملأ مباشرة ＋، والحصص القائمة يُطرح عليها مقترح تصويت 💡:",
                             fontSize = 12.sp,
                             color = TextMuted,
                             modifier = Modifier.padding(bottom = 6.dp)
@@ -317,10 +331,19 @@ fun ScheduleScreen(
                         CanvasSchoolTimetableBoard(
                             allSlots = allSlots,
                             onCellClick = { dayIndex, slotOrder ->
-                                if (canManageSchedule && (isDirectEditMode || allSlots.isEmpty())) {
+                                val slot = allSlots.find { it.dayOfWeek == dayIndex && it.slotOrder == slotOrder }
+                                val isStaffDirect = (isStaffWithDirectEdit && isDirectEditMode) || allSlots.isEmpty()
+                                if (isStaffDirect) {
                                     activeEditingCell = Pair(dayIndex, slotOrder)
                                 } else {
-                                    activeProposalCell = Pair(dayIndex, slotOrder)
+                                    // Points 13 & 14 Policy:
+                                    // Empty slot -> directly filled!
+                                    // Occupied slot -> propose change with reason and voting!
+                                    if (slot == null) {
+                                        activeEditingCell = Pair(dayIndex, slotOrder)
+                                    } else {
+                                        activeProposalCell = Pair(dayIndex, slotOrder)
+                                    }
                                 }
                             }
                         )
@@ -404,18 +427,26 @@ fun ScheduleScreen(
                 items((1..6).toList()) { periodOrder ->
                     val slot = allSlots.find { it.dayOfWeek == selectedDayForList && it.slotOrder == periodOrder }
                     val defaultTime = com.magd.tanweer.util.AcademicTimeEngine.getDefaultPeriodTime(periodOrder)
+                    val isStaffDirect = (isStaffWithDirectEdit && isDirectEditMode) || allSlots.isEmpty()
 
                     SinglePeriodSlotCard(
                         dayOfWeek = selectedDayForList,
                         periodOrder = periodOrder,
                         slot = slot,
                         defaultTime = defaultTime,
-                        canDirectEdit = canManageSchedule && (isDirectEditMode || allSlots.isEmpty()),
+                        canDirectEdit = isStaffDirect || slot == null,
                         onClick = {
-                            if (canManageSchedule && (isDirectEditMode || allSlots.isEmpty())) {
+                            if (isStaffDirect) {
                                 activeEditingCell = Pair(selectedDayForList, periodOrder)
                             } else {
-                                activeProposalCell = Pair(selectedDayForList, periodOrder)
+                                // Points 13 & 14 Policy:
+                                // Empty slot -> directly filled!
+                                // Occupied slot -> propose change with reason and voting!
+                                if (slot == null) {
+                                    activeEditingCell = Pair(selectedDayForList, periodOrder)
+                                } else {
+                                    activeProposalCell = Pair(selectedDayForList, periodOrder)
+                                }
                             }
                         }
                     )
@@ -464,11 +495,11 @@ fun ScheduleScreen(
                 onDelete = {
                     viewModel.deleteScheduleSlot(dayOfWeek = dayIndex, slotOrder = slotOrder) { result ->
                         result.fold(
-                            onSuccess = { msg ->
-                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            onSuccess = { res ->
+                                Toast.makeText(context, res.message, Toast.LENGTH_LONG).show()
                             },
                             onFailure = { error ->
-                                Toast.makeText(context, error.localizedMessage ?: "تعذر تفريغ الخانة في السيرفر", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, error.localizedMessage ?: "تعذر تفريغ الخانة في الخادم", Toast.LENGTH_LONG).show()
                             }
                         )
                     }
@@ -768,29 +799,40 @@ fun CanvasTimetableCell(
         }
 
         if (isOccupied) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(text = slot!!.subjectIcon, fontSize = 16.sp)
-                Text(
-                    text = slot.subjectName,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center
-                )
-                Text(
-                    text = "${slot.startTime ?: ""} - ${slot.endTime ?: ""}",
-                    fontSize = 8.sp,
-                    color = TextSecondary,
-                    maxLines = 1
-                )
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (slot?.syncStatus == "PENDING" || slot?.syncStatus == "FAILED") {
+                    Text(
+                        text = if (slot?.syncStatus == "PENDING") "⏳" else "⚠️",
+                        fontSize = 9.sp,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(2.dp)
+                    )
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(text = slot!!.subjectIcon, fontSize = 16.sp)
+                    Text(
+                        text = slot.subjectName,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "${slot.startTime ?: ""} - ${slot.endTime ?: ""}",
+                        fontSize = 8.sp,
+                        color = TextSecondary,
+                        maxLines = 1
+                    )
+                }
             }
         } else {
             Column(
@@ -882,7 +924,11 @@ fun SinglePeriodSlotCard(
                 }
             }
 
-            if (canDirectEdit) {
+            if (slot?.syncStatus == "PENDING") {
+                GlassPill(text = "قيد المزامنة ⏳", color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.2f))
+            } else if (slot?.syncStatus == "FAILED") {
+                GlassPill(text = "فشل الحفظ ⚠️", color = RubyRed, bgColor = RubyRed.copy(alpha = 0.2f))
+            } else if (canDirectEdit) {
                 if (isOccupied) {
                     GlassPill(text = "تعديل ✏️", color = CyanAccent, bgColor = CyanGlow)
                 } else {
@@ -892,7 +938,7 @@ fun SinglePeriodSlotCard(
                 if (isOccupied) {
                     GlassPill(text = "اقتراح تعديل 💡", color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.2f))
                 } else {
-                    GlassPill(text = "اقتراح إضافة 💡", color = CyanAccent, bgColor = CyanGlow)
+                    GlassPill(text = "إضافة ＋", color = CyanAccent, bgColor = CyanGlow)
                 }
             }
         }
@@ -1092,7 +1138,7 @@ fun ScheduleProposalDialog(
                 Text("💡", fontSize = 20.sp)
                 Column {
                     Text(
-                        text = "اقتراح تعديل حصة",
+                        text = if (existingSlot == null) "اقتراح ملء خانة فارغة في الجدول" else "اقتراح تعديل حصة",
                         color = CyanAccent,
                         fontWeight = FontWeight.Bold,
                         fontSize = 17.sp
@@ -1168,7 +1214,7 @@ fun ScheduleProposalDialog(
                 OutlinedTextField(
                     value = reason,
                     onValueChange = { reason = it },
-                    placeholder = { Text("مثلاً: تغيير المدرس أو تبديل الحصة...", fontSize = 11.sp, color = TextMuted) },
+                    placeholder = { Text(if (existingSlot == null) "مثلاً: إضافة حصة الرياضيات في هذه الخانة..." else "مثلاً: تغيير المدرس أو تبديل الحصة...", fontSize = 11.sp, color = TextMuted) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                     colors = OutlinedTextFieldDefaults.colors(

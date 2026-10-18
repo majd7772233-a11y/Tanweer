@@ -32,23 +32,16 @@ enum class Role(
     ),
     ADMIN(
         level = 4,
-        displayNameAr = "مدير",
+        displayNameAr = "مدير المدرسة",
         badgeIcon = "👑",
         descriptionAr = "مدير المنظومة المدرسية، يملك كامل الصلاحيات الإدارية وتعيين المشرفين."
-    ),
-    SYSTEM_OWNER(
-        level = 5,
-        displayNameAr = "مالك المنظومة",
-        badgeIcon = "🔐",
-        descriptionAr = "حساب مالك الخادم وغرفة التحكم المركزية."
     );
 
     companion object {
         fun fromString(roleStr: String?): Role {
             if (roleStr.isNullOrBlank()) return STUDENT
             return when (roleStr.trim().uppercase()) {
-                "SYSTEM_OWNER", "OWNER" -> SYSTEM_OWNER
-                "ADMIN", "ADMINISTRATOR" -> ADMIN
+                "ADMIN", "ADMINISTRATOR", "SYSTEM_OWNER", "OWNER" -> ADMIN
                 "TEACHER", "VERIFIED_TEACHER" -> TEACHER
                 "MODERATOR" -> MODERATOR
                 "STUDENT", "MEMBER" -> STUDENT

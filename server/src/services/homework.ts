@@ -63,12 +63,17 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     ? body.id.trim()
     : generateId('hw');
 
-  // Idempotency check: if item with same ID already exists, return success
-  const existing = await env.DB.prepare(`SELECT id, is_official FROM homeworks WHERE id = ?`).bind(hwId).first<{
+  // Idempotency check with ownership & scope validation
+  const existing = await env.DB.prepare(`SELECT id, is_official, group_id, created_by FROM homeworks WHERE id = ?`).bind(hwId).first<{
     id: string;
     is_official: number;
+    group_id: string;
+    created_by: string;
   }>();
   if (existing) {
+    if (existing.group_id !== body.groupId || existing.created_by !== user.userId) {
+      return errorResponse('CONFLICT', 'المعرّف مستخدم مسبقاً في نطاق آخر أو بواسطة مستخدم آخر', 409);
+    }
     return jsonResponse({
       success: true,
       homeworkId: existing.id,

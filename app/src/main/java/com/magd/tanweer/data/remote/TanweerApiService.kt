@@ -143,7 +143,15 @@ data class CreateExamRequest(
     val subjectId: String,
     val title: String,
     val requiredChapters: String? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    val examType: String = "MONTHLY"
+)
+
+@JsonClass(generateAdapter = true)
+data class ToggleExamCompletionResponse(
+    val success: Boolean,
+    val isCompleted: Boolean,
+    val message: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -227,6 +235,13 @@ data class ChatMessagesResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class ContentsResponse(
+    val success: Boolean = true,
+    val contents: List<ContentItem> = emptyList(),
+    val totalCount: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
 data class BooksResponse(
     val success: Boolean,
     val books: List<BookItem> = emptyList()
@@ -242,7 +257,8 @@ data class SystemVersionResponse(
     val isUpdateRequired: Boolean = false,
     val releaseDate: String? = null,
     val changelog: List<String> = emptyList(),
-    val downloadUrl: String? = null
+    val downloadUrl: String? = null,
+    val sha256: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -412,6 +428,11 @@ interface TanweerApiService {
         @Part file: MultipartBody.Part
     ): Response<UploadMediaResponse>
 
+    @GET("api/v1/contents")
+    suspend fun getContents(
+        @Query("groupId") groupId: String
+    ): Response<ContentsResponse>
+
     @POST("api/v1/content")
     suspend fun createContent(@Body req: CreateContentRequest): Response<GenericResponse>
 
@@ -479,6 +500,9 @@ interface TanweerApiService {
 
     @DELETE("api/v1/exams/{id}")
     suspend fun deleteExam(@Path("id") id: String): Response<GenericResponse>
+
+    @POST("api/v1/exams/{id}/toggle-completion")
+    suspend fun toggleExamCompletion(@Path("id") id: String): Response<ToggleExamCompletionResponse>
 
     @GET("api/v1/events")
     suspend fun getEvents(@Query("groupId") groupId: String): Response<EventsResponse>

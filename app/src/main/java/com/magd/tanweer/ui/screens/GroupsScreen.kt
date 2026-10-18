@@ -52,7 +52,7 @@ fun GroupsScreen(
     val chatStatus by viewModel.chatConnectionStatus.collectAsStateWithLifecycle()
     val groupMembersState by viewModel.groupMembersState.collectAsStateWithLifecycle()
     val userRole = currentUser?.getRoleEnum() ?: Role.STUDENT
-    val canManageMembers = userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER || userRole == Role.TEACHER || userRole == Role.MODERATOR
+    val canManageMembers = userRole == Role.ADMIN || userRole == Role.TEACHER || userRole == Role.MODERATOR
 
     var activeTab by remember { mutableStateOf(GroupsTab.MY_GROUPS) }
     var activeChatGroup by remember { mutableStateOf<GroupItem?>(null) }

@@ -98,9 +98,16 @@ fun WhatDidIMissScreen(
         allContents.filter { it.studyDate in startDateStr..endDateStr }
     }
 
-    // 2. Homework assigned strictly in the absence window
+    // 2. Homework assigned OR due strictly in the absence window (Point 26: accounts for assignment and due date)
     val missedHomeworks = remember(allHomeworks, startDateStr, endDateStr) {
-        allHomeworks.filter { it.studyDate in startDateStr..endDateStr }
+        allHomeworks.filter { hw ->
+            (hw.studyDate in startDateStr..endDateStr) || (hw.dueDate in startDateStr..endDateStr)
+        }.distinctBy { it.id }
+    }
+    val upcomingHomeworks = remember(allHomeworks, endDateStr) {
+        allHomeworks.filter { hw ->
+            hw.dueDate > endDateStr && hw.studyDate > endDateStr
+        }.distinctBy { it.id }
     }
 
     // 3. Exams: Distinguish between exams missed during absence vs upcoming future exams
@@ -119,7 +126,7 @@ fun WhatDidIMissScreen(
         allEvents.filter { it.eventDate > endDateStr }
     }
 
-    val totalCatchupItems = missedLessons.size + missedHomeworks.size + missedExams.size + upcomingExams.size + missedEvents.size + upcomingEvents.size
+    val totalCatchupItems = missedLessons.size + missedHomeworks.size + upcomingHomeworks.size + missedExams.size + upcomingExams.size + missedEvents.size + upcomingEvents.size
 
     BackHandler {
         viewModel.navigateBack()
@@ -408,6 +415,27 @@ fun WhatDidIMissScreen(
                                     color = WarmAmber,
                                     bgColor = WarmAmber.copy(alpha = 0.15f)
                                 )
+                                val isDueInWindow = hw.dueDate in startDateStr..endDateStr
+                                val isAssignedInWindow = hw.studyDate in startDateStr..endDateStr
+                                if (isDueInWindow && !isAssignedInWindow) {
+                                    GlassPill(
+                                        text = "يستحق خلال الغياب ⚠️",
+                                        color = RubyRed,
+                                        bgColor = RubyRed.copy(alpha = 0.15f)
+                                    )
+                                } else if (isDueInWindow && isAssignedInWindow) {
+                                    GlassPill(
+                                        text = "كُلّف واستحق أثناء الغياب 📌",
+                                        color = WarmAmber,
+                                        bgColor = WarmAmber.copy(alpha = 0.15f)
+                                    )
+                                } else if (isAssignedInWindow) {
+                                    GlassPill(
+                                        text = "كُلّف خلال فترة الغياب 📝",
+                                        color = CyanAccent,
+                                        bgColor = CyanGlow
+                                    )
+                                }
                                 Text(
                                     text = "تاريخ الحصة: ${hw.studyDate}",
                                     fontSize = 11.sp,
@@ -435,6 +463,121 @@ fun WhatDidIMissScreen(
                                     text = "⏳ موعد التسليم: ${hw.dueDate}",
                                     fontSize = 11.sp,
                                     color = WarmAmber,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = {
+                                viewModel.toggleHomework(hw.id, hw.isCompleted) { res ->
+                                    when (res) {
+                                        is HomeworkToggleResult.SyncedWithServer -> {
+                                            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                        }
+                                        is HomeworkToggleResult.QueuedOffline -> {
+                                            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                        }
+                                        is HomeworkToggleResult.Failed -> {
+                                            Toast.makeText(context, res.error, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(GlassSurface)
+                        ) {
+                            Icon(
+                                imageVector = if (hw.isCompleted) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                contentDescription = "إكمال الواجب",
+                                tint = if (hw.isCompleted) EmeraldGreen else TextMuted
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 2.5 UPCOMING HOMEWORK SECTION
+        // -------------------------------------------------------------
+        if (selectedCategoryFilter in listOf(CatchupCategoryFilter.ALL, CatchupCategoryFilter.HOMEWORK) && upcomingHomeworks.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "⏳", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "واجبات وتكليفات قادمة (${upcomingHomeworks.size})",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CyanAccent
+                        )
+                    }
+                    TextButton(onClick = { viewModel.setTab(NavigationTab.HOMEWORK) }) {
+                        Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            items(upcomingHomeworks) { hw ->
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = GlassSurface
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                GlassPill(
+                                    text = hw.subjectName,
+                                    color = CyanAccent,
+                                    bgColor = CyanGlow
+                                )
+                                GlassPill(
+                                    text = "قادم ⏳",
+                                    color = EmeraldGreen,
+                                    bgColor = EmeraldGreen.copy(alpha = 0.15f)
+                                )
+                                Text(
+                                    text = "تاريخ الحصة: ${hw.studyDate}",
+                                    fontSize = 11.sp,
+                                    color = TextMuted
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = hw.title,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            if (!hw.details.isNullOrBlank()) {
+                                Text(
+                                    text = hw.details,
+                                    fontSize = 12.sp,
+                                    color = TextSecondary,
+                                    maxLines = 2
+                                )
+                            }
+                            if (hw.dueDate.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "⏳ موعد التسليم: ${hw.dueDate}",
+                                    fontSize = 11.sp,
+                                    color = CyanAccent,
                                     fontWeight = FontWeight.Medium
                                 )
                             }

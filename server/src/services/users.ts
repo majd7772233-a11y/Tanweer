@@ -105,10 +105,16 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
      VALUES (?, ?, 'CLASS', ?, ?, ?)`
   ).bind(classGroupId, groupName, `المجموعة الدراسية الرسمية لـ ${groupName}`, academicYear, now).run();
 
+  // Group membership role is strictly scoped to group context.
+  // SYSTEM_OWNER and ADMIN are strictly global platform roles and must NEVER be stored in group_members.
+  const targetGroupRole = (user.role === Role.TEACHER)
+    ? Role.TEACHER
+    : (user.role === Role.MODERATOR ? Role.MODERATOR : Role.STUDENT);
+
   await env.DB.prepare(
     `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at)
      VALUES (?, ?, ?, 'ACTIVE', ?)`
-  ).bind(classGroupId, user.userId, user.role || Role.STUDENT, now).run();
+  ).bind(classGroupId, user.userId, targetGroupRole, now).run();
 
   return jsonResponse({
     success: true,

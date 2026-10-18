@@ -61,6 +61,9 @@ interface ScheduleDao {
 
     @Query("DELETE FROM cached_schedule_slots WHERE groupId = :groupId")
     suspend fun clearSlots(groupId: String)
+
+    @Query("SELECT * FROM cached_schedule_slots WHERE groupId = :groupId")
+    suspend fun getSlotsSync(groupId: String): List<ScheduleSlotEntity>
 }
 
 @Dao

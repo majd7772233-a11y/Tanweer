@@ -172,30 +172,44 @@ object StudentNotebookManager {
 
         content.media.forEachIndexed { index, mediaItem ->
             val urlStr = mediaItem.url
+            val effectiveUrl = when {
+                urlStr.startsWith("http://") || urlStr.startsWith("https://") -> urlStr
+                urlStr.startsWith("/") -> "https://tanweer.magd.workers.dev$urlStr"
+                else -> urlStr
+            }
             val destFile = File(offlineDir, "board_${content.id}_${index}.jpg")
 
             if (destFile.exists() && destFile.length() > 0) {
                 pathsMap[index] = destFile.absolutePath
-            } else if (urlStr.startsWith("http://") || urlStr.startsWith("https://")) {
+            } else if (effectiveUrl.startsWith("http://") || effectiveUrl.startsWith("https://")) {
                 try {
-                    val stream = URL(urlStr).openStream()
+                    val stream = URL(effectiveUrl).openStream()
                     FileOutputStream(destFile).use { out ->
                         stream.copyTo(out)
                     }
                     if (destFile.exists() && destFile.length() > 0) {
                         pathsMap[index] = destFile.absolutePath
                         downloadedCount++
+                    } else {
+                        destFile.delete()
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to download image at index $index: ${e.message}")
+                    if (destFile.exists() && destFile.length() == 0L) {
+                        destFile.delete()
+                    }
                 }
-            } else if (File(urlStr).exists()) {
-                pathsMap[index] = urlStr
+            } else if (File(effectiveUrl).exists()) {
+                pathsMap[index] = effectiveUrl
             }
         }
 
         val updatedRecord = existing.copy(localImagePaths = pathsMap)
         saveLessonRecord(context, updatedRecord)
-        Result.success(downloadedCount)
+        if (content.media.isNotEmpty() && pathsMap.isEmpty()) {
+            Result.failure(Exception("تعذر تنزيل لوحات الدرس، يرجى التأكد من اتصال الإنترنت"))
+        } else {
+            Result.success(downloadedCount)
+        }
     }
 }

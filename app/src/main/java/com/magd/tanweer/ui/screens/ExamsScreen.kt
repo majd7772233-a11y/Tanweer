@@ -1,6 +1,11 @@
 package com.magd.tanweer.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -29,9 +34,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.ExamItem
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.data.notifications.TanweerNotificationManager
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
@@ -66,6 +73,53 @@ fun ExamsScreen(
 
     val todayDateStr = remember { TanweerViewModel.getTodayDateString() }
 
+    // Grouping by Month (Point 17: Monthly structure & organization)
+    val examsByMonth = remember(exams) {
+        exams.groupBy { getMonthKey(it.examDate) }.toSortedMap()
+    }
+    val allMonthKeys = remember(examsByMonth) { examsByMonth.keys.toList() }
+    var selectedMonthFilter by remember { mutableStateOf<String?>(null) } // null = "جميع الأشهر"
+
+    var pendingExamForReminder by remember { mutableStateOf<ExamItem?>(null) }
+    var showExactAlarmDialog by remember { mutableStateOf(false) }
+    var showNotificationSettingsDialog by remember { mutableStateOf(false) }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            pendingExamForReminder?.let { exam ->
+                val res = TanweerNotificationManager.scheduleExamReminder(
+                    context = context,
+                    examId = exam.id,
+                    title = exam.title,
+                    subjectName = exam.subjectName,
+                    examDate = exam.examDate
+                )
+                when (res) {
+                    TanweerNotificationManager.ScheduleReminderResult.SUCCESS -> {
+                        Toast.makeText(context, "تم جدولة تذكير لاختبار ${exam.subjectName} بنجاح 🔔", Toast.LENGTH_SHORT).show()
+                    }
+                    TanweerNotificationManager.ScheduleReminderResult.PERMISSION_EXACT_ALARM_DENIED -> {
+                        showExactAlarmDialog = true
+                    }
+                    TanweerNotificationManager.ScheduleReminderResult.PERMISSION_NOTIFICATIONS_DENIED -> {
+                        showNotificationSettingsDialog = true
+                    }
+                    TanweerNotificationManager.ScheduleReminderResult.ALARM_SERVICE_UNAVAILABLE -> {
+                        Toast.makeText(context, "خدمة المنبهات غير متاحة على هذا الجهاز حالياً", Toast.LENGTH_SHORT).show()
+                    }
+                    TanweerNotificationManager.ScheduleReminderResult.GENERAL_ERROR -> {
+                        Toast.makeText(context, "تعذر جدولة التنبيه. يرجى التحقق من إعدادات النظام والبطارية.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        } else {
+            showNotificationSettingsDialog = true
+        }
+        pendingExamForReminder = null
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -78,7 +132,7 @@ fun ExamsScreen(
             contentPadding = PaddingValues(top = 16.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header (Zero clutter, exactly ONE single add button)
+            // Header
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -87,13 +141,13 @@ fun ExamsScreen(
                 ) {
                     Column {
                         Text(
-                            text = "🧪 جدول الاختبارات",
+                            text = "🧪 جدول الاختبارات المركزي",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Black,
                             color = RubyRed
                         )
                         Text(
-                            text = "${exams.size} اختبارات مسجلة للشعبة",
+                            text = "${exams.size} اختبارات مسجلة موزعة على ${examsByMonth.size} أشهر",
                             fontSize = 12.sp,
                             color = TextSecondary
                         )
@@ -114,33 +168,147 @@ fun ExamsScreen(
                 item {
                     EmptyStateGlass(
                         title = "جدول الاختبارات فارغ",
-                        subtitle = "يمكنك إضافة موعد اختبار وتحديد الفصول المطلوبة",
+                        subtitle = "يمكنك جدولة مواعيد الاختبارات الشهرية والنصفي والنهائي وتحديد الفصول المقررة",
                         icon = "📋",
-                        actionButtonText = "إضافة اختبار جديد",
+                        actionButtonText = "إضافة أول اختبار",
                         onActionClick = { isLocalAddExamModalOpen = true }
                     )
                 }
             } else {
-                // The Full Structured Canvas Exam Table
-                item {
-                    CanvasExamsTableBoard(
-                        exams = exams,
-                        todayDateStr = todayDateStr,
-                        onToggleDone = { examId, currentDone ->
-                            viewModel.toggleExamCompletion(examId, !currentDone)
-                        },
-                        onRowClick = { exam ->
-                            selectedExamForDetail = exam
-                        },
-                        onDeleteClick = { exam ->
-                            examToDelete = exam
+                // Month Filter Selector Tabs (Point 17)
+                if (allMonthKeys.size > 1) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // "All Months" Tab
+                            val isAllSelected = selectedMonthFilter == null
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isAllSelected) RubyRed else MidnightSurface)
+                                    .border(1.dp, if (isAllSelected) RubyRed else GlassBorderSubtle, RoundedCornerShape(12.dp))
+                                    .clickable { selectedMonthFilter = null }
+                                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = "جميع الأشهر (${exams.size})",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isAllSelected) Color.White else TextSecondary
+                                )
+                            }
+
+                            // Each Month Tab
+                            allMonthKeys.forEach { monthKey ->
+                                val monthExams = examsByMonth[monthKey] ?: emptyList()
+                                val isSelected = selectedMonthFilter == monthKey
+                                val monthTitle = getShortMonthTitle(monthKey)
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isSelected) RubyRed else MidnightSurface)
+                                        .border(1.dp, if (isSelected) RubyRed else GlassBorderSubtle, RoundedCornerShape(12.dp))
+                                        .clickable { selectedMonthFilter = monthKey }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = "$monthTitle (${monthExams.size})",
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) Color.White else TextSecondary
+                                    )
+                                }
+                            }
                         }
-                    )
+                    }
+                }
+
+                // Render Monthly Sections (Point 17)
+                val displayedMonths = if (selectedMonthFilter != null) {
+                    examsByMonth.filterKeys { it == selectedMonthFilter }
+                } else {
+                    examsByMonth
+                }
+
+                displayedMonths.forEach { (monthKey, monthExams) ->
+                    val completedCount = monthExams.count { it.isCompleted || isExamDatePassed(it.examDate, todayDateStr) }
+                    val fullMonthTitle = getArabicMonthTitle(monthKey)
+
+                    // Month Header Section Card
+                    item(key = "header_$monthKey") {
+                        GlassCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = MidnightSurface,
+                            borderColor = GlassBorderSubtle
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(RubyRed.copy(alpha = 0.15f))
+                                            .border(1.dp, RubyRed.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(text = "📅", fontSize = 16.sp)
+                                    }
+                                    Column {
+                                        Text(
+                                            text = fullMonthTitle,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary
+                                        )
+                                        Text(
+                                            text = "تمت مراجعة $completedCount من ${monthExams.size} اختبارات",
+                                            fontSize = 11.sp,
+                                            color = if (completedCount == monthExams.size) EmeraldGreen else TextSecondary
+                                        )
+                                    }
+                                }
+
+                                GlassPill(
+                                    text = "${monthExams.size} اختبارات",
+                                    color = RubyRed,
+                                    bgColor = RubyRed.copy(alpha = 0.15f)
+                                )
+                            }
+                        }
+                    }
+
+                    // Structured Table for this Month
+                    item(key = "table_$monthKey") {
+                        CanvasExamsTableBoard(
+                            exams = monthExams,
+                            todayDateStr = todayDateStr,
+                            onToggleDone = { examId, currentDone ->
+                                viewModel.toggleExamCompletion(examId, !currentDone)
+                            },
+                            onRowClick = { exam ->
+                                selectedExamForDetail = exam
+                            },
+                            onDeleteClick = { exam ->
+                                examToDelete = exam
+                            }
+                        )
+                    }
                 }
             }
         }
 
-        // Add Exam Sheet
+        // Add Exam Sheet (Point 18: Passes examType properly)
         if (isAddExamModalOpen) {
             AddExamSheet(
                 gradeSubjects = gradeSubjects,
@@ -149,13 +317,14 @@ fun ExamsScreen(
                     isLocalAddExamModalOpen = false
                     viewModel.closeAddExamDialog()
                 },
-                onAdd = { subjId, title, chapters, notes, date ->
+                onAdd = { subjId, title, chapters, notes, date, examType ->
                     viewModel.addExam(
                         subjectId = subjId,
                         title = title,
                         requiredChapters = chapters,
                         notes = notes,
                         examDate = date,
+                        examType = examType,
                         onResult = { res ->
                             res.fold(
                                 onSuccess = { addRes ->
@@ -174,11 +343,53 @@ fun ExamsScreen(
             )
         }
 
-        // Exam Detail Modal
+        // Exam Detail Modal (Point 17 & 21: Full details, completion toggle, and reminder scheduling)
         selectedExamForDetail?.let { exam ->
             ExamDetailModal(
                 exam = exam,
+                todayDateStr = todayDateStr,
                 onDismiss = { selectedExamForDetail = null },
+                onToggleDone = {
+                    viewModel.toggleExamCompletion(exam.id, !exam.isCompleted)
+                    selectedExamForDetail = exam.copy(isCompleted = !exam.isCompleted)
+                },
+                onScheduleReminder = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        val hasPerm = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (!hasPerm) {
+                            pendingExamForReminder = exam
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            return@ExamDetailModal
+                        }
+                    }
+                    val res = TanweerNotificationManager.scheduleExamReminder(
+                        context = context,
+                        examId = exam.id,
+                        title = exam.title,
+                        subjectName = exam.subjectName,
+                        examDate = exam.examDate
+                    )
+                    when (res) {
+                        TanweerNotificationManager.ScheduleReminderResult.SUCCESS -> {
+                            Toast.makeText(context, "تم ضبط تذكير لاختبار ${exam.subjectName} بنجاح 🔔", Toast.LENGTH_SHORT).show()
+                        }
+                        TanweerNotificationManager.ScheduleReminderResult.PERMISSION_EXACT_ALARM_DENIED -> {
+                            showExactAlarmDialog = true
+                        }
+                        TanweerNotificationManager.ScheduleReminderResult.PERMISSION_NOTIFICATIONS_DENIED -> {
+                            showNotificationSettingsDialog = true
+                        }
+                        TanweerNotificationManager.ScheduleReminderResult.ALARM_SERVICE_UNAVAILABLE -> {
+                            Toast.makeText(context, "خدمة المنبهات والتذكيرات غير متوفرة على هذا الجهاز حالياً", Toast.LENGTH_SHORT).show()
+                        }
+                        TanweerNotificationManager.ScheduleReminderResult.GENERAL_ERROR -> {
+                            Toast.makeText(context, "تعذر جدولة التذكير. تأكد من إعدادات النظام والبطارية في جهازك.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
                 onOpenLibraryBook = {
                     selectedExamForDetail = null
                     viewModel.setTab(NavigationTab.MORE)
@@ -219,11 +430,112 @@ fun ExamsScreen(
                 shape = RoundedCornerShape(18.dp)
             )
         }
+
+        // Exact Alarm Permission Recovery Dialog
+        if (showExactAlarmDialog) {
+            AlertDialog(
+                onDismissRequest = { showExactAlarmDialog = false },
+                title = { Text("تفعيل التنبيهات الدقيقة ⏰", color = CyanAccent, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "يتطلب إرسال تذكير الاختبار في موعده الدقيق السماح للتطبيق بجدولة التنبيهات والمنبهات (Alarms & Reminders) من إعدادات الهاتف.",
+                        color = TextPrimary,
+                        fontSize = 13.sp
+                    )
+                },
+                confirmButton = {
+                    GlassButton(
+                        text = "فتح إعدادات النظام ⚙️",
+                        color = CyanAccent,
+                        onClick = {
+                            showExactAlarmDialog = false
+                            try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    val intent = android.content.Intent(
+                                        android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    )
+                                    context.startActivity(intent)
+                                } else {
+                                    val intent = android.content.Intent(
+                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    )
+                                    context.startActivity(intent)
+                                }
+                            } catch (_: Exception) {
+                                try {
+                                    val intent = android.content.Intent(
+                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    )
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "يرجى الانتقال لإعدادات الهاتف وتفعيل المنبهات الدقيقة", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    )
+                },
+                dismissButton = {
+                    GlassOutlinedButton(text = "إلغاء", onClick = { showExactAlarmDialog = false })
+                },
+                containerColor = MidnightSurface,
+                shape = RoundedCornerShape(18.dp)
+            )
+        }
+
+        // Notifications Permission Recovery Dialog
+        if (showNotificationSettingsDialog) {
+            AlertDialog(
+                onDismissRequest = { showNotificationSettingsDialog = false },
+                title = { Text("إذن التنبيهات والإشعارات 🔔", color = WarmAmber, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "لتذكيرك بموعد الاختبار والمراجعة، يحتاج تنوير إلى تفعيل إذن الإشعارات من إعدادات الهاتف.",
+                        color = TextPrimary,
+                        fontSize = 13.sp
+                    )
+                },
+                confirmButton = {
+                    GlassButton(
+                        text = "إعدادات الإشعارات ⚙️",
+                        color = WarmAmber,
+                        onClick = {
+                            showNotificationSettingsDialog = false
+                            try {
+                                val intent = android.content.Intent(
+                                    android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                                ).apply {
+                                    putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                }
+                                context.startActivity(intent)
+                            } catch (_: Exception) {
+                                try {
+                                    val intent = android.content.Intent(
+                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    )
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "يرجى تفعيل الإشعارات من إعدادات التطبيق", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    )
+                },
+                dismissButton = {
+                    GlassOutlinedButton(text = "إلغاء", onClick = { showNotificationSettingsDialog = false })
+                },
+                containerColor = MidnightSurface,
+                shape = RoundedCornerShape(18.dp)
+            )
+        }
     }
 }
 
 // -------------------------------------------------------------
-// CANVAS EXAMS TABLE BOARD (AUTHENTIC SCHOOL TABLE WITH HEADERS ON TOP)
+// CANVAS EXAMS TABLE BOARD (WITH EXAM TYPE & STATUS)
 // -------------------------------------------------------------
 @Composable
 fun CanvasExamsTableBoard(
@@ -246,7 +558,7 @@ fun CanvasExamsTableBoard(
                 .horizontalScroll(horizontalScroll)
                 .padding(4.dp)
         ) {
-            // 1. Table Top Column Headers (على رأس الجدول)
+            // Table Top Column Headers
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -256,17 +568,17 @@ fun CanvasExamsTableBoard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(text = "#", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(32.dp))
-                Text(text = "المادة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(130.dp))
+                Text(text = "المادة والنوع", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(145.dp))
                 Text(text = "اليوم والتاريخ", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(130.dp))
-                Text(text = "الأستاذ / القاعة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(130.dp))
-                Text(text = "الفصول المقررة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(150.dp))
-                Text(text = "الحالة الذكية", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, textAlign = TextAlign.Center, modifier = Modifier.width(90.dp))
+                Text(text = "الأستاذ / القاعة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(120.dp))
+                Text(text = "الفصول المقررة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(140.dp))
+                Text(text = "المراجعة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, textAlign = TextAlign.Center, modifier = Modifier.width(85.dp))
                 Text(text = "حذف", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, textAlign = TextAlign.Center, modifier = Modifier.width(44.dp))
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // 2. Table Rows
+            // Table Rows
             exams.forEachIndexed { index, exam ->
                 val isDone = exam.isCompleted || isExamDatePassed(exam.examDate, todayDateStr)
                 val dayName = remember(exam.examDate) { getArabicDayOfWeek(exam.examDate) }
@@ -302,22 +614,26 @@ fun CanvasExamsTableBoard(
                             modifier = Modifier.width(32.dp)
                         )
 
-                        // Subject
+                        // Subject & Type Badge (Point 18)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.width(130.dp)
+                            modifier = Modifier.width(145.dp)
                         ) {
                             Text(text = exam.subjectIcon, fontSize = 16.sp)
                             Spacer(modifier = Modifier.width(6.dp))
                             Column {
-                                Text(
-                                    text = exam.subjectName,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isDone) EmeraldGreen else TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = exam.subjectName,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDone) EmeraldGreen else TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    // Exam type pill
+                                    ExamTypePill(exam.examType)
+                                }
                                 Text(
                                     text = exam.title,
                                     fontSize = 10.sp,
@@ -350,7 +666,7 @@ fun CanvasExamsTableBoard(
                             color = TextSecondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.width(130.dp)
+                            modifier = Modifier.width(120.dp)
                         )
 
                         // Required Chapters
@@ -360,12 +676,12 @@ fun CanvasExamsTableBoard(
                             color = CyanAccent,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.width(150.dp)
+                            modifier = Modifier.width(140.dp)
                         )
 
-                        // Smart Status Box
+                        // Smart Status Box (Point 19: real toggle)
                         Box(
-                            modifier = Modifier.width(90.dp),
+                            modifier = Modifier.width(85.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             CanvasSmartStatusBadge(
@@ -393,6 +709,25 @@ fun CanvasExamsTableBoard(
     }
 }
 
+@Composable
+fun ExamTypePill(examType: String) {
+    val (label, color) = when (examType) {
+        "QUIZ" -> "كويز ⚡" to WarmAmber
+        "MIDTERM" -> "نصفي 📑" to EmeraldGreen
+        "FINAL" -> "نهائي 🏆" to Color(0xFFFFB74D)
+        else -> "شهري 📝" to RubyRed
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = 0.15f))
+            .border(0.5.dp, color.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 4.dp, vertical = 1.dp)
+    ) {
+        Text(text = label, fontSize = 8.sp, fontWeight = FontWeight.Bold, color = color)
+    }
+}
+
 // -------------------------------------------------------------
 // CANVAS SMART STATUS BADGE
 // -------------------------------------------------------------
@@ -411,7 +746,7 @@ fun CanvasSmartStatusBadge(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 6.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
@@ -419,7 +754,7 @@ fun CanvasSmartStatusBadge(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Box(
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
@@ -448,19 +783,23 @@ fun CanvasSmartStatusBadge(
                                 val endY = h * 0.26f
                                 moveTo(startX, startY)
                                 if (checkProgress <= 0.5f) {
-                                    val p = checkProgress / 0.5f
-                                    lineTo(startX + (midX - startX) * p, startY + (midY - startY) * p)
+                                    val prog = checkProgress / 0.5f
+                                    lineTo(startX + (midX - startX) * prog, startY + (midY - startY) * prog)
                                 } else {
                                     lineTo(midX, midY)
-                                    val p = (checkProgress - 0.5f) / 0.5f
-                                    lineTo(midX + (endX - midX) * p, midY + (endY - midY) * p)
+                                    val prog = (checkProgress - 0.5f) / 0.5f
+                                    lineTo(midX + (endX - midX) * prog, midY + (endY - midY) * prog)
                                 }
                             }
-                            drawPath(path = path, color = EmeraldGreen, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                            drawPath(
+                                path = path,
+                                color = EmeraldGreen,
+                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                            )
                         }
                     } else {
                         drawRoundRect(
-                            color = RubyRed.copy(alpha = 0.4f),
+                            color = RubyRed.copy(alpha = 0.15f),
                             size = Size(w, h),
                             cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
                             style = Stroke(width = 1.2f.dp.toPx())
@@ -470,8 +809,8 @@ fun CanvasSmartStatusBadge(
             }
 
             Text(
-                text = if (isDone) "انتهى" else "مجدول",
-                fontSize = 11.sp,
+                text = if (isDone) "مكتمل ✓" else "قادم ⏳",
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (isDone) EmeraldGreen else RubyRed,
                 maxLines = 1,
@@ -482,7 +821,7 @@ fun CanvasSmartStatusBadge(
 }
 
 // -------------------------------------------------------------
-// ADD EXAM SHEET
+// ADD EXAM SHEET (POINT 18: WITH EXAM TYPE SUPPORT)
 // -------------------------------------------------------------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -490,7 +829,7 @@ fun AddExamSheet(
     gradeSubjects: List<SubjectItem>,
     initialExamDate: String? = null,
     onDismiss: () -> Unit,
-    onAdd: (subjectId: String, title: String, chapters: String?, notes: String?, date: String) -> Unit
+    onAdd: (subjectId: String, title: String, chapters: String?, notes: String?, date: String, examType: String) -> Unit
 ) {
     var selectedSubj by remember { mutableStateOf(gradeSubjects.firstOrNull()) }
     var title by remember { mutableStateOf("") }
@@ -524,17 +863,17 @@ fun AddExamSheet(
                 )
                 GlassPill(
                     text = when (examType) {
-                        "QUIZ" -> "تسميع / كويز"
-                        "MIDTERM" -> "اختبار نصفي"
-                        "FINAL" -> "اختبار نهائي"
-                        else -> "اختبار شهري"
+                        "QUIZ" -> "تسميع / كويز ⚡"
+                        "MIDTERM" -> "اختبار نصفي 📑"
+                        "FINAL" -> "اختبار نهائي 🏆"
+                        else -> "اختبار شهري 📝"
                     },
                     color = RubyRed,
                     bgColor = RubyRed.copy(alpha = 0.15f)
                 )
             }
 
-            // Exam Type Selection Chips
+            // Exam Type Selection Chips (Point 18)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -636,7 +975,7 @@ fun AddExamSheet(
                 enabled = title.isNotBlank() && selectedSubj != null,
                 onClick = {
                     selectedSubj?.let { s ->
-                        onAdd(s.id, title.trim(), chapters.trim().ifEmpty { null }, teacherNotes.trim().ifEmpty { null }, examDate.trim())
+                        onAdd(s.id, title.trim(), chapters.trim().ifEmpty { null }, teacherNotes.trim().ifEmpty { null }, examDate.trim(), examType)
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(48.dp)
@@ -648,19 +987,25 @@ fun AddExamSheet(
 }
 
 // -------------------------------------------------------------
-// EXAM DETAIL MODAL
+// EXAM DETAIL MODAL (POINTS 17, 18, 19, 21)
 // -------------------------------------------------------------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExamDetailModal(
     exam: ExamItem,
+    todayDateStr: String,
     onDismiss: () -> Unit,
+    onToggleDone: () -> Unit,
+    onScheduleReminder: () -> Unit,
     onOpenLibraryBook: () -> Unit
 ) {
+    val isDone = exam.isCompleted || isExamDatePassed(exam.examDate, todayDateStr)
+    val dayName = remember(exam.examDate) { getArabicDayOfWeek(exam.examDate) }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MidnightSurface,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = CyanAccent) }
+        dragHandle = { BottomSheetDefaults.DragHandle(color = RubyRed) }
     ) {
         Column(
             modifier = Modifier
@@ -668,48 +1013,163 @@ fun ExamDetailModal(
                 .padding(horizontal = 18.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = exam.subjectIcon, fontSize = 24.sp)
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = exam.subjectIcon, fontSize = 26.sp)
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column {
-                        Text(text = "اختبار ${exam.subjectName}", fontSize = 16.sp, fontWeight = FontWeight.Black, color = CyanAccent)
-                        Text(text = exam.title, fontSize = 13.sp, color = TextPrimary)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(text = "اختبار ${exam.subjectName}", fontSize = 16.sp, fontWeight = FontWeight.Black, color = TextPrimary)
+                            ExamTypePill(exam.examType)
+                        }
+                        Text(text = exam.title, fontSize = 13.sp, color = TextSecondary)
                     }
                 }
-                Text(text = exam.examDate, fontSize = 12.sp, color = RubyRed, fontWeight = FontWeight.Bold)
+
+                GlassPill(
+                    text = if (isDone) "مكتمل ✓" else "قادم ⏳",
+                    color = if (isDone) EmeraldGreen else RubyRed,
+                    bgColor = if (isDone) EmeraldGreen.copy(alpha = 0.15f) else RubyRed.copy(alpha = 0.15f)
+                )
+            }
+
+            HorizontalDivider(color = GlassBorderSubtle)
+
+            // Date and Day Row
+            GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(text = "موعد الاختبار:", fontSize = 11.sp, color = TextSecondary)
+                        Text(text = "$dayName • ${exam.examDate}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+                    }
+
+                    // Toggle review completion button (Point 19)
+                    GlassButton(
+                        text = if (exam.isCompleted) "إلغاء المراجعة ↩️" else "تمت المراجعة ✓",
+                        color = if (exam.isCompleted) EmeraldGreen else CyanAccent,
+                        textColor = Color.White,
+                        onClick = onToggleDone,
+                        modifier = Modifier.height(34.dp)
+                    )
+                }
             }
 
             if (!exam.requiredChapters.isNullOrBlank()) {
                 GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Text(text = "الفصول المقررة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-                        Text(text = exam.requiredChapters, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.padding(top = 2.dp))
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(text = "الفصول والموضوعات المقررة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                        Text(text = exam.requiredChapters, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
 
             if (!exam.notes.isNullOrBlank()) {
                 GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Text(text = "الأستاذ والقاعة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
-                        Text(text = exam.notes, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.padding(top = 2.dp))
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(text = "الأستاذ والقاعة المخصصة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+                        Text(text = exam.notes, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
 
-            GlassButton(
-                text = "فتح كتاب ${exam.subjectName} في المكتبة 📖",
-                onClick = onOpenLibraryBook,
-                modifier = Modifier.fillMaxWidth().height(46.dp)
-            )
+            // Actions Row: Set Reminder (Point 21) & Open Book
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                GlassButton(
+                    text = "تذكير بالموعد 🔔",
+                    color = WarmAmber,
+                    textColor = Color.White,
+                    onClick = onScheduleReminder,
+                    modifier = Modifier.weight(1f).height(46.dp)
+                )
+
+                GlassOutlinedButton(
+                    text = "كتاب المادة 📖",
+                    onClick = onOpenLibraryBook,
+                    modifier = Modifier.weight(1f).height(46.dp)
+                )
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+}
+
+// -------------------------------------------------------------
+// HELPER FUNCTIONS (POINTS 17 & 20)
+// -------------------------------------------------------------
+fun getMonthKey(dateStr: String): String {
+    return if (dateStr.length >= 7) dateStr.substring(0, 7) else "OTHER"
+}
+
+fun getArabicMonthTitle(monthKey: String): String {
+    return try {
+        val parts = monthKey.split("-")
+        if (parts.size >= 2) {
+            val year = parts[0]
+            val month = parts[1].toInt()
+            val monthName = when (month) {
+                1 -> "يناير / كانون الثاني"
+                2 -> "فبراير / شباط"
+                3 -> "مارس / آذار"
+                4 -> "أبريل / نيسان"
+                5 -> "مايو / أيار"
+                6 -> "يونيو / حزيران"
+                7 -> "يوليو / تموز"
+                8 -> "أغسطس / آب"
+                9 -> "سبتمبر / أيلول"
+                10 -> "أكتوبر / تشرين الأول"
+                11 -> "نوفمبر / تشرين الثاني"
+                12 -> "ديسمبر / كانون الأول"
+                else -> "شهر $month"
+            }
+            "شهر $monthName $year"
+        } else {
+            monthKey
+        }
+    } catch (_: Exception) {
+        monthKey
+    }
+}
+
+fun getShortMonthTitle(monthKey: String): String {
+    return try {
+        val parts = monthKey.split("-")
+        if (parts.size >= 2) {
+            val month = parts[1].toInt()
+            when (month) {
+                1 -> "يناير"
+                2 -> "فبراير"
+                3 -> "مارس"
+                4 -> "أبريل"
+                5 -> "مايو"
+                6 -> "يونيو"
+                7 -> "يوليو"
+                8 -> "أغسطس"
+                9 -> "سبتمبر"
+                10 -> "أكتوبر"
+                11 -> "نوفمبر"
+                12 -> "ديسمبر"
+                else -> "شهر $month"
+            }
+        } else {
+            monthKey
+        }
+    } catch (_: Exception) {
+        monthKey
     }
 }
 

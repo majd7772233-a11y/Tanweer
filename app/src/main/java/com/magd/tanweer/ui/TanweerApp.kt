@@ -102,6 +102,7 @@ fun TanweerApp(
                         currentTab = currentTab,
                         subScreen = subScreen,
                         onSelectTab = { tab ->
+                            viewModel.triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                             if (tab == NavigationTab.MORE) {
                                 if (subScreen == SubScreen.EXTRA_SECTIONS_HUB) {
                                     viewModel.setSubScreen(SubScreen.NONE)
@@ -119,7 +120,10 @@ fun TanweerApp(
             floatingActionButton = {
                 if (subScreen == SubScreen.NONE) {
                     FloatingActionButton(
-                        onClick = { viewModel.openUploadDialog() },
+                        onClick = {
+                            viewModel.triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+                            viewModel.openUploadDialog()
+                        },
                         containerColor = CyanAccent,
                         contentColor = TextOnAccent,
                         shape = CircleShape,
@@ -162,7 +166,10 @@ fun TanweerApp(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 IconButton(
-                                    onClick = { viewModel.navigateBack() },
+                                    onClick = {
+                                        viewModel.triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+                                        viewModel.navigateBack()
+                                    },
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(CircleShape)

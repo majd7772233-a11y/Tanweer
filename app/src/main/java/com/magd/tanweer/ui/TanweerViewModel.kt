@@ -79,17 +79,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     val hapticsEnabled: StateFlow<Boolean> = _hapticsEnabled.asStateFlow()
 
     private val todayDateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-    private val storedLastOpenDate = prefs.getString("last_open_date", null)
-    private val isFirstEverLaunch = storedLastOpenDate == null
+    private var currentActiveUserId: String? = null
 
-    private val _isNewAccountOrFirstLaunch = MutableStateFlow(isFirstEverLaunch)
+    private val _isNewAccountOrFirstLaunch = MutableStateFlow(false)
     val isNewAccountOrFirstLaunch: StateFlow<Boolean> = _isNewAccountOrFirstLaunch.asStateFlow()
 
-    private val _lastOpenDate = MutableStateFlow(storedLastOpenDate ?: todayDateStr)
+    private val _lastOpenDate = MutableStateFlow(todayDateStr)
     val lastOpenDate: StateFlow<String> = _lastOpenDate.asStateFlow()
 
-    // Show Catch-up card ONLY if: Not first launch AND last open date is before today
-    private val _shouldShowCatchUpCard = MutableStateFlow(!isFirstEverLaunch && (storedLastOpenDate != null && storedLastOpenDate < todayDateStr))
+    private val _shouldShowCatchUpCard = MutableStateFlow(false)
     val shouldShowCatchUpCard: StateFlow<Boolean> = _shouldShowCatchUpCard.asStateFlow()
 
     private val _previousSessionTimestamp = MutableStateFlow(
@@ -100,8 +98,35 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _isCheckingAuth = MutableStateFlow(true)
     val isCheckingAuth: StateFlow<Boolean> = _isCheckingAuth.asStateFlow()
 
+    fun updateUserSessionState(userId: String) {
+        if (userId.isBlank()) return
+        currentActiveUserId = userId
+        val userDateKey = "last_open_date_$userId"
+        val storedDate = prefs.getString(userDateKey, null)
+        val isFirstForUser = storedDate == null
+
+        _isNewAccountOrFirstLaunch.value = isFirstForUser
+
+        if (isFirstForUser) {
+            // New user account on this device: initialize to today and do NOT show absence catch-up card
+            _lastOpenDate.value = todayDateStr
+            _shouldShowCatchUpCard.value = false
+            prefs.edit().putString(userDateKey, todayDateStr).apply()
+        } else {
+            _lastOpenDate.value = storedDate ?: todayDateStr
+            // Show Catch-up card only if user's last recorded visit was before today
+            _shouldShowCatchUpCard.value = (storedDate != null && storedDate < todayDateStr)
+            // Save today's date for this user
+            prefs.edit().putString(userDateKey, todayDateStr).apply()
+        }
+    }
+
     fun dismissCatchUpCard() {
         _shouldShowCatchUpCard.value = false
+        val userId = currentActiveUserId ?: currentUser.value?.id
+        if (!userId.isNullOrBlank()) {
+            prefs.edit().putString("last_open_date_$userId", todayDateStr).apply()
+        }
         prefs.edit().putString("last_open_date", todayDateStr).apply()
     }
 
@@ -111,15 +136,22 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         prefs.edit()
             .putLong("previous_session_time", lastActive)
             .putLong("last_active_time", System.currentTimeMillis())
-            .putString("last_open_date", todayDateStr)
             .apply()
 
         viewModelScope.launch {
             val user = db.userDao().getUserSync()
             if (user != null) {
                 NetworkModule.setAuthToken(user.token)
+                updateUserSessionState(user.id)
             }
             _isCheckingAuth.value = false
+
+            // Observe future user changes (e.g., login or account switch)
+            repository.currentUser.collect { u ->
+                if (u != null && u.id != currentActiveUserId) {
+                    updateUserSessionState(u.id)
+                }
+            }
         }
     }
 
@@ -173,9 +205,20 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun triggerHaptic(type: com.magd.tanweer.util.TanweerHapticManager.HapticType = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK) {
+        com.magd.tanweer.util.TanweerHapticManager.performHaptic(getApplication(), _hapticsEnabled.value, type)
+    }
+
     fun setHapticsEnabled(enabled: Boolean) {
         _hapticsEnabled.value = enabled
         prefs.edit().putBoolean("haptics_enabled", enabled).apply()
+        if (enabled) {
+            com.magd.tanweer.util.TanweerHapticManager.performHaptic(
+                getApplication(),
+                true,
+                com.magd.tanweer.util.TanweerHapticManager.HapticType.TOGGLE
+            )
+        }
     }
 
     val currentUser = repository.currentUser.stateIn(
@@ -334,6 +377,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     // =========================================================================
 
     fun setTab(tab: NavigationTab) {
+        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _currentTab.value = tab
         _subScreen.value = SubScreen.NONE
 
@@ -349,6 +393,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setSubScreen(screen: SubScreen) {
+        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _subScreen.value = screen
         val groupId = getActiveGroupId()
         when (screen) {
@@ -426,33 +471,39 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openUploadDialog(subjectId: String? = null) {
+        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _uploadInitialSubjectId.value = subjectId
         _isUploadModalOpen.value = true
     }
 
     fun closeUploadDialog() {
+        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _isUploadModalOpen.value = false
         _uploadInitialSubjectId.value = null
     }
 
     fun openAddHomeworkDialog(initialDate: String? = null) {
+        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _initialHomeworkDueDate.value = initialDate ?: _selectedDate.value
         _isAddHomeworkModalOpen.value = true
         setTab(NavigationTab.HOMEWORK)
     }
 
     fun closeAddHomeworkDialog() {
+        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _isAddHomeworkModalOpen.value = false
         _initialHomeworkDueDate.value = null
     }
 
     fun openAddExamDialog(initialDate: String? = null) {
+        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _initialExamDate.value = initialDate ?: _selectedDate.value
         _isAddExamModalOpen.value = true
         setTab(NavigationTab.EXAMS)
     }
 
     fun closeAddExamDialog() {
+        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _isAddExamModalOpen.value = false
         _initialExamDate.value = null
     }
@@ -678,6 +729,24 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 startTime = startTime,
                 endTime = endTime
             )
+            res.fold(
+                onSuccess = { mutation ->
+                    when (mutation) {
+                        is com.magd.tanweer.data.local.ScheduleMutationResult.SavedDirectly -> {
+                            _scheduleSyncState.value = SyncState.Success()
+                        }
+                        is com.magd.tanweer.data.local.ScheduleMutationResult.QueuedOffline -> {
+                            _scheduleSyncState.value = SyncState.OfflineCached()
+                        }
+                        is com.magd.tanweer.data.local.ScheduleMutationResult.SubmittedAsProposal -> {
+                            _scheduleSyncState.value = SyncState.Success()
+                        }
+                    }
+                },
+                onFailure = { err ->
+                    _scheduleSyncState.value = SyncState.Error(err.message ?: "فشل حفظ الحصة في الخادم", false)
+                }
+            )
             onResult?.invoke(res)
         }
     }
@@ -685,17 +754,31 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun deleteScheduleSlot(
         dayOfWeek: Int,
         slotOrder: Int,
-        onResult: ((Result<String>) -> Unit)? = null
+        onResult: ((Result<com.magd.tanweer.data.local.ScheduleSlotDeleteResult>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
         val groupId = getActiveGroupId()
         viewModelScope.launch {
             val res = repository.deleteScheduleSlot(groupId, dayOfWeek, slotOrder)
+            res.fold(
+                onSuccess = { deleteRes ->
+                    triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+                    if (deleteRes.isSynced) {
+                        _scheduleSyncState.value = SyncState.Success()
+                    } else {
+                        _scheduleSyncState.value = SyncState.OfflineCached(message = deleteRes.message)
+                    }
+                },
+                onFailure = { err ->
+                    triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.ERROR)
+                    _scheduleSyncState.value = SyncState.Error(err.message ?: "تعذر حذف الحصة من الخادم", false)
+                }
+            )
             onResult?.invoke(res)
         }
     }
 
-    fun deleteScheduleSlotById(slotId: String, onResult: ((Result<String>) -> Unit)? = null) {
+    fun deleteScheduleSlotById(slotId: String, onResult: ((Result<com.magd.tanweer.data.local.ScheduleSlotDeleteResult>) -> Unit)? = null) {
         viewModelScope.launch {
             val res = repository.deleteScheduleSlotById(slotId)
             onResult?.invoke(res)
@@ -1187,6 +1270,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun logout() {
         viewModelScope.launch {
             repository.logout()
+            currentActiveUserId = null
+            _shouldShowCatchUpCard.value = false
+            _lastOpenDate.value = todayDateStr
+            _isNewAccountOrFirstLaunch.value = false
             _selectedGroupId.value = ""
             _homeSyncState.value = SyncState.Idle
             _scheduleSyncState.value = SyncState.Idle
@@ -1216,7 +1303,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         description: String?,
         date: String = _selectedDate.value,
         pages: List<com.magd.tanweer.util.ProcessedPageResult>
-    ): Result<String> {
+    ): Result<PublicationResult> {
         val user = currentUser.value
             ?: return Result.failure(Exception("لم يتم تسجيل الدخول"))
         val groupId = getActiveGroupId()
@@ -1298,7 +1385,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         dueDate: String,
         taskType: String = "HOMEWORK",
         pages: List<com.magd.tanweer.util.ProcessedPageResult> = emptyList(),
-        onResult: ((Result<String>) -> Unit)? = null,
+        onResult: ((Result<PublicationResult>) -> Unit)? = null,
         onComplete: (() -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
@@ -1343,7 +1430,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         onResult: ((com.magd.tanweer.data.local.HomeworkToggleResult) -> Unit)? = null
     ) {
         viewModelScope.launch {
+            triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
             val res = repository.toggleHomeworkCompletion(homeworkId, currentStatus)
+            if (res is com.magd.tanweer.data.local.HomeworkToggleResult.SyncedWithServer) {
+                triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS)
+            }
             onResult?.invoke(res)
         }
     }
@@ -1354,6 +1445,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         requiredChapters: String?,
         notes: String?,
         examDate: String,
+        examType: String = "MONTHLY",
         onResult: ((Result<com.magd.tanweer.data.local.ExamAddResult>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
@@ -1365,7 +1457,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 subjectId = subjectId,
                 title = title,
                 requiredChapters = requiredChapters,
-                notes = notes
+                notes = notes,
+                examType = examType
             )
             onResult?.invoke(res)
         }
@@ -1427,24 +1520,71 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun syncAllComprehensive(onFinished: (() -> Unit)? = null) {
+    fun syncAllComprehensive(onFinished: ((ComprehensiveSyncReport) -> Unit)? = null) {
         viewModelScope.launch {
             val user = currentUser.value
             val groupId = getActiveGroupId()
-            repository.syncProfile()
-            repository.syncGroups()
-            if (groupId.isNotBlank()) {
-                repository.syncSchedule(groupId)
-                repository.syncDay(groupId, _selectedDate.value)
-                repository.syncHomeworks(groupId)
-                repository.syncExams(groupId)
-                repository.syncIssues(groupId)
-                repository.syncEvents(groupId)
-                if (user != null) {
-                    repository.syncBooks(user.gradeId)
+
+            val succeeded = mutableListOf<String>()
+            val failed = mutableListOf<Pair<String, String>>()
+            val offline = mutableListOf<String>()
+
+            fun processResult(sectionName: String, res: com.magd.tanweer.data.repository.SyncResult) {
+                when (res) {
+                    is com.magd.tanweer.data.repository.SyncResult.Success -> succeeded.add(sectionName)
+                    is com.magd.tanweer.data.repository.SyncResult.Offline -> offline.add(sectionName)
+                    is com.magd.tanweer.data.repository.SyncResult.Error -> failed.add(sectionName to res.message)
                 }
             }
-            onFinished?.invoke()
+
+            processResult("الملف الشخصي", repository.syncProfile())
+            processResult("الشُعب المدرسية", repository.syncGroups())
+
+            if (groupId.isNotBlank()) {
+                processResult("الجدول المدرسي", repository.syncSchedule(groupId))
+                processResult("دروس اليوم", repository.syncDay(groupId, _selectedDate.value))
+                processResult("الواجبات المنزلية", repository.syncHomeworks(groupId))
+                processResult("جدول الاختبارات", repository.syncExams(groupId))
+                processResult("استفسارات الشعبة", repository.syncIssues(groupId))
+                processResult("الفعاليات المدرسية", repository.syncEvents(groupId))
+                if (user != null) {
+                    processResult("المناهج والكتب", repository.syncBooks(user.gradeId))
+                }
+            } else {
+                offline.add("أقسام الشعبة والجدول (لم يتم تحديد شعبة دراسية مفعلة بعد)")
+            }
+
+            // Flush offline outbox queue
+            try {
+                repository.processOutboxQueue()
+            } catch (_: Exception) {}
+
+            val remainingPending = repository.getPendingOutboxCountSync()
+
+            val isAllOk = failed.isEmpty() && offline.isEmpty() && remainingPending == 0
+            val summary = when {
+                isAllOk ->
+                    "اكتملت مزامنة جميع الأقسام وتأكيدها مع الخادم بنجاح (${succeeded.size} أقسام) ✓"
+                failed.isEmpty() && (offline.isNotEmpty() || remainingPending > 0) ->
+                    "تم تحديث الأقسام (${succeeded.size} ناجحة). يوجد ${offline.size} أقسام معتمدة على التخزين المؤقت، و$remainingPending عمليات محفوظة بانتظار الرفع ⏳"
+                failed.isNotEmpty() && succeeded.isNotEmpty() ->
+                    "اكتملت ${succeeded.size} أقسام، وتعذرت مزامنة ${failed.size} أقسام (${failed.joinToString { it.first }}). المعلق محلياً: $remainingPending"
+                else ->
+                    "تعذر الاتصال بالخادم. بياناتك محفوظة في جهازك وستُزامن تلقائياً فور توفر الإنترنت ⏳"
+            }
+
+            triggerHaptic(if (isAllOk) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS else com.magd.tanweer.util.TanweerHapticManager.HapticType.WARNING)
+
+            val report = ComprehensiveSyncReport(
+                succeededSections = succeeded,
+                failedSections = failed,
+                offlineSections = offline,
+                pendingOutboxCount = remainingPending,
+                isAllSucceeded = isAllOk,
+                summaryMessage = summary
+            )
+
+            onFinished?.invoke(report)
         }
     }
 

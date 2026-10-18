@@ -11,14 +11,17 @@ export async function handleGetExams(groupId: string, user: UserContext, env: En
 
   const exams = await env.DB.prepare(
     `SELECT e.id, e.group_id, e.exam_date, e.subject_id, e.title, e.required_chapters, e.notes, e.study_package_info, e.is_official, e.created_by, e.created_at,
+            e.exam_type,
+            CASE WHEN ec.user_id IS NOT NULL THEN 1 ELSE 0 END as is_completed,
             COALESCE(s.name_ar, e.subject_id) as subject_name,
             COALESCE(s.icon, '🔴') as subject_icon,
             s.color_hex
      FROM exams e
      LEFT JOIN subjects s ON e.subject_id = s.id
+     LEFT JOIN exam_completions ec ON e.id = ec.exam_id AND ec.user_id = ?
      WHERE e.group_id = ?
      ORDER BY e.is_official DESC, e.exam_date ASC`
-  ).bind(groupId).all();
+  ).bind(user.userId, groupId).all();
 
   return jsonResponse({
     success: true,
@@ -38,10 +41,13 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
     topics?: string;
     notes?: string;
     isOfficial?: boolean;
+    examType?: string;
   };
 
   const examDate = body.examDate || body.date;
   const chapters = body.requiredChapters || body.topics;
+  const rawType = (body.examType || 'MONTHLY').trim().toUpperCase();
+  const examType = ['MONTHLY', 'QUIZ', 'MIDTERM', 'FINAL'].includes(rawType) ? rawType : 'MONTHLY';
 
   if (!body.groupId || !examDate || !body.subjectId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد تفاصيل الاختبار والمادة وتاريخه');
@@ -60,15 +66,22 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
     ? body.id.trim()
     : generateId('exm');
 
-  // Idempotency check
-  const existing = await env.DB.prepare(`SELECT id, is_official FROM exams WHERE id = ?`).bind(examId).first<{
+  // Idempotency check with ownership & scope validation
+  const existing = await env.DB.prepare(`SELECT id, is_official, group_id, created_by, exam_type FROM exams WHERE id = ?`).bind(examId).first<{
     id: string;
     is_official: number;
+    group_id: string;
+    created_by: string;
+    exam_type: string;
   }>();
   if (existing) {
+    if (existing.group_id !== body.groupId || existing.created_by !== user.userId) {
+      return errorResponse('CONFLICT', 'المعرّف مستخدم مسبقاً في نطاق آخر أو بواسطة مستخدم آخر', 409);
+    }
     return jsonResponse({
       success: true,
       examId: existing.id,
+      examType: existing.exam_type || 'MONTHLY',
       isOfficial: existing.is_official === 1,
       message: existing.is_official === 1
         ? 'تم اعتماد وتثبيت موعد الاختبار الرسمي في التقويم الدراسي 🔴'
@@ -77,8 +90,8 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
   }
 
   await env.DB.prepare(
-    `INSERT INTO exams (id, group_id, exam_date, subject_id, title, required_chapters, notes, is_official, created_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO exams (id, group_id, exam_date, subject_id, title, required_chapters, notes, is_official, created_by, created_at, exam_type)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     examId,
     body.groupId,
@@ -89,7 +102,8 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
     body.notes?.trim() || null,
     isOfficial,
     user.userId,
-    Date.now()
+    Date.now(),
+    examType
   ).run();
 
   const msg = isOfficial === 1
@@ -99,6 +113,7 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
   return jsonResponse({
     success: true,
     examId,
+    examType,
     isOfficial: isOfficial === 1,
     message: msg,
   });
@@ -140,6 +155,7 @@ export async function handleUpdateExam(
     requiredChapters?: string;
     notes?: string;
     isOfficial?: boolean;
+    examType?: string;
   };
 
   const canPublishOfficial = await hasPermission(user, Permission.PUBLISH_OFFICIAL_EXAM, {
@@ -152,13 +168,17 @@ export async function handleUpdateExam(
     officialVal = body.isOfficial ? 1 : 0;
   }
 
+  const rawType = body.examType ? body.examType.trim().toUpperCase() : null;
+  const examTypeVal = rawType && ['MONTHLY', 'QUIZ', 'MIDTERM', 'FINAL'].includes(rawType) ? rawType : null;
+
   await env.DB.prepare(
     `UPDATE exams
      SET exam_date = COALESCE(?, exam_date),
          title = COALESCE(?, title),
          required_chapters = COALESCE(?, required_chapters),
          notes = COALESCE(?, notes),
-         is_official = COALESCE(?, is_official)
+         is_official = COALESCE(?, is_official),
+         exam_type = COALESCE(?, exam_type)
      WHERE id = ?`
   ).bind(
     body.examDate || null,
@@ -166,6 +186,7 @@ export async function handleUpdateExam(
     body.requiredChapters?.trim() || null,
     body.notes?.trim() || null,
     officialVal,
+    examTypeVal,
     examId
   ).run();
 
@@ -209,5 +230,44 @@ export async function handleDeleteExam(
   return jsonResponse({
     success: true,
     message: 'تم حذف الاختبار بنجاح',
+  });
+}
+
+export async function handleToggleExamCompletion(
+  examId: string,
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  const exam = await env.DB.prepare(`SELECT id, group_id FROM exams WHERE id = ?`).bind(examId).first<{
+    id: string;
+    group_id: string;
+  }>();
+
+  if (!exam) {
+    return errorResponse('EXAM_NOT_FOUND', 'الاختبار غير موجود', 404);
+  }
+
+  const memberCheck = await requireGroupMember(user, exam.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
+  const existing = await env.DB.prepare(
+    `SELECT * FROM exam_completions WHERE exam_id = ? AND user_id = ?`
+  ).bind(examId, user.userId).first();
+
+  let isCompleted: boolean;
+  if (existing) {
+    await env.DB.prepare(`DELETE FROM exam_completions WHERE exam_id = ? AND user_id = ?`).bind(examId, user.userId).run();
+    isCompleted = false;
+  } else {
+    await env.DB.prepare(
+      `INSERT INTO exam_completions (exam_id, user_id, completed_at) VALUES (?, ?, ?)`
+    ).bind(examId, user.userId, Date.now()).run();
+    isCompleted = true;
+  }
+
+  return jsonResponse({
+    success: true,
+    isCompleted,
+    message: isCompleted ? 'تم تعليم الاختبار كمراجع ومكتمل ✓' : 'تمت إعادة الاختبار لقائمة المراجعة القادمة'
   });
 }

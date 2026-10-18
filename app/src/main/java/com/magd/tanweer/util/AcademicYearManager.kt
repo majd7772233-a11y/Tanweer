@@ -69,6 +69,30 @@ object AcademicYearManager {
             "${year - 1}-$year"
         }
     }
+
+    /**
+     * Dynamically resolves the available academic years based on real school records and policy.
+     * Extracts all years present in the dataset, anchors to current academic year, and returns sorted descending.
+     */
+    fun resolveAvailableAcademicYears(
+        currentDateStr: String,
+        itemDates: Collection<String> = emptyList()
+    ): List<String> {
+        val yearsSet = mutableSetOf<String>()
+        val currentYear = getAcademicYearForDate(currentDateStr)
+        yearsSet.add(currentYear)
+
+        for (d in itemDates) {
+            if (d.isNotBlank() && d.length >= 10) {
+                yearsSet.add(getAcademicYearForDate(d))
+            }
+        }
+
+        val startYr = currentYear.substringBefore("-").toIntOrNull() ?: 2026
+        yearsSet.add("${startYr - 1}-$startYr")
+
+        return yearsSet.toList().sortedDescending()
+    }
 }
 
 /**

@@ -38,6 +38,15 @@ import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.ArabicNameValidator
+import com.magd.tanweer.util.TanweerHapticManager
+
+data class BadgeDetailInfo(
+    val name: String,
+    val icon: String,
+    val criteria: String,
+    val progressText: String,
+    val isAchieved: Boolean
+)
 
 @Composable
 fun ProfileScreen(
@@ -62,6 +71,7 @@ fun ProfileScreen(
     var isRoleUpgradeDialogOpen by remember { mutableStateOf(false) }
     var isRedeemCodeDialogOpen by remember { mutableStateOf(false) }
     var requestSuccessInfo by remember { mutableStateOf<SubmitRoleUpgradeResponse?>(null) }
+    var selectedBadgeInfo by remember { mutableStateOf<BadgeDetailInfo?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.repository.syncProfile()
@@ -153,7 +163,7 @@ fun ProfileScreen(
                                     GlassPill(
                                         text = "${roleEnum.badgeIcon} ${roleEnum.displayNameAr}",
                                         color = when (roleEnum) {
-                                            Role.SYSTEM_OWNER, Role.ADMIN -> WarmAmber
+                                            Role.ADMIN -> WarmAmber
                                             Role.TEACHER -> EmeraldGreen
                                             Role.MODERATOR -> CyanAccent
                                             Role.STUDENT -> TextSecondary
@@ -216,7 +226,7 @@ fun ProfileScreen(
                                     color = TextPrimary
                                 )
                                 Text(
-                                    text = "المستوى ${userRole.level} من 5 في الهيكل الإداري",
+                                    text = "المستوى ${userRole.level} من 4 في الهيكل المدرسي",
                                     fontSize = 11.sp,
                                     color = CyanAccent
                                 )
@@ -298,18 +308,18 @@ fun ProfileScreen(
                     }
 
                     // Quick access to Role Dashboard if eligible
-                    if (userRole == Role.TEACHER || userRole == Role.MODERATOR || userRole == Role.ADMIN || userRole == Role.SYSTEM_OWNER) {
+                    if (userRole == Role.TEACHER || userRole == Role.MODERATOR || userRole == Role.ADMIN) {
                         Spacer(modifier = Modifier.height(12.dp))
                         val dashboardTitle = when (userRole) {
                             Role.TEACHER -> "🎓 فتح مركز التعليم للأستاذ المعتمد"
                             Role.MODERATOR -> "🛡️ فتح مركز إشراف الشعبة والتدقيق"
-                            Role.ADMIN, Role.SYSTEM_OWNER -> "👑 فتح لوحة مدير المدرسة"
+                            Role.ADMIN -> "👑 فتح لوحة مدير المدرسة"
                             else -> "مركز الإدارة"
                         }
                         val targetSubScreen = when (userRole) {
                             Role.TEACHER -> com.magd.tanweer.ui.SubScreen.TEACHER_DASHBOARD
                             Role.MODERATOR -> com.magd.tanweer.ui.SubScreen.MODERATOR_DASHBOARD
-                            Role.ADMIN, Role.SYSTEM_OWNER -> com.magd.tanweer.ui.SubScreen.ADMIN_DASHBOARD
+                            Role.ADMIN -> com.magd.tanweer.ui.SubScreen.ADMIN_DASHBOARD
                             else -> com.magd.tanweer.ui.SubScreen.NONE
                         }
                         GlassButton(
@@ -398,10 +408,66 @@ fun ProfileScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        BadgeItem(name = "موثق الدروس", icon = "📚", active = isLessonDoc, modifier = Modifier.weight(1f))
-                        BadgeItem(name = "مساعد الشعبة", icon = "🛡️", active = isHelper, modifier = Modifier.weight(1f))
-                        BadgeItem(name = "صاحب أفضل إجابة", icon = "⭐", active = isBestAnswerOwner, modifier = Modifier.weight(1f))
-                        BadgeItem(name = "مساهم الشهر", icon = "🌟", active = isMonthContributor, modifier = Modifier.weight(1f))
+                        BadgeItem(
+                            name = "موثق الدروس",
+                            icon = "📚",
+                            active = isLessonDoc,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                selectedBadgeInfo = BadgeDetailInfo(
+                                    name = "موثق الدروس",
+                                    icon = "📚",
+                                    criteria = "توثيق درس دراسي واحد على الأقل أو رفع 3 صور للسبورة",
+                                    progressText = "إنجازك: $lessonsCount دروس و$photosCount صور سبورة",
+                                    isAchieved = isLessonDoc
+                                )
+                            }
+                        )
+                        BadgeItem(
+                            name = "مساعد الشعبة",
+                            icon = "🛡️",
+                            active = isHelper,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                selectedBadgeInfo = BadgeDetailInfo(
+                                    name = "مساعد الشعبة",
+                                    icon = "🛡️",
+                                    criteria = "تسجيل واجبين دراسيين أو طرح استفسار علمي مفيد للشعبة",
+                                    progressText = "إنجازك: $homeworksCount واجبات و$issuesCount استفسارات",
+                                    isAchieved = isHelper
+                                )
+                            }
+                        )
+                        BadgeItem(
+                            name = "صاحب أفضل إجابة",
+                            icon = "⭐",
+                            active = isBestAnswerOwner,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                selectedBadgeInfo = BadgeDetailInfo(
+                                    name = "صاحب أفضل إجابة",
+                                    icon = "⭐",
+                                    criteria = "اعتماد إجابتك كأفضل إجابة معتمدة على استفسارات الشعبة",
+                                    progressText = "إنجازك: $verifiedBestAnswersCount إجابات معتمدة كأفضل إجابة",
+                                    isAchieved = isBestAnswerOwner
+                                )
+                            }
+                        )
+                        BadgeItem(
+                            name = "موثق دروس الشهر",
+                            icon = "🌟",
+                            active = isMonthContributor,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                selectedBadgeInfo = BadgeDetailInfo(
+                                    name = "موثق دروس الشهر",
+                                    icon = "🌟",
+                                    criteria = "توثيق 3 دروس دراسية أو أكثر باسمك خلال الشهر الجاري",
+                                    progressText = "إنجازك: $monthLessonsCount من 3 دروس مسجلة هذا الشهر",
+                                    isAchieved = isMonthContributor
+                                )
+                            }
+                        )
                     }
                 }
             }
@@ -525,6 +591,41 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth()
             )
         }
+    }
+
+    // Badge Details Dialog
+    if (selectedBadgeInfo != null) {
+        val badge = selectedBadgeInfo!!
+        AlertDialog(
+            onDismissRequest = { selectedBadgeInfo = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(text = badge.icon, fontSize = 24.sp)
+                    Text(text = badge.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(text = "📋 شرط الحصول على الوسام:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                    Text(text = badge.criteria, fontSize = 12.sp, color = TextPrimary)
+                    HorizontalDivider(color = GlassBorderSubtle)
+                    Text(text = "📊 إنجازك الحالي الموثق:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+                    Text(text = badge.progressText, fontSize = 12.sp, color = TextSecondary)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (badge.isAchieved) "الحالة: حصلت على هذا الوسام بنجاح ✅" else "الحالة: قيد الإنجاز ⏳",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (badge.isAchieved) EmeraldGreen else WarmAmber
+                    )
+                }
+            },
+            confirmButton = {
+                GlassButton(text = "إغلاق", onClick = { selectedBadgeInfo = null })
+            },
+            containerColor = MidnightSurface,
+            shape = RoundedCornerShape(18.dp)
+        )
     }
 
     // Edit Profile Modal Dialog
@@ -1019,12 +1120,19 @@ fun StatItem(label: String, count: String, icon: String) {
 }
 
 @Composable
-fun BadgeItem(name: String, icon: String, active: Boolean, modifier: Modifier = Modifier) {
+fun BadgeItem(
+    name: String,
+    icon: String,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {}
+) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(MidnightSurface)
             .border(1.dp, if (active) CyanGlow else GlassBorderSubtle, RoundedCornerShape(12.dp))
+            .clickable { onClick() }
             .padding(vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {

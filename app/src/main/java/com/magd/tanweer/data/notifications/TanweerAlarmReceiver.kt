@@ -17,6 +17,12 @@ class TanweerAlarmReceiver : BroadcastReceiver() {
                 val subject = intent.getStringExtra(EXTRA_SUBJECT_NAME) ?: "المادة"
                 TanweerNotificationManager.showIndividualHomeworkNotification(context, homeworkId, title, subject)
             }
+            ACTION_EXAM_REMINDER -> {
+                val examId = intent.getStringExtra(EXTRA_EXAM_ID) ?: "exm"
+                val title = intent.getStringExtra(EXTRA_EXAM_TITLE) ?: "اختبار مدرسي"
+                val subject = intent.getStringExtra(EXTRA_SUBJECT_NAME) ?: "المادة"
+                TanweerNotificationManager.showIndividualExamNotification(context, examId, title, subject)
+            }
             else -> {
                 TanweerNotificationManager.checkAndSendReminders(context)
             }
@@ -26,8 +32,11 @@ class TanweerAlarmReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_CHECK_REMINDERS = "com.magd.tanweer.ACTION_CHECK_REMINDERS"
         const val ACTION_HOMEWORK_REMINDER = "com.magd.tanweer.ACTION_HOMEWORK_REMINDER"
+        const val ACTION_EXAM_REMINDER = "com.magd.tanweer.ACTION_EXAM_REMINDER"
         const val EXTRA_HOMEWORK_ID = "extra_homework_id"
         const val EXTRA_HOMEWORK_TITLE = "extra_homework_title"
+        const val EXTRA_EXAM_ID = "extra_exam_id"
+        const val EXTRA_EXAM_TITLE = "extra_exam_title"
         const val EXTRA_SUBJECT_NAME = "extra_subject_name"
     }
 }

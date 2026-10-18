@@ -5,9 +5,11 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -69,7 +71,33 @@ fun AcademicHistoryScreen(
     val allHistoricalExams by viewModel.repository.getAllHistoricalExams()
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
-    val academicYears = listOf("2026-2027", "2025-2026", "2024-2025")
+    val todayStr = remember { TanweerViewModel.getTodayDateString() }
+
+    val allRecordedDates = remember(allHistoricalContents, allHistoricalHomeworks, allHistoricalExams, activeGroupContents) {
+        val dates = mutableListOf<String>()
+        allHistoricalContents.forEach { dates.add(it.studyDate) }
+        allHistoricalHomeworks.forEach { 
+            if (it.dueDate.isNotBlank()) dates.add(it.dueDate)
+            if (it.studyDate.isNotBlank()) dates.add(it.studyDate)
+        }
+        allHistoricalExams.forEach { dates.add(it.examDate) }
+        dates
+    }
+
+    val academicYears = remember(todayStr, allRecordedDates) {
+        AcademicYearManager.resolveAvailableAcademicYears(todayStr, allRecordedDates)
+    }
+
+    val currentAcademicYear = remember(todayStr) {
+        AcademicYearManager.getAcademicYearForDate(todayStr)
+    }
+
+    LaunchedEffect(academicYears) {
+        if (selectedYear !in academicYears && academicYears.isNotEmpty()) {
+            val defaultYear = if (currentAcademicYear in academicYears) currentAcademicYear else academicYears.first()
+            viewModel.setSelectedAcademicYear(defaultYear)
+        }
+    }
 
     // Mode: 0 = إنجازاتي الشخصية (الأرشيف الشخصي الشامل عبر كل المجموعات), 1 = أرشيف الشعبة الحالية
     var viewMode by remember { mutableIntStateOf(0) }
@@ -83,8 +111,6 @@ fun AcademicHistoryScreen(
     val allExams = remember(viewMode, activeGroupExams, allHistoricalExams) {
         if (viewMode == 0) allHistoricalExams else activeGroupExams
     }
-
-    val todayStr = remember { TanweerViewModel.getTodayDateString() }
 
     // Generate comprehensive academic archive report
     val archiveReport = remember(selectedYear, allContents, allHomeworks, allExams, currentUser) {
@@ -163,20 +189,20 @@ fun AcademicHistoryScreen(
             }
         }
 
-        // Academic Year Selector
+        // Academic Year Selector (dynamically rendered from AcademicYearManager & available school records)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             academicYears.forEach { yr ->
-                val isCurrent = yr == "2026-2027"
+                val isCurrent = yr == currentAcademicYear
                 val isSelected = yr == selectedYear
 
                 Box(
                     modifier = Modifier
-                        .weight(1f)
                         .clip(RoundedCornerShape(14.dp))
                         .background(if (isSelected) CyanGlow.copy(alpha = 0.25f) else GlassSurface)
                         .border(
@@ -185,7 +211,7 @@ fun AcademicHistoryScreen(
                             RoundedCornerShape(14.dp)
                         )
                         .clickable { viewModel.setSelectedAcademicYear(yr) }
-                        .padding(vertical = 9.dp),
+                        .padding(horizontal = 16.dp, vertical = 9.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(
@@ -199,9 +225,9 @@ fun AcademicHistoryScreen(
                             color = if (isSelected) CyanAccent else TextSecondary
                         )
                         if (isCurrent) {
-                            Text("📍", fontSize = 11.sp)
+                            Text("📍 الحالي", fontSize = 11.sp, color = CyanAccent)
                         } else {
-                            Text("📦", fontSize = 10.sp)
+                            Text("📦 مؤرشف", fontSize = 10.sp, color = TextMuted)
                         }
                     }
                 }

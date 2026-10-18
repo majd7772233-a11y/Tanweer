@@ -163,7 +163,8 @@ data class ScheduleSlot(
     val subjectIcon: String,
     val colorHex: String? = null,
     val startTime: String? = null,
-    val endTime: String? = null
+    val endTime: String? = null,
+    val syncStatus: String = "SYNCED"
 )
 
 @JsonClass(generateAdapter = true)
@@ -462,6 +463,7 @@ data class ExamItem(
     val subjectIcon: String = "🔴",
     val colorHex: String = "#FF3366",
     val isCompleted: Boolean = false,
+    val examType: String = "MONTHLY",
     val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
 )
 
@@ -701,5 +703,17 @@ data class PublicationResult(
     val state: PublicationState,
     val message: String,
     val isOfficial: Boolean = false
+) {
+    val isSynced: Boolean get() = state == PublicationState.SYNCED
+    val isPending: Boolean get() = state == PublicationState.PENDING
+}
+
+data class ComprehensiveSyncReport(
+    val succeededSections: List<String>,
+    val failedSections: List<Pair<String, String>>,
+    val offlineSections: List<String>,
+    val pendingOutboxCount: Int,
+    val isAllSucceeded: Boolean,
+    val summaryMessage: String
 )
 

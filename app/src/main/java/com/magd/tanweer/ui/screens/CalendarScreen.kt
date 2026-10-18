@@ -26,12 +26,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.data.model.*
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
-import com.magd.tanweer.ui.components.GlassButton
-import com.magd.tanweer.ui.components.GlassCard
-import com.magd.tanweer.ui.components.GlassPill
+import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -47,6 +47,11 @@ fun CalendarScreen(
     var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
     var showAddActionSheet by remember { mutableStateOf(false) }
+
+    var activeViewingContent by remember { mutableStateOf<ContentItem?>(null) }
+    var activeViewingHomework by remember { mutableStateOf<HomeworkItem?>(null) }
+    var activeViewingExam by remember { mutableStateOf<ExamItem?>(null) }
+    var activeViewingEvent by remember { mutableStateOf<SchoolEventItem?>(null) }
 
     val monthYearFormat = remember { SimpleDateFormat("MMMM yyyy", Locale("ar")) }
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
@@ -374,7 +379,9 @@ fun CalendarScreen(
         if (dayExams.isNotEmpty()) {
             items(dayExams) { exam ->
                 GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { activeViewingExam = exam },
                     borderColor = RubyRed.copy(alpha = 0.5f),
                     backgroundColor = GlassSurface
                 ) {
@@ -383,7 +390,7 @@ fun CalendarScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("🔴", fontSize = 16.sp)
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -402,6 +409,12 @@ fun CalendarScreen(
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
                             }
+                            Text(
+                                text = "اضغط لعرض تفاصيل ومقرر الاختبار 🔍",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
                         }
                         GlassPill(text = "اختبار", color = RubyRed, bgColor = Color(0x33FF3366))
                     }
@@ -413,7 +426,9 @@ fun CalendarScreen(
         if (dayHomeworks.isNotEmpty()) {
             items(dayHomeworks) { hw ->
                 GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { activeViewingHomework = hw },
                     borderColor = WarmAmber.copy(alpha = 0.4f),
                     backgroundColor = GlassSurface
                 ) {
@@ -422,7 +437,7 @@ fun CalendarScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "📝 واجب ${hw.subjectName}: ${hw.title}",
                                 fontSize = 14.sp,
@@ -433,6 +448,12 @@ fun CalendarScreen(
                                 text = "موعد التسليم: ${hw.dueDate}",
                                 fontSize = 12.sp,
                                 color = WarmAmber
+                            )
+                            Text(
+                                text = "اضغط لعرض تفاصيل الواجب والمرفقات 🔍",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                modifier = Modifier.padding(top = 2.dp)
                             )
                         }
                         Checkbox(
@@ -452,7 +473,9 @@ fun CalendarScreen(
         if (dayEvents.isNotEmpty()) {
             items(dayEvents) { ev ->
                 GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { activeViewingEvent = ev },
                     borderColor = PurpleAccent.copy(alpha = 0.5f),
                     backgroundColor = GlassSurface
                 ) {
@@ -497,6 +520,12 @@ fun CalendarScreen(
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
                             }
+                            Text(
+                                text = "اضغط لعرض تفاصيل الفعالية 🔍",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
                         }
                         GlassPill(text = "فعالية 🎪", color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
                     }
@@ -508,7 +537,9 @@ fun CalendarScreen(
         if (dayContents.isNotEmpty()) {
             items(dayContents) { content ->
                 GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { activeViewingContent = content },
                     backgroundColor = GlassSurface
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
@@ -532,12 +563,25 @@ fun CalendarScreen(
                                 modifier = Modifier.padding(top = 4.dp)
                             )
                         }
-                        Text(
-                            text = "بواسطة: ${content.authorName} (${content.authorGradeSection})",
-                            fontSize = 11.sp,
-                            color = CyanAccent,
-                            modifier = Modifier.padding(top = 6.dp)
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "بواسطة: ${content.authorName} (${content.authorGradeSection})",
+                                fontSize = 11.sp,
+                                color = CyanAccent
+                            )
+                            Text(
+                                text = "📖 اضغط لفتح الصور والنقل للدفتر",
+                                fontSize = 11.sp,
+                                color = CyanAccent,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }

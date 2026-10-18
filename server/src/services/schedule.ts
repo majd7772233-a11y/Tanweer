@@ -112,14 +112,38 @@ export async function handleCreateScheduleSlot(
     hasSlots = (slotCount?.count || 0) > 0;
   }
 
-  const isInitial = !activeVersion || !hasSlots;
-  const permCheck = await requireScheduleManager(user, groupId, env.DB, isInitial);
-  if (permCheck) return permCheck;
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
 
   const body = await request.json() as ScheduleSlotInput;
 
   if (body.dayOfWeek === undefined || !body.slotOrder || !body.subjectId) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد اليوم ورقم الحصة والمادة');
+  }
+
+  const isScheduleManager = await hasPermission(user, Permission.MANAGE_SCHEDULE, {
+    db: env.DB,
+    groupId,
+  });
+
+  // 2. Check if a slot already exists at this position in the active version
+  let existingSlot: { id: string; start_time: string | null; end_time: string | null } | null = null;
+  if (activeVersion) {
+    existingSlot = await env.DB.prepare(
+      `SELECT id, start_time, end_time FROM schedule_slots WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
+    ).bind(activeVersion.id, body.dayOfWeek, body.slotOrder).first<{ id: string; start_time: string | null; end_time: string | null }>();
+  }
+
+  // Points 13 & 14 Policy:
+  // - If slot is occupied: only authorized managers (teachers/admins) can directly edit without voting.
+  //   Students must propose a change and go through voting.
+  // - If slot is empty: any active group member can fill it directly.
+  if (existingSlot && !isScheduleManager) {
+    return errorResponse(
+      'SCHEDULE_SLOT_OCCUPIED_REQUIRES_PROPOSAL',
+      'الحصة مشغولة بالفعل. لتعديلها يرجى تقديم مقترح تعديل ليصوت عليه الطلاب والزملاء.',
+      403
+    );
   }
 
   if (!activeVersion) {
@@ -132,19 +156,26 @@ export async function handleCreateScheduleSlot(
     activeVersion = { id: versionId, version_number: 1 };
   }
 
-  // 2. Ensure subject exists
+  // 3. Ensure subject exists
   if (body.subjectName) {
     await env.DB.prepare(
       `INSERT OR IGNORE INTO subjects (id, name_ar, icon, color_hex) VALUES (?, ?, ?, ?)`
     ).bind(body.subjectId, body.subjectName, body.subjectIcon || '📚', body.colorHex || '#00E5FF').run();
   }
 
-  // 3. Remove old slot at that day & slot_order in this version
+  const finalStartTime = (body.startTime !== undefined && body.startTime !== null && body.startTime.trim() !== '')
+    ? body.startTime.trim()
+    : (existingSlot?.start_time || null);
+  const finalEndTime = (body.endTime !== undefined && body.endTime !== null && body.endTime.trim() !== '')
+    ? body.endTime.trim()
+    : (existingSlot?.end_time || null);
+
+  // Remove old slot at that day & slot_order in this version
   await env.DB.prepare(
     `DELETE FROM schedule_slots WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
   ).bind(activeVersion.id, body.dayOfWeek, body.slotOrder).run();
 
-  // 4. Insert new slot
+  // 4. Insert new slot with preserved times
   const slotId = generateId('slot');
   await env.DB.prepare(
     `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
@@ -155,8 +186,8 @@ export async function handleCreateScheduleSlot(
     body.dayOfWeek,
     body.slotOrder,
     body.subjectId,
-    body.startTime || null,
-    body.endTime || null
+    finalStartTime,
+    finalEndTime
   ).run();
 
   return jsonResponse({
@@ -514,6 +545,9 @@ export async function handleApproveScheduleProposal(
      VALUES (?, ?, ?, ?, 1, ?, ?)`
   ).bind(newVersionId, proposal.group_id, newVersionNum, today, now, user.userId).run();
 
+  let preservedStartTime: string | null = null;
+  let preservedEndTime: string | null = null;
+
   // Copy existing slots to new version, replacing the proposed slot
   if (currentVersion) {
     const oldSlots = await env.DB.prepare(
@@ -528,6 +562,8 @@ export async function handleApproveScheduleProposal(
 
     for (const s of (oldSlots.results || [])) {
       if (s.day_of_week === proposal.day_of_week && s.slot_order === proposal.slot_order) {
+        preservedStartTime = s.start_time;
+        preservedEndTime = s.end_time;
         continue; // skip the one being replaced
       }
       const newSlotId = generateId('slot');
@@ -538,12 +574,12 @@ export async function handleApproveScheduleProposal(
     }
   }
 
-  // Insert the approved new subject slot
+  // Insert the approved new subject slot while preserving previous custom times
   const appliedSlotId = generateId('slot');
   await env.DB.prepare(
-    `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id)
-     VALUES (?, ?, ?, ?, ?)`
-  ).bind(appliedSlotId, newVersionId, proposal.day_of_week, proposal.slot_order, proposal.new_subject_id).run();
+    `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(appliedSlotId, newVersionId, proposal.day_of_week, proposal.slot_order, proposal.new_subject_id, preservedStartTime, preservedEndTime).run();
 
   // Mark proposal as ACCEPTED
   await env.DB.prepare(
