@@ -713,6 +713,8 @@ data class ComprehensiveSyncReport(
     val failedSections: List<Pair<String, String>>,
     val offlineSections: List<String>,
     val pendingOutboxCount: Int,
+    val processedOutboxCount: Int = 0,
+    val outboxError: String? = null,
     val isAllSucceeded: Boolean,
     val summaryMessage: String
 )

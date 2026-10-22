@@ -2,7 +2,7 @@ import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
 import { mapGroup } from '../lib/mappers';
 import { errorResponse, jsonResponse } from '../lib/response';
-import { Role, normalizeRole } from '../lib/roles';
+import { Role, normalizeRole, sanitizePublicRole } from '../lib/roles';
 import { Permission, hasPermission } from '../lib/permissions';
 
 export async function handleGetGroups(user: UserContext, env: Env): Promise<Response> {
@@ -87,7 +87,7 @@ export async function handleGetGroupMembers(groupId: string, user: UserContext, 
       fullName: m.full_name,
       phoneNumber: canManage ? m.phone_number : undefined,
       memberRole: m.member_role,
-      globalRole: m.global_role,
+      globalRole: sanitizePublicRole(m.global_role),
       status: m.status,
       joinedAt: m.joined_at,
       gradeId: m.grade_id,

@@ -18,6 +18,23 @@ describe('Server PBKDF2 Password Hashing & Crypto', () => {
     expect(isWrong).toBe(false);
   });
 
+  it('verifies passwords hashed with legacy fallback pepper and indicates needsRehash', async () => {
+    const password = 'LegacyPassword123!';
+    const legacyPepper = 'tanweer-pepper-2026';
+    const newProductionPepper = 'new_custom_prod_pepper_456';
+
+    const { hash } = await hashPassword(password, legacyPepper);
+
+    // Verify using new production pepper with fallback enabled
+    const result = await verifyPassword(password, hash, newProductionPepper, legacyPepper);
+    expect(result).toBe(true);
+
+    const { verifyPasswordWithDetails } = await import('../src/lib/crypto');
+    const details = await verifyPasswordWithDetails(password, hash, newProductionPepper, legacyPepper);
+    expect(details.isValid).toBe(true);
+    expect(details.needsRehash).toBe(true);
+  });
+
   it('throws error when server secret pepper is missing', async () => {
     await expect(hashPassword('pass', '')).rejects.toThrow('Server secret pepper is required');
     await expect(verifyPassword('pass', 'hash', '')).rejects.toThrow('Server secret pepper is required');

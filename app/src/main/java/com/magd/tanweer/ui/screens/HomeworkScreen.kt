@@ -214,14 +214,11 @@ fun HomeworkScreen(
                     Column {
                         Text(
                             text = "📝 الواجبات والتكاليف",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Black,
-                            color = CyanAccent
+                            style = AppTypography.SectionHeader.copy(color = CyanAccent)
                         )
                         Text(
                             text = "${homeworks.size} واجب • $todayCount مستحق اليوم",
-                            fontSize = 12.sp,
-                            color = TextSecondary
+                            style = AppTypography.Body.copy(color = TextSecondary)
                         )
                     }
                     GlassButton(
@@ -301,12 +298,13 @@ fun HomeworkScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text(text = filter.icon, fontSize = 12.sp)
+                                Text(text = filter.icon, style = AppTypography.Chip)
                                 Text(
                                     text = filter.label,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) TextOnAccent else if (filter == HomeworkFilter.OVERDUE && overdueCount > 0) Color(0xFFFF5252) else TextSecondary
+                                    style = AppTypography.Chip.copy(
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) TextOnAccent else if (filter == HomeworkFilter.OVERDUE && overdueCount > 0) Color(0xFFFF5252) else TextSecondary
+                                    )
                                 )
                                 if (badgeCount != null && badgeCount > 0) {
                                     Box(
@@ -317,9 +315,9 @@ fun HomeworkScreen(
                                     ) {
                                         Text(
                                             text = "$badgeCount",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) TextOnAccent else if (filter == HomeworkFilter.OVERDUE) Color.White else TextSecondary
+                                            style = AppTypography.Badge.copy(
+                                                color = if (isSelected) TextOnAccent else if (filter == HomeworkFilter.OVERDUE) Color.White else TextSecondary
+                                            )
                                         )
                                     }
                                 }
@@ -446,7 +444,9 @@ fun HomeworkScreen(
                                 homeworkId = hw.id
                             ) { res ->
                                 if (res.isSuccess) {
-                                    Toast.makeText(context, "تم فتح استفسار مرتبط بالواجب بنجاح ❓", Toast.LENGTH_SHORT).show()
+                                    val outcome = res.getOrNull()
+                                    val msg = outcome?.message ?: "تم فتح استفسار مرتبط بالواجب بنجاح ❓"
+                                    Toast.makeText(context, msg, if (outcome?.isSynced == true) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
                                     viewModel.setTab(NavigationTab.ISSUES)
                                 } else {
                                     Toast.makeText(context, res.exceptionOrNull()?.message ?: "تعذر فتح الاستفسار", Toast.LENGTH_LONG).show()
@@ -561,8 +561,7 @@ fun HomeworkScreen(
                 text = {
                     Text(
                         "يتطلب إرسال تذكير الواجب في موعده الدقيق السماح للتطبيق بجدولة التنبيهات والمنبهات (Alarms & Reminders) من إعدادات الهاتف.",
-                        color = TextPrimary,
-                        fontSize = 13.sp
+                        style = AppTypography.BodyLarge.copy(color = TextPrimary)
                     )
                 },
                 confirmButton = {
@@ -606,8 +605,7 @@ fun HomeworkScreen(
                 text = {
                     Text(
                         "لتذكيرك بموعد تسليم الواجب والمذاكرة، يحتاج تنوير إلى تفعيل إذن الإشعارات من إعدادات جهازك.",
-                        color = TextPrimary,
-                        fontSize = 13.sp
+                        style = AppTypography.BodyLarge.copy(color = TextPrimary)
                     )
                 },
                 confirmButton = {
@@ -694,16 +692,14 @@ fun HomeworkCard(
                             .background(if (isOverdue) Color(0xFFFF5252).copy(alpha = 0.15f) else CyanGlow),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = homework.subjectIcon, fontSize = 20.sp)
+                        Text(text = homework.subjectIcon, fontSize = TanweerTypographyTokens.SizeHeader)
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
                                 text = "${homework.subjectName}: ${homework.title}",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                style = AppTypography.Title.copy(color = TextPrimary)
                             )
                             if (homework.taskType == "TASK") {
                                 Box(
@@ -712,7 +708,7 @@ fun HomeworkCard(
                                         .background(WarmAmber.copy(alpha = 0.15f))
                                         .padding(horizontal = 5.dp, vertical = 2.dp)
                                 ) {
-                                    Text("مشروع 🎯", fontSize = 9.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                                    Text("مشروع 🎯", style = AppTypography.Badge.copy(color = WarmAmber))
                                 }
                             }
                         }
@@ -723,14 +719,15 @@ fun HomeworkCard(
                         ) {
                             Text(
                                 text = if (countdownText.isNotBlank()) countdownText else "التسليم: ${homework.dueDate}",
-                                fontSize = 12.sp,
-                                color = when {
-                                    homework.isCompleted -> EmeraldGreen
-                                    isOverdue -> Color(0xFFFF5252)
-                                    isDueToday -> WarmAmber
-                                    else -> TextSecondary
-                                },
-                                fontWeight = if (isOverdue || isDueToday) FontWeight.Bold else FontWeight.Normal
+                                style = AppTypography.Body.copy(
+                                    color = when {
+                                        homework.isCompleted -> EmeraldGreen
+                                        isOverdue -> Color(0xFFFF5252)
+                                        isDueToday -> WarmAmber
+                                        else -> TextSecondary
+                                    },
+                                    fontWeight = if (isOverdue || isDueToday) FontWeight.Bold else FontWeight.Normal
+                                )
                             )
                         }
                     }
@@ -758,8 +755,7 @@ fun HomeworkCard(
                     if (!homework.details.isNullOrBlank()) {
                         Text(
                             text = homework.details,
-                            fontSize = 13.sp,
-                            color = TextSecondary
+                            style = AppTypography.Body.copy(color = TextSecondary)
                         )
                     }
                     Row(
@@ -780,18 +776,14 @@ fun HomeworkCard(
                             ) {
                                 Text(
                                     text = "📖 صفحة: ${homework.pageNumbers} ↗",
-                                    fontSize = 12.sp,
-                                    color = CyanAccent,
-                                    fontWeight = FontWeight.Bold
+                                    style = AppTypography.BodyBold.copy(color = CyanAccent)
                                 )
                             }
                         }
                         if (!homework.questionNumbers.isNullOrBlank()) {
                             Text(
                                 text = "✏️ الأسئلة: ${homework.questionNumbers}",
-                                fontSize = 12.sp,
-                                color = WarmAmber,
-                                fontWeight = FontWeight.Medium
+                                style = AppTypography.Body.copy(color = WarmAmber, fontWeight = FontWeight.Medium)
                             )
                         }
                     }
@@ -815,14 +807,11 @@ fun HomeworkCard(
                     ) {
                         Text(
                             text = "📷 صور وتوثيق الحل (${homework.mediaUrls.size}):",
-                            fontSize = 11.sp,
-                            color = CyanAccent,
-                            fontWeight = FontWeight.Bold
+                            style = AppTypography.Caption.copy(color = CyanAccent, fontWeight = FontWeight.Bold)
                         )
                         Text(
                             text = "اضغط للمعاينة 🔍",
-                            fontSize = 10.sp,
-                            color = TextMuted
+                            style = AppTypography.Meta.copy(color = TextMuted)
                         )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
@@ -882,15 +871,12 @@ fun HomeworkCard(
                 ) {
                     Text(
                         text = if (homework.syncStatus == "FAILED") "⚠️ لم يُرفع للسيرفر (محلي)" else "🔄 جاري المزامنة مع السيرفر...",
-                        fontSize = 11.sp,
-                        color = if (homework.syncStatus == "FAILED") Color(0xFFFF8A80) else CyanAccent
+                        style = AppTypography.CaptionNormal.copy(color = if (homework.syncStatus == "FAILED") Color(0xFFFF8A80) else CyanAccent)
                     )
                     if (homework.syncStatus == "FAILED" && onRetrySync != null) {
                         Text(
                             text = "إعادة المحاولة 🔁",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = CyanAccent,
+                            style = AppTypography.Caption.copy(color = CyanAccent, fontWeight = FontWeight.Bold),
                             modifier = Modifier.clickable { onRetrySync() }
                         )
                     }
@@ -943,7 +929,7 @@ fun HomeworkCard(
                 ) {
                     Icon(Icons.Default.QuestionMark, contentDescription = "اسأل عن الواجب", modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("اسأل عن الواجب", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("اسأل عن الواجب", style = AppTypography.Caption.copy(fontWeight = FontWeight.Bold))
                 }
             }
         }
@@ -1070,9 +1056,7 @@ fun AddHomeworkDialog(
                             }
                             Text(
                                 text = "إضافة وتوثيق واجب مدرسي 📝",
-                                color = CyanAccent,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 16.sp
+                                style = AppTypography.CardTitle.copy(color = CyanAccent)
                             )
                         }
 
@@ -1241,9 +1225,7 @@ fun AddHomeworkDialog(
                 ) {
                     Text(
                         text = "📷 إدراج صور الواجب / الحل (اختياري)",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = CyanAccent
+                        style = AppTypography.BodyBold.copy(color = CyanAccent)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -1266,7 +1248,7 @@ fun AddHomeworkDialog(
                         ) {
                             Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("الاستوديو", fontSize = 11.sp)
+                            Text("الاستوديو", style = AppTypography.CaptionNormal)
                         }
 
                         OutlinedButton(
@@ -1278,7 +1260,7 @@ fun AddHomeworkDialog(
                         ) {
                             Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("الكاميرا", fontSize = 11.sp)
+                            Text("الكاميرا", style = AppTypography.CaptionNormal)
                         }
                     }
 

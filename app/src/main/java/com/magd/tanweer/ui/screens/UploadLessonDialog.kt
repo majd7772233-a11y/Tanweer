@@ -183,9 +183,7 @@ fun UploadLessonDialog(
                             }
                             Text(
                                 text = "توثيق وإضافة درس رسمي 📷",
-                                color = CyanAccent,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 16.sp
+                                style = AppTypography.CardTitle.copy(color = CyanAccent)
                             )
                         }
 
@@ -407,7 +405,7 @@ fun UploadLessonDialog(
                             ) {
                                 Icon(Icons.Default.Collections, contentDescription = "المعرض", modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("🖼️ من المعرض", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("🖼️ من المعرض", style = AppTypography.Button)
                             }
                         }
 
@@ -434,9 +432,7 @@ fun UploadLessonDialog(
                                             ) {
                                                 Text(
                                                     text = "صفحة ${index + 1}",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = CyanAccent
+                                                    style = AppTypography.Caption.copy(color = CyanAccent, fontWeight = FontWeight.Bold)
                                                 )
                                                 IconButton(
                                                     onClick = {
@@ -519,9 +515,7 @@ fun UploadLessonDialog(
                         } else {
                             Text(
                                 text = "💡 يمكنك تصوير السبورة مباشرة أو إرفاق صور متعددة وسيتم تحسين الإضاءة وتوضيح الخطوط آلياً.",
-                                fontSize = 11.sp,
-                                color = TextMuted,
-                                lineHeight = 16.sp
+                                style = AppTypography.Hint.copy(color = TextMuted, lineHeight = 16.sp)
                             )
                         }
 
@@ -538,7 +532,7 @@ fun UploadLessonDialog(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("التحسين التلقائي للسبورة والتباين", fontSize = 11.sp, color = TextPrimary)
+                                Text("التحسين التلقائي للسبورة والتباين", style = AppTypography.CaptionNormal.copy(color = TextPrimary))
                             }
                             Switch(
                                 checked = globalAutoEnhance,

@@ -335,18 +335,36 @@ class TanweerRepository(
             val myGroups = db.groupDao().getMyGroupsSync()
             if (myGroups.isEmpty()) return@withContext SyncResult.Success()
 
+            val subResults = mutableListOf<SyncResult>()
             for (grp in myGroups) {
                 try {
-                    syncContents(grp.id)
-                    syncHomeworks(grp.id)
-                    syncExams(grp.id)
-                    syncEvents(grp.id)
-                    syncSchedule(grp.id)
+                    subResults.add(syncContents(grp.id))
+                    subResults.add(syncHomeworks(grp.id))
+                    subResults.add(syncExams(grp.id))
+                    subResults.add(syncEvents(grp.id))
+                    subResults.add(syncSchedule(grp.id))
                 } catch (e: Exception) {
                     Log.w("TanweerRepository", "Failed syncing academic archive for group ${grp.id}: ${e.message}")
+                    subResults.add(resolveException(e, "تعذر مزامنة أرشيف الشعبة ${grp.name}"))
                 }
             }
-            SyncResult.Success()
+
+            val errors = subResults.filterIsInstance<SyncResult.Error>()
+            val offlines = subResults.filterIsInstance<SyncResult.Offline>()
+            val successes = subResults.filterIsInstance<SyncResult.Success>()
+
+            when {
+                errors.isNotEmpty() && errors.size == subResults.size ->
+                    SyncResult.Error(errors.first().message, errors.first().isNetworkError)
+                offlines.isNotEmpty() && offlines.size == subResults.size ->
+                    SyncResult.Offline("وضع عدم الاتصال: تعذر إكمال مزامنة الأرشيف الأكاديمي")
+                errors.isNotEmpty() || offlines.isNotEmpty() -> {
+                    val succeededCount = successes.size
+                    val totalCount = subResults.size
+                    SyncResult.Offline("اكتملت مزامنة بعض أقسام الأرشيف ($succeededCount/$totalCount)، وبقيت أقسام أخرى غير مكتملة أو دون اتصال")
+                }
+                else -> SyncResult.Success(successes.size)
+            }
         } catch (e: Exception) {
             SyncResult.Offline("أوفلاين: الأرشيف الأكاديمي")
         }
@@ -552,6 +570,13 @@ class TanweerRepository(
                 db.examDao().clearSyncedExamsForDate(groupId, date)
                 if (body.exams.isNotEmpty()) {
                     val exams = body.exams.map {
+                        val local = db.examDao().getExamById(it.id)
+                        val isDone = if (local != null && local.syncStatus == "PENDING") {
+                            local.isCompleted
+                        } else {
+                            it.isCompleted
+                        }
+                        val finalExamType = if (it.examType.isNotBlank()) it.examType else (local?.examType ?: "MONTHLY")
                         ExamEntity(
                             id = it.id,
                             groupId = it.groupId,
@@ -562,7 +587,9 @@ class TanweerRepository(
                             notes = it.notes,
                             subjectName = it.subjectName,
                             subjectIcon = it.subjectIcon,
-                            colorHex = it.colorHex
+                            colorHex = it.colorHex,
+                            isCompleted = isDone,
+                            examType = finalExamType
                         )
                     }
                     db.examDao().insertExams(exams)
@@ -711,6 +738,13 @@ class TanweerRepository(
                 // 1. Process and cache exams
                 if (body.exams.isNotEmpty()) {
                     val exams = body.exams.map {
+                        val local = db.examDao().getExamById(it.id)
+                        val isDone = if (local != null && local.syncStatus == "PENDING") {
+                            local.isCompleted
+                        } else {
+                            it.isCompleted
+                        }
+                        val finalExamType = if (it.examType.isNotBlank()) it.examType else (local?.examType ?: "MONTHLY")
                         ExamEntity(
                             id = it.id,
                             groupId = it.groupId,
@@ -722,7 +756,8 @@ class TanweerRepository(
                             subjectName = it.subjectName,
                             subjectIcon = it.subjectIcon,
                             colorHex = it.colorHex,
-                            isCompleted = it.isCompleted
+                            isCompleted = isDone,
+                            examType = finalExamType
                         )
                     }
                     db.examDao().insertExams(exams)
@@ -1203,14 +1238,29 @@ class TanweerRepository(
                 Result.failure(Exception(res.message().ifBlank { "تعذر حفظ الحصة في السيرفر (كود ${res.code()})" }))
             }
         } catch (e: Exception) {
-            // Offline fallback: save locally as PENDING and enqueue in Outbox
+            // Offline fallback: save locally as PENDING and enqueue in Outbox with full metadata
             db.scheduleDao().insertSlots(listOf(entity.copy(syncStatus = "PENDING")))
+            val slotJson = try {
+                org.json.JSONObject().apply {
+                    put("groupId", groupId)
+                    put("dayOfWeek", dayOfWeek)
+                    put("slotOrder", slotOrder)
+                    put("subjectId", subjectId)
+                    put("subjectName", entity.subjectName)
+                    put("subjectIcon", entity.subjectIcon)
+                    put("colorHex", entity.colorHex)
+                    put("startTime", startTime)
+                    put("endTime", endTime)
+                }.toString()
+            } catch (_: Exception) {
+                "{\"groupId\":\"$groupId\",\"dayOfWeek\":$dayOfWeek,\"slotOrder\":$slotOrder}"
+            }
             val outboxItem = OutboxEntity(
                 id = "ob_sch_${slotId}_${System.currentTimeMillis()}",
                 entityType = "SCHEDULE_SLOT_UPDATE",
                 entityId = slotId,
                 operation = "CREATE",
-                payloadJson = "{\"groupId\":\"$groupId\",\"dayOfWeek\":$dayOfWeek,\"slotOrder\":$slotOrder}"
+                payloadJson = slotJson
             )
             db.outboxDao().insertOutbox(outboxItem)
             Result.success(ScheduleMutationResult.QueuedOffline())
@@ -1229,12 +1279,19 @@ class TanweerRepository(
         } catch (e: Exception) {
             // Offline fallback: delete locally and queue Outbox
             db.scheduleDao().deleteSlot(groupId, dayOfWeek, slotOrder)
+            val delJson = try {
+                org.json.JSONObject().apply {
+                    put("groupId", groupId)
+                    put("dayOfWeek", dayOfWeek)
+                    put("slotOrder", slotOrder)
+                }.toString()
+            } catch (_: Exception) { "{}" }
             val outboxItem = OutboxEntity(
                 id = "ob_schdel_${groupId}_${dayOfWeek}_${slotOrder}_${System.currentTimeMillis()}",
                 entityType = "SCHEDULE_SLOT_DELETE",
                 entityId = "${groupId}:${dayOfWeek}:${slotOrder}",
                 operation = "DELETE",
-                payloadJson = "{}"
+                payloadJson = delJson
             )
             db.outboxDao().insertOutbox(outboxItem)
             Result.success(ScheduleSlotDeleteResult.QueuedOffline())
@@ -2960,25 +3017,49 @@ class TanweerRepository(
                 db.examDao().updateSyncStatus(id, "FAILED")
                 Result.failure(Exception(res.message() ?: "لا تملك صلاحية حفظ هذا الاختبار"))
             } else {
+                val examJson = try {
+                    org.json.JSONObject().apply {
+                        put("id", id)
+                        put("groupId", groupId)
+                        put("examDate", examDate)
+                        put("subjectId", subjectId)
+                        put("title", title)
+                        put("requiredChapters", requiredChapters)
+                        put("notes", notes)
+                        put("examType", examType)
+                    }.toString()
+                } catch (_: Exception) { "{}" }
                 val outboxItem = OutboxEntity(
                     id = "ob_exc_${id}_${System.currentTimeMillis()}",
                     entityType = "EXAM_CREATE",
                     entityId = id,
                     operation = "CREATE",
-                    payloadJson = "{}"
+                    payloadJson = examJson
                 )
                 db.outboxDao().insertOutbox(outboxItem)
                 db.examDao().updateSyncStatus(id, "PENDING")
                 Result.success(ExamAddResult.QueuedOffline(id))
             }
         } catch (e: Exception) {
-            // Queue in Outbox for offline synchronization
+            // Queue in Outbox for offline synchronization with full metadata
+            val examJson = try {
+                org.json.JSONObject().apply {
+                    put("id", id)
+                    put("groupId", groupId)
+                    put("examDate", examDate)
+                    put("subjectId", subjectId)
+                    put("title", title)
+                    put("requiredChapters", requiredChapters)
+                    put("notes", notes)
+                    put("examType", examType)
+                }.toString()
+            } catch (_: Exception) { "{}" }
             val outboxItem = OutboxEntity(
                 id = "ob_exc_${id}_${System.currentTimeMillis()}",
                 entityType = "EXAM_CREATE",
                 entityId = id,
                 operation = "CREATE",
-                payloadJson = "{}"
+                payloadJson = examJson
             )
             db.outboxDao().insertOutbox(outboxItem)
             db.examDao().updateSyncStatus(id, "PENDING")
@@ -3431,25 +3512,46 @@ class TanweerRepository(
                     }
                     "EXAM_CREATE" -> {
                         val ex = db.examDao().getExamById(item.entityId)
-                        if (ex != null) {
-                            val res = api.createExam(
-                                CreateExamRequest(
-                                    id = ex.id,
-                                    groupId = ex.groupId,
-                                    examDate = ex.examDate,
-                                    subjectId = ex.subjectId,
-                                    title = ex.title,
-                                    requiredChapters = ex.requiredChapters,
-                                    notes = ex.notes
-                                )
+                        val req: CreateExamRequest? = if (ex != null) {
+                            CreateExamRequest(
+                                id = ex.id,
+                                groupId = ex.groupId,
+                                examDate = ex.examDate,
+                                subjectId = ex.subjectId,
+                                title = ex.title,
+                                requiredChapters = ex.requiredChapters,
+                                notes = ex.notes,
+                                examType = ex.examType
                             )
+                        } else if (item.payloadJson.isNotBlank() && item.payloadJson != "{}") {
+                            try {
+                                val obj = org.json.JSONObject(item.payloadJson)
+                                CreateExamRequest(
+                                    id = item.entityId,
+                                    groupId = obj.optString("groupId", ""),
+                                    examDate = obj.optString("examDate", ""),
+                                    subjectId = obj.optString("subjectId", ""),
+                                    title = obj.optString("title", ""),
+                                    requiredChapters = obj.optString("requiredChapters", null),
+                                    notes = obj.optString("notes", null),
+                                    examType = obj.optString("examType", "MONTHLY")
+                                )
+                            } catch (_: Exception) { null }
+                        } else {
+                            null
+                        }
+
+                        if (req != null && req.groupId.isNotBlank() && req.title.isNotBlank()) {
+                            val res = api.createExam(req)
                             if (res.isSuccessful) {
                                 val serverId = res.body()?.examId ?: res.body()?.id
-                                if (serverId != null && serverId != ex.id) {
-                                    val updated = ex.copy(id = serverId, syncStatus = "SYNCED")
-                                    db.examDao().replaceExamId(ex.id, updated)
+                                if (serverId != null && serverId != item.entityId) {
+                                    if (ex != null) {
+                                        val updated = ex.copy(id = serverId, syncStatus = "SYNCED")
+                                        db.examDao().replaceExamId(ex.id, updated)
+                                    }
                                 } else {
-                                    db.examDao().updateSyncStatus(ex.id, "SYNCED")
+                                    db.examDao().updateSyncStatus(item.entityId, "SYNCED")
                                 }
                                 db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
                                 successCount++
@@ -3457,7 +3559,7 @@ class TanweerRepository(
                                 db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
                             }
                         } else {
-                            db.outboxDao().deleteOutbox(item.id)
+                            db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = "تعذر العثور على بيانات الاختبار محلياً (id: ${item.entityId})")
                         }
                     }
                     "EXAM_DELETE" -> {
@@ -3550,36 +3652,74 @@ class TanweerRepository(
                     }
                     "SCHEDULE_SLOT_UPDATE" -> {
                         val slot = db.scheduleDao().getSlotById(item.entityId)
+                        var gId = ""
+                        var req: CreateScheduleSlotRequest? = null
                         if (slot != null) {
-                            val res = api.createScheduleSlot(
-                                groupId = slot.groupId,
-                                req = CreateScheduleSlotRequest(
-                                    dayOfWeek = slot.dayOfWeek,
-                                    slotOrder = slot.slotOrder,
-                                    subjectId = slot.subjectId,
-                                    subjectName = slot.subjectName,
-                                    subjectIcon = slot.subjectIcon,
-                                    colorHex = slot.colorHex,
-                                    startTime = slot.startTime,
-                                    endTime = slot.endTime
-                                )
+                            gId = slot.groupId
+                            req = CreateScheduleSlotRequest(
+                                dayOfWeek = slot.dayOfWeek,
+                                slotOrder = slot.slotOrder,
+                                subjectId = slot.subjectId,
+                                subjectName = slot.subjectName,
+                                subjectIcon = slot.subjectIcon,
+                                colorHex = slot.colorHex,
+                                startTime = slot.startTime,
+                                endTime = slot.endTime
                             )
+                        } else if (item.payloadJson.isNotBlank() && item.payloadJson != "{}") {
+                            try {
+                                val obj = org.json.JSONObject(item.payloadJson)
+                                gId = obj.optString("groupId", "")
+                                req = CreateScheduleSlotRequest(
+                                    dayOfWeek = obj.optInt("dayOfWeek", 0),
+                                    slotOrder = obj.optInt("slotOrder", 0),
+                                    subjectId = obj.optString("subjectId", ""),
+                                    subjectName = obj.optString("subjectName", ""),
+                                    subjectIcon = obj.optString("subjectIcon", "📚"),
+                                    colorHex = obj.optString("colorHex", null),
+                                    startTime = obj.optString("startTime", null),
+                                    endTime = obj.optString("endTime", null)
+                                )
+                            } catch (_: Exception) {
+                                gId = ""
+                                req = null
+                            }
+                        } else {
+                            gId = ""
+                            req = null
+                        }
+
+                        if (req != null && gId.isNotBlank()) {
+                            val res = api.createScheduleSlot(groupId = gId, req = req)
                             if (res.isSuccessful) {
+                                if (slot != null) {
+                                    db.scheduleDao().insertSlots(listOf(slot.copy(syncStatus = "SYNCED")))
+                                }
                                 db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
                                 successCount++
                             } else {
                                 db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
                             }
                         } else {
-                            db.outboxDao().deleteOutbox(item.id)
+                            db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = "تعذر العثور على بيانات الحصة محلياً (id: ${item.entityId})")
                         }
                     }
                     "SCHEDULE_SLOT_DELETE" -> {
                         val parts = item.entityId.split(":")
-                        if (parts.size == 3) {
-                            val gId = parts[0]
-                            val dOfWeek = parts[1].toIntOrNull() ?: 1
-                            val sOrder = parts[2].toIntOrNull() ?: 1
+                        var gId = parts.getOrNull(0) ?: ""
+                        var dOfWeek = parts.getOrNull(1)?.toIntOrNull()
+                        var sOrder = parts.getOrNull(2)?.toIntOrNull()
+
+                        if (dOfWeek == null || sOrder == null) {
+                            try {
+                                val obj = org.json.JSONObject(item.payloadJson)
+                                gId = obj.optString("groupId", gId)
+                                dOfWeek = obj.optInt("dayOfWeek", 0)
+                                sOrder = obj.optInt("slotOrder", 0)
+                            } catch (_: Exception) {}
+                        }
+
+                        if (gId.isNotBlank() && dOfWeek != null && sOrder != null) {
                             val res = api.deleteScheduleSlot(gId, dOfWeek, sOrder)
                             if (res.isSuccessful || res.code() == 404) {
                                 db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
@@ -3588,7 +3728,7 @@ class TanweerRepository(
                                 db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
                             }
                         } else {
-                            db.outboxDao().deleteOutbox(item.id)
+                            db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = "معرف الحصة غير صالح للحذف: ${item.entityId}")
                         }
                     }
                     "LESSON_CREATE" -> {
@@ -3743,6 +3883,10 @@ class TanweerRepository(
 
     fun getBestAnswersCountForUser(userId: String): Flow<Int> {
         return db.issueDao().countBestAnswersForUser(userId)
+    }
+
+    fun getCommentsCountForUser(userId: String): Flow<Int> {
+        return db.issueDao().countCommentsForUser(userId)
     }
 
     fun countContentsForAuthorBetween(authorName: String, startDate: String, endDate: String): Flow<Int> {

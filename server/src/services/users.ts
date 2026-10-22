@@ -2,7 +2,7 @@ import { Env, UserContext } from '../env';
 import { validateArabicFullName, isValidGradeSection } from '../lib/validation';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { getCurrentAcademicYearId } from '../lib/school';
-import { Role, normalizeRole } from '../lib/roles';
+import { Role, normalizeRole, sanitizePublicRole } from '../lib/roles';
 
 export async function handleGetProfile(user: UserContext, env: Env): Promise<Response> {
   const contributions = await env.DB.prepare(
@@ -36,7 +36,7 @@ export async function handleGetProfile(user: UserContext, env: Env): Promise<Res
       gradeId: user.gradeId,
       gradeName: gradeNameMap[user.gradeId] || `الصف ${user.gradeId}`,
       sectionId: user.sectionId,
-      role: normalizeRole(user.role),
+      role: sanitizePublicRole(user.role),
       stats: {
         lessonsCount: contributions?.lessons_count || 0,
         homeworksCount: contributions?.homeworks_count || 0,

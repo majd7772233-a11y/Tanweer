@@ -12,6 +12,17 @@ import androidx.compose.ui.unit.sp
 // =========================================================================
 
 object TanweerTypographyTokens {
+    // Standard Base Scale Sizes
+    val SizeHero = 28.sp
+    val SizeHeadline = 22.sp
+    val SizeHeader = 20.sp
+    val SizeTitle = 16.sp
+    val SizeSubTitle = 14.sp
+    val SizeBase = 12.sp
+    val SizeCaption = 11.sp
+    val SizeMeta = 10.sp
+    val SizeBadge = 9.sp
+
     val DisplayHero = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Black,
@@ -121,8 +132,12 @@ object AppTypography {
     val CardSubtitle: TextStyle get() = TanweerTypographyTokens.BodySmall
     val Title: TextStyle get() = TanweerTypographyTokens.TitleSmall
     val Body: TextStyle get() = TanweerTypographyTokens.BodyMedium
+    val BodyBold: TextStyle get() = TanweerTypographyTokens.LabelLarge
+    val BodyLarge: TextStyle get() = TanweerTypographyTokens.BodyLarge
     val Caption: TextStyle get() = TanweerTypographyTokens.LabelMedium
+    val CaptionNormal: TextStyle get() = TanweerTypographyTokens.BodySmall
     val Meta: TextStyle get() = TanweerTypographyTokens.LabelSmall
+    val Badge: TextStyle get() = TextStyle(fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold, fontSize = TanweerTypographyTokens.SizeBadge, lineHeight = 12.sp)
     val Button: TextStyle get() = TanweerTypographyTokens.LabelLarge
     val Nav: TextStyle get() = TanweerTypographyTokens.LabelMedium
     val FieldLabel: TextStyle get() = TanweerTypographyTokens.BodyMedium

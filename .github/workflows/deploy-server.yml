@@ -1,10 +1,6 @@
 name: Deploy Tanweer Server
 
 on:
-  push:
-    paths:
-      - 'server/**'
-      - '.github/workflows/deploy-server.yml'
   workflow_dispatch:
 
 permissions:

@@ -101,6 +101,8 @@ fun ProfileScreen(
     val currentUserId = currentUser?.id ?: ""
     val verifiedBestAnswersCount by viewModel.repository.getBestAnswersCountForUser(currentUserId)
         .collectAsStateWithLifecycle(initialValue = 0)
+    val userCommentsCount by viewModel.repository.getCommentsCountForUser(currentUserId)
+        .collectAsStateWithLifecycle(initialValue = 0)
 
     val (currentMonthStart, currentMonthEnd) = remember {
         val cal = java.util.Calendar.getInstance()
@@ -377,7 +379,7 @@ fun ProfileScreen(
             val issuesCount = stats?.issuesCount ?: 0
 
             val isLessonDoc = lessonsCount >= 1 || photosCount >= 3
-            val isHelper = issuesCount >= 1 || homeworksCount >= 2
+            val isHelper = (userCommentsCount >= 2) || (userCommentsCount >= 1 && homeworksCount >= 2) || (verifiedBestAnswersCount >= 1)
             val isBestAnswerOwner = verifiedBestAnswersCount >= 1
             val isMonthContributor = monthLessonsCount >= 3
 
@@ -432,8 +434,8 @@ fun ProfileScreen(
                                 selectedBadgeInfo = BadgeDetailInfo(
                                     name = "مساعد الشعبة",
                                     icon = "🛡️",
-                                    criteria = "تسجيل واجبين دراسيين أو طرح استفسار علمي مفيد للشعبة",
-                                    progressText = "إنجازك: $homeworksCount واجبات و$issuesCount استفسارات",
+                                    criteria = "مساعدة الزملاء بتقديم إجابتين على الأقل في استفسارات الشعبة أو توثيق واجبات دراسية للمجموعة",
+                                    progressText = "إنجازك: $userCommentsCount إجابات ومشاركات مفيدة و$homeworksCount واجبات موثقة",
                                     isAchieved = isHelper
                                 )
                             }

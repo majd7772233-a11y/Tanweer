@@ -161,16 +161,166 @@ class UnifiedMutationQueue(
                         handleMutationFailure(item, "محرك رفع الدروس غير مهيأ بعد")
                     }
                 }
-                "ISSUE_COMMENT" -> {
-                    val obj = JSONObject(item.payloadJson)
-                    val issueId = obj.optString("issueId", "")
-                    val comment = obj.optString("comment", "")
-                    val res = api.addIssueComment(issueId, com.magd.tanweer.data.remote.AddCommentRequest(comment = comment))
-                    if (res.isSuccessful) {
-                        db.issueDao().updateCommentSyncStatus(item.entityId, "SYNCED")
+                "HOMEWORK_TOGGLE" -> {
+                    val res = api.toggleHomework(item.entityId)
+                    if (res.isSuccessful || res.code() == 404) {
                         outboxDao.deleteOutbox(item.id)
                     } else {
-                        handleMutationFailure(item, "فشل إرسال التعليق (${res.code()})")
+                        handleMutationFailure(item, "فشل مزامنة حالة الواجب مع الخادم (${res.code()})")
+                    }
+                }
+                "EXAM_CREATE" -> {
+                    val ex = db.examDao().getExamById(item.entityId)
+                    val req: com.magd.tanweer.data.remote.CreateExamRequest? = if (ex != null) {
+                        com.magd.tanweer.data.remote.CreateExamRequest(
+                            id = ex.id,
+                            groupId = ex.groupId,
+                            examDate = ex.examDate,
+                            subjectId = ex.subjectId,
+                            title = ex.title,
+                            requiredChapters = ex.requiredChapters,
+                            notes = ex.notes,
+                            examType = ex.examType
+                        )
+                    } else if (item.payloadJson.isNotBlank() && item.payloadJson != "{}") {
+                        try {
+                            val obj = JSONObject(item.payloadJson)
+                            com.magd.tanweer.data.remote.CreateExamRequest(
+                                id = item.entityId,
+                                groupId = obj.optString("groupId", ""),
+                                examDate = obj.optString("examDate", ""),
+                                subjectId = obj.optString("subjectId", ""),
+                                title = obj.optString("title", ""),
+                                requiredChapters = obj.optString("requiredChapters", null),
+                                notes = obj.optString("notes", null),
+                                examType = obj.optString("examType", "MONTHLY")
+                            )
+                        } catch (_: Exception) { null }
+                    } else {
+                        null
+                    }
+
+                    if (req != null && req.groupId.isNotBlank() && req.title.isNotBlank()) {
+                        val res = api.createExam(req)
+                        if (res.isSuccessful) {
+                            val serverId = res.body()?.examId ?: res.body()?.id
+                            if (serverId != null && serverId != item.entityId) {
+                                if (ex != null) {
+                                    val updated = ex.copy(id = serverId, syncStatus = "SYNCED")
+                                    db.examDao().replaceExamId(ex.id, updated)
+                                }
+                            } else {
+                                db.examDao().updateSyncStatus(item.entityId, "SYNCED")
+                            }
+                            outboxDao.deleteOutbox(item.id)
+                        } else {
+                            handleMutationFailure(item, "فشل رفع الاختبار إلى الخادم (${res.code()})")
+                        }
+                    } else {
+                        handleMutationFailure(item, "تعذر العثور على بيانات الاختبار محلياً (id: ${item.entityId})")
+                    }
+                }
+                "EVENT_CREATE" -> {
+                    val ev = db.eventDao().getEventById(item.entityId)
+                    if (ev != null) {
+                        val res = api.createEvent(
+                            com.magd.tanweer.data.remote.CreateEventRequest(
+                                id = ev.id,
+                                groupId = ev.groupId,
+                                title = ev.title,
+                                description = ev.description ?: "",
+                                category = ev.category ?: "",
+                                eventDate = ev.eventDate,
+                                timeStr = ev.timeStr ?: "",
+                                location = ev.location
+                            )
+                        )
+                        if (res.isSuccessful) {
+                            db.eventDao().updateSyncStatus(ev.id, "SYNCED")
+                            outboxDao.deleteOutbox(item.id)
+                        } else {
+                            handleMutationFailure(item, "فشل رفع الفعالية إلى الخادم (${res.code()})")
+                        }
+                    } else {
+                        handleMutationFailure(item, "تعذر العثور على الفعالية محلياً للمزامنة (id: ${item.entityId})")
+                    }
+                }
+                "ISSUE_CREATE" -> {
+                    val issue = db.issueDao().getIssueSync(item.entityId)
+                    if (issue != null) {
+                        val res = api.createIssue(
+                            com.magd.tanweer.data.remote.CreateIssueRequest(
+                                id = issue.id,
+                                groupId = issue.groupId,
+                                subjectId = issue.subjectId,
+                                homeworkId = issue.homeworkId,
+                                examId = issue.examId,
+                                title = issue.title,
+                                description = issue.description
+                            )
+                        )
+                        if (res.isSuccessful) {
+                            db.issueDao().updateSyncStatus(issue.id, "SYNCED")
+                            outboxDao.deleteOutbox(item.id)
+                        } else {
+                            handleMutationFailure(item, "فشل رفع السؤال إلى الخادم (${res.code()})")
+                        }
+                    } else {
+                        handleMutationFailure(item, "تعذر العثور على السؤال محلياً للمزامنة (id: ${item.entityId})")
+                    }
+                }
+                "ISSUE_COMMENT", "ISSUE_COMMENT_CREATE" -> {
+                    val comment = db.issueDao().getCommentById(item.entityId)
+                    if (comment != null) {
+                        val res = api.addIssueComment(
+                            issueId = comment.issueId,
+                            req = com.magd.tanweer.data.remote.AddCommentRequest(id = comment.id, comment = comment.comment)
+                        )
+                        if (res.isSuccessful) {
+                            db.issueDao().updateCommentSyncStatus(comment.id, "SYNCED")
+                            outboxDao.deleteOutbox(item.id)
+                        } else {
+                            handleMutationFailure(item, "فشل إرسال التعليق (${res.code()})")
+                        }
+                    } else {
+                        try {
+                            val obj = JSONObject(item.payloadJson)
+                            val issueId = obj.optString("issueId", "")
+                            val commentText = obj.optString("comment", "")
+                            if (issueId.isNotBlank() && commentText.isNotBlank()) {
+                                val res = api.addIssueComment(issueId, com.magd.tanweer.data.remote.AddCommentRequest(id = item.entityId, comment = commentText))
+                                if (res.isSuccessful) {
+                                    outboxDao.deleteOutbox(item.id)
+                                } else {
+                                    handleMutationFailure(item, "فشل إرسال التعليق (${res.code()})")
+                                }
+                            } else {
+                                outboxDao.deleteOutbox(item.id)
+                            }
+                        } catch (_: Exception) {
+                            outboxDao.deleteOutbox(item.id)
+                        }
+                    }
+                }
+                "CORRECTION", "CORRECTION_REQUEST" -> {
+                    val corr = db.correctionDao().getCorrectionById(item.entityId)
+                    if (corr != null) {
+                        val res = api.submitCorrection(
+                            contentId = corr.contentId,
+                            req = com.magd.tanweer.data.remote.SubmitCorrectionRequest(
+                                fieldName = corr.fieldName,
+                                originalValue = corr.originalValue,
+                                proposedValue = corr.proposedValue,
+                                reason = corr.reason
+                            )
+                        )
+                        if (res.isSuccessful) {
+                            outboxDao.deleteOutbox(item.id)
+                        } else {
+                            handleMutationFailure(item, "فشل رفع طلب التصحيح (${res.code()})")
+                        }
+                    } else {
+                        handleMutationFailure(item, "تعذر العثور على طلب التصحيح محلياً (id: ${item.entityId})")
                     }
                 }
                 "EXAM_DELETE" -> {
@@ -183,10 +333,20 @@ class UnifiedMutationQueue(
                 }
                 "SCHEDULE_SLOT_DELETE" -> {
                     val parts = item.entityId.split(":")
-                    if (parts.size >= 3) {
-                        val gId = parts[0]
-                        val day = parts[1].toIntOrNull() ?: 0
-                        val order = parts[2].toIntOrNull() ?: 0
+                    var gId = parts.getOrNull(0) ?: ""
+                    var day = parts.getOrNull(1)?.toIntOrNull()
+                    var order = parts.getOrNull(2)?.toIntOrNull()
+
+                    if (day == null || order == null) {
+                        try {
+                            val obj = JSONObject(item.payloadJson)
+                            gId = obj.optString("groupId", gId)
+                            day = obj.optInt("dayOfWeek", 0)
+                            order = obj.optInt("slotOrder", 0)
+                        } catch (_: Exception) {}
+                    }
+
+                    if (gId.isNotBlank() && day != null && order != null) {
                         val res = api.deleteScheduleSlot(gId, day, order)
                         if (res.isSuccessful || res.code() == 404) {
                             outboxDao.deleteOutbox(item.id)
@@ -194,36 +354,67 @@ class UnifiedMutationQueue(
                             handleMutationFailure(item, "فشل حذف الحصة من الخادم (${res.code()})")
                         }
                     } else {
-                        outboxDao.deleteOutbox(item.id)
+                        handleMutationFailure(item, "معرّف الحصة غير صالح للحذف: ${item.entityId}")
                     }
                 }
                 "SCHEDULE_SLOT_UPDATE" -> {
                     val slot = db.scheduleDao().getSlotById(item.entityId)
+                    var gId = ""
+                    var req: com.magd.tanweer.data.remote.CreateScheduleSlotRequest? = null
                     if (slot != null) {
-                        val res = api.createScheduleSlot(
-                            groupId = slot.groupId,
-                            req = com.magd.tanweer.data.remote.CreateScheduleSlotRequest(
-                                dayOfWeek = slot.dayOfWeek,
-                                slotOrder = slot.slotOrder,
-                                subjectId = slot.subjectId,
-                                subjectName = slot.subjectName,
-                                subjectIcon = slot.subjectIcon,
-                                colorHex = slot.colorHex,
-                                startTime = slot.startTime,
-                                endTime = slot.endTime
-                            )
+                        gId = slot.groupId
+                        req = com.magd.tanweer.data.remote.CreateScheduleSlotRequest(
+                            dayOfWeek = slot.dayOfWeek,
+                            slotOrder = slot.slotOrder,
+                            subjectId = slot.subjectId,
+                            subjectName = slot.subjectName,
+                            subjectIcon = slot.subjectIcon,
+                            colorHex = slot.colorHex,
+                            startTime = slot.startTime,
+                            endTime = slot.endTime
                         )
+                    } else if (item.payloadJson.isNotBlank() && item.payloadJson != "{}") {
+                        try {
+                            val obj = JSONObject(item.payloadJson)
+                            gId = obj.optString("groupId", "")
+                            req = com.magd.tanweer.data.remote.CreateScheduleSlotRequest(
+                                dayOfWeek = obj.optInt("dayOfWeek", 0),
+                                slotOrder = obj.optInt("slotOrder", 0),
+                                subjectId = obj.optString("subjectId", ""),
+                                subjectName = obj.optString("subjectName", ""),
+                                subjectIcon = obj.optString("subjectIcon", "📚"),
+                                colorHex = obj.optString("colorHex", null),
+                                startTime = obj.optString("startTime", null),
+                                endTime = obj.optString("endTime", null)
+                            )
+                        } catch (_: Exception) {
+                            gId = ""
+                            req = null
+                        }
+                    } else {
+                        gId = ""
+                        req = null
+                    }
+
+                    if (req != null && gId.isNotBlank()) {
+                        val res = api.createScheduleSlot(groupId = gId, req = req)
                         if (res.isSuccessful) {
+                            if (slot != null) {
+                                db.scheduleDao().insertSlots(listOf(slot.copy(syncStatus = "SYNCED")))
+                            }
                             outboxDao.deleteOutbox(item.id)
                         } else {
                             handleMutationFailure(item, "فشل حفظ الحصة في الخادم (${res.code()})")
                         }
                     } else {
-                        outboxDao.deleteOutbox(item.id)
+                        handleMutationFailure(item, "تعذر العثور على بيانات الحصة محلياً (id: ${item.entityId})")
                     }
                 }
                 else -> {
-                    outboxDao.deleteOutbox(item.id)
+                    // CRITICAL: NEVER delete unhandled outbox items silently!
+                    // Retain them with an explicit failure state, error logging, and exponential backoff retry.
+                    Log.w("UnifiedMutationQueue", "Unknown mutation operation type: ${item.entityType} (id: ${item.id}). Preserving in outbox.")
+                    handleMutationFailure(item, "نوع العملية غير معرّف في المحرك الموحد: ${item.entityType}")
                 }
             }
         } catch (e: Exception) {

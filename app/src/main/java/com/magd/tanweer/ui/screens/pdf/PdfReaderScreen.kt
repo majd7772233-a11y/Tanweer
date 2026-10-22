@@ -237,7 +237,7 @@ fun PdfReaderScreen(
         }
     }
     var persistedUniquePages by remember { mutableStateOf(initialSavedPages) }
-    val pagesReadCount = persistedUniquePages.size.coerceAtLeast(1)
+    val pagesReadCount = persistedUniquePages.size
     val targetPagesGoal = 15
 
     // Helper functions for strokes serialization
@@ -315,7 +315,7 @@ fun PdfReaderScreen(
         ttsEngine?.setSpeechRate(audioSpeed)
         ttsEngine?.speak(textToRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
         isAudioPlaying = true
-        com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, true, com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+        com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
     }
 
     fun stopAudioPlayback() {
@@ -328,7 +328,7 @@ fun PdfReaderScreen(
     // Save Reading State on exit or state changes
     fun persistReadingState() {
         coroutineScope.launch {
-            val totalUniquePages = persistedUniquePages.size.coerceAtLeast(1)
+            val totalUniquePages = persistedUniquePages.size
             repository.saveBookReadingState(
                 bookId = book.id,
                 lastPage = currentPageIndex,
@@ -413,11 +413,6 @@ fun PdfReaderScreen(
             zoomScale = savedState.zoom
             lifetimeStudySeconds = savedState.totalStudySeconds
             sessionReadingSeconds = 0L
-            if (persistedUniquePages.isEmpty()) {
-                val seed = setOf(savedState.lastPage)
-                persistedUniquePages = seed
-                readingPrefs.edit().putString("unique_pages_${book.id}", seed.joinToString(",")).apply()
-            }
             readingTheme = try { ReadingTheme.valueOf(savedState.theme) } catch (_: Exception) { ReadingTheme.DAY }
         }
 
@@ -469,16 +464,19 @@ fun PdfReaderScreen(
         }
     }
 
-    // Track unique visited pages accurately
-    // Track unique visited pages accurately
+    // Track unique visited pages accurately after active reading dwell time (4s)
     LaunchedEffect(currentPageIndex, downloadState) {
         if (downloadState is PdfDownloadState.Ready) {
-            val updated = persistedUniquePages + currentPageIndex
-            persistedUniquePages = updated
-            readingPrefs.edit().putString("unique_pages_${book.id}", updated.joinToString(",")).apply()
-            persistReadingState()
             if (isAudioPlaying) {
                 speakCurrentPage()
+            }
+            // Require active reading dwell time to avoid counting quickly flicked or immediately closed pages
+            kotlinx.coroutines.delay(4000L)
+            val updated = persistedUniquePages + currentPageIndex
+            if (updated.size != persistedUniquePages.size) {
+                persistedUniquePages = updated
+                readingPrefs.edit().putString("unique_pages_${book.id}", updated.joinToString(",")).apply()
+                persistReadingState()
             }
         }
     }

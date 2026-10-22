@@ -1,4 +1,12 @@
 .wrangler/
+**/.wrangler/
 node_modules/
 dist/
 .dev.vars
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
+

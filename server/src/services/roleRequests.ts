@@ -6,9 +6,9 @@
 import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
 import { errorResponse, jsonResponse } from '../lib/response';
-import { Role, normalizeRole, ROLE_METADATA, ROLE_HIERARCHY } from '../lib/roles';
+import { Role, normalizeRole, ROLE_METADATA, ROLE_HIERARCHY, PUBLIC_ROLE_METADATA, PUBLIC_ROLE_HIERARCHY } from '../lib/roles';
 import { Permission, hasPermission } from '../lib/permissions';
-import { hashString } from '../lib/crypto';
+import { hashString, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
 import { logRoleAudit } from './dashboard';
 
 const WHATSAPP_CONTACT_NUMBER = '+967 735465673';
@@ -169,8 +169,20 @@ export async function handleRedeemRoleCode(
     return errorResponse('MAX_ATTEMPTS_EXCEEDED', 'تم استنفاد الحد الأقصى للمحاولات (5 محاولات). تم إيقاف الرمز لحماية الحساب.', 429);
   }
 
-  // 3. Compare Hash
-  if (codeRecord.code_hash !== inputHash) {
+  // 3. Compare Hash with backward compatibility fallback
+  let isCodeValid = codeRecord.code_hash === inputHash;
+  if (!isCodeValid && pepper !== LEGACY_DEFAULT_PEPPER) {
+    const legacyInputHash = await hashString(cleanCode, LEGACY_DEFAULT_PEPPER);
+    if (codeRecord.code_hash === legacyInputHash) {
+      isCodeValid = true;
+      // Rehash with current configured secret pepper
+      await env.DB.prepare(
+        `UPDATE role_verification_codes SET code_hash = ? WHERE id = ?`
+      ).bind(inputHash, codeRecord.id).run();
+    }
+  }
+
+  if (!isCodeValid) {
     const newAttempts = codeRecord.attempts + 1;
     await env.DB.prepare(
       `UPDATE role_verification_codes SET attempts = ? WHERE id = ?`
@@ -274,8 +286,8 @@ export async function handleGetMyRoleRequests(
 export function handleGetRoleMetadata(): Response {
   return jsonResponse({
     success: true,
-    roles: ROLE_METADATA,
-    hierarchy: ROLE_HIERARCHY,
+    roles: PUBLIC_ROLE_METADATA,
+    hierarchy: PUBLIC_ROLE_HIERARCHY,
     whatsappNumber: WHATSAPP_CONTACT_NUMBER,
   });
 }

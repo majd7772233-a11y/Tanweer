@@ -81,43 +81,41 @@ object AppVersionManager {
         val installedCode = BuildConfig.VERSION_CODE
         val installedName = BuildConfig.VERSION_NAME
 
-        // 1. Authoritative: Query Platform Server Update Channel API
+        var serverVersionInfo: AppVersionInfo? = null
+        var gitHubVersionInfo: AppVersionInfo? = null
+
+        // 1. Query Platform Server Update Channel API
         try {
             val srvRes = NetworkModule.apiService.getSystemVersion()
             if (srvRes.isSuccessful && srvRes.body() != null) {
                 val body = srvRes.body()!!
                 val isUpdateAvailable = body.versionCode > installedCode
                 val isMandatory = body.isUpdateRequired || (installedCode < body.minSupportedVersionCode)
-
-                val downloadUrl = body.downloadUrl ?: "https://github.com/majd7772233-a11y/tanweer/releases/latest"
+                val downloadUrl = body.downloadUrl ?: "https://github.com/majd7772233-a11y/Tanweer/releases/latest"
                 val isDirectApk = downloadUrl.endsWith(".apk", ignoreCase = true)
-
-                // Try reading Change Log/X.Y.Z.md from repository
                 val detailedChangelog = fetchChangeLogMarkdown(body.currentVersion).ifEmpty { body.changelog }
 
-                return@withContext Result.success(
-                    AppVersionInfo(
-                        currentVersionName = body.currentVersion,
-                        currentVersionCode = body.versionCode,
-                        installedVersionName = installedName,
-                        installedVersionCode = installedCode,
-                        releaseDate = body.releaseDate,
-                        changelog = detailedChangelog,
-                        webpageUrl = if (!isDirectApk) downloadUrl else "https://github.com/majd7772233-a11y/tanweer/releases/latest",
-                        directApkUrl = if (isDirectApk) downloadUrl else null,
-                        directApkSizeMb = null,
-                        sha256 = body.sha256,
-                        isUpdateAvailable = isUpdateAvailable,
-                        isMandatory = isMandatory,
-                        source = VersionSource.SERVER_CHANNEL
-                    )
+                serverVersionInfo = AppVersionInfo(
+                    currentVersionName = body.currentVersion,
+                    currentVersionCode = body.versionCode,
+                    installedVersionName = installedName,
+                    installedVersionCode = installedCode,
+                    releaseDate = body.releaseDate,
+                    changelog = detailedChangelog,
+                    webpageUrl = if (!isDirectApk) downloadUrl else "https://github.com/majd7772233-a11y/Tanweer/releases/latest",
+                    directApkUrl = if (isDirectApk) downloadUrl else null,
+                    directApkSizeMb = null,
+                    sha256 = body.sha256,
+                    isUpdateAvailable = isUpdateAvailable,
+                    isMandatory = isMandatory,
+                    source = VersionSource.SERVER_CHANNEL
                 )
             }
         } catch (e: Exception) {
             Log.w(TAG, "Server version API query note: ${e.message}")
         }
 
-        // 2. Secondary check: Query GitHub Releases if server was unavailable
+        // 2. Query GitHub Releases API
         try {
             val ghRes = NetworkModule.gitHubApiService.getAppLatestRelease()
             if (ghRes.isSuccessful && ghRes.body() != null) {
@@ -137,29 +135,52 @@ object AppVersionManager {
                         ?: emptyList()
                 }
 
-                return@withContext Result.success(
-                    AppVersionInfo(
-                        currentVersionName = verName,
-                        currentVersionCode = verCode,
-                        installedVersionName = installedName,
-                        installedVersionCode = installedCode,
-                        releaseDate = rel.published_at?.take(10) ?: rel.created_at?.take(10),
-                        changelog = rawChangelog,
-                        webpageUrl = rel.html_url ?: "https://github.com/majd7772233-a11y/tanweer/releases/latest",
-                        directApkUrl = directApkUrl,
-                        directApkSizeMb = apkSizeMb,
-                        sha256 = null,
-                        isUpdateAvailable = verCode > installedCode,
-                        isMandatory = false,
-                        source = VersionSource.GITHUB_RELEASE
-                    )
+                gitHubVersionInfo = AppVersionInfo(
+                    currentVersionName = verName,
+                    currentVersionCode = verCode,
+                    installedVersionName = installedName,
+                    installedVersionCode = installedCode,
+                    releaseDate = rel.published_at?.take(10) ?: rel.created_at?.take(10),
+                    changelog = rawChangelog,
+                    webpageUrl = rel.html_url ?: "https://github.com/majd7772233-a11y/Tanweer/releases/latest",
+                    directApkUrl = directApkUrl,
+                    directApkSizeMb = apkSizeMb,
+                    sha256 = null,
+                    isUpdateAvailable = verCode > installedCode,
+                    isMandatory = false,
+                    source = VersionSource.GITHUB_RELEASE
                 )
             }
         } catch (e: Exception) {
             Log.w(TAG, "GitHub release query note: ${e.message}")
         }
 
-        Result.failure(Exception("تعذر الاتصال بقنوات التحديث الرسمية للتطبيق"))
+        // 3. Resolve unified source of truth:
+        // Prioritize whichever source offers a newer version code or direct APK download asset
+        val resolved = when {
+            gitHubVersionInfo != null && (serverVersionInfo == null || gitHubVersionInfo.currentVersionCode > serverVersionInfo.currentVersionCode) -> {
+                gitHubVersionInfo
+            }
+            serverVersionInfo != null -> {
+                if (serverVersionInfo.directApkUrl == null && gitHubVersionInfo?.directApkUrl != null &&
+                    gitHubVersionInfo.currentVersionCode >= serverVersionInfo.currentVersionCode) {
+                    serverVersionInfo.copy(
+                        directApkUrl = gitHubVersionInfo.directApkUrl,
+                        directApkSizeMb = gitHubVersionInfo.directApkSizeMb
+                    )
+                } else {
+                    serverVersionInfo
+                }
+            }
+            gitHubVersionInfo != null -> gitHubVersionInfo
+            else -> null
+        }
+
+        if (resolved != null) {
+            Result.success(resolved)
+        } else {
+            Result.failure(Exception("تعذر الاتصال بقنوات التحديث الرسمية للتطبيق"))
+        }
     }
 
     /**

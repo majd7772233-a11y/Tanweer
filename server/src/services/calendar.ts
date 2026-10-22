@@ -23,15 +23,20 @@ export async function handleGetCalendarOverview(
      GROUP BY study_date`
   ).bind(groupId, datePrefix).all<{ date: string; count: number }>();
 
-  // 2. Full Exams for the calendar
+  // 2. Full Exams for the calendar with user-specific completion and exam_type
   const exams = await env.DB.prepare(
     `SELECT e.id, e.group_id, e.exam_date, e.subject_id, e.title, e.required_chapters, e.notes,
-            s.name_ar as subject_name, s.icon as subject_icon, s.color_hex
+            e.exam_type,
+            CASE WHEN ec.user_id IS NOT NULL THEN 1 ELSE 0 END as is_completed,
+            COALESCE(s.name_ar, e.subject_id) as subject_name,
+            COALESCE(s.icon, '🔴') as subject_icon,
+            s.color_hex
      FROM exams e
      LEFT JOIN subjects s ON e.subject_id = s.id
+     LEFT JOIN exam_completions ec ON e.id = ec.exam_id AND ec.user_id = ?
      WHERE e.group_id = ? AND e.exam_date LIKE ?
      ORDER BY e.exam_date ASC`
-  ).bind(groupId, datePrefix).all();
+  ).bind(user.userId, groupId, datePrefix).all();
 
   // 3. Full Events for the calendar
   const events = await env.DB.prepare(
@@ -102,11 +107,16 @@ export async function handleGetDayDetail(
 
   const exams = await env.DB.prepare(
     `SELECT e.id, e.group_id, e.exam_date, e.subject_id, e.title, e.required_chapters, e.notes,
-            s.name_ar as subject_name, s.icon as subject_icon, s.color_hex
+            e.exam_type,
+            CASE WHEN ec.user_id IS NOT NULL THEN 1 ELSE 0 END as is_completed,
+            COALESCE(s.name_ar, e.subject_id) as subject_name,
+            COALESCE(s.icon, '🔴') as subject_icon,
+            s.color_hex
      FROM exams e
      LEFT JOIN subjects s ON e.subject_id = s.id
+     LEFT JOIN exam_completions ec ON e.id = ec.exam_id AND ec.user_id = ?
      WHERE e.group_id = ? AND e.exam_date = ?`
-  ).bind(groupId, date).all();
+  ).bind(user.userId, groupId, date).all();
 
   const events = await env.DB.prepare(
     `SELECT id, group_id, event_date, time_str, title, description, category, location, created_at

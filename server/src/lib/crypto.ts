@@ -39,25 +39,72 @@ export async function hashPassword(
   };
 }
 
+export const LEGACY_DEFAULT_PEPPER = 'tanweer-pepper-2026';
+
+export interface PasswordVerificationResult {
+  isValid: boolean;
+  needsRehash: boolean;
+}
+
 export async function verifyPassword(
   password: string,
   storedHash: string,
-  secretPepper: string
+  secretPepper: string,
+  fallbackPepper: string = LEGACY_DEFAULT_PEPPER
 ): Promise<boolean> {
+  const result = await verifyPasswordWithDetails(password, storedHash, secretPepper, fallbackPepper);
+  return result.isValid;
+}
+
+export async function verifyPasswordWithDetails(
+  password: string,
+  storedHash: string,
+  secretPepper: string,
+  fallbackPepper: string = LEGACY_DEFAULT_PEPPER
+): Promise<PasswordVerificationResult> {
   if (!secretPepper) {
     throw new Error('Server secret pepper is required for password verification');
   }
+
+  // 1. Verify against current configured pepper
   if (storedHash.startsWith('pbkdf2$')) {
     const parts = storedHash.split('$');
-    if (parts.length !== 4) return false;
-    const [, , salt, expectedHex] = parts;
-    const { hash } = await hashPassword(password, secretPepper, salt);
-    const computedHex = hash.split('$')[3];
-    return computedHex === expectedHex;
+    if (parts.length === 4) {
+      const [, , salt, expectedHex] = parts;
+      const { hash } = await hashPassword(password, secretPepper, salt);
+      const computedHex = hash.split('$')[3];
+      if (computedHex === expectedHex) {
+        return { isValid: true, needsRehash: false };
+      }
+    }
+  } else {
+    const legacyHash = await hashString(password, secretPepper);
+    if (storedHash === legacyHash) {
+      return { isValid: true, needsRehash: true };
+    }
   }
-  // Backward compatibility with legacy SHA-256
-  const legacyHash = await hashString(password, secretPepper);
-  return storedHash === legacyHash;
+
+  // 2. Compatibility fallback: verify against legacy default pepper if configured secret differs
+  if (fallbackPepper && fallbackPepper !== secretPepper) {
+    if (storedHash.startsWith('pbkdf2$')) {
+      const parts = storedHash.split('$');
+      if (parts.length === 4) {
+        const [, , salt, expectedHex] = parts;
+        const { hash } = await hashPassword(password, fallbackPepper, salt);
+        const computedHex = hash.split('$')[3];
+        if (computedHex === expectedHex) {
+          return { isValid: true, needsRehash: true };
+        }
+      }
+    } else {
+      const legacyHash = await hashString(password, fallbackPepper);
+      if (storedHash === legacyHash) {
+        return { isValid: true, needsRehash: true };
+      }
+    }
+  }
+
+  return { isValid: false, needsRehash: false };
 }
 
 export async function hashString(input: string, salt: string = ''): Promise<string> {

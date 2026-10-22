@@ -22,8 +22,18 @@ object TanweerHapticManager {
         BADGE_UNLOCK
     }
 
-    fun performHaptic(context: Context, enabled: Boolean, type: HapticType = HapticType.CLICK) {
-        if (!enabled) return
+    fun isHapticsEnabled(context: Context): Boolean {
+        return try {
+            val prefs = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
+            prefs.getBoolean("haptics_enabled", true)
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    fun performHaptic(context: Context, enabled: Boolean? = null, type: HapticType = HapticType.CLICK) {
+        val isEffective = enabled ?: isHapticsEnabled(context)
+        if (!isEffective) return
 
         try {
             val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

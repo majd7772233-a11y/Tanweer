@@ -8,6 +8,7 @@
 /.idea/workspace.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+.idea/
 .DS_Store
 /build
 /captures
@@ -16,3 +17,13 @@
 local.properties
 .env
 debug.keystore
+.wrangler/
+**/.wrangler/
+server/.wrangler/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
+

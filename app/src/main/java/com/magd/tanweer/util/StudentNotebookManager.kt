@@ -152,11 +152,25 @@ object StudentNotebookManager {
         saveLessonRecord(context, updated)
     }
 
+data class LessonCachingResult(
+    val totalPages: Int,
+    val successfulCount: Int,
+    val failedCount: Int,
+    val newlyDownloadedCount: Int,
+    val isAllSucceeded: Boolean
+) {
+    val summaryMessage: String get() = when {
+        isAllSucceeded -> "تم حفظ جميع لوحات الدرس ($totalPages لوحات) بنجاح للمذاكرة دون اتصال ✓"
+        successfulCount > 0 -> "تم حفظ $successfulCount من أصل $totalPages لوحات بنجاح، بينما تعذر تنزيل $failedCount لوحات ⚠️"
+        else -> "تعذر تنزيل لوحات الدرس، يرجى التأكد من اتصال الإنترنت ❌"
+    }
+}
+
     /**
      * Downloads and permanently caches all whiteboard/lesson captures to local storage.
-     * Guaranteed 100% offline study for missed lessons.
+     * Respects section privacy by attaching the student's Authorization token and Group ID.
      */
-    suspend fun cacheAllLessonPagesLocally(context: Context, content: ContentItem): Result<Int> = withContext(Dispatchers.IO) {
+    suspend fun cacheAllLessonPagesLocally(context: Context, content: ContentItem): Result<LessonCachingResult> = withContext(Dispatchers.IO) {
         val offlineDir = getOfflineDir(context)
         val existing = getLessonRecord(context, content.id) ?: TranscribedLessonRecord(
             contentId = content.id,
@@ -168,7 +182,11 @@ object StudentNotebookManager {
         )
 
         val pathsMap = existing.localImagePaths.toMutableMap()
-        var downloadedCount = 0
+        var newlyDownloadedCount = 0
+        var failedCount = 0
+
+        val prefs = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
+        val authToken = prefs.getString("auth_token", "") ?: ""
 
         content.media.forEachIndexed { index, mediaItem ->
             val urlStr = mediaItem.url
@@ -183,33 +201,167 @@ object StudentNotebookManager {
                 pathsMap[index] = destFile.absolutePath
             } else if (effectiveUrl.startsWith("http://") || effectiveUrl.startsWith("https://")) {
                 try {
-                    val stream = URL(effectiveUrl).openStream()
-                    FileOutputStream(destFile).use { out ->
-                        stream.copyTo(out)
+                    val conn = (URL(effectiveUrl).openConnection() as java.net.HttpURLConnection).apply {
+                        connectTimeout = 15000
+                        readTimeout = 20000
+                        if (authToken.isNotBlank()) {
+                            setRequestProperty("Authorization", "Bearer $authToken")
+                        }
+                        if (content.groupId.isNotBlank()) {
+                            setRequestProperty("X-Group-Id", content.groupId)
+                        }
+                    }
+                    conn.inputStream.use { input ->
+                        FileOutputStream(destFile).use { out ->
+                            input.copyTo(out)
+                        }
                     }
                     if (destFile.exists() && destFile.length() > 0) {
                         pathsMap[index] = destFile.absolutePath
-                        downloadedCount++
+                        newlyDownloadedCount++
                     } else {
                         destFile.delete()
+                        failedCount++
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to download image at index $index: ${e.message}")
+                    Log.w(TAG, "Failed to download board image at index $index: ${e.message}")
                     if (destFile.exists() && destFile.length() == 0L) {
                         destFile.delete()
                     }
+                    failedCount++
                 }
             } else if (File(effectiveUrl).exists()) {
                 pathsMap[index] = effectiveUrl
+            } else {
+                failedCount++
             }
         }
 
         val updatedRecord = existing.copy(localImagePaths = pathsMap)
         saveLessonRecord(context, updatedRecord)
-        if (content.media.isNotEmpty() && pathsMap.isEmpty()) {
-            Result.failure(Exception("تعذر تنزيل لوحات الدرس، يرجى التأكد من اتصال الإنترنت"))
+
+        val totalPages = content.media.size
+        val successfulCount = pathsMap.size
+        val isAllOk = totalPages > 0 && successfulCount >= totalPages && failedCount == 0
+
+        val cachingResult = LessonCachingResult(
+            totalPages = totalPages,
+            successfulCount = successfulCount,
+            failedCount = failedCount,
+            newlyDownloadedCount = newlyDownloadedCount,
+            isAllSucceeded = isAllOk
+        )
+
+        if (totalPages > 0 && successfulCount == 0) {
+            Result.failure(Exception(cachingResult.summaryMessage))
         } else {
-            Result.success(downloadedCount)
+            Result.success(cachingResult)
+        }
+    }
+
+    /**
+     * Saves a lesson board image directly to the user's public device Gallery (Pictures/Tanweer)
+     * using Android's MediaStore API so the student can access it outside the app.
+     */
+    suspend fun saveImageToGallery(
+        context: Context,
+        imageSource: String,
+        title: String,
+        pageIndex: Int,
+        groupId: String = ""
+    ): Result<android.net.Uri> = withContext(Dispatchers.IO) {
+        try {
+            val resolver = context.contentResolver
+            val safeTitle = title.replace(Regex("[^a-zA-Z0-9\\u0600-\\u06FF]"), "_").take(30)
+            val fileName = "Tanweer_${safeTitle}_P${pageIndex + 1}_${System.currentTimeMillis()}.jpg"
+
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/Tanweer")
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+            }
+
+            val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                ?: return@withContext Result.failure(Exception("تعذر إنشاء مسار الصورة في معرض الصور"))
+
+            val prefs = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
+            val authToken = prefs.getString("auth_token", "") ?: ""
+
+            resolver.openOutputStream(uri)?.use { out ->
+                if (imageSource.startsWith("http://") || imageSource.startsWith("https://")) {
+                    val conn = (URL(imageSource).openConnection() as java.net.HttpURLConnection).apply {
+                        connectTimeout = 15000
+                        readTimeout = 20000
+                        if (authToken.isNotBlank()) {
+                            setRequestProperty("Authorization", "Bearer $authToken")
+                        }
+                        if (groupId.isNotBlank()) {
+                            setRequestProperty("X-Group-Id", groupId)
+                        }
+                    }
+                    conn.inputStream.use { input ->
+                        input.copyTo(out)
+                    }
+                } else {
+                    java.io.FileInputStream(File(imageSource)).use { input ->
+                        input.copyTo(out)
+                    }
+                }
+            } ?: return@withContext Result.failure(Exception("تعذر فتح مجرى الكتابة للصورة"))
+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                contentValues.clear()
+                contentValues.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(uri, contentValues, null, null)
+            }
+
+            Result.success(uri)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed saving image to gallery", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Saves all whiteboard captures of a lesson directly to the user's Gallery (Pictures/Tanweer).
+     */
+    suspend fun saveAllImagesToGallery(
+        context: Context,
+        content: ContentItem
+    ): Result<Pair<Int, Int>> = withContext(Dispatchers.IO) {
+        val offlineDir = getOfflineDir(context)
+        var savedCount = 0
+        var failedCount = 0
+
+        content.media.forEachIndexed { index, mediaItem ->
+            val localFile = File(offlineDir, "board_${content.id}_${index}.jpg")
+            val sourcePath = if (localFile.exists() && localFile.length() > 0) {
+                localFile.absolutePath
+            } else {
+                mediaItem.url
+            }
+
+            val res = saveImageToGallery(
+                context = context,
+                imageSource = sourcePath,
+                title = content.title,
+                pageIndex = index,
+                groupId = content.groupId
+            )
+            if (res.isSuccess) {
+                savedCount++
+            } else {
+                failedCount++
+            }
+        }
+
+        if (savedCount > 0) {
+            Result.success(Pair(savedCount, failedCount))
+        } else {
+            Result.failure(Exception("تعذر حفظ اللوحات في المعرض، يرجى المحاولة لاحقاً"))
         }
     }
 }

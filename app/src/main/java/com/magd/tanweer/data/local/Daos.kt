@@ -333,6 +333,12 @@ interface IssueDao {
 
     @Query("SELECT COUNT(*) FROM cached_issue_comments WHERE userId = :userId AND isBestAnswer = 1")
     suspend fun countBestAnswersForUserSync(userId: String): Int
+
+    @Query("SELECT COUNT(*) FROM cached_issue_comments WHERE userId = :userId")
+    fun countCommentsForUser(userId: String): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM cached_issue_comments WHERE userId = :userId")
+    suspend fun countCommentsForUserSync(userId: String): Int
 }
 
 @Dao
@@ -519,6 +525,9 @@ interface CorrectionDao {
 interface DailyPlanDao {
     @Query("SELECT * FROM cached_daily_plan WHERE userId = :userId AND planDate = :date ORDER BY isCompleted ASC, createdAt DESC")
     fun getPlanForDate(userId: String, date: String): Flow<List<DailyPlanEntity>>
+
+    @Query("SELECT * FROM cached_daily_plan WHERE userId = :userId AND planDate = :date ORDER BY isCompleted ASC, createdAt DESC")
+    suspend fun getPlanForDateSync(userId: String, date: String): List<DailyPlanEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlanItem(item: DailyPlanEntity)

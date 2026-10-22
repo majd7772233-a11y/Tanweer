@@ -184,7 +184,9 @@ fun IssuesScreen(
                         subjectId = subjId
                     ) { res ->
                         if (res.isSuccess) {
-                            Toast.makeText(context, "تم طرح الاستفسار بنجاح ❓", Toast.LENGTH_SHORT).show()
+                            val outcome = res.getOrNull()
+                            val msg = outcome?.message ?: "تم تسجيل الاستفسار بنجاح ❓"
+                            Toast.makeText(context, msg, if (outcome?.isSynced == true) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
                         } else {
                             Toast.makeText(context, res.exceptionOrNull()?.message ?: "فشل طرح الاستفسار", Toast.LENGTH_LONG).show()
                         }

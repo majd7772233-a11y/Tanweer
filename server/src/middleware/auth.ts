@@ -1,5 +1,5 @@
 import { Env, UserContext } from '../env';
-import { hashString } from '../lib/crypto';
+import { hashString, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
 import { errorResponse } from '../lib/response';
 
 export async function getUserFromToken(token: string, env: Env): Promise<UserContext | null> {
@@ -10,7 +10,7 @@ export async function getUserFromToken(token: string, env: Env): Promise<UserCon
 
   const tokenHash = await hashString(token, pepper);
 
-  const session = await env.DB.prepare(
+  let session = await env.DB.prepare(
     `SELECT s.id, s.user_id, s.device_id, s.expires_at, u.phone_number, u.full_name, u.grade_id, u.section_id, u.role,
             COALESCE(u.status, 'ACTIVE') as status
      FROM sessions s
@@ -28,6 +28,23 @@ export async function getUserFromToken(token: string, env: Env): Promise<UserCon
     role: string;
     status: string;
   }>();
+
+  // Backward compatibility fallback for sessions created under legacy default pepper
+  if (!session && pepper !== LEGACY_DEFAULT_PEPPER) {
+    const legacyTokenHash = await hashString(token, LEGACY_DEFAULT_PEPPER);
+    session = await env.DB.prepare(
+      `SELECT s.id, s.user_id, s.device_id, s.expires_at, u.phone_number, u.full_name, u.grade_id, u.section_id, u.role,
+              COALESCE(u.status, 'ACTIVE') as status
+       FROM sessions s
+       JOIN users u ON s.user_id = u.id
+       WHERE s.refresh_token_hash = ? AND s.expires_at > ?`
+    ).bind(legacyTokenHash, Date.now()).first<any>();
+
+    if (session) {
+      // Migrate session token hash to current configured pepper
+      await env.DB.prepare(`UPDATE sessions SET refresh_token_hash = ? WHERE id = ?`).bind(tokenHash, session.id).run();
+    }
+  }
 
   if (!session) return null;
   if (session.status === 'DISABLED') {

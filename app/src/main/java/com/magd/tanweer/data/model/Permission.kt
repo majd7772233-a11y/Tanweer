@@ -118,8 +118,7 @@ object PermissionEvaluator {
                 Permission.MODERATE_CHAT,
                 Permission.MANAGE_GROUP_MEMBERS,
                 Permission.MODERATE_CONTENT,
-                Permission.MODERATE_ISSUES,
-                Permission.MANAGE_SCHEDULE
+                Permission.MODERATE_ISSUES
             )
             Role.ADMIN -> true
         }

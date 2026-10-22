@@ -72,29 +72,86 @@ fun SettingsScreen(
     var syncReportDialog by remember { mutableStateOf<ComprehensiveSyncReport?>(null) }
     var isSyncingComprehensive by remember { mutableStateOf(false) }
 
+    fun openAppNotificationSettings() {
+        val intent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+            }
+        } else {
+            android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.fromParts("package", context.packageName, null)
+            }
+        }
+        try {
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            val fallback = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.fromParts("package", context.packageName, null)
+            }
+            context.startActivity(fallback)
+        }
+    }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var areSystemNotificationsEnabled by remember {
+        mutableStateOf(
+            androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+                (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+                 androidx.core.content.ContextCompat.checkSelfPermission(
+                     context,
+                     android.Manifest.permission.POST_NOTIFICATIONS
+                 ) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+        )
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                areSystemNotificationsEnabled = androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+                    (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+                     androidx.core.content.ContextCompat.checkSelfPermission(
+                         context,
+                         android.Manifest.permission.POST_NOTIFICATIONS
+                     ) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { isGranted ->
+        areSystemNotificationsEnabled = isGranted
         if (isGranted) {
             pendingNotifToggleAction?.invoke()
             Toast.makeText(context, "تم تفعيل إذن الإشعارات بنجاح 🔔", Toast.LENGTH_SHORT).show()
         } else {
-            Toast.makeText(context, "لم يتم منح إذن الإشعارات. يرجى تفعيله من إعدادات الهاتف لتلقي التنبيهات.", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "إذن الإشعارات مرفوض. يرجى تفعيله من إعدادات الهاتف لتلقي التنبيهات ⚙️", Toast.LENGTH_LONG).show()
+            openAppNotificationSettings()
         }
         pendingNotifToggleAction = null
     }
 
     fun requestNotificationPermissionIfNeeded(action: () -> Unit) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission(
-                context,
-                android.Manifest.permission.POST_NOTIFICATIONS
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (!hasPerm) {
-                pendingNotifToggleAction = action
+        val hasPerm = androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+            (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+             androidx.core.content.ContextCompat.checkSelfPermission(
+                 context,
+                 android.Manifest.permission.POST_NOTIFICATIONS
+             ) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+
+        if (!hasPerm) {
+            pendingNotifToggleAction = action
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                return
+            } else {
+                Toast.makeText(context, "إذن الإشعارات معطل في الهاتف، يرجى تفعيله من الإعدادات", Toast.LENGTH_LONG).show()
+                openAppNotificationSettings()
             }
+            return
         }
         action()
     }
@@ -433,14 +490,51 @@ fun SettingsScreen(
             SettingsSectionHeader(title = "🔔 التنبيهات المدرسية", subtitle = "تخصيص الإشعارات والتذكيرات")
         }
 
+        if (!areSystemNotificationsEnabled) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(RubyRed.copy(alpha = 0.12f))
+                        .border(1.dp, RubyRed.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("⚠️", fontSize = 14.sp)
+                            Text(
+                                text = "إذن الإشعارات معطل في الهاتف",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = RubyRed
+                            )
+                        }
+                        Text(
+                            text = "التنبيهات المدرسية وتذكيرات الواجبات والجدول متوقفة حالياً. فعّل الإذن لتصلك التنبيهات.",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    GlassButton(
+                        text = "إعدادات الهاتف ⚙️",
+                        onClick = { openAppNotificationSettings() },
+                        modifier = Modifier.height(34.dp)
+                    )
+                }
+            }
+        }
+
         item {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsToggleRow(
                         icon = Icons.Default.Assignment,
                         title = "تذكيرات تسليم الواجبات",
-                        subtitle = "تنبيه قبل موعد استحقاق الواجب والتكليف",
-                        checked = notifyHomework,
+                        subtitle = if (!areSystemNotificationsEnabled) "تنبيه قبل موعد الاستحقاق (⚠️ متوقف: إذن الهاتف معطل)" else "تنبيه قبل موعد استحقاق الواجب والتكليف",
+                        checked = notifyHomework && areSystemNotificationsEnabled,
                         onCheckedChange = { isChecked ->
                             if (isChecked) {
                                 requestNotificationPermissionIfNeeded {
@@ -455,8 +549,8 @@ fun SettingsScreen(
                     SettingsToggleRow(
                         icon = Icons.Default.CalendarToday,
                         title = "تذكير جدول الحصص الصباحي",
-                        subtitle = "إشعار صباحي بحصص اليوم الدراسي",
-                        checked = notifySchedule,
+                        subtitle = if (!areSystemNotificationsEnabled) "إشعار صباحي بالحصص (⚠️ متوقف: إذن الهاتف معطل)" else "إشعار صباحي بحصص اليوم الدراسي",
+                        checked = notifySchedule && areSystemNotificationsEnabled,
                         onCheckedChange = { isChecked ->
                             if (isChecked) {
                                 requestNotificationPermissionIfNeeded {
@@ -471,8 +565,8 @@ fun SettingsScreen(
                     SettingsToggleRow(
                         icon = Icons.Default.Alarm,
                         title = "العد التنازلي للاختبارات",
-                        subtitle = "تذكير بمواعيد الاختبارات الشهرية والنهائية",
-                        checked = notifyExams,
+                        subtitle = if (!areSystemNotificationsEnabled) "تذكير بمواعيد الاختبارات (⚠️ متوقف: إذن الهاتف معطل)" else "تذكير بمواعيد الاختبارات الشهرية والنهائية",
+                        checked = notifyExams && areSystemNotificationsEnabled,
                         onCheckedChange = { isChecked ->
                             if (isChecked) {
                                 requestNotificationPermissionIfNeeded {
@@ -711,6 +805,20 @@ fun SettingsScreen(
                             text = report.offlineSections.joinToString(" • "),
                             fontSize = 11.sp,
                             color = TextSecondary
+                        )
+                    }
+                    if (report.processedOutboxCount > 0) {
+                        Text(
+                            text = "تم رفع ومعالجة ${report.processedOutboxCount} عمليات كانت معلقة في الطابور بنجاح ✓",
+                            fontSize = 11.sp,
+                            color = EmeraldGreen
+                        )
+                    }
+                    if (report.outboxError != null) {
+                        Text(
+                            text = "تعذر رفع بعض عمليات الطابور: ${report.outboxError}",
+                            fontSize = 11.sp,
+                            color = RubyRed
                         )
                     }
                     if (report.pendingOutboxCount > 0) {

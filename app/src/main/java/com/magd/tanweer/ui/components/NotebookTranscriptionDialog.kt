@@ -225,6 +225,43 @@ fun NotebookTranscriptionDialog(
                             .padding(8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        // Save directly to Gallery
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(GlassSurface.copy(alpha = 0.85f))
+                                .clickable {
+                                    val sourcePath = if (localBoardFile.exists() && localBoardFile.length() > 0) {
+                                        localBoardFile.absolutePath
+                                    } else {
+                                        currentMedia?.url
+                                    }
+                                    if (sourcePath.isNullOrBlank()) {
+                                        Toast.makeText(context, "لا توجد لوحة مصورة لحفظها", Toast.LENGTH_SHORT).show()
+                                        return@clickable
+                                    }
+                                    scope.launch {
+                                        val saveResult = com.magd.tanweer.util.StudentNotebookManager.saveImageToGallery(
+                                            context = context,
+                                            imageSource = sourcePath,
+                                            title = content.title,
+                                            pageIndex = currentPageIndex
+                                        )
+                                        saveResult.fold(
+                                            onSuccess = {
+                                                Toast.makeText(context, "تم حفظ اللوحة في معرض الصور بنجاح 🖼️ (Pictures/Tanweer)", Toast.LENGTH_LONG).show()
+                                            },
+                                            onFailure = { err ->
+                                                Toast.makeText(context, "تعذر حفظ الصورة: ${err.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
+                                }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        ) {
+                            Text("حفظ في المعرض 🖼️", fontSize = 10.sp, color = TextPrimary, fontWeight = FontWeight.Bold)
+                        }
+
                         // High Contrast Toggle
                         Box(
                             modifier = Modifier
@@ -296,7 +333,7 @@ fun NotebookTranscriptionDialog(
                             val nextState = !isCurrentPageCompleted
                             completedPages[currentPageIndex] = nextState
                             com.magd.tanweer.util.StudentNotebookManager.markPageCompleted(context, content, currentPageIndex, nextState)
-                            com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, true, if (nextState) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS else com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+                            com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = if (nextState) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS else com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                             if (nextState) {
                                 val label = if (mediaList.isNotEmpty()) "اللوحة ${currentPageIndex + 1}" else "ملخص الدرس"
                                 Toast.makeText(context, "أحسنت! تم حفظ نقل $label إلى دفترك ✓", Toast.LENGTH_SHORT).show()
@@ -312,7 +349,7 @@ fun NotebookTranscriptionDialog(
                             onCheckedChange = { checked ->
                                 completedPages[currentPageIndex] = checked
                                 com.magd.tanweer.util.StudentNotebookManager.markPageCompleted(context, content, currentPageIndex, checked)
-                                com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, true, if (checked) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS else com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+                                com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = if (checked) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS else com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                             },
                             colors = CheckboxDefaults.colors(
                                 checkedColor = EmeraldGreen,
@@ -394,11 +431,12 @@ fun NotebookTranscriptionDialog(
                                     isDownloadingAll = false
                                     refreshLocalTrigger++
                                     res.fold(
-                                        onSuccess = { count ->
-                                            Toast.makeText(context, "تم حفظ لوحات الدرس في ذاكرة هاتفك لمذاكرتها أوفلاين دون إنترنت ✓", Toast.LENGTH_SHORT).show()
+                                        onSuccess = { cachingResult ->
+                                            Toast.makeText(context, cachingResult.summaryMessage, Toast.LENGTH_LONG).show()
                                         },
-                                        onFailure = {
-                                            Toast.makeText(context, "تعذر تنزيل الصور، تأكد من اتصال الإنترنت.", Toast.LENGTH_SHORT).show()
+                                        onFailure = { err ->
+                                            val msg = err.message ?: "تعذر تنزيل الصور، تأكد من اتصال الإنترنت."
+                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                         }
                                     )
                                 }

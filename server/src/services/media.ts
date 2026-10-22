@@ -1,6 +1,8 @@
 import { Env, UserContext } from '../env';
 import { generateId } from '../lib/ids';
 import { errorResponse, jsonResponse } from '../lib/response';
+import { getUserFromToken } from '../middleware/auth';
+import { normalizeRole, Role } from '../lib/roles';
 
 function detectImageMimeType(buffer: ArrayBuffer): string | null {
   if (buffer.byteLength < 12) return null;
@@ -147,16 +149,61 @@ export async function handleUploadMedia(user: UserContext, request: Request, env
   });
 }
 
-export async function handleGetMedia(mediaId: string, env: Env): Promise<Response> {
+export async function handleGetMedia(mediaId: string, request: Request, env: Env): Promise<Response> {
   // Strip extension if present (e.g. med_xxx.jpg -> med_xxx)
   const cleanId = mediaId.replace(/\.[a-zA-Z0-9]+$/, '');
 
+  // 1. Authenticate user from Header or Query Param
+  const authHeader = request.headers.get('Authorization') || request.headers.get('authorization') || '';
+  const url = new URL(request.url);
+  const queryToken = url.searchParams.get('token');
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim() || queryToken?.trim();
+
+  let user: UserContext | null = null;
+  if (token) {
+    try {
+      user = await getUserFromToken(token, env);
+    } catch (_: any) {}
+  }
+
+  // 2. Check if the media blob exists
   const row = await env.DB.prepare(
     `SELECT mime_type, data FROM media_blobs WHERE id = ? LIMIT 1`
   ).bind(cleanId).first<{ mime_type: string; data: ArrayBuffer | number[] | Uint8Array }>();
 
   if (!row || !row.data) {
     return errorResponse('NOT_FOUND', 'الصورة غير موجودة', 404);
+  }
+
+  // 3. Enforce Group Membership & School Scope
+  // If user is unauthenticated, deny access to protect school whiteboard and class media
+  if (!user) {
+    return errorResponse('UNAUTHORIZED', 'يجب تسجيل الدخول بحساب مدرسي مصرح له للوصول إلى صور ومحتويات الشعبة الدراسية', 401);
+  }
+
+  // Check if this media is linked to a specific classroom group
+  const contentLink = await env.DB.prepare(
+    `SELECT c.group_id, c.status
+     FROM content_media cm
+     JOIN contents c ON cm.content_id = c.id
+     WHERE cm.url LIKE ? OR cm.id = ? OR cm.object_key = ?
+     LIMIT 1`
+  ).bind(`%${cleanId}%`, cleanId, cleanId).first<{ group_id: string; status: string }>();
+
+  if (contentLink && contentLink.group_id) {
+    const userRole = normalizeRole(user.role);
+    const isPrivileged = [Role.ADMIN, Role.SYSTEM_OWNER, Role.TEACHER].includes(userRole);
+
+    if (!isPrivileged) {
+      // Check if user is a member of this specific group
+      const member = await env.DB.prepare(
+        `SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1`
+      ).bind(contentLink.group_id, user.userId).first();
+
+      if (!member) {
+        return errorResponse('FORBIDDEN', 'لا تملك صلاحية الوصول إلى صور هذا الدرس (مخصصة لأعضاء الشعبة فقط)', 403);
+      }
+    }
   }
 
   const rawData: any = row.data;
@@ -173,7 +220,7 @@ export async function handleGetMedia(mediaId: string, env: Env): Promise<Respons
     status: 200,
     headers: {
       'Content-Type': row.mime_type || 'image/jpeg',
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': 'private, max-age=86400',
       'Access-Control-Allow-Origin': '*',
     },
   });

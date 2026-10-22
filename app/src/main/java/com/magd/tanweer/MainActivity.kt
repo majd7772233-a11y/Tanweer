@@ -32,7 +32,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         TanweerNotificationManager.initChannel(this)
         TanweerNotificationManager.scheduleDailyReminder(this)
+        TanweerNotificationManager.performBackgroundMaintenance(this)
         checkAndRequestNotificationPermission()
+
+        // Configure Coil image loader to transparently carry authentication headers for school media
+        val imageLoader = coil.ImageLoader.Builder(this)
+            .okHttpClient(com.magd.tanweer.data.remote.NetworkModule.okHttpClient)
+            .crossfade(true)
+            .build()
+        coil.Coil.setImageLoader(imageLoader)
+
         handleNotificationIntent(intent)
         setContent {
             val fontScale by viewModel.fontSizeScale.collectAsStateWithLifecycle()
@@ -54,14 +63,32 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
 
+            val prefs = getSharedPreferences("tanweer_prefs", MODE_PRIVATE)
+            prefs.edit().putBoolean("notifications_permission_granted", hasPermission).apply()
+
             if (!hasPermission) {
-                val prefs = getSharedPreferences("tanweer_prefs", MODE_PRIVATE)
-                val hasPrompted = prefs.getBoolean("has_prompted_notif_permission", false)
-                if (!hasPrompted) {
-                    prefs.edit().putBoolean("has_prompted_notif_permission", true).apply()
+                val promptCount = prefs.getInt("notif_permission_prompt_count", 0)
+                val shouldShowRationale = shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+                // Allow prompting when appropriate without permanently hiding without user knowledge
+                if (promptCount < 2 || shouldShowRationale) {
+                    prefs.edit().putInt("notif_permission_prompt_count", promptCount + 1).apply()
                     requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            getSharedPreferences("tanweer_prefs", MODE_PRIVATE)
+                .edit()
+                .putBoolean("notifications_permission_granted", hasPermission)
+                .apply()
         }
     }
 
@@ -85,6 +112,18 @@ class MainActivity : ComponentActivity() {
             "SCHEDULE" -> {
                 viewModel.setTab(com.magd.tanweer.ui.NavigationTab.MORE)
                 viewModel.setSubScreen(com.magd.tanweer.ui.SubScreen.SCHEDULE)
+            }
+            "VERSION_CHECK" -> {
+                viewModel.setTab(com.magd.tanweer.ui.NavigationTab.MORE)
+                viewModel.setSubScreen(com.magd.tanweer.ui.SubScreen.VERSION_CHECK)
+            }
+            "CHAT" -> {
+                viewModel.setTab(com.magd.tanweer.ui.NavigationTab.MORE)
+                viewModel.setSubScreen(com.magd.tanweer.ui.SubScreen.GROUPS)
+            }
+            "ISSUES" -> {
+                viewModel.setTab(com.magd.tanweer.ui.NavigationTab.MORE)
+                viewModel.setSubScreen(com.magd.tanweer.ui.SubScreen.COMMUNITY_DECISIONS)
             }
         }
     }

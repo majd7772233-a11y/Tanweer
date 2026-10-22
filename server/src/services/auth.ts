@@ -1,5 +1,5 @@
 import { Env } from '../env';
-import { hashPassword, verifyPassword, hashString, generateRecoveryCode, generateRandomToken } from '../lib/crypto';
+import { hashPassword, verifyPassword, verifyPasswordWithDetails, hashString, generateRecoveryCode, generateRandomToken, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
 import { generateId } from '../lib/ids';
 import { validateArabicFullName, validateYemenPhoneNumber, evaluatePasswordStrength, isValidGradeSection } from '../lib/validation';
 import { errorResponse, jsonResponse } from '../lib/response';
@@ -172,13 +172,13 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
     return errorResponse('INVALID_CREDENTIALS', 'رقم الهاتف أو كلمة المرور غير صحيحة');
   }
 
-  const isPasswordValid = await verifyPassword(body.password, user.password_hash, pepper);
-  if (!isPasswordValid) {
+  const verification = await verifyPasswordWithDetails(body.password, user.password_hash, pepper);
+  if (!verification.isValid) {
     return errorResponse('INVALID_CREDENTIALS', 'رقم الهاتف أو كلمة المرور غير صحيحة');
   }
 
-  // Transparently upgrade legacy SHA-256 hash to PBKDF2
-  if (!user.password_hash.startsWith('pbkdf2$')) {
+  // Transparently upgrade legacy hash or rehash with current configured secret pepper
+  if (verification.needsRehash || !user.password_hash.startsWith('pbkdf2$')) {
     const { hash: newPbkdf2Hash } = await hashPassword(body.password, pepper);
     await env.DB.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).bind(newPbkdf2Hash, user.id).run();
   }
@@ -232,7 +232,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
   const cleanCode = body.recoveryCode.replace(/[\s\-]/g, '').toUpperCase();
   const recoveryHash = await hashString(cleanCode, pepper);
 
-  const user = await env.DB.prepare(
+  let user = await env.DB.prepare(
     `SELECT id, phone_number, full_name, grade_id, section_id, role
      FROM users WHERE recovery_code_hash = ?`
   ).bind(recoveryHash).first<{
@@ -243,6 +243,27 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
     section_id: string;
     role: string;
   }>();
+
+  // Backward compatibility fallback: verify against legacy default pepper if secret changed
+  if (!user && pepper !== LEGACY_DEFAULT_PEPPER) {
+    const legacyRecoveryHash = await hashString(cleanCode, LEGACY_DEFAULT_PEPPER);
+    user = await env.DB.prepare(
+      `SELECT id, phone_number, full_name, grade_id, section_id, role
+       FROM users WHERE recovery_code_hash = ?`
+    ).bind(legacyRecoveryHash).first<{
+      id: string;
+      phone_number: string;
+      full_name: string;
+      grade_id: number;
+      section_id: string;
+      role: string;
+    }>();
+
+    if (user) {
+      // Seamlessly migrate recovery code hash to current configured pepper
+      await env.DB.prepare(`UPDATE users SET recovery_code_hash = ? WHERE id = ?`).bind(recoveryHash, user.id).run();
+    }
+  }
 
   if (!user) {
     return errorResponse('INVALID_RECOVERY_CODE', 'رمز الاسترداد السري غير صحيح أو غير موجود');

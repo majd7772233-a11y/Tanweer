@@ -79,6 +79,48 @@ object TanweerNotificationManager {
         }
     }
 
+    /**
+     * Independent periodic background maintenance for books catalog and app update checks.
+     * Operates completely decoupled from notification permissions or user reminder settings.
+     * Enforces strict cooldowns (24h for app updates, 12h for books) to ensure minimal data usage.
+     */
+    fun performBackgroundMaintenance(context: Context) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val prefs = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
+                val now = System.currentTimeMillis()
+
+                // 1. Periodic App Update Check (24h cooldown)
+                val lastUpdateCheck = prefs.getLong("last_background_update_check_ts", 0L)
+                if (now - lastUpdateCheck >= 24 * 60 * 60 * 1000L) {
+                    try {
+                        com.magd.tanweer.util.AppVersionManager.checkPeriodicUpdate(context)
+                        prefs.edit().putLong("last_background_update_check_ts", now).apply()
+                    } catch (e: Exception) {
+                        Log.w("TanweerMaintenance", "Background update check note: ${e.message}")
+                    }
+                }
+
+                // 2. Periodic Books Catalog Sync (12h cooldown)
+                val lastBooksSync = prefs.getLong("last_background_books_sync_ts", 0L)
+                if (now - lastBooksSync >= 12 * 60 * 60 * 1000L) {
+                    try {
+                        val db = TanweerDatabase.getInstance(context)
+                        val user = db.userDao().getUserSync()
+                        val gradeId = user?.gradeId ?: 10
+                        val repo = com.magd.tanweer.data.repository.TanweerRepository(db)
+                        repo.syncBooks(gradeId)
+                        prefs.edit().putLong("last_background_books_sync_ts", now).apply()
+                    } catch (e: Exception) {
+                        Log.w("TanweerMaintenance", "Background books sync note: ${e.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("TanweerMaintenance", "Background maintenance error: ${e.message}")
+            }
+        }
+    }
+
     fun checkAndSendReminders(context: Context) {
         val prefs: SharedPreferences = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
         val notifyHw = prefs.getBoolean("notify_homework", true)
@@ -87,6 +129,9 @@ object TanweerNotificationManager {
 
         initChannel(context)
 
+        // Run independent background maintenance (books + updates) regardless of notification settings
+        performBackgroundMaintenance(context)
+
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val db = TanweerDatabase.getInstance(context)
@@ -94,27 +139,13 @@ object TanweerNotificationManager {
                 val groupId = user.defaultGroupId
                 if (groupId.isBlank()) return@launch
 
-                // Pre-sync with server before sending notifications so data is fresh (Points 15 & 16)
+                // Pre-sync with server before sending notifications so data is fresh
                 try {
                     val repo = com.magd.tanweer.data.repository.TanweerRepository(db)
                     repo.syncHomeworks(groupId)
                     repo.syncExams(groupId)
                     repo.syncSchedule(groupId)
                     repo.syncEvents(groupId)
-
-                    // Point 31: Daily background book catalog & new release synchronization
-                    try {
-                        repo.syncBooks(user.gradeId)
-                    } catch (be: Exception) {
-                        Log.w("TanweerNotifications", "Background books sync note: ${be.message}")
-                    }
-
-                    // Point 24: Daily background periodic check for app updates
-                    try {
-                        com.magd.tanweer.util.AppVersionManager.checkPeriodicUpdate(context)
-                    } catch (ue: Exception) {
-                        Log.w("TanweerNotifications", "Background update check note: ${ue.message}")
-                    }
                 } catch (_: Exception) {}
 
                 val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)

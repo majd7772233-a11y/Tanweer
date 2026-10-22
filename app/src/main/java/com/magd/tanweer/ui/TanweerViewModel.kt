@@ -361,8 +361,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                         if (_selectedGroupId.value.isEmpty()) {
                             _selectedGroupId.value = user.defaultGroupId
                         }
-                        syncInitialData(user.defaultGroupId, _selectedDate.value)
-                        syncBooks(user.gradeId)
+                        if (_autoSyncEnabled.value) {
+                            syncInitialData(user.defaultGroupId, _selectedDate.value)
+                            syncBooks(user.gradeId)
+                        }
                     }
                 }
         }
@@ -458,7 +460,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     fun setSelectedGroup(groupId: String) {
         _selectedGroupId.value = groupId
-        syncInitialData(groupId, _selectedDate.value)
+        if (_autoSyncEnabled.value) {
+            syncInitialData(groupId, _selectedDate.value)
+        }
     }
 
     fun setSelectedDate(date: String) {
@@ -527,7 +531,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     // SYNC METHODS (Server -> Room -> Compose)
     // =========================================================================
 
-    fun syncInitialData(groupId: String, date: String) {
+    fun syncInitialData(groupId: String, date: String, isExplicitAction: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isExplicitAction) return
         viewModelScope.launch {
             _homeSyncState.value = SyncState.Loading
             when (val result = repository.syncInitial(groupId, date)) {
@@ -607,6 +612,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncCalendarMonth(groupId: String = getActiveGroupId(), month: String, isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
         viewModelScope.launch {
             _calendarSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
             when (val result = repository.syncCalendarMonth(groupId, month)) {
@@ -624,6 +630,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncIssues(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
         viewModelScope.launch {
             _issuesSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
             when (val result = repository.syncIssues(groupId)) {
@@ -635,6 +642,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncGroups(isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
         viewModelScope.launch {
             _groupsSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
             when (val result = repository.syncGroups()) {
@@ -646,6 +654,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncBooks(gradeId: Int? = null, isRefresh: Boolean = false, onResult: ((Boolean, String) -> Unit)? = null) {
+        if (!_autoSyncEnabled.value && !isRefresh && onResult == null) return
         val targetGrade = gradeId ?: currentUser.value?.gradeId ?: 10
         viewModelScope.launch {
             _librarySyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
@@ -986,6 +995,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             val res = repository.voteScheduleProposal(proposalId, voteType)
             res.onSuccess { msg ->
                 loadScheduleProposals()
+                loadScheduleData()
                 onResult(true, msg)
             }.onFailure { err ->
                 onResult(false, err.message ?: "تعذر التصويت")
@@ -997,6 +1007,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         proposalId: String,
         onResult: (Boolean, String) -> Unit = { _, _ -> }
     ) {
+        if (!canManageSchedule()) {
+            onResult(false, "عذراً، اعتماد مقترحات الجدول محصور بالمعلمين وإدارة المدرسة")
+            return
+        }
         val groupId = getActiveGroupId()
         viewModelScope.launch {
             val res = repository.approveScheduleProposal(proposalId, groupId)
@@ -1014,6 +1028,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         proposalId: String,
         onResult: (Boolean, String) -> Unit = { _, _ -> }
     ) {
+        if (!canManageSchedule()) {
+            onResult(false, "عذراً، رفض مقترحات الجدول محصور بالمعلمين وإدارة المدرسة")
+            return
+        }
         viewModelScope.launch {
             val res = repository.rejectScheduleProposal(proposalId)
             res.onSuccess { msg ->
@@ -1201,8 +1219,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 if (pair.second.isNotEmpty()) {
                     _recoveryCodeDialog.value = pair.second
                 }
-                syncInitialData(pair.first.defaultGroupId, _selectedDate.value)
-                syncBooks(pair.first.gradeId)
+                syncInitialData(pair.first.defaultGroupId, _selectedDate.value, isExplicitAction = true)
+                syncBooks(pair.first.gradeId, isRefresh = true)
                 onSuccess()
             }.onFailure { err ->
                 onError(err.message ?: "فشل إنشاء الحساب")
@@ -1220,8 +1238,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             val result = repository.login(phone, pass)
             result.onSuccess { user ->
                 _selectedGroupId.value = user.defaultGroupId
-                syncInitialData(user.defaultGroupId, _selectedDate.value)
-                syncBooks(user.gradeId)
+                syncInitialData(user.defaultGroupId, _selectedDate.value, isExplicitAction = true)
+                syncBooks(user.gradeId, isRefresh = true)
                 onSuccess()
             }.onFailure { err ->
                 onError(err.message ?: "فشل تسجيل الدخول")
@@ -1238,8 +1256,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             val result = repository.loginWithRecoveryCode(code)
             result.onSuccess { user ->
                 _selectedGroupId.value = user.defaultGroupId
-                syncInitialData(user.defaultGroupId, _selectedDate.value)
-                syncBooks(user.gradeId)
+                syncInitialData(user.defaultGroupId, _selectedDate.value, isExplicitAction = true)
+                syncBooks(user.gradeId, isRefresh = true)
                 onSuccess()
             }.onFailure { err ->
                 onError(err.message ?: "فشل تسجيل الدخول بالرقم السري")
@@ -1258,8 +1276,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             val result = repository.updateProfile(fullName, gradeId, sectionId)
             result.onSuccess { user ->
                 _selectedGroupId.value = user.defaultGroupId
-                syncInitialData(user.defaultGroupId, _selectedDate.value)
-                syncBooks(user.gradeId)
+                syncInitialData(user.defaultGroupId, _selectedDate.value, isExplicitAction = true)
+                syncBooks(user.gradeId, isRefresh = true)
                 onSuccess()
             }.onFailure { err ->
                 onError(err.message ?: "فشل تحديث البيانات")
@@ -1554,14 +1572,26 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 offline.add("أقسام الشعبة والجدول (لم يتم تحديد شعبة دراسية مفعلة بعد)")
             }
 
-            // Flush offline outbox queue
-            try {
+            // Sync multi-group academic archive to preserve complete student history across groups as an independent section
+            processResult("الأرشيف الأكاديمي التاريخي الشامل", repository.syncStudentAcademicArchive())
+
+            // Flush offline outbox queue with precise tracking
+            val outboxResult = try {
                 repository.processOutboxQueue()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            val processedOutbox = outboxResult.getOrDefault(0)
+            val outboxErr = outboxResult.exceptionOrNull()?.message
+            if (outboxErr != null) {
+                failed.add("طابور العمليات غير المتصلة" to outboxErr)
+            } else if (processedOutbox > 0) {
+                succeeded.add("طابور العمليات غير المتصلة (تم رفع $processedOutbox عمليات بنجاح)")
+            }
 
             val remainingPending = repository.getPendingOutboxCountSync()
 
-            val isAllOk = failed.isEmpty() && offline.isEmpty() && remainingPending == 0
+            val isAllOk = failed.isEmpty() && offline.isEmpty() && remainingPending == 0 && outboxErr == null
             val summary = when {
                 isAllOk ->
                     "اكتملت مزامنة جميع الأقسام وتأكيدها مع الخادم بنجاح (${succeeded.size} أقسام) ✓"
@@ -1580,6 +1610,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 failedSections = failed,
                 offlineSections = offline,
                 pendingOutboxCount = remainingPending,
+                processedOutboxCount = processedOutbox,
+                outboxError = outboxErr,
                 isAllSucceeded = isAllOk,
                 summaryMessage = summary
             )

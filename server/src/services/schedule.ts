@@ -475,54 +475,65 @@ export async function handleVoteScheduleProposal(
     `UPDATE schedule_proposals SET votes_for = ?, votes_against = ? WHERE id = ?`
   ).bind(votesFor, votesAgainst, proposalId).run();
 
+  // Check group membership count to determine consensus threshold (Point 14)
+  const memberCountResult = await env.DB.prepare(
+    `SELECT COUNT(*) as total FROM group_members WHERE group_id = ?`
+  ).bind(proposal.group_id).first<{ total: number }>();
+  const totalMembers = memberCountResult?.total || 1;
+
+  // Quorum: between 2 and 5 members or ~35% of group
+  const quorum = Math.max(2, Math.min(5, Math.ceil(totalMembers * 0.35)));
+
+  let autoResolvedStatus: 'ACCEPTED' | 'REJECTED' | null = null;
+  let autoResolvedMessage: string | null = null;
+
+  if (votesFor >= quorum && votesFor > votesAgainst * 1.5) {
+    const fullProposal = await env.DB.prepare(
+      `SELECT * FROM schedule_proposals WHERE id = ?`
+    ).bind(proposalId).first<ScheduleProposalRow>();
+
+    if (fullProposal) {
+      const newVersionNum = await applyScheduleProposalToActiveSchedule(fullProposal, 'SYSTEM_VOTE_CONSENSUS', env);
+      autoResolvedStatus = 'ACCEPTED';
+      autoResolvedMessage = `اكتمل نصاب تصويت الشعبة (${votesFor}/${quorum}) وتم اعتماد تغيير الحصة تلقائياً وتحديث الجدول للنسخة (${newVersionNum}) 🎉`;
+    }
+  } else if (votesAgainst >= quorum && votesAgainst > votesFor * 1.5) {
+    await env.DB.prepare(
+      `UPDATE schedule_proposals SET status = 'REJECTED' WHERE id = ?`
+    ).bind(proposalId).run();
+    autoResolvedStatus = 'REJECTED';
+    autoResolvedMessage = `تم حسم المقترح بالرفض وفق تصويت أغلبية أعضاء الشعبة (${votesAgainst} ضد)`;
+  }
+
   return jsonResponse({
     success: true,
     votesFor,
     votesAgainst,
+    status: autoResolvedStatus || 'PENDING',
     myVote: existingVote?.vote_type === voteType ? null : voteType,
-    message: 'تم تسجيل تصويتك على مقترح الجدول بنجاح 👍',
+    message: autoResolvedMessage || 'تم تسجيل تصويتك على مقترح الجدول بنجاح 👍',
   });
 }
 
+interface ScheduleProposalRow {
+  id: string;
+  group_id: string;
+  day_of_week: number;
+  slot_order: number;
+  old_subject_id: string | null;
+  new_subject_id: string;
+  status: string;
+  proposed_by: string;
+}
+
 /**
- * Approves a schedule change proposal, applies it to create a new schedule version, and closes the proposal.
+ * Helper to apply an approved proposal to the active schedule and generate a new version.
  */
-export async function handleApproveScheduleProposal(
-  proposalId: string,
-  user: UserContext,
+export async function applyScheduleProposalToActiveSchedule(
+  proposal: ScheduleProposalRow,
+  resolvedByUserId: string,
   env: Env
-): Promise<Response> {
-  const proposal = await env.DB.prepare(
-    `SELECT * FROM schedule_proposals WHERE id = ?`
-  ).bind(proposalId).first<{
-    id: string;
-    group_id: string;
-    day_of_week: number;
-    slot_order: number;
-    old_subject_id: string;
-    new_subject_id: string;
-    status: string;
-    proposed_by: string;
-  }>();
-
-  if (!proposal) {
-    return errorResponse('PROPOSAL_NOT_FOUND', 'المقترح غير موجود', 404);
-  }
-
-  if (proposal.status !== 'PENDING') {
-    return errorResponse('PROPOSAL_ALREADY_RESOLVED', 'تم حسم هذا المقترح مسبقاً');
-  }
-
-  const isScheduleManager = await hasPermission(user, Permission.MANAGE_SCHEDULE, {
-    db: env.DB,
-    groupId: proposal.group_id,
-  });
-
-  if (!isScheduleManager) {
-    return errorResponse('FORBIDDEN', 'لا تملك صلاحية اعتماد وتطبيق مقترحات الجدول', 403);
-  }
-
-  // 1. Get current active version
+): Promise<number> {
   const currentVersion = await env.DB.prepare(
     `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
   ).bind(proposal.group_id).first<{ id: string; version_number: number }>();
@@ -543,7 +554,7 @@ export async function handleApproveScheduleProposal(
   await env.DB.prepare(
     `INSERT INTO schedule_versions (id, group_id, version_number, valid_from, is_active, created_at, created_by)
      VALUES (?, ?, ?, ?, 1, ?, ?)`
-  ).bind(newVersionId, proposal.group_id, newVersionNum, today, now, user.userId).run();
+  ).bind(newVersionId, proposal.group_id, newVersionNum, today, now, resolvedByUserId).run();
 
   let preservedStartTime: string | null = null;
   let preservedEndTime: string | null = null;
@@ -584,7 +595,41 @@ export async function handleApproveScheduleProposal(
   // Mark proposal as ACCEPTED
   await env.DB.prepare(
     `UPDATE schedule_proposals SET status = 'ACCEPTED' WHERE id = ?`
-  ).bind(proposalId).run();
+  ).bind(proposal.id).run();
+
+  return newVersionNum;
+}
+
+/**
+ * Approves a schedule change proposal, applies it to create a new schedule version, and closes the proposal.
+ */
+export async function handleApproveScheduleProposal(
+  proposalId: string,
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  const proposal = await env.DB.prepare(
+    `SELECT * FROM schedule_proposals WHERE id = ?`
+  ).bind(proposalId).first<ScheduleProposalRow>();
+
+  if (!proposal) {
+    return errorResponse('PROPOSAL_NOT_FOUND', 'المقترح غير موجود', 404);
+  }
+
+  if (proposal.status !== 'PENDING') {
+    return errorResponse('PROPOSAL_ALREADY_RESOLVED', 'تم حسم هذا المقترح مسبقاً');
+  }
+
+  const isScheduleManager = await hasPermission(user, Permission.MANAGE_SCHEDULE, {
+    db: env.DB,
+    groupId: proposal.group_id,
+  });
+
+  if (!isScheduleManager) {
+    return errorResponse('FORBIDDEN', 'لا تملك صلاحية اعتماد وتطبيق مقترحات الجدول', 403);
+  }
+
+  const newVersionNum = await applyScheduleProposalToActiveSchedule(proposal, user.userId, env);
 
   return jsonResponse({
     success: true,

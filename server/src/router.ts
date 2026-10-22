@@ -71,10 +71,10 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     return handleLoginWithRecoveryCode(request, env);
   }
 
-  // Public Media Serving (for images loaded by Coil / browsers)
+  // Media Serving with Authentication & Membership Scoping
   if (path.startsWith('/api/v1/media/') && method === 'GET') {
     const mediaId = path.split('/')[4];
-    return handleGetMedia(mediaId, env);
+    return handleGetMedia(mediaId, request, env);
   }
 
   // Health check
@@ -82,8 +82,37 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     return jsonResponse({ status: 'ok', app: 'Tanweer', timestamp: Date.now() });
   }
 
-  // System Version & Release Check
+  // System Version & Release Check (Dynamic GitHub Release fetcher with fallback)
   if (path === '/api/v1/system/version' && method === 'GET') {
+    try {
+      const ghRes = await fetch('https://api.github.com/repos/majd7772233-a11y/Tanweer/releases/latest', {
+        headers: {
+          'User-Agent': 'Tanweer-Server/1.0',
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      });
+      if (ghRes.ok) {
+        const rel = await ghRes.json() as any;
+        const tag = rel.tag_name || 'v1.2.0';
+        const verName = tag.replace(/^v/i, '');
+        const apkAsset = Array.isArray(rel.assets) ? rel.assets.find((a: any) => a.name?.endsWith('.apk')) : null;
+        const parts = verName.split('.').map((p: string) => parseInt(p, 10) || 0);
+        const calcCode = parts.length === 3 ? parts[0] * 100 + parts[1] * 10 + parts[2] : (parts.length === 2 ? parts[0] * 100 + parts[1] : 2);
+
+        return jsonResponse({
+          currentVersion: verName,
+          versionCode: calcCode,
+          minSupportedVersion: '1.0.0',
+          minSupportedVersionCode: 1,
+          isUpdateRequired: false,
+          releaseDate: rel.published_at ? rel.published_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+          changelog: rel.body ? rel.body.split('\n').map((l: string) => l.trim().replace(/^[-*•]\s*/, '')).filter((l: string) => l.length > 0) : [],
+          downloadUrl: apkAsset ? apkAsset.browser_download_url : (rel.html_url || 'https://github.com/majd7772233-a11y/Tanweer/releases/latest'),
+          sha256: null,
+        });
+      }
+    } catch (_: any) {}
+
     return jsonResponse({
       currentVersion: '1.2.0',
       versionCode: 2,
@@ -99,7 +128,7 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
         '🚀 توافق متقدم مع أجهزة Android بدءاً من Android 6.0 (API 23+) وما فوق',
         '⚡ بنية مزامنة متكاملة Offline-First تضمن موثوقية العمل دون انقطاع'
       ],
-      downloadUrl: 'https://github.com/majd7772233-a11y/tanweer/releases/latest',
+      downloadUrl: 'https://github.com/majd7772233-a11y/Tanweer/releases/latest',
       sha256: null
     });
   }

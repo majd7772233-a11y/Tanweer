@@ -89,6 +89,35 @@ export const ROLE_METADATA: Record<Role, RoleMetadata> = {
 };
 
 /**
+ * Public Role definitions exposed through open APIs and student clients.
+ * SYSTEM_OWNER (level 5) is strictly concealed from all public metadata and member lists.
+ */
+export const PUBLIC_ROLE_HIERARCHY: Record<Exclude<Role, Role.SYSTEM_OWNER>, number> = {
+  [Role.STUDENT]: 1,
+  [Role.MODERATOR]: 2,
+  [Role.TEACHER]: 3,
+  [Role.ADMIN]: 4,
+};
+
+export const PUBLIC_ROLE_METADATA: Record<Exclude<Role, Role.SYSTEM_OWNER>, RoleMetadata> = {
+  [Role.STUDENT]: ROLE_METADATA[Role.STUDENT],
+  [Role.MODERATOR]: ROLE_METADATA[Role.MODERATOR],
+  [Role.TEACHER]: ROLE_METADATA[Role.TEACHER],
+  [Role.ADMIN]: ROLE_METADATA[Role.ADMIN],
+};
+
+/**
+ * Sanitizes role for public-facing API responses, masking SYSTEM_OWNER as ADMIN.
+ */
+export function sanitizePublicRole(roleStr?: string | null): Role {
+  const norm = normalizeRole(roleStr);
+  if (norm === Role.SYSTEM_OWNER) {
+    return Role.ADMIN;
+  }
+  return norm;
+}
+
+/**
  * Normalizes legacy or raw role strings into canonical Role enum.
  * Maps 'MEMBER' -> Role.STUDENT, 'VERIFIED_TEACHER' -> Role.TEACHER.
  */
