@@ -176,7 +176,6 @@ export async function hasPermission(
 
     case Role.MODERATOR:
       return [
-        Permission.MANAGE_SCHEDULE,
         Permission.MODERATE_CHAT,
         Permission.MANAGE_GROUP_MEMBERS,
         Permission.MODERATE_CONTENT,

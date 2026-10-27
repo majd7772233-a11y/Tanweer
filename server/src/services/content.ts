@@ -4,6 +4,7 @@ import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
 import { mapContent } from '../lib/mappers';
+import { cleanupOrphanMedia } from './media';
 
 interface MediaPayloadItem {
   url: string;
@@ -282,9 +283,25 @@ export async function handleDeleteContent(
     return errorResponse('FORBIDDEN', 'لا يمكنك حذف درس منشور من قِبل عضو آخر مباشرة — يمكنك تقديم طلب تصويت لحذفه', 403);
   }
 
+  const candidates: string[] = [];
+  try {
+    const mediaRows = await env.DB.prepare(
+      `SELECT object_key, url FROM content_media WHERE content_id = ?`
+    ).bind(contentId).all<{ object_key: string; url: string }>();
+    for (const r of mediaRows.results || []) {
+      if (r.object_key) candidates.push(r.object_key);
+      if (r.url) {
+        const match = r.url.match(/([a-zA-Z0-9_\-]+)$/);
+        if (match) candidates.push(match[1].replace(/\.[a-zA-Z0-9]+$/, ''));
+      }
+    }
+  } catch {}
+
   await env.DB.prepare(`DELETE FROM contents WHERE id = ?`).bind(contentId).run();
   await env.DB.prepare(`DELETE FROM content_media WHERE content_id = ?`).bind(contentId).run();
   await env.DB.prepare(`DELETE FROM content_useful_votes WHERE content_id = ?`).bind(contentId).run();
+
+  await cleanupOrphanMedia(env.DB, candidates);
 
   return jsonResponse({
     success: true,

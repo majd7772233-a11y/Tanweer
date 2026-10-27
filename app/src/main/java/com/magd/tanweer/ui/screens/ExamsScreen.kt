@@ -837,6 +837,58 @@ fun AddExamSheet(
     var chapters by remember { mutableStateOf("") }
     var teacherNotes by remember { mutableStateOf("") }
     var examDate by remember(initialExamDate) { mutableStateOf(initialExamDate ?: TanweerViewModel.getTodayDateString()) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = remember(examDate) {
+            try {
+                SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.parse(examDate)?.time
+            } catch (_: Exception) {
+                System.currentTimeMillis()
+            }
+        }
+    )
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }
+                        examDate = sdf.format(Date(millis))
+                    }
+                    showDatePicker = false
+                }) {
+                    Text("تأكيد", color = RubyRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("إلغاء", color = TextSecondary)
+                }
+            },
+            colors = DatePickerDefaults.colors(
+                containerColor = MidnightSurface
+            )
+        ) {
+            DatePicker(
+                state = datePickerState,
+                colors = DatePickerDefaults.colors(
+                    containerColor = MidnightSurface,
+                    titleContentColor = RubyRed,
+                    headlineContentColor = TextPrimary,
+                    selectedDayContainerColor = RubyRed,
+                    selectedDayContentColor = Color.White,
+                    todayDateBorderColor = RubyRed
+                )
+            )
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -947,12 +999,48 @@ fun AddExamSheet(
                 placeholder = "مثال: اختبار الشهر الأول / نصفي"
             )
 
-            GlassTextField(
-                value = examDate,
-                onValueChange = { examDate = it },
-                label = "تاريخ الاختبار (YYYY-MM-DD)",
-                placeholder = "2026-09-30"
-            )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "تاريخ الاختبار (تاريخ تقويمي معتمد) *",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(GlassSurface)
+                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
+                        .clickable { showDatePicker = true }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DateRange,
+                            contentDescription = null,
+                            tint = RubyRed,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = examDate,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                    }
+                    GlassPill(
+                        text = "تحديد التاريخ 📅",
+                        color = RubyRed,
+                        bgColor = RubyRed.copy(alpha = 0.15f)
+                    )
+                }
+            }
 
             GlassTextField(
                 value = chapters,

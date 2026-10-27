@@ -120,7 +120,8 @@ fun AcademicHistoryScreen(
             homeworks = allHomeworks,
             exams = allExams,
             userFullName = currentUser?.fullName,
-            currentDate = todayStr
+            currentDate = todayStr,
+            userId = currentUser?.id
         )
     }
 
@@ -140,7 +141,12 @@ fun AcademicHistoryScreen(
 
     // Personal achievements filtering: matches student across all academic groups
     val myPersonalLessons = remember(yearContents, currentUser) {
-        yearContents.filter { it.authorName.isNotBlank() && (it.authorName == currentUser?.fullName || it.authorName.contains(currentUser?.fullName ?: "")) }
+        val uid = currentUser?.id.orEmpty()
+        val uName = currentUser?.fullName.orEmpty()
+        yearContents.filter {
+            (uid.isNotEmpty() && it.createdBy.isNotBlank() && it.createdBy == uid) ||
+            (uName.isNotEmpty() && (it.authorName == uName || it.authorName.contains(uName)))
+        }
     }
     val myCompletedHomeworks = remember(yearHomeworks) {
         yearHomeworks.filter { it.isCompleted }

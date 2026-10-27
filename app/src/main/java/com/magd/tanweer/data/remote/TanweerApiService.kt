@@ -49,6 +49,11 @@ data class UpdateProfileRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class ToggleCompletionRequest(
+    val isCompleted: Boolean? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class GroupsResponse(
     val success: Boolean,
     val myGroups: List<GroupItem> = emptyList(),
@@ -258,7 +263,8 @@ data class SystemVersionResponse(
     val releaseDate: String? = null,
     val changelog: List<String> = emptyList(),
     val downloadUrl: String? = null,
-    val sha256: String? = null
+    val sha256: String? = null,
+    val dataGeneration: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -487,7 +493,10 @@ interface TanweerApiService {
     suspend fun createHomework(@Body req: CreateHomeworkRequest): Response<GenericResponse>
 
     @POST("api/v1/homeworks/{id}/toggle")
-    suspend fun toggleHomework(@Path("id") id: String): Response<GenericResponse>
+    suspend fun toggleHomework(
+        @Path("id") id: String,
+        @Body req: ToggleCompletionRequest? = null
+    ): Response<GenericResponse>
 
     @GET("api/v1/system/version")
     suspend fun getSystemVersion(): Response<SystemVersionResponse>
@@ -502,7 +511,10 @@ interface TanweerApiService {
     suspend fun deleteExam(@Path("id") id: String): Response<GenericResponse>
 
     @POST("api/v1/exams/{id}/toggle-completion")
-    suspend fun toggleExamCompletion(@Path("id") id: String): Response<ToggleExamCompletionResponse>
+    suspend fun toggleExamCompletion(
+        @Path("id") id: String,
+        @Body req: ToggleCompletionRequest? = null
+    ): Response<ToggleExamCompletionResponse>
 
     @GET("api/v1/events")
     suspend fun getEvents(@Query("groupId") groupId: String): Response<EventsResponse>

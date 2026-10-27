@@ -3,6 +3,7 @@ import { validateArabicFullName, isValidGradeSection } from '../lib/validation';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { getCurrentAcademicYearId } from '../lib/school';
 import { Role, normalizeRole, sanitizePublicRole } from '../lib/roles';
+import { Permission, hasPermission } from '../lib/permissions';
 
 export async function handleGetProfile(user: UserContext, env: Env): Promise<Response> {
   const contributions = await env.DB.prepare(
@@ -55,8 +56,8 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
   };
 
   const newFullName = body.fullName ? body.fullName.trim().replace(/\s+/g, ' ') : user.fullName;
-  const newGradeId = body.gradeId !== undefined ? body.gradeId : user.gradeId;
-  const newSectionId = body.sectionId ? body.sectionId.toUpperCase() : user.sectionId;
+  const gradeChanged = body.gradeId !== undefined && body.gradeId !== user.gradeId;
+  const sectionChanged = body.sectionId !== undefined && body.sectionId.toUpperCase() !== user.sectionId;
 
   if (body.fullName) {
     const valName = validateArabicFullName(newFullName);
@@ -65,28 +66,90 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
     }
   }
 
-  if (body.gradeId !== undefined || body.sectionId !== undefined) {
+  // Academic transfer (Grade or Section change) must be authorized by School Admin / Supervisor
+  if (gradeChanged || sectionChanged) {
+    const canManageUsers = user.role === Role.ADMIN || 
+      user.role === Role.SYSTEM_OWNER || 
+      await hasPermission(user, Permission.MANAGE_USERS);
+
+    if (!canManageUsers) {
+      return errorResponse(
+        'FORBIDDEN_ACADEMIC_TRANSFER',
+        'تغيير الصف أو الشعبة يتطلب موافقة إدارة المدرسة أو اعتماد المشرف المخول'
+      );
+    }
+
+    const newGradeId = body.gradeId !== undefined ? body.gradeId : user.gradeId;
+    const newSectionId = body.sectionId ? body.sectionId.toUpperCase() : user.sectionId;
+
     if (!isValidGradeSection(newGradeId, newSectionId)) {
       return errorResponse('INVALID_SECTION', 'الشعبة غير متوافقة مع الصف المحدد');
     }
+
+    const now = Date.now();
+    const classGroupId = `class_${newGradeId}_${newSectionId}`;
+    const oldClassGroupId = `class_${user.gradeId}_${user.sectionId}`;
+
+    const gradeNameMap: Record<number, string> = {
+      7: 'الصف السابع',
+      8: 'الصف الثامن',
+      9: 'الصف التاسع',
+      10: 'الأول الثانوي',
+      11: 'الثاني الثانوي',
+      12: 'الثالث الثانوي'
+    };
+    const groupName = `${gradeNameMap[newGradeId]} — شعبة (${newSectionId})`;
+    const academicYear = await getCurrentAcademicYearId(env.DB);
+
+    const targetGroupRole = (user.role === Role.TEACHER)
+      ? Role.TEACHER
+      : (user.role === Role.MODERATOR ? Role.MODERATOR : Role.STUDENT);
+
+    // Atomic batch update of user record and group memberships
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE users SET full_name = ?, grade_id = ?, section_id = ?, updated_at = ? WHERE id = ?`
+      ).bind(newFullName, newGradeId, newSectionId, now, user.userId),
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO groups (id, name, type, description, academic_year_id, created_at)
+         VALUES (?, ?, 'CLASS', ?, ?, ?)`
+      ).bind(classGroupId, groupName, `المجموعة الدراسية الرسمية لـ ${groupName}`, academicYear, now),
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO group_sections (group_id, grade_id, section_id)
+         VALUES (?, ?, ?)`
+      ).bind(classGroupId, newGradeId, newSectionId),
+      env.DB.prepare(
+        `DELETE FROM group_members
+         WHERE user_id = ?
+           AND (group_id = ? OR group_id IN (SELECT id FROM groups WHERE type = 'CLASS' AND id != ?))`
+      ).bind(user.userId, oldClassGroupId, classGroupId),
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at)
+         VALUES (?, ?, ?, 'ACTIVE', ?)`
+      ).bind(classGroupId, user.userId, targetGroupRole, now)
+    ]);
+
+    return jsonResponse({
+      success: true,
+      message: 'تم تحديث بيانات الحساب والانتقال الأكاديمي بنجاح',
+      user: {
+        id: user.userId,
+        fullName: newFullName,
+        phoneNumber: user.phoneNumber,
+        gradeId: newGradeId,
+        gradeName: gradeNameMap[newGradeId] || `الصف ${newGradeId}`,
+        sectionId: newSectionId,
+        role: sanitizePublicRole(user.role),
+        defaultGroupId: classGroupId,
+      },
+    });
   }
 
+  // Self-update of name only
   const now = Date.now();
   await env.DB.prepare(
-    `UPDATE users SET full_name = ?, grade_id = ?, section_id = ?, updated_at = ? WHERE id = ?`
-  ).bind(newFullName, newGradeId, newSectionId, now, user.userId).run();
-
-  const classGroupId = `class_${newGradeId}_${newSectionId}`;
-  const oldClassGroupId = `class_${user.gradeId}_${user.sectionId}`;
-
-  // If class or section changed, remove user from previous class group memberships
-  if (oldClassGroupId !== classGroupId) {
-    await env.DB.prepare(
-      `DELETE FROM group_members
-       WHERE user_id = ?
-         AND (group_id = ? OR group_id IN (SELECT id FROM groups WHERE type = 'CLASS' AND id != ?))`
-    ).bind(user.userId, oldClassGroupId, classGroupId).run();
-  }
+    `UPDATE users SET full_name = ?, updated_at = ? WHERE id = ?`
+  ).bind(newFullName, now, user.userId).run();
 
   const gradeNameMap: Record<number, string> = {
     7: 'الصف السابع',
@@ -96,38 +159,19 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
     11: 'الثاني الثانوي',
     12: 'الثالث الثانوي'
   };
-  const groupName = `${gradeNameMap[newGradeId]} — شعبة (${newSectionId})`;
-
-  // Ensure new group exists and user is member
-  const academicYear = await getCurrentAcademicYearId(env.DB);
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO groups (id, name, type, description, academic_year_id, created_at)
-     VALUES (?, ?, 'CLASS', ?, ?, ?)`
-  ).bind(classGroupId, groupName, `المجموعة الدراسية الرسمية لـ ${groupName}`, academicYear, now).run();
-
-  // Group membership role is strictly scoped to group context.
-  // SYSTEM_OWNER and ADMIN are strictly global platform roles and must NEVER be stored in group_members.
-  const targetGroupRole = (user.role === Role.TEACHER)
-    ? Role.TEACHER
-    : (user.role === Role.MODERATOR ? Role.MODERATOR : Role.STUDENT);
-
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at)
-     VALUES (?, ?, ?, 'ACTIVE', ?)`
-  ).bind(classGroupId, user.userId, targetGroupRole, now).run();
 
   return jsonResponse({
     success: true,
-    message: 'تم تحديث بيانات الحساب بنجاح',
+    message: 'تم تحديث الاسم بنجاح',
     user: {
       id: user.userId,
       fullName: newFullName,
       phoneNumber: user.phoneNumber,
-      gradeId: newGradeId,
-      gradeName: gradeNameMap[newGradeId] || `الصف ${newGradeId}`,
-      sectionId: newSectionId,
-      role: normalizeRole(user.role),
-      defaultGroupId: classGroupId,
+      gradeId: user.gradeId,
+      gradeName: gradeNameMap[user.gradeId] || `الصف ${user.gradeId}`,
+      sectionId: user.sectionId,
+      role: sanitizePublicRole(user.role),
+      defaultGroupId: `class_${user.gradeId}_${user.sectionId}`,
     },
   });
 }

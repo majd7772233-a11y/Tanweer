@@ -138,6 +138,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             .putLong("last_active_time", System.currentTimeMillis())
             .apply()
 
+        repository.mutationQueue.isAutoSyncEnabled = _autoSyncEnabled.value
+
         viewModelScope.launch {
             val user = db.userDao().getUserSync()
             if (user != null) {
@@ -168,6 +170,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun setAutoSyncEnabled(enabled: Boolean) {
         _autoSyncEnabled.value = enabled
         prefs.edit().putBoolean("auto_sync_enabled", enabled).apply()
+        repository.mutationQueue.isAutoSyncEnabled = enabled
     }
 
     fun setImageQualitySetting(quality: String) {
@@ -367,6 +370,19 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
                 }
+        }
+
+        viewModelScope.launch {
+            try {
+                val res = repository.getSystemVersion()
+                if (res.isSuccess) {
+                    val sysVer = res.getOrNull()
+                    val purged = repository.checkAndApplyDataGeneration(getApplication(), sysVer?.dataGeneration)
+                    if (purged) {
+                        logout()
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -620,6 +636,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 is SyncResult.Offline -> _calendarSyncState.value = SyncState.OfflineCached()
                 is SyncResult.Error -> _calendarSyncState.value = SyncState.Error(result.message, result.isNetworkError)
             }
+        }
+    }
+
+    fun syncDayDetails(groupId: String = getActiveGroupId(), date: String) {
+        if (groupId.isBlank() || date.isBlank()) return
+        viewModelScope.launch {
+            repository.syncDay(groupId, date)
         }
     }
 
@@ -1287,7 +1310,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     fun logout() {
         viewModelScope.launch {
-            repository.logout()
+            repository.logout(getApplication())
             currentActiveUserId = null
             _shouldShowCatchUpCard.value = false
             _lastOpenDate.value = todayDateStr
@@ -1510,6 +1533,32 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 category = category,
                 location = location
             )
+            onResult?.invoke(res)
+        }
+    }
+
+    fun createHoliday(
+        title: String,
+        reason: String,
+        eventDate: String,
+        isSchoolWide: Boolean,
+        onResult: ((Result<com.magd.tanweer.data.local.EventAddResult>) -> Unit)? = null
+    ) {
+        val user = currentUser.value ?: return
+        val groupId = getActiveGroupId()
+        viewModelScope.launch {
+            val res = repository.createHoliday(
+                groupId = groupId,
+                eventDate = eventDate,
+                title = title,
+                reason = reason,
+                isSchoolWide = isSchoolWide
+            )
+            if (res.isSuccess) {
+                val ym = eventDate.take(7)
+                syncCalendarMonth(groupId, ym)
+                repository.syncEvents(groupId)
+            }
             onResult?.invoke(res)
         }
     }

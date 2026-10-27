@@ -77,6 +77,28 @@ object AppVersionManager {
      * Resolves latest app version by checking the authoritative Server Version API first,
      * supplemented by fetching Change Log/X.Y.Z.md from repo if available.
      */
+    /**
+     * Compares two semantic version strings (e.g. "1.2.0" vs "1.2.1").
+     * Returns > 0 if v1 > v2, < 0 if v1 < v2, and 0 if equal.
+     */
+    fun compareSemanticVersions(v1: String, v2: String): Int {
+        val clean1 = v1.trim().removePrefix("v").removePrefix("V")
+        val clean2 = v2.trim().removePrefix("v").removePrefix("V")
+        val parts1 = clean1.split(".").map { it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0 }
+        val parts2 = clean2.split(".").map { it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0 }
+        val length = maxOf(parts1.size, parts2.size)
+        for (i in 0 until length) {
+            val p1 = parts1.getOrElse(i) { 0 }
+            val p2 = parts2.getOrElse(i) { 0 }
+            if (p1 != p2) return p1.compareTo(p2)
+        }
+        return 0
+    }
+
+    /**
+     * Resolves latest app version by checking the authoritative Server Version API first,
+     * supplemented by fetching Change Log/X.Y.Z.md from repo if available.
+     */
     suspend fun checkVersion(): Result<AppVersionInfo> = withContext(Dispatchers.IO) {
         val installedCode = BuildConfig.VERSION_CODE
         val installedName = BuildConfig.VERSION_NAME
@@ -89,7 +111,8 @@ object AppVersionManager {
             val srvRes = NetworkModule.apiService.getSystemVersion()
             if (srvRes.isSuccessful && srvRes.body() != null) {
                 val body = srvRes.body()!!
-                val isUpdateAvailable = body.versionCode > installedCode
+                val semverCmp = compareSemanticVersions(body.currentVersion, installedName)
+                val isUpdateAvailable = semverCmp > 0 || (semverCmp == 0 && body.versionCode > installedCode)
                 val isMandatory = body.isUpdateRequired || (installedCode < body.minSupportedVersionCode)
                 val downloadUrl = body.downloadUrl ?: "https://github.com/majd7772233-a11y/Tanweer/releases/latest"
                 val isDirectApk = downloadUrl.endsWith(".apk", ignoreCase = true)
@@ -128,12 +151,32 @@ object AppVersionManager {
                 val directApkUrl = apkAsset?.browser_download_url
                 val apkSizeMb = apkAsset?.size?.let { Math.round((it.toDouble() / (1024 * 1024)) * 10.0) / 10.0 }
 
+                var githubSha256: String? = null
+                val shaAsset = rel.assets.find { it.name.contains("sha256", ignoreCase = true) || it.name.contains("checksum", ignoreCase = true) }
+                if (shaAsset != null && !shaAsset.browser_download_url.isNullOrBlank()) {
+                    try {
+                        val req = Request.Builder().url(shaAsset.browser_download_url).build()
+                        rawHttpClient.newCall(req).execute().use { resp ->
+                            val txt = resp.body?.string().orEmpty()
+                            val m = Regex("""\b([a-fA-F0-9]{64})\b""").find(txt)
+                            if (m != null) githubSha256 = m.value.lowercase()
+                        }
+                    } catch (_: Exception) {}
+                }
+                if (githubSha256 == null && !rel.body.isNullOrBlank()) {
+                    val m = Regex("""\b([a-fA-F0-9]{64})\b""").find(rel.body)
+                    if (m != null) githubSha256 = m.value.lowercase()
+                }
+
                 val rawChangelog = fetchChangeLogMarkdown(verName).ifEmpty {
                     rel.body?.split("\n")
                         ?.map { it.trim().removePrefix("-").removePrefix("*").trim() }
                         ?.filter { it.isNotBlank() }
                         ?: emptyList()
                 }
+
+                val semverCmp = compareSemanticVersions(verName, installedName)
+                val isGhUpdateAvailable = semverCmp > 0 || (semverCmp == 0 && verCode > installedCode)
 
                 gitHubVersionInfo = AppVersionInfo(
                     currentVersionName = verName,
@@ -145,8 +188,8 @@ object AppVersionManager {
                     webpageUrl = rel.html_url ?: "https://github.com/majd7772233-a11y/Tanweer/releases/latest",
                     directApkUrl = directApkUrl,
                     directApkSizeMb = apkSizeMb,
-                    sha256 = null,
-                    isUpdateAvailable = verCode > installedCode,
+                    sha256 = githubSha256,
+                    isUpdateAvailable = isGhUpdateAvailable,
                     isMandatory = false,
                     source = VersionSource.GITHUB_RELEASE
                 )
@@ -156,21 +199,16 @@ object AppVersionManager {
         }
 
         // 3. Resolve unified source of truth:
-        // Prioritize whichever source offers a newer version code or direct APK download asset
         val resolved = when {
             gitHubVersionInfo != null && (serverVersionInfo == null || gitHubVersionInfo.currentVersionCode > serverVersionInfo.currentVersionCode) -> {
-                gitHubVersionInfo
+                gitHubVersionInfo.copy(sha256 = serverVersionInfo?.sha256 ?: gitHubVersionInfo.sha256)
             }
             serverVersionInfo != null -> {
-                if (serverVersionInfo.directApkUrl == null && gitHubVersionInfo?.directApkUrl != null &&
-                    gitHubVersionInfo.currentVersionCode >= serverVersionInfo.currentVersionCode) {
-                    serverVersionInfo.copy(
-                        directApkUrl = gitHubVersionInfo.directApkUrl,
-                        directApkSizeMb = gitHubVersionInfo.directApkSizeMb
-                    )
-                } else {
-                    serverVersionInfo
-                }
+                serverVersionInfo.copy(
+                    directApkUrl = serverVersionInfo.directApkUrl ?: gitHubVersionInfo?.directApkUrl,
+                    directApkSizeMb = serverVersionInfo.directApkSizeMb ?: gitHubVersionInfo?.directApkSizeMb,
+                    sha256 = serverVersionInfo.sha256 ?: gitHubVersionInfo?.sha256
+                )
             }
             gitHubVersionInfo != null -> gitHubVersionInfo
             else -> null

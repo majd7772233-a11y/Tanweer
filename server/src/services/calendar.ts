@@ -54,9 +54,9 @@ export async function handleGetCalendarOverview(
             (SELECT 1 FROM homework_completions hc WHERE hc.homework_id = h.id AND hc.user_id = ?) as is_completed
      FROM homeworks h
      LEFT JOIN subjects s ON h.subject_id = s.id
-     WHERE h.group_id = ? AND h.due_date LIKE ?
+     WHERE h.group_id = ? AND (h.due_date LIKE ? OR h.study_date LIKE ?)
      ORDER BY h.due_date ASC`
-  ).bind(user.userId, groupId, datePrefix).all();
+  ).bind(user.userId, groupId, datePrefix, datePrefix).all();
 
   return jsonResponse({
     success: true,

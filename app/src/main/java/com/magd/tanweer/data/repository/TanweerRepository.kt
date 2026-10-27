@@ -34,9 +34,10 @@ class TanweerRepository(
     private val gitHubApi: GitHubApiService = NetworkModule.gitHubApiService,
     val chatManager: RealtimeChatManager = RealtimeChatManager()
 ) {
-    val mutationQueue = UnifiedMutationQueue(db, api)
+    val mutationQueue = UnifiedMutationQueue.getInstance(db, api)
 
     init {
+        mutationQueue.start()
         mutationQueue.onRetryHomework = { id -> retrySyncHomework(id) }
         mutationQueue.onRetryContent = { id -> retrySyncContent(id) }
     }
@@ -100,8 +101,7 @@ class TanweerRepository(
                         sectionId = body.user.sectionId,
                         role = body.user.role,
                         defaultGroupId = body.user.defaultGroupId.ifEmpty { classGroupId },
-                        token = body.token,
-                        recoveryCode = body.recoveryCode
+                        token = body.token
                     )
                 )
                 db.groupDao().insertGroups(
@@ -143,8 +143,7 @@ class TanweerRepository(
                         sectionId = body.user.sectionId,
                         role = body.user.role,
                         defaultGroupId = body.user.defaultGroupId,
-                        token = body.token,
-                        recoveryCode = null
+                        token = body.token
                     )
                 )
                 Result.success(body.user)
@@ -173,8 +172,7 @@ class TanweerRepository(
                         sectionId = body.user.sectionId,
                         role = body.user.role,
                         defaultGroupId = body.user.defaultGroupId,
-                        token = body.token,
-                        recoveryCode = code
+                        token = body.token
                     )
                 )
                 Result.success(body.user)
@@ -201,16 +199,19 @@ class TanweerRepository(
         val newSectionId = sectionId ?: currentUserEntity.sectionId
         val newGroupId = "class_${newGradeId}_${newSectionId.uppercase()}"
 
+        val gradeToUpdate = if (gradeId != null && gradeId != currentUserEntity.gradeId) gradeId else null
+        val sectionToUpdate = if (sectionId != null && sectionId.uppercase() != currentUserEntity.sectionId.uppercase()) sectionId.uppercase() else null
+
         try {
             val res = api.updateProfile(
                 UpdateProfileRequest(
-                    fullName = newFullName,
-                    gradeId = newGradeId,
-                    sectionId = newSectionId.uppercase()
+                    fullName = fullName?.trim()?.takeIf { it.isNotBlank() },
+                    gradeId = gradeToUpdate,
+                    sectionId = sectionToUpdate
                 )
             )
             if (!res.isSuccessful || res.body()?.user == null) {
-                val errorMsg = res.body()?.message ?: res.message().let { if (it.isNullOrBlank()) "فشل تحديث بيانات الحساب على السيرفر" else it }
+                val errorMsg = res.body()?.message ?: res.errorBody()?.string()?.takeIf { it.isNotBlank() } ?: res.message().let { if (it.isNullOrBlank()) "فشل تحديث بيانات الحساب على السيرفر" else it }
                 return@withContext Result.failure(Exception(errorMsg))
             }
             val updatedUser = res.body()!!.user!!
@@ -224,8 +225,7 @@ class TanweerRepository(
                     sectionId = updatedUser.sectionId,
                     role = updatedUser.role,
                     defaultGroupId = updatedUser.defaultGroupId,
-                    token = currentUserEntity.token,
-                    recoveryCode = currentUserEntity.recoveryCode
+                    token = currentUserEntity.token
                 )
             )
 
@@ -239,11 +239,19 @@ class TanweerRepository(
         }
     }
 
-    suspend fun logout() = withContext(Dispatchers.IO) {
+    suspend fun logout(context: android.content.Context? = null) = withContext(Dispatchers.IO) {
+        mutationQueue.stop()
         chatManager.disconnect()
         NetworkModule.setAuthToken(null)
         // Complete isolation: clear all local database tables so subsequent users never see prior user's cached data
         db.clearAllTables()
+        if (context != null) {
+            com.magd.tanweer.util.StudentNotebookManager.clearAllUserData(context)
+            try {
+                val prefs = context.getSharedPreferences("tanweer_prefs", android.content.Context.MODE_PRIVATE)
+                prefs.edit().remove("auth_token").apply()
+            } catch (_: Exception) {}
+        }
     }
 
     // =========================================================================
@@ -291,6 +299,9 @@ class TanweerRepository(
         try {
             val res = api.getContents(groupId)
             if (res.isSuccessful && res.body() != null) {
+                // Clear previously synced contents for this group so deletions on server are reflected locally,
+                // while preserving any offline/pending content creations.
+                db.contentDao().clearSyncedContents(groupId)
                 val list = res.body()!!.contents
                 if (list.isNotEmpty()) {
                     val entities = list.map { it ->
@@ -307,6 +318,7 @@ class TanweerRepository(
                             type = it.type,
                             title = it.title,
                             description = it.description,
+                            createdBy = it.createdBy,
                             authorName = it.authorName,
                             authorGradeSection = it.authorGradeSection,
                             viewsCount = it.viewsCount,
@@ -395,7 +407,6 @@ class TanweerRepository(
             if (res.isSuccessful && res.body()?.user != null) {
                 val user = res.body()!!.user!!
                 val currentToken = db.userDao().getUserSync()?.token ?: ""
-                val currentRecovery = db.userDao().getUserSync()?.recoveryCode
                 db.userDao().insertUser(
                     UserEntity(
                         id = user.id,
@@ -406,7 +417,6 @@ class TanweerRepository(
                         role = user.role,
                         defaultGroupId = user.defaultGroupId,
                         token = currentToken,
-                        recoveryCode = currentRecovery,
                         lessonsCount = user.stats?.lessonsCount ?: 0,
                         homeworksCount = user.stats?.homeworksCount ?: 0,
                         issuesCount = user.stats?.issuesCount ?: 0,
@@ -528,6 +538,7 @@ class TanweerRepository(
                             type = it.type,
                             title = it.title,
                             description = it.description,
+                            createdBy = it.createdBy,
                             authorName = it.authorName,
                             authorGradeSection = it.authorGradeSection,
                             viewsCount = it.viewsCount,
@@ -544,7 +555,16 @@ class TanweerRepository(
                 // Reconcile Homeworks for this date
                 db.homeworkDao().clearSyncedHomeworksForDate(groupId, date)
                 if (body.homeworks.isNotEmpty()) {
+                    val currentUserId = db.userDao().getUserSync()?.id ?: "local_user"
                     val homeworks = body.homeworks.map {
+                        val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
+                        if (pendingToggle == null || pendingToggle.entityType != "HOMEWORK_TOGGLE") {
+                            if (it.isCompleted) {
+                                db.homeworkDao().insertCompletion(HomeworkCompletionEntity(homeworkId = it.id, userId = currentUserId))
+                            } else {
+                                db.homeworkDao().deleteCompletion(it.id, currentUserId)
+                            }
+                        }
                         HomeworkEntity(
                             id = it.id,
                             groupId = it.groupId,
@@ -571,7 +591,10 @@ class TanweerRepository(
                 if (body.exams.isNotEmpty()) {
                     val exams = body.exams.map {
                         val local = db.examDao().getExamById(it.id)
-                        val isDone = if (local != null && local.syncStatus == "PENDING") {
+                        val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
+                        val isDone = if (pendingToggle != null && pendingToggle.entityType == "EXAM_TOGGLE") {
+                            local?.isCompleted ?: it.isCompleted
+                        } else if (local != null && local.syncStatus == "PENDING") {
                             local.isCompleted
                         } else {
                             it.isCompleted
@@ -629,7 +652,16 @@ class TanweerRepository(
         try {
             val res = api.getHomeworks(groupId)
             if (res.isSuccessful && res.body()?.homeworks != null) {
+                val currentUserId = db.userDao().getUserSync()?.id ?: "local_user"
                 val hwList = res.body()!!.homeworks.map {
+                    val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
+                    if (pendingToggle == null || pendingToggle.entityType != "HOMEWORK_TOGGLE") {
+                        if (it.isCompleted) {
+                            db.homeworkDao().insertCompletion(HomeworkCompletionEntity(homeworkId = it.id, userId = currentUserId))
+                        } else {
+                            db.homeworkDao().deleteCompletion(it.id, currentUserId)
+                        }
+                    }
                     HomeworkEntity(
                         id = it.id,
                         groupId = it.groupId,
@@ -667,6 +699,16 @@ class TanweerRepository(
             val res = api.getExams(groupId)
             if (res.isSuccessful && res.body()?.exams != null) {
                 val exams = res.body()!!.exams.map {
+                    val local = db.examDao().getExamById(it.id)
+                    val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
+                    val isDone = if (pendingToggle != null && pendingToggle.entityType == "EXAM_TOGGLE") {
+                        local?.isCompleted ?: it.isCompleted
+                    } else if (local != null && local.syncStatus == "PENDING") {
+                        local.isCompleted
+                    } else {
+                        it.isCompleted
+                    }
+                    val finalExamType = if (it.examType.isNotBlank()) it.examType else (local?.examType ?: "MONTHLY")
                     ExamEntity(
                         id = it.id,
                         groupId = it.groupId,
@@ -678,8 +720,8 @@ class TanweerRepository(
                         subjectName = it.subjectName,
                         subjectIcon = it.subjectIcon,
                         colorHex = it.colorHex,
-                        isCompleted = it.isCompleted,
-                        examType = it.examType,
+                        isCompleted = isDone,
+                        examType = finalExamType,
                         syncStatus = "SYNCED"
                     )
                 }
@@ -735,11 +777,19 @@ class TanweerRepository(
                 val body = res.body()!!
                 var count = 0
 
+                // Point 16: Full reconciliation of old month data on server deletion
+                db.examDao().clearSyncedExamsForMonth(groupId, month)
+                db.eventDao().clearSyncedEventsForMonth(groupId, month)
+                db.homeworkDao().clearSyncedHomeworksForMonth(groupId, month)
+
                 // 1. Process and cache exams
                 if (body.exams.isNotEmpty()) {
                     val exams = body.exams.map {
                         val local = db.examDao().getExamById(it.id)
-                        val isDone = if (local != null && local.syncStatus == "PENDING") {
+                        val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
+                        val isDone = if (pendingToggle != null && pendingToggle.entityType == "EXAM_TOGGLE") {
+                            local?.isCompleted ?: it.isCompleted
+                        } else if (local != null && local.syncStatus == "PENDING") {
                             local.isCompleted
                         } else {
                             it.isCompleted
@@ -785,7 +835,16 @@ class TanweerRepository(
 
                 // 3. Process and cache homeworks
                 if (body.homeworks.isNotEmpty()) {
+                    val currentUserId = db.userDao().getUserSync()?.id ?: "local_user"
                     val hws = body.homeworks.map {
+                        val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
+                        if (pendingToggle == null || pendingToggle.entityType != "HOMEWORK_TOGGLE") {
+                            if (it.isCompleted) {
+                                db.homeworkDao().insertCompletion(HomeworkCompletionEntity(homeworkId = it.id, userId = currentUserId))
+                            } else {
+                                db.homeworkDao().deleteCompletion(it.id, currentUserId)
+                            }
+                        }
                         HomeworkEntity(
                             id = it.id,
                             groupId = it.groupId,
@@ -1756,6 +1815,7 @@ class TanweerRepository(
             type = it.type,
             title = it.title,
             description = it.description,
+            createdBy = it.createdBy,
             authorName = it.authorName,
             authorGradeSection = it.authorGradeSection,
             viewsCount = it.viewsCount,
@@ -2315,6 +2375,7 @@ class TanweerRepository(
             type = "LESSON",
             title = title,
             description = description,
+            createdBy = user?.id ?: "",
             authorName = authorName,
             authorGradeSection = authorGradeSection,
             viewsCount = 1,
@@ -2910,7 +2971,7 @@ class TanweerRepository(
         }
 
         try {
-            val res = api.toggleHomework(homeworkId)
+            val res = api.toggleHomework(homeworkId, ToggleCompletionRequest(isCompleted = targetStatus))
             if (res.isSuccessful) {
                 db.outboxDao().deleteByEntityId(homeworkId)
                 HomeworkToggleResult.SyncedWithServer(targetStatus)
@@ -3068,17 +3129,55 @@ class TanweerRepository(
     }
 
     suspend fun toggleExamCompletion(examId: String, targetStatus: Boolean): Result<Boolean> = withContext(Dispatchers.IO) {
+        val exam = db.examDao().getExamById(examId)
+        val isNotSyncedYet = exam != null && exam.syncStatus != "SYNCED"
         db.examDao().updateExamCompletion(examId, targetStatus)
+
+        if (isNotSyncedYet) {
+            val outboxItem = OutboxEntity(
+                id = "ob_examt_${examId}_${System.currentTimeMillis()}",
+                entityType = "EXAM_TOGGLE",
+                entityId = examId,
+                operation = "UPDATE",
+                payloadJson = "{\"isCompleted\": $targetStatus}"
+            )
+            db.outboxDao().insertOutbox(outboxItem)
+            return@withContext Result.success(targetStatus)
+        }
+
         try {
-            val res = api.toggleExamCompletion(examId)
-            if (res.isSuccessful && res.body() != null) {
-                val serverCompleted = res.body()!!.isCompleted
+            val res = api.toggleExamCompletion(examId, ToggleCompletionRequest(isCompleted = targetStatus))
+            if (res.isSuccessful) {
+                db.outboxDao().deleteByEntityId(examId)
+                val serverCompleted = res.body()?.isCompleted ?: targetStatus
                 db.examDao().updateExamCompletion(examId, serverCompleted)
                 Result.success(serverCompleted)
+            } else if (res.code() in listOf(401, 403)) {
+                // Rollback on rejection or authorization failure
+                db.examDao().updateExamCompletion(examId, !targetStatus)
+                Result.failure(Exception("لا تملك صلاحية تغيير حالة الاختبار (كود ${res.code()})"))
             } else {
+                // Server temporary failure: queue in outbox for reliable retry
+                val outboxItem = OutboxEntity(
+                    id = "ob_examt_${examId}_${System.currentTimeMillis()}",
+                    entityType = "EXAM_TOGGLE",
+                    entityId = examId,
+                    operation = "UPDATE",
+                    payloadJson = "{\"isCompleted\": $targetStatus}"
+                )
+                db.outboxDao().insertOutbox(outboxItem)
                 Result.success(targetStatus)
             }
         } catch (_: Exception) {
+            // Network failure: queue in outbox for reliable offline retry
+            val outboxItem = OutboxEntity(
+                id = "ob_examt_${examId}_${System.currentTimeMillis()}",
+                entityType = "EXAM_TOGGLE",
+                entityId = examId,
+                operation = "UPDATE",
+                payloadJson = "{\"isCompleted\": $targetStatus}"
+            )
+            db.outboxDao().insertOutbox(outboxItem)
             Result.success(targetStatus)
         }
     }
@@ -3159,6 +3258,47 @@ class TanweerRepository(
             db.eventDao().updateSyncStatus(id, "PENDING")
             Result.success(EventAddResult.QueuedOffline(id))
         }
+    }
+
+    suspend fun createHoliday(
+        groupId: String,
+        eventDate: String,
+        title: String,
+        reason: String,
+        isSchoolWide: Boolean
+    ): Result<EventAddResult> {
+        val targetGroupId = if (isSchoolWide) "all" else groupId
+        return addEvent(
+            groupId = targetGroupId,
+            eventDate = eventDate,
+            title = title,
+            timeStr = null,
+            category = "HOLIDAY",
+            description = reason,
+            location = if (isSchoolWide) "كامل المدرسة" else "الشعبة"
+        )
+    }
+
+    suspend fun checkAndApplyDataGeneration(context: android.content.Context, serverGeneration: String?): Boolean = withContext(Dispatchers.IO) {
+        if (serverGeneration.isNullOrBlank()) return@withContext false
+        val prefs = context.getSharedPreferences("tanweer_prefs", android.content.Context.MODE_PRIVATE)
+        val lastGen = prefs.getString("data_generation", null)
+        if (lastGen == null) {
+            prefs.edit().putString("data_generation", serverGeneration).apply()
+            return@withContext false
+        }
+        if (lastGen != serverGeneration) {
+            Log.w("TanweerRepo", "Server data generation changed from $lastGen to $serverGeneration. Purging local data!")
+            try {
+                db.clearAllTables()
+                NetworkModule.setAuthToken(null)
+            } catch (e: Exception) {
+                Log.e("TanweerRepo", "Error clearing tables on data generation change", e)
+            }
+            prefs.edit().putString("data_generation", serverGeneration).apply()
+            return@withContext true
+        }
+        false
     }
 
     suspend fun syncIssueDetails(issueId: String): SyncResult = withContext(Dispatchers.IO) {
@@ -3425,6 +3565,22 @@ class TanweerRepository(
         return db.outboxDao().getPendingItems().map { it.size }
     }
 
+    fun getPendingOnlyOutboxCount(): Flow<Int> {
+        return db.outboxDao().getPendingOnlyCount()
+    }
+
+    fun getSyncingOutboxCount(): Flow<Int> {
+        return db.outboxDao().getSyncingCount()
+    }
+
+    fun getFailedOutboxCount(): Flow<Int> {
+        return db.outboxDao().getFailedCount()
+    }
+
+    fun getTotalActiveOutboxCount(): Flow<Int> {
+        return db.outboxDao().getTotalActiveCount()
+    }
+
     suspend fun getPendingOutboxCountSync(): Int = withContext(Dispatchers.IO) {
         try {
             db.outboxDao().getPendingItemsSync().size
@@ -3434,347 +3590,12 @@ class TanweerRepository(
     }
 
     suspend fun processOutboxQueue(): Result<Int> = withContext(Dispatchers.IO) {
-        val pending = db.outboxDao().getPendingItemsSync()
-        if (pending.isEmpty()) return@withContext Result.success(0)
-        var successCount = 0
-
-        for (item in pending) {
-            db.outboxDao().updateOutboxStatus(item.id, "SYNCING")
-            try {
-                when (item.entityType) {
-                    "CORRECTION" -> {
-                        val correction = db.correctionDao().getCorrectionById(item.entityId)
-                        if (correction != null) {
-                            val res = api.submitCorrection(
-                                correction.contentId,
-                                SubmitCorrectionRequest(
-                                    fieldName = correction.fieldName,
-                                    originalValue = correction.originalValue,
-                                    proposedValue = correction.proposedValue,
-                                    reason = correction.reason
-                                )
-                            )
-                            if (res.isSuccessful) {
-                                db.correctionDao().updateStatus(correction.id, "SUBMITTED")
-                                db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                                successCount++
-                            } else {
-                                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                            }
-                        } else {
-                            db.outboxDao().deleteOutbox(item.id)
-                        }
-                    }
-                    "HOMEWORK_TOGGLE" -> {
-                        val res = api.toggleHomework(item.entityId)
-                        if (res.isSuccessful) {
-                            db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                            successCount++
-                        } else if (res.code() in listOf(401, 403, 404)) {
-                            db.outboxDao().deleteOutbox(item.id)
-                        } else {
-                            db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                        }
-                    }
-                    "HOMEWORK_CREATE" -> {
-                        val hw = db.homeworkDao().getHomeworkById(item.entityId)
-                        if (hw != null) {
-                            val res = api.createHomework(
-                                CreateHomeworkRequest(
-                                    id = hw.id,
-                                    groupId = hw.groupId,
-                                    studyDate = hw.studyDate,
-                                    dueDate = hw.dueDate,
-                                    subjectId = hw.subjectId,
-                                    title = hw.title,
-                                    details = hw.details,
-                                    pageNumbers = hw.pageNumbers,
-                                    questionNumbers = hw.questionNumbers,
-                                    taskType = hw.taskType
-                                )
-                            )
-                            if (res.isSuccessful) {
-                                val serverId = res.body()?.homeworkId ?: res.body()?.id
-                                if (serverId != null && serverId != hw.id) {
-                                    val updated = hw.copy(id = serverId, syncStatus = "SYNCED")
-                                    db.homeworkDao().replaceHomeworkId(hw.id, updated)
-                                } else {
-                                    db.homeworkDao().updateSyncStatus(hw.id, "SYNCED")
-                                }
-                                db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                                successCount++
-                            } else {
-                                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                            }
-                        } else {
-                            db.outboxDao().deleteOutbox(item.id)
-                        }
-                    }
-                    "EXAM_CREATE" -> {
-                        val ex = db.examDao().getExamById(item.entityId)
-                        val req: CreateExamRequest? = if (ex != null) {
-                            CreateExamRequest(
-                                id = ex.id,
-                                groupId = ex.groupId,
-                                examDate = ex.examDate,
-                                subjectId = ex.subjectId,
-                                title = ex.title,
-                                requiredChapters = ex.requiredChapters,
-                                notes = ex.notes,
-                                examType = ex.examType
-                            )
-                        } else if (item.payloadJson.isNotBlank() && item.payloadJson != "{}") {
-                            try {
-                                val obj = org.json.JSONObject(item.payloadJson)
-                                CreateExamRequest(
-                                    id = item.entityId,
-                                    groupId = obj.optString("groupId", ""),
-                                    examDate = obj.optString("examDate", ""),
-                                    subjectId = obj.optString("subjectId", ""),
-                                    title = obj.optString("title", ""),
-                                    requiredChapters = obj.optString("requiredChapters", null),
-                                    notes = obj.optString("notes", null),
-                                    examType = obj.optString("examType", "MONTHLY")
-                                )
-                            } catch (_: Exception) { null }
-                        } else {
-                            null
-                        }
-
-                        if (req != null && req.groupId.isNotBlank() && req.title.isNotBlank()) {
-                            val res = api.createExam(req)
-                            if (res.isSuccessful) {
-                                val serverId = res.body()?.examId ?: res.body()?.id
-                                if (serverId != null && serverId != item.entityId) {
-                                    if (ex != null) {
-                                        val updated = ex.copy(id = serverId, syncStatus = "SYNCED")
-                                        db.examDao().replaceExamId(ex.id, updated)
-                                    }
-                                } else {
-                                    db.examDao().updateSyncStatus(item.entityId, "SYNCED")
-                                }
-                                db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                                successCount++
-                            } else {
-                                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                            }
-                        } else {
-                            db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = "تعذر العثور على بيانات الاختبار محلياً (id: ${item.entityId})")
-                        }
-                    }
-                    "EXAM_DELETE" -> {
-                        val res = api.deleteExam(item.entityId)
-                        if (res.isSuccessful || res.code() == 404) {
-                            db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                            successCount++
-                        } else {
-                            db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                        }
-                    }
-                    "EVENT_CREATE" -> {
-                        val ev = db.eventDao().getEventById(item.entityId)
-                        if (ev != null) {
-                            val res = api.createEvent(
-                                CreateEventRequest(
-                                    id = ev.id,
-                                    groupId = ev.groupId,
-                                    title = ev.title,
-                                    description = ev.description ?: "",
-                                    category = ev.category ?: "",
-                                    eventDate = ev.eventDate,
-                                    timeStr = ev.timeStr ?: "",
-                                    location = ev.location
-                                )
-                            )
-                            if (res.isSuccessful) {
-                                val serverId = res.body()?.eventId ?: res.body()?.id
-                                if (serverId != null && serverId != ev.id) {
-                                    val updated = ev.copy(id = serverId, syncStatus = "SYNCED")
-                                    db.eventDao().replaceEventId(ev.id, updated)
-                                } else {
-                                    db.eventDao().updateSyncStatus(ev.id, "SYNCED")
-                                }
-                                db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                                successCount++
-                            } else {
-                                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                            }
-                        } else {
-                            db.outboxDao().deleteOutbox(item.id)
-                        }
-                    }
-                    "ISSUE_CREATE" -> {
-                        val isRecord = db.issueDao().getIssueSync(item.entityId)
-                        if (isRecord != null) {
-                            val res = api.createIssue(
-                                CreateIssueRequest(
-                                    id = isRecord.id,
-                                    groupId = isRecord.groupId,
-                                    subjectId = isRecord.subjectId,
-                                    title = isRecord.title,
-                                    description = isRecord.description
-                                )
-                            )
-                            if (res.isSuccessful) {
-                                val serverId = res.body()?.issueId ?: res.body()?.id
-                                if (serverId != null && serverId != isRecord.id) {
-                                    val updated = isRecord.copy(id = serverId, syncStatus = "SYNCED")
-                                    db.issueDao().replaceIssueId(isRecord.id, updated)
-                                } else {
-                                    db.issueDao().updateSyncStatus(isRecord.id, "SYNCED")
-                                }
-                                db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                                successCount++
-                            } else {
-                                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                            }
-                        } else {
-                            db.outboxDao().deleteOutbox(item.id)
-                        }
-                    }
-                    "ISSUE_COMMENT_CREATE" -> {
-                        val comment = db.issueDao().getCommentById(item.entityId)
-                        if (comment != null) {
-                            val res = api.addIssueComment(
-                                issueId = comment.issueId,
-                                req = AddCommentRequest(id = comment.id, comment = comment.comment)
-                            )
-                            if (res.isSuccessful) {
-                                db.issueDao().updateCommentSyncStatus(comment.id, "SYNCED")
-                                db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                                successCount++
-                            } else {
-                                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                            }
-                        } else {
-                            db.outboxDao().deleteOutbox(item.id)
-                        }
-                    }
-                    "SCHEDULE_SLOT_UPDATE" -> {
-                        val slot = db.scheduleDao().getSlotById(item.entityId)
-                        var gId = ""
-                        var req: CreateScheduleSlotRequest? = null
-                        if (slot != null) {
-                            gId = slot.groupId
-                            req = CreateScheduleSlotRequest(
-                                dayOfWeek = slot.dayOfWeek,
-                                slotOrder = slot.slotOrder,
-                                subjectId = slot.subjectId,
-                                subjectName = slot.subjectName,
-                                subjectIcon = slot.subjectIcon,
-                                colorHex = slot.colorHex,
-                                startTime = slot.startTime,
-                                endTime = slot.endTime
-                            )
-                        } else if (item.payloadJson.isNotBlank() && item.payloadJson != "{}") {
-                            try {
-                                val obj = org.json.JSONObject(item.payloadJson)
-                                gId = obj.optString("groupId", "")
-                                req = CreateScheduleSlotRequest(
-                                    dayOfWeek = obj.optInt("dayOfWeek", 0),
-                                    slotOrder = obj.optInt("slotOrder", 0),
-                                    subjectId = obj.optString("subjectId", ""),
-                                    subjectName = obj.optString("subjectName", ""),
-                                    subjectIcon = obj.optString("subjectIcon", "📚"),
-                                    colorHex = obj.optString("colorHex", null),
-                                    startTime = obj.optString("startTime", null),
-                                    endTime = obj.optString("endTime", null)
-                                )
-                            } catch (_: Exception) {
-                                gId = ""
-                                req = null
-                            }
-                        } else {
-                            gId = ""
-                            req = null
-                        }
-
-                        if (req != null && gId.isNotBlank()) {
-                            val res = api.createScheduleSlot(groupId = gId, req = req)
-                            if (res.isSuccessful) {
-                                if (slot != null) {
-                                    db.scheduleDao().insertSlots(listOf(slot.copy(syncStatus = "SYNCED")))
-                                }
-                                db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                                successCount++
-                            } else {
-                                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                            }
-                        } else {
-                            db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = "تعذر العثور على بيانات الحصة محلياً (id: ${item.entityId})")
-                        }
-                    }
-                    "SCHEDULE_SLOT_DELETE" -> {
-                        val parts = item.entityId.split(":")
-                        var gId = parts.getOrNull(0) ?: ""
-                        var dOfWeek = parts.getOrNull(1)?.toIntOrNull()
-                        var sOrder = parts.getOrNull(2)?.toIntOrNull()
-
-                        if (dOfWeek == null || sOrder == null) {
-                            try {
-                                val obj = org.json.JSONObject(item.payloadJson)
-                                gId = obj.optString("groupId", gId)
-                                dOfWeek = obj.optInt("dayOfWeek", 0)
-                                sOrder = obj.optInt("slotOrder", 0)
-                            } catch (_: Exception) {}
-                        }
-
-                        if (gId.isNotBlank() && dOfWeek != null && sOrder != null) {
-                            val res = api.deleteScheduleSlot(gId, dOfWeek, sOrder)
-                            if (res.isSuccessful || res.code() == 404) {
-                                db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                                successCount++
-                            } else {
-                                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                            }
-                        } else {
-                            db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = "معرف الحصة غير صالح للحذف: ${item.entityId}")
-                        }
-                    }
-                    "LESSON_CREATE" -> {
-                        val content = db.contentDao().getContentById(item.entityId)
-                        if (content != null) {
-                            val mediaItems = parseMediaJson(content.mediaUrlsJson)
-                            val res = api.createContent(
-                                CreateContentRequest(
-                                    id = content.id,
-                                    groupId = content.groupId,
-                                    studyDate = content.studyDate,
-                                    subjectId = content.subjectId,
-                                    type = content.type,
-                                    title = content.title,
-                                    description = content.description,
-                                    media = mediaItems
-                                )
-                            )
-                            if (res.isSuccessful) {
-                                val serverId = res.body()?.contentId ?: res.body()?.id
-                                if (serverId != null && serverId != content.id) {
-                                    val updated = content.copy(id = serverId, syncStatus = "SYNCED")
-                                    db.contentDao().replaceContentId(content.id, updated)
-                                } else {
-                                    db.contentDao().updateSyncStatus(content.id, "SYNCED")
-                                }
-                                db.outboxDao().updateOutboxStatus(item.id, "SYNCED")
-                                successCount++
-                            } else {
-                                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = res.message())
-                            }
-                        } else {
-                            db.outboxDao().deleteOutbox(item.id)
-                        }
-                    }
-                    else -> {
-                        // Unrecognized outbox item type: do not falsely mark as SYNCED
-                        db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = "نوع العملية غير معرّف في طابور المزامنة: ${item.entityType}")
-                    }
-                }
-            } catch (e: Exception) {
-                db.outboxDao().updateOutboxStatus(item.id, "FAILED", error = e.localizedMessage)
-            }
+        try {
+            val count = mutationQueue.drainQueue()
+            Result.success(count)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
-        db.outboxDao().clearSynced()
-        Result.success(successCount)
     }
 
     // =========================================================================
@@ -3891,5 +3712,9 @@ class TanweerRepository(
 
     fun countContentsForAuthorBetween(authorName: String, startDate: String, endDate: String): Flow<Int> {
         return db.contentDao().countContentsForAuthorBetween(authorName, startDate, endDate)
+    }
+
+    fun countContentsForUserBetween(userId: String, authorName: String, startDate: String, endDate: String): Flow<Int> {
+        return db.contentDao().countContentsForUserBetween(userId, authorName, startDate, endDate)
     }
 }

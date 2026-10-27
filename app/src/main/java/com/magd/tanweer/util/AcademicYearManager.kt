@@ -20,25 +20,57 @@ object AcademicYearManager {
     var config: AcademicCalendarConfig = AcademicCalendarConfig()
 
     /**
+     * Strictly verifies whether a date string conforms to standard ISO (yyyy-MM-dd) with valid calendar values.
+     */
+    fun isValidIsoDate(dateStr: String?): Boolean {
+        if (dateStr.isNullOrBlank() || dateStr.length < 10) return false
+        val clean = dateStr.trim().take(10)
+        if (!Regex("""^\d{4}-\d{2}-\d{2}$""").matches(clean)) return false
+        val parts = clean.split("-")
+        val y = parts[0].toIntOrNull() ?: return false
+        val m = parts[1].toIntOrNull() ?: return false
+        val d = parts[2].toIntOrNull() ?: return false
+        return y in 2020..2099 && m in 1..12 && d in 1..31
+    }
+
+    /**
+     * Resolves the current academic year dynamically from real system/device time.
+     * Starts on August 1st: e.g. from 2026-08-01 through 2027-07-31 is "2026-2027".
+     */
+    fun getCurrentAcademicYear(): String {
+        val cal = java.util.Calendar.getInstance()
+        val curYear = cal.get(java.util.Calendar.YEAR)
+        val curMonth = cal.get(java.util.Calendar.MONTH) + 1 // 1-12
+        return if (curMonth >= 8) {
+            "$curYear-${curYear + 1}"
+        } else {
+            "${curYear - 1}-$curYear"
+        }
+    }
+
+    /**
      * Resolves exact start and end date strings for an academic year (e.g. "2026-2027").
      */
     fun getYearRange(academicYear: String): Pair<String, String> {
         val parts = academicYear.split("-")
-        if (parts.size != 2) {
-            val curYear = "2026"
-            return Pair("$curYear-${config.startMonthDay}", "${curYear.toInt() + 1}-${config.endMonthDay}")
+        val startYear = parts.getOrNull(0)?.trim()?.toIntOrNull()
+        val endYear = parts.getOrNull(1)?.trim()?.toIntOrNull()
+
+        val validYear = if (parts.size == 2 && startYear != null && endYear != null && endYear == startYear + 1) {
+            "${startYear}-${endYear}"
+        } else {
+            getCurrentAcademicYear()
         }
-        val startYear = parts[0].trim()
-        val endYear = parts[1].trim()
-        return Pair("$startYear-${config.startMonthDay}", "$endYear-${config.endMonthDay}")
+        val validParts = validYear.split("-")
+        return Pair("${validParts[0]}-${config.startMonthDay}", "${validParts[1]}-${config.endMonthDay}")
     }
 
     /**
      * Verifies if a given ISO date (yyyy-MM-dd) falls strictly inside the configured academic year.
-     * Prevents January 2026 from falsely belonging to 2026-2027.
+     * Prevents invalid dates or dates outside the boundary from being counted.
      */
     fun isDateInAcademicYear(dateStr: String, academicYear: String): Boolean {
-        if (dateStr.isBlank()) return false
+        if (!isValidIsoDate(dateStr)) return false
         val cleanDate = dateStr.trim().take(10)
         val (start, end) = getYearRange(academicYear)
         return cleanDate in start..end
@@ -48,21 +80,25 @@ object AcademicYearManager {
      * Identifies which semester a date belongs to (Semester 1 vs Semester 2).
      */
     fun getSemesterForDate(dateStr: String, academicYear: String): Int {
-        if (!isDateInAcademicYear(dateStr, academicYear)) return 0
+        if (!isValidIsoDate(dateStr) || !isDateInAcademicYear(dateStr, academicYear)) return 0
         val cleanDate = dateStr.trim().take(10)
         val parts = academicYear.split("-")
-        val startYear = parts[0].trim()
+        val startYear = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: return 0
         val s1End = "$startYear-${config.semester1EndMonthDay}"
         return if (cleanDate <= s1End) 1 else 2
     }
 
     /**
-     * Calculates the academic year label for any given date.
+     * Calculates the academic year label for any valid date.
+     * Returns null if the date is invalid or does not match ISO format.
      */
     fun getAcademicYearForDate(dateStr: String): String {
-        if (dateStr.length < 10) return "2026-2027"
-        val year = dateStr.take(4).toIntOrNull() ?: 2026
-        val monthDay = dateStr.substring(5, 10)
+        if (!isValidIsoDate(dateStr)) {
+            return getCurrentAcademicYear()
+        }
+        val clean = dateStr.trim().take(10)
+        val year = clean.take(4).toIntOrNull() ?: return getCurrentAcademicYear()
+        val monthDay = clean.substring(5, 10)
         return if (monthDay >= config.startMonthDay) {
             "$year-${year + 1}"
         } else {
@@ -79,16 +115,21 @@ object AcademicYearManager {
         itemDates: Collection<String> = emptyList()
     ): List<String> {
         val yearsSet = mutableSetOf<String>()
-        val currentYear = getAcademicYearForDate(currentDateStr)
+        val currentYear = if (isValidIsoDate(currentDateStr)) {
+            getAcademicYearForDate(currentDateStr)
+        } else {
+            getCurrentAcademicYear()
+        }
         yearsSet.add(currentYear)
 
         for (d in itemDates) {
-            if (d.isNotBlank() && d.length >= 10) {
+            if (isValidIsoDate(d)) {
                 yearsSet.add(getAcademicYearForDate(d))
             }
         }
 
-        val startYr = currentYear.substringBefore("-").toIntOrNull() ?: 2026
+        val startYr = currentYear.substringBefore("-").toIntOrNull()
+            ?: java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
         yearsSet.add("${startYr - 1}-$startYr")
 
         return yearsSet.toList().sortedDescending()
@@ -123,7 +164,8 @@ object AcademicArchiveEngine {
         homeworks: List<HomeworkItem>,
         exams: List<ExamItem>,
         userFullName: String?,
-        currentDate: String
+        currentDate: String,
+        userId: String? = null
     ): AcademicArchiveReport {
         val (startDate, endDate) = AcademicYearManager.getYearRange(academicYear)
 
@@ -139,7 +181,13 @@ object AcademicArchiveEngine {
             (completedHw.toFloat() / yearHomeworks.size.toFloat()) * 100f
         } else 0f
 
-        val personalContributions = yearContents.count { it.authorName.isNotBlank() && it.authorName == userFullName }
+        val personalContributions = yearContents.count {
+            if (!userId.isNullOrBlank() && it.createdBy.isNotBlank()) {
+                it.createdBy == userId
+            } else {
+                it.authorName.isNotBlank() && it.authorName == userFullName
+            }
+        }
 
         val s1Lessons = yearContents.count { AcademicYearManager.getSemesterForDate(it.studyDate, academicYear) == 1 }
         val s2Lessons = yearContents.count { AcademicYearManager.getSemesterForDate(it.studyDate, academicYear) == 2 }

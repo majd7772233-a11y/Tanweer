@@ -62,7 +62,10 @@ fun SettingsScreen(
     val notifySchedule by viewModel.notifySchedule.collectAsStateWithLifecycle()
     val notifyExams by viewModel.notifyExams.collectAsStateWithLifecycle()
     val hapticsEnabled by viewModel.hapticsEnabled.collectAsStateWithLifecycle()
-    val pendingOutboxCount by viewModel.repository.getPendingOutboxCount().collectAsStateWithLifecycle(initialValue = 0)
+    val pendingOnlyCount by viewModel.repository.getPendingOnlyOutboxCount().collectAsStateWithLifecycle(initialValue = 0)
+    val syncingCount by viewModel.repository.getSyncingOutboxCount().collectAsStateWithLifecycle(initialValue = 0)
+    val failedCount by viewModel.repository.getFailedOutboxCount().collectAsStateWithLifecycle(initialValue = 0)
+    val isDrainingQueue by viewModel.repository.mutationQueue.isDraining.collectAsStateWithLifecycle()
 
     var cacheSizeBytes by remember { mutableLongStateOf(0L) }
     var isClearingCache by remember { mutableStateOf(false) }
@@ -346,43 +349,101 @@ fun SettingsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SettingsToggleRow(
                         icon = Icons.Default.Sync,
-                        title = "المزامنة التلقائية الفورية",
-                        subtitle = "تحديث الواجبات والجدول عند فتح الشاشات والتبديل بينها",
+                        title = "المزامنة التلقائية (الخلفية وفورية)",
+                        subtitle = "تحديث الشاشات والرفع التلقائي في الخلفية. عند الإيقاف: تبقى المزامنة اليدوية والسحب للتحديث متاحة دائماً.",
                         checked = autoSyncEnabled,
                         onCheckedChange = { viewModel.setAutoSyncEnabled(it) }
                     )
 
                     HorizontalDivider(color = GlassBorderSubtle)
 
-                    // Honest Outbox Queue State
+                    // Honest Outbox Queue State (Differentiating PENDING, SYNCING, FAILED)
+                    val isActivelySyncing = syncingCount > 0 || isDrainingQueue
+                    val hasFailed = failedCount > 0
+                    val hasPending = pendingOnlyCount > 0
+
+                    val bannerBg = when {
+                        isActivelySyncing -> CyanGlow.copy(alpha = 0.25f)
+                        hasFailed -> RubyRed.copy(alpha = 0.15f)
+                        hasPending -> WarmAmber.copy(alpha = 0.15f)
+                        else -> EmeraldGreen.copy(alpha = 0.12f)
+                    }
+                    val bannerBorder = when {
+                        isActivelySyncing -> CyanAccent.copy(alpha = 0.6f)
+                        hasFailed -> RubyRed.copy(alpha = 0.5f)
+                        hasPending -> WarmAmber.copy(alpha = 0.5f)
+                        else -> EmeraldGreen.copy(alpha = 0.4f)
+                    }
+                    val bannerTextColor = when {
+                        isActivelySyncing -> CyanAccent
+                        hasFailed -> RubyRed
+                        hasPending -> WarmAmber
+                        else -> EmeraldGreen
+                    }
+                    val bannerIcon = when {
+                        isActivelySyncing -> "⏳"
+                        hasFailed -> "⚠️"
+                        hasPending -> "🟡"
+                        else -> "🟢"
+                    }
+                    val bannerTitle = when {
+                        isActivelySyncing -> "قائمة الانتظار السحابية: جاري المعالجة والإرسال حالياً..."
+                        hasFailed -> "قائمة الانتظار السحابية: $failedCount عمليات تعثر إرسالها"
+                        hasPending -> "قائمة الانتظار السحابية: $pendingOnlyCount عمليات بانتظار الرفع"
+                        else -> "قائمة الانتظار السحابية: متزامنة تماماً"
+                    }
+                    val bannerSubtitle = when {
+                        isActivelySyncing -> if (syncingCount > 0) "يتم رفع $syncingCount عملية وتأكيدها مع السيرفر الآن." else "جاري معالجة طابور المزامنة والتحديث الفوري..."
+                        hasFailed -> "تعثر إرسال بعض العمليات بسبب الاتصال أو الشبكة. يمكنك إعادة المحاولة الآن."
+                        hasPending -> "هناك عمليات محفوظة محلياً بانتظار رفعها للسيرفر عند توفر الاتصال."
+                        else -> "كافة تعديلاتك وواجباتك متزامنة ومؤكدة على السيرفر."
+                    }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (pendingOutboxCount == 0) EmeraldGreen.copy(alpha = 0.12f) else WarmAmber.copy(alpha = 0.15f))
-                            .border(1.dp, if (pendingOutboxCount == 0) EmeraldGreen.copy(alpha = 0.4f) else WarmAmber.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .background(bannerBg)
+                            .border(1.dp, bannerBorder, RoundedCornerShape(12.dp))
                             .padding(10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(if (pendingOutboxCount == 0) "🟢" else "🟡", fontSize = 14.sp)
+                                Text(bannerIcon, fontSize = 14.sp)
                                 Text(
-                                    text = if (pendingOutboxCount == 0) "قائمة الانتظار السحابية: متزامنة تماماً" else "قائمة الانتظار السحابية (Outbox): $pendingOutboxCount عمليات معلقة",
+                                    text = bannerTitle,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (pendingOutboxCount == 0) EmeraldGreen else WarmAmber
+                                    color = bannerTextColor
                                 )
                             }
                             Text(
-                                text = if (pendingOutboxCount == 0) "كافة تعديلاتك وواجباتك متزامنة ومؤكدة على السيرفر." else "هناك عمليات محفوظة محلياً بانتظار رفعها للسيرفر عند توفر الاتصال.",
+                                text = bannerSubtitle,
                                 fontSize = 11.sp,
                                 color = TextSecondary
                             )
                         }
 
-                        if (pendingOutboxCount > 0) {
+                        if (isActivelySyncing) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = CyanAccent,
+                                strokeWidth = 2.dp
+                            )
+                        } else if (hasFailed) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            GlassOutlinedButton(
+                                text = "إعادة المحاولة 🔄",
+                                onClick = {
+                                    viewModel.repository.mutationQueue.triggerDrain()
+                                    Toast.makeText(context, "جاري إعادة محاولة إرسال العمليات المتعثرة...", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.height(32.dp)
+                            )
+                        } else if (hasPending) {
                             Spacer(modifier = Modifier.width(6.dp))
                             GlassOutlinedButton(
                                 text = "إرسال 📤",
@@ -596,27 +657,51 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("الملفات المؤقتة والكاش", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("الملفات المؤقتة والذاكرة المخبئية", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                         Text(
                             text = "الحجم الحالي: ${(cacheSizeBytes / (1024 * 1024.0)).let { "%.2f".format(it) }} ميجابايت",
                             fontSize = 11.sp,
                             color = CyanAccent
                         )
+                        Text(
+                            text = "تنظيف الكاش يحذف ملفات التصفح والصور المؤقتة فقط، دون المساس بالدروس أو المحتوى المحفوظ للاستخدام دون اتصال.",
+                            fontSize = 10.sp,
+                            color = TextSecondary
+                        )
                     }
 
                     GlassOutlinedButton(
                         text = if (isClearingCache) "جاري التنظيف..." else "تنظيف الكاش 🧹",
+                        enabled = !isClearingCache,
                         onClick = {
                             isClearingCache = true
                             coroutineScope.launch(Dispatchers.IO) {
+                                var freedBytes = 0L
+                                var failedCount = 0
                                 try {
-                                    context.cacheDir.deleteRecursively()
+                                    val files = context.cacheDir.listFiles() ?: emptyArray()
+                                    for (f in files) {
+                                        val len = if (f.isFile) f.length() else f.walkTopDown().filter { it.isFile }.map { it.length() }.sum()
+                                        val deleted = f.deleteRecursively()
+                                        if (deleted) {
+                                            freedBytes += len
+                                        } else {
+                                            failedCount++
+                                        }
+                                    }
                                     context.cacheDir.mkdirs()
-                                } catch (_: Exception) {}
+                                } catch (_: Exception) {
+                                    failedCount++
+                                }
                                 withContext(Dispatchers.Main) {
                                     calculateCacheSize()
                                     isClearingCache = false
-                                    Toast.makeText(context, "تم تنظيف الذاكرة المؤقتة بنجاح", Toast.LENGTH_SHORT).show()
+                                    if (failedCount == 0) {
+                                        val freedMb = String.format(java.util.Locale.US, "%.1f", freedBytes / (1024.0 * 1024.0))
+                                        Toast.makeText(context, "تم تنظيف الذاكرة المؤقتة بنجاح (تم تحرير $freedMb ميجابايت) ✓", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "تعذر حذف بعض الملفات المؤقتة لأنها قيد الاستخدام حالياً ⚠️", Toast.LENGTH_LONG).show()
+                                    }
                                 }
                             }
                         }

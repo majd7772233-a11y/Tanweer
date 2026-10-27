@@ -4,6 +4,7 @@ import { mapScheduleSlot } from '../lib/mappers';
 import { requireGroupMember, requireScheduleManager } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
+import { sanitizePublicRole } from '../lib/roles';
 
 export interface ScheduleSlotInput {
   dayOfWeek: number;
@@ -475,9 +476,9 @@ export async function handleVoteScheduleProposal(
     `UPDATE schedule_proposals SET votes_for = ?, votes_against = ? WHERE id = ?`
   ).bind(votesFor, votesAgainst, proposalId).run();
 
-  // Check group membership count to determine consensus threshold (Point 14)
+  // Check group membership count to determine consensus threshold (Point 14 & 20: ACTIVE members only)
   const memberCountResult = await env.DB.prepare(
-    `SELECT COUNT(*) as total FROM group_members WHERE group_id = ?`
+    `SELECT COUNT(*) as total FROM group_members WHERE group_id = ? AND status = 'ACTIVE'`
   ).bind(proposal.group_id).first<{ total: number }>();
   const totalMembers = memberCountResult?.total || 1;
 
@@ -534,6 +535,18 @@ export async function applyScheduleProposalToActiveSchedule(
   resolvedByUserId: string,
   env: Env
 ): Promise<number> {
+  // 1. Idempotency check: verify if proposal is already resolved to prevent duplicate versions
+  const freshProposal = await env.DB.prepare(
+    `SELECT sp.status, sv.version_number
+     FROM schedule_proposals sp
+     LEFT JOIN schedule_versions sv ON sv.group_id = sp.group_id AND sv.is_active = 1
+     WHERE sp.id = ?`
+  ).bind(proposal.id).first<{ status: string; version_number: number | null }>();
+
+  if (freshProposal && freshProposal.status === 'ACCEPTED') {
+    return freshProposal.version_number || 1;
+  }
+
   const currentVersion = await env.DB.prepare(
     `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
   ).bind(proposal.group_id).first<{ id: string; version_number: number }>();
@@ -543,23 +556,19 @@ export async function applyScheduleProposalToActiveSchedule(
   const now = Date.now();
   const today = new Date().toISOString().slice(0, 10);
 
-  // Deactivate old active version
-  if (currentVersion) {
-    await env.DB.prepare(
-      `UPDATE schedule_versions SET is_active = 0, valid_until = ? WHERE id = ?`
-    ).bind(today, currentVersion.id).run();
-  }
-
-  // Create new active version
-  await env.DB.prepare(
-    `INSERT INTO schedule_versions (id, group_id, version_number, valid_from, is_active, created_at, created_by)
-     VALUES (?, ?, ?, ?, 1, ?, ?)`
-  ).bind(newVersionId, proposal.group_id, newVersionNum, today, now, resolvedByUserId).run();
-
   let preservedStartTime: string | null = null;
   let preservedEndTime: string | null = null;
 
-  // Copy existing slots to new version, replacing the proposed slot
+  type OldSlotItem = {
+    id: string;
+    day_of_week: number;
+    slot_order: number;
+    subject_id: string;
+    start_time: string | null;
+    end_time: string | null;
+  };
+  const slotsToCopy: OldSlotItem[] = [];
+
   if (currentVersion) {
     const oldSlots = await env.DB.prepare(
       `SELECT day_of_week, slot_order, subject_id, start_time, end_time FROM schedule_slots WHERE version_id = ?`
@@ -575,27 +584,68 @@ export async function applyScheduleProposalToActiveSchedule(
       if (s.day_of_week === proposal.day_of_week && s.slot_order === proposal.slot_order) {
         preservedStartTime = s.start_time;
         preservedEndTime = s.end_time;
-        continue; // skip the one being replaced
+        continue; // skip the slot being replaced
       }
-      const newSlotId = generateId('slot');
-      await env.DB.prepare(
-        `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).bind(newSlotId, newVersionId, s.day_of_week, s.slot_order, s.subject_id, s.start_time, s.end_time).run();
+      slotsToCopy.push({
+        id: generateId('slot'),
+        day_of_week: s.day_of_week,
+        slot_order: s.slot_order,
+        subject_id: s.subject_id,
+        start_time: s.start_time,
+        end_time: s.end_time,
+      });
     }
   }
 
-  // Insert the approved new subject slot while preserving previous custom times
   const appliedSlotId = generateId('slot');
-  await env.DB.prepare(
-    `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).bind(appliedSlotId, newVersionId, proposal.day_of_week, proposal.slot_order, proposal.new_subject_id, preservedStartTime, preservedEndTime).run();
 
-  // Mark proposal as ACCEPTED
-  await env.DB.prepare(
-    `UPDATE schedule_proposals SET status = 'ACCEPTED' WHERE id = ?`
-  ).bind(proposal.id).run();
+  // Build atomic transaction batch (Point 22)
+  const batchStatements: D1PreparedStatement[] = [];
+
+  // A. Deactivate previous version
+  if (currentVersion) {
+    batchStatements.push(
+      env.DB.prepare(
+        `UPDATE schedule_versions SET is_active = 0, valid_until = ? WHERE id = ?`
+      ).bind(today, currentVersion.id)
+    );
+  }
+
+  // B. Insert new active schedule version
+  batchStatements.push(
+    env.DB.prepare(
+      `INSERT INTO schedule_versions (id, group_id, version_number, valid_from, is_active, created_at, created_by)
+       VALUES (?, ?, ?, ?, 1, ?, ?)`
+    ).bind(newVersionId, proposal.group_id, newVersionNum, today, now, resolvedByUserId)
+  );
+
+  // C. Copy existing unchanged slots
+  for (const slot of slotsToCopy) {
+    batchStatements.push(
+      env.DB.prepare(
+        `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(slot.id, newVersionId, slot.day_of_week, slot.slot_order, slot.subject_id, slot.start_time, slot.end_time)
+    );
+  }
+
+  // D. Insert replaced slot
+  batchStatements.push(
+    env.DB.prepare(
+      `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(appliedSlotId, newVersionId, proposal.day_of_week, proposal.slot_order, proposal.new_subject_id, preservedStartTime, preservedEndTime)
+  );
+
+  // E. Atomically resolve proposal to ACCEPTED
+  batchStatements.push(
+    env.DB.prepare(
+      `UPDATE schedule_proposals SET status = 'ACCEPTED' WHERE id = ? AND status = 'PENDING'`
+    ).bind(proposal.id)
+  );
+
+  // Execute all operations atomically in a single D1 transaction
+  await env.DB.batch(batchStatements);
 
   return newVersionNum;
 }
@@ -707,7 +757,7 @@ export async function handleGetScheduleVersions(groupId: string, user: UserConte
       createdAt: v.created_at,
       createdBy: v.created_by,
       creatorName: v.creator_name || 'عضو في الشعبة',
-      creatorRole: v.creator_role || 'STUDENT',
+      creatorRole: sanitizePublicRole(v.creator_role || 'STUDENT'),
     })),
   });
 }

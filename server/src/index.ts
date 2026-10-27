@@ -42,6 +42,14 @@ import {
   handleDeleteDashboardChatMessage,
   handleGetDashboardCorrections,
   handleExecuteSql,
+  handleGetDashboardContentDetail,
+  handleGetDashboardMedia,
+  handleGetDashboardUserDetail,
+  handlePreviewPurge,
+  handleExecutePurge,
+  handleDashboardGetHolidays,
+  handleDashboardCreateHoliday,
+  handleDashboardDeleteHoliday,
 } from './services/dashboard';
 export { GroupChatDO } from './realtime/GroupChatDO';
 
@@ -245,6 +253,34 @@ export default {
       }
       if (url.pathname === '/api/dashboard/corrections' && request.method === 'GET') {
         return handleGetDashboardCorrections(env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/users/') && !url.pathname.includes('/role') && !url.pathname.includes('/disable') && !url.pathname.includes('/enable') && !url.pathname.includes('/revoke-sessions') && request.method === 'GET') {
+        const userId = url.pathname.split('/')[4];
+        return handleGetDashboardUserDetail(userId, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/contents/') && !url.pathname.endsWith('/pin') && request.method === 'GET') {
+        const contentId = url.pathname.split('/')[4];
+        return handleGetDashboardContentDetail(contentId, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/media/') && request.method === 'GET') {
+        const mediaKey = url.pathname.substring('/api/dashboard/media/'.length);
+        return handleGetDashboardMedia(mediaKey, env);
+      }
+      if (url.pathname === '/api/dashboard/system/purge/preview' && request.method === 'POST') {
+        return handlePreviewPurge(auth.ownerId, env);
+      }
+      if (url.pathname === '/api/dashboard/system/purge' && request.method === 'POST') {
+        return handleExecutePurge(request, auth.ownerId, env);
+      }
+      if (url.pathname === '/api/dashboard/holidays' && request.method === 'GET') {
+        return handleDashboardGetHolidays(env);
+      }
+      if (url.pathname === '/api/dashboard/holidays' && request.method === 'POST') {
+        return handleDashboardCreateHoliday(request, auth.ownerId, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/holidays/') && request.method === 'DELETE') {
+        const holId = url.pathname.split('/')[4];
+        return handleDashboardDeleteHoliday(holId, auth.ownerId, env);
       }
       if (url.pathname === '/api/dashboard/sql' && request.method === 'POST') {
         return handleExecuteSql(request, auth.ownerId, env);

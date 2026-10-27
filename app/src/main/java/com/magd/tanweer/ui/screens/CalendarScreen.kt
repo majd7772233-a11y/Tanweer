@@ -48,6 +48,13 @@ fun CalendarScreen(
     var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
     var showAddActionSheet by remember { mutableStateOf(false) }
 
+    var showAddHolidayDialog by remember { mutableStateOf(false) }
+    var holidayTitle by remember { mutableStateOf("") }
+    var holidayReason by remember { mutableStateOf("") }
+    var isSchoolWideHoliday by remember { mutableStateOf(true) }
+    var holidayError by remember { mutableStateOf<String?>(null) }
+    var isSubmittingHoliday by remember { mutableStateOf(false) }
+
     var activeViewingContent by remember { mutableStateOf<ContentItem?>(null) }
     var activeViewingHomework by remember { mutableStateOf<HomeworkItem?>(null) }
     var activeViewingExam by remember { mutableStateOf<ExamItem?>(null) }
@@ -64,8 +71,17 @@ fun CalendarScreen(
         }
     }
 
+    LaunchedEffect(activeGroupId, selectedDateStr) {
+        if (activeGroupId.isNotBlank() && selectedDateStr.isNotBlank()) {
+            viewModel.syncDayDetails(activeGroupId, selectedDateStr)
+        }
+    }
+
     // Day content queries
     val dayContents by viewModel.repository.getDayContents(activeGroupId, selectedDateStr)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val allContents by viewModel.repository.getAllContents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val homeworks by viewModel.repository.getHomeworks(activeGroupId)
@@ -90,7 +106,7 @@ fun CalendarScreen(
     }
 
     // Days in current month
-    val daysInMonth = remember(currentCalendar.timeInMillis, exams, homeworks, events) {
+    val daysInMonth = remember(currentCalendar.timeInMillis, exams, homeworks, events, allContents) {
         val cal = currentCalendar.clone() as Calendar
         cal.set(Calendar.DAY_OF_MONTH, 1)
         val maxDays = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
@@ -113,9 +129,11 @@ fun CalendarScreen(
                     dateStr = dStr,
                     isCurrentMonth = true,
                     isToday = (dStr == todayStr),
+                    hasLesson = allContents.any { it.studyDate == dStr },
                     hasExam = exams.any { it.examDate == dStr },
-                    hasHomework = homeworks.any { it.dueDate == dStr },
-                    hasEvent = events.any { it.eventDate == dStr }
+                    hasHomework = homeworks.any { it.studyDate == dStr || it.dueDate == dStr },
+                    hasEvent = events.any { it.eventDate == dStr },
+                    hasHoliday = events.any { it.eventDate == dStr && it.category == "HOLIDAY" }
                 )
             )
         }
@@ -186,8 +204,25 @@ fun CalendarScreen(
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                val curMonthPrefix = remember(currentCalendar.timeInMillis) { monthQueryFormat.format(currentCalendar.time) }
+                val monthLessons = remember(allContents, curMonthPrefix) {
+                    allContents.count { it.studyDate?.startsWith(curMonthPrefix) == true }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(EmeraldGreen.copy(alpha = 0.12f))
+                        .border(1.dp, EmeraldGreen.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                        .padding(vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("📖 $monthLessons دروس", fontSize = 11.sp, color = EmeraldGreen, fontWeight = FontWeight.Bold)
+                }
+
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -214,7 +249,7 @@ fun CalendarScreen(
 
                 Box(
                     modifier = Modifier
-                        .weight(1.2f)
+                        .weight(1.1f)
                         .clip(RoundedCornerShape(10.dp))
                         .background(PurpleAccent.copy(alpha = 0.15f))
                         .border(1.dp, PurpleAccent.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
@@ -276,6 +311,7 @@ fun CalendarScreen(
                                         when {
                                             isSelected -> CyanAccent
                                             item.isToday -> CyanGlow
+                                            item.hasHoliday -> EmeraldGreen.copy(alpha = 0.22f)
                                             else -> Color.Transparent
                                         }
                                     )
@@ -284,6 +320,7 @@ fun CalendarScreen(
                                         when {
                                             isSelected -> CyanAccent
                                             item.isToday -> CyanAccent
+                                            item.hasHoliday -> EmeraldGreen.copy(alpha = 0.8f)
                                             else -> Color.Transparent
                                         },
                                         CircleShape
@@ -291,6 +328,7 @@ fun CalendarScreen(
                                     .clickable {
                                         selectedDateStr = item.dateStr
                                         viewModel.setSelectedDate(item.dateStr)
+                                        viewModel.syncDayDetails(activeGroupId, item.dateStr)
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
@@ -298,8 +336,12 @@ fun CalendarScreen(
                                     Text(
                                         text = item.dayNumber.toString(),
                                         fontSize = 13.sp,
-                                        fontWeight = if (isSelected || item.isToday) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSelected) TextOnAccent else TextPrimary
+                                        fontWeight = if (isSelected || item.isToday || item.hasHoliday) FontWeight.Bold else FontWeight.Normal,
+                                        color = when {
+                                            isSelected -> TextOnAccent
+                                            item.hasHoliday -> EmeraldGreen
+                                            else -> TextPrimary
+                                        }
                                     )
                                     // Activity indicators
                                     Row(
@@ -307,6 +349,22 @@ fun CalendarScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.padding(top = 2.dp)
                                     ) {
+                                        if (item.hasHoliday) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(5.dp)
+                                                    .clip(CircleShape)
+                                                    .background(EmeraldGreen)
+                                            )
+                                        }
+                                        if (item.hasLesson) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(4.dp)
+                                                    .clip(CircleShape)
+                                                    .background(EmeraldGreen)
+                                            )
+                                        }
                                         if (item.hasExam) {
                                             Box(
                                                 modifier = Modifier
@@ -323,7 +381,7 @@ fun CalendarScreen(
                                                     .background(WarmAmber)
                                             )
                                         }
-                                        if (item.hasEvent) {
+                                        if (item.hasEvent && !item.hasHoliday) {
                                             Box(
                                                 modifier = Modifier
                                                     .size(4.dp)
@@ -372,6 +430,61 @@ fun CalendarScreen(
                     },
                     modifier = Modifier.height(36.dp)
                 )
+            }
+        }
+
+        // Selected Day Holiday Banner (Point 35)
+        val selectedDayHoliday = dayEvents.find { it.category == "HOLIDAY" }
+        if (selectedDayHoliday != null) {
+            item {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    borderColor = EmeraldGreen.copy(alpha = 0.7f),
+                    backgroundColor = EmeraldGreen.copy(alpha = 0.12f)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("🌴", fontSize = 32.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "إجازة مدرسية رسمية",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldGreen
+                                )
+                                GlassPill(
+                                    text = if (selectedDayHoliday.groupId == "all") "كامل المدرسة 🏫" else "الشعبة فقط",
+                                    color = EmeraldGreen,
+                                    bgColor = EmeraldGreen.copy(alpha = 0.2f)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = selectedDayHoliday.title,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                            if (!selectedDayHoliday.description.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "المبرر الإداري: ${selectedDayHoliday.description}",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -723,8 +836,153 @@ fun CalendarScreen(
                         GlassPill(text = "فعالية", color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
                     }
                 }
+
+                if (currentUser?.role in listOf("TEACHER", "ADMIN", "SYSTEM_OWNER")) {
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = GlassSurface,
+                        onClick = {
+                            showAddActionSheet = false
+                            holidayTitle = ""
+                            holidayReason = ""
+                            holidayError = null
+                            showAddHolidayDialog = true
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text("🌴", fontSize = 24.sp)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("إعلان إجازة مدرسية رسمية", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+                                Text("تعيين هذا اليوم كإجازة مع توثيق السبب والمبرر الإلزامي", fontSize = 11.sp, color = TextSecondary)
+                            }
+                            GlassPill(text = "إجازة", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
+                        }
+                    }
+                }
             }
         }
+    }
+
+    if (showAddHolidayDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isSubmittingHoliday) showAddHolidayDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("🌴", fontSize = 22.sp)
+                    Text("إعلان إجازة مدرسية رسمية", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "التاريخ: ${TanweerViewModel.getFormattedArabicDate(selectedDateStr)} ($selectedDateStr)",
+                        fontSize = 12.sp,
+                        color = CyanAccent
+                    )
+
+                    OutlinedTextField(
+                        value = holidayTitle,
+                        onValueChange = { holidayTitle = it },
+                        label = { Text("عنوان الإجازة (مثلاً: إجازة رسمية / يوم المعلم)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = holidayReason,
+                        onValueChange = { holidayReason = it },
+                        label = { Text("السبب والمبرر الإداري الرسمي (إلزامي) ⚠️") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 4
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isSchoolWideHoliday = !isSchoolWideHoliday }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("نطاق الإجازة", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(
+                                if (isSchoolWideHoliday) "كامل المدرسة (جميع الشعب والمراحل)" else "شعبتي الحالية فقط",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+                        Switch(
+                            checked = isSchoolWideHoliday,
+                            onCheckedChange = { isSchoolWideHoliday = it }
+                        )
+                    }
+
+                    if (holidayError != null) {
+                        Text(
+                            text = holidayError ?: "",
+                            color = RubyRed,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (holidayTitle.isBlank()) {
+                            holidayError = "الرجاء إدخال عنوان الإجازة"
+                            return@Button
+                        }
+                        if (holidayReason.isBlank()) {
+                            holidayError = "سبب ومبرر الإجازة إلزامي لاعتمادها وتوثيقها"
+                            return@Button
+                        }
+                        holidayError = null
+                        isSubmittingHoliday = true
+                        viewModel.createHoliday(
+                            title = holidayTitle.trim(),
+                            reason = holidayReason.trim(),
+                            eventDate = selectedDateStr,
+                            isSchoolWide = isSchoolWideHoliday
+                        ) { result ->
+                            isSubmittingHoliday = false
+                            if (result.isSuccess) {
+                                showAddHolidayDialog = false
+                            } else {
+                                holidayError = result.exceptionOrNull()?.localizedMessage ?: "فشلت عملية إنشاء الإجازة"
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
+                    enabled = !isSubmittingHoliday
+                ) {
+                    if (isSubmittingHoliday) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = TextOnAccent, strokeWidth = 2.dp)
+                    } else {
+                        Text("اعتماد وتثبيت الإجازة 🌴", color = TextOnAccent)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showAddHolidayDialog = false },
+                    enabled = !isSubmittingHoliday
+                ) {
+                    Text("إلغاء", color = TextSecondary)
+                }
+            },
+            containerColor = MidnightSurface,
+            shape = RoundedCornerShape(16.dp)
+        )
     }
 }
 
@@ -733,7 +991,9 @@ data class CalendarDayItem(
     val dateStr: String,
     val isCurrentMonth: Boolean,
     val isToday: Boolean = false,
+    val hasLesson: Boolean = false,
     val hasExam: Boolean = false,
     val hasHomework: Boolean = false,
-    val hasEvent: Boolean = false
+    val hasEvent: Boolean = false,
+    val hasHoliday: Boolean = false
 )

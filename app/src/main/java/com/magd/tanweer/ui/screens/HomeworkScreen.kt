@@ -371,7 +371,11 @@ fun HomeworkScreen(
                         onOpenBookPage = if (!hw.pageNumbers.isNullOrBlank()) {
                             {
                                 val matchingBook = books.find { it.subjectId == hw.subjectId }
-                                val pageNum = hw.pageNumbers.filter { it.isDigit() }.toIntOrNull() ?: 1
+                                val pageNum = Regex("""\d+""")
+                                    .find(hw.pageNumbers.orEmpty())
+                                    ?.value
+                                    ?.toIntOrNull()
+                                    ?: 1
                                 if (matchingBook != null) {
                                     viewModel.openBookInPdfReader(matchingBook, targetPage = (pageNum - 1).coerceAtLeast(0))
                                 } else {
@@ -954,6 +958,7 @@ fun getRemainingTimeText(dueDateStr: String): String {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddHomeworkDialog(
     subjects: List<SubjectItem>,
@@ -972,6 +977,58 @@ fun AddHomeworkDialog(
     var dueDate by remember(initialDueDate) { mutableStateOf(initialDueDate ?: TanweerViewModel.getTodayDateString()) }
     var taskType by remember { mutableStateOf("HOMEWORK") }
     var scannedPages by remember { mutableStateOf<List<HomeworkScanPage>>(emptyList()) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = remember(dueDate) {
+            try {
+                SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.parse(dueDate)?.time
+            } catch (_: Exception) {
+                System.currentTimeMillis()
+            }
+        }
+    )
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }
+                        dueDate = sdf.format(Date(millis))
+                    }
+                    showDatePicker = false
+                }) {
+                    Text("تأكيد", color = CyanAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("إلغاء", color = TextSecondary)
+                }
+            },
+            colors = DatePickerDefaults.colors(
+                containerColor = MidnightSurface
+            )
+        ) {
+            DatePicker(
+                state = datePickerState,
+                colors = DatePickerDefaults.colors(
+                    containerColor = MidnightSurface,
+                    titleContentColor = CyanAccent,
+                    headlineContentColor = TextPrimary,
+                    selectedDayContainerColor = CyanAccent,
+                    selectedDayContentColor = TextOnAccent,
+                    todayDateBorderColor = CyanAccent
+                )
+            )
+        }
+    }
 
     fun processPageItem(page: HomeworkScanPage, onUpdated: (HomeworkScanPage) -> Unit) {
         scope.launch {
@@ -1207,12 +1264,47 @@ fun AddHomeworkDialog(
                     placeholder = "ملاحظات المعلم أو شروط ومواصفات الحل..."
                 )
 
-                GlassTextField(
-                    value = dueDate,
-                    onValueChange = { dueDate = it },
-                    label = "موعد التسليم (YYYY-MM-DD)",
-                    placeholder = "2026-09-30"
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "موعد التسليم (تاريخ تقويمي معتمد) *",
+                        style = AppTypography.FieldLabel,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MidnightSurface)
+                            .border(1.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
+                            .clickable { showDatePicker = true }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DateRange,
+                                contentDescription = null,
+                                tint = CyanAccent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = dueDate,
+                                style = AppTypography.BodyBold,
+                                color = TextPrimary
+                            )
+                        }
+                        GlassPill(
+                            text = "تحديد التاريخ 📅",
+                            color = CyanAccent,
+                            bgColor = CyanGlow
+                        )
+                    }
+                }
 
                 // IMAGE ATTACHMENT SECTION
                 Column(

@@ -97,6 +97,7 @@ export function mapContent(r: any, media: any[] = []) {
     type: r.type ?? 'LESSON',
     title: r.title,
     description: r.description ?? null,
+    createdBy: r.created_by ?? r.createdBy ?? '',
     authorName: r.author_name ?? r.authorName ?? '',
     authorGradeSection: r.author_grade_section ?? r.authorGradeSection ?? '',
     viewsCount: Number(r.views_count ?? r.viewsCount ?? 0),

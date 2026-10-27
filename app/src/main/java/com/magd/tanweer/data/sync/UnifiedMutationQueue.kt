@@ -29,11 +29,12 @@ data class SyncErrorInfo(
  * Provides a single, deterministic engine for all offline actions, mutations,
  * retries with exponential backoff, chat timeout reconciliation, and real error reporting.
  */
-class UnifiedMutationQueue(
+class UnifiedMutationQueue private constructor(
     private val db: TanweerDatabase,
     private val api: TanweerApiService = NetworkModule.apiService
 ) {
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var periodicJob: Job? = null
 
     private val _isDraining = MutableStateFlow(false)
     val isDraining: StateFlow<Boolean> = _isDraining.asStateFlow()
@@ -43,16 +44,77 @@ class UnifiedMutationQueue(
 
     private val outboxDao: OutboxDao = db.outboxDao()
 
+    @Volatile
+    var isAutoSyncEnabled: Boolean = true
+
     var onRetryHomework: (suspend (String) -> Result<Unit>)? = null
     var onRetryContent: (suspend (String) -> Result<Unit>)? = null
 
     init {
-        // Periodic background drain and reconciliation
-        scope.launch {
+        start()
+    }
+
+    @Synchronized
+    fun start() {
+        if (periodicJob?.isActive == true) return
+        if (!scope.isActive) {
+            scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        }
+        periodicJob = scope.launch {
             while (isActive) {
                 delay(30_000) // Every 30 seconds
-                drainQueue()
-                reconcileChatMessages()
+                if (isAutoSyncEnabled) {
+                    drainQueue()
+                    reconcileChatMessages()
+                }
+            }
+        }
+    }
+
+    @Synchronized
+    fun stop() {
+        periodicJob?.cancel()
+        periodicJob = null
+        _isDraining.value = false
+    }
+
+    companion object {
+        @Volatile
+        private var INSTANCE: UnifiedMutationQueue? = null
+
+        fun getInstance(
+            db: TanweerDatabase,
+            api: TanweerApiService = NetworkModule.apiService
+        ): UnifiedMutationQueue {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: UnifiedMutationQueue(db, api).also { INSTANCE = it }
+            }
+        }
+
+        fun normalizeLegacyOperation(item: OutboxEntity): OutboxEntity {
+            val payload = runCatching { JSONObject(item.payloadJson) }.getOrNull()
+
+            val normalizedType = when {
+                item.entityType == "HOMEWORK" && (payload?.has("isCompleted") == true || item.operation == "TOGGLE" || item.operation == "UPDATE") -> "HOMEWORK_TOGGLE"
+                item.entityType == "HOMEWORK" && (item.operation == "CREATE" || payload?.has("title") == true) -> "HOMEWORK_CREATE"
+                item.entityType == "EXAM" && (payload?.has("isCompleted") == true || item.operation == "TOGGLE") -> "EXAM_TOGGLE"
+                item.entityType == "EXAM" && item.operation == "DELETE" -> "EXAM_DELETE"
+                item.entityType == "EXAM" && (item.operation == "CREATE" || payload?.has("examDate") == true) -> "EXAM_CREATE"
+                item.entityType == "CONTENT" || item.entityType == "LESSON" -> "LESSON_CREATE"
+                item.entityType == "COMMENT" -> "ISSUE_COMMENT_CREATE"
+                item.entityType == "ISSUE" -> "ISSUE_CREATE"
+                item.entityType == "EVENT" -> "EVENT_CREATE"
+                item.entityType == "CORRECTION" -> "CORRECTION_REQUEST"
+                item.entityType == "SCHEDULE_SLOT" && item.operation == "DELETE" -> "SCHEDULE_SLOT_DELETE"
+                item.entityType == "SCHEDULE_SLOT" -> "SCHEDULE_SLOT_UPDATE"
+                item.entityType == "CHAT" || item.entityType == "MESSAGE" -> "CHAT_MESSAGE"
+                else -> item.entityType
+            }
+
+            return if (normalizedType != item.entityType) {
+                item.copy(entityType = normalizedType)
+            } else {
+                item
             }
         }
     }
@@ -77,7 +139,9 @@ class UnifiedMutationQueue(
             createdAt = System.currentTimeMillis()
         )
         outboxDao.insertOutbox(outboxItem)
-        triggerDrain()
+        if (isAutoSyncEnabled) {
+            triggerDrain()
+        }
         outboxItem
     }
 
@@ -88,15 +152,18 @@ class UnifiedMutationQueue(
     }
 
     /**
-     * Drains all pending items in the outbox queue using unified execution and exponential backoff.
+     * Drains all pending items in the outbox queue using unified execution and atomic reservation.
      */
-    suspend fun drainQueue() = withContext(Dispatchers.IO) {
-        if (_isDraining.value) return@withContext
+    suspend fun drainQueue(): Int = withContext(Dispatchers.IO) {
+        if (_isDraining.value) return@withContext 0
         _isDraining.value = true
+        var processedCount = 0
 
         try {
             val pendingItems = outboxDao.getPendingItemsSync()
-            for (item in pendingItems) {
+            for (rawItem in pendingItems) {
+                val item = normalizeLegacyOperation(rawItem)
+
                 // Exponential backoff check: 2s, 4s, 8s, 16s, max 60s
                 val backoffMs = (1000L * (1 shl item.attempts.coerceAtMost(5))).coerceIn(2000L, 60_000L)
                 val now = System.currentTimeMillis()
@@ -104,7 +171,14 @@ class UnifiedMutationQueue(
                     continue // Skip until backoff window elapses
                 }
 
-                executeMutation(item)
+                // Atomic reservation: only proceed if this worker successfully claims the item
+                val claimed = outboxDao.claimPendingItem(item.id, now)
+                if (claimed <= 0) {
+                    continue // Already claimed by concurrent worker
+                }
+
+                val success = executeMutation(item)
+                if (success) processedCount++
             }
         } catch (e: Exception) {
             Log.e("UnifiedMutationQueue", "Error during outbox drain", e)
@@ -118,10 +192,11 @@ class UnifiedMutationQueue(
         } finally {
             _isDraining.value = false
         }
+        processedCount
     }
 
-    private suspend fun executeMutation(item: OutboxEntity) {
-        try {
+    private suspend fun executeMutation(item: OutboxEntity): Boolean {
+        return try {
             when (item.entityType) {
                 "CHAT_MESSAGE" -> {
                     val obj = JSONObject(item.payloadJson)
@@ -131,8 +206,10 @@ class UnifiedMutationQueue(
                     if (res.isSuccessful) {
                         db.chatDao().updateMessageStatus(item.entityId, "SENT")
                         outboxDao.deleteOutbox(item.id)
+                        true
                     } else {
                         handleMutationFailure(item, "خطأ في إرسال الرسالة (${res.code()})")
+                        false
                     }
                 }
                 "HOMEWORK_UPLOAD", "HOMEWORK_CREATE" -> {
@@ -141,11 +218,14 @@ class UnifiedMutationQueue(
                         val res = retryFunc(item.entityId)
                         if (res.isSuccess) {
                             outboxDao.deleteOutbox(item.id)
+                            true
                         } else {
                             handleMutationFailure(item, res.exceptionOrNull()?.message ?: "فشل مزامنة الواجب مع الخادم")
+                            false
                         }
                     } else {
                         handleMutationFailure(item, "محرك رفع الواجبات غير مهيأ بعد")
+                        false
                     }
                 }
                 "CONTENT_UPLOAD", "LESSON_CREATE" -> {
@@ -154,19 +234,60 @@ class UnifiedMutationQueue(
                         val res = retryFunc(item.entityId)
                         if (res.isSuccess) {
                             outboxDao.deleteOutbox(item.id)
+                            true
                         } else {
                             handleMutationFailure(item, res.exceptionOrNull()?.message ?: "فشل مزامنة الدرس مع الخادم")
+                            false
                         }
                     } else {
                         handleMutationFailure(item, "محرك رفع الدروس غير مهيأ بعد")
+                        false
                     }
                 }
                 "HOMEWORK_TOGGLE" -> {
-                    val res = api.toggleHomework(item.entityId)
+                    val obj = runCatching { JSONObject(item.payloadJson) }.getOrNull()
+                    val isCompleted = if (obj != null && obj.has("isCompleted")) obj.optBoolean("isCompleted") else null
+                    val req = isCompleted?.let { com.magd.tanweer.data.remote.ToggleCompletionRequest(it) }
+                    val res = api.toggleHomework(item.entityId, req)
                     if (res.isSuccessful || res.code() == 404) {
                         outboxDao.deleteOutbox(item.id)
+                        true
+                    } else if (res.code() in listOf(401, 403)) {
+                        val currentUserId = db.userDao().getUserSync()?.id ?: ""
+                        if (currentUserId.isNotBlank() && isCompleted != null) {
+                            if (isCompleted) {
+                                db.homeworkDao().deleteCompletion(item.entityId, currentUserId)
+                            } else {
+                                db.homeworkDao().insertCompletion(com.magd.tanweer.data.local.HomeworkCompletionEntity(homeworkId = item.entityId, userId = currentUserId))
+                            }
+                        }
+                        outboxDao.deleteOutbox(item.id)
+                        false
                     } else {
                         handleMutationFailure(item, "فشل مزامنة حالة الواجب مع الخادم (${res.code()})")
+                        false
+                    }
+                }
+                "EXAM_TOGGLE" -> {
+                    val obj = runCatching { JSONObject(item.payloadJson) }.getOrNull()
+                    val isCompleted = if (obj != null && obj.has("isCompleted")) obj.optBoolean("isCompleted") else null
+                    val req = isCompleted?.let { com.magd.tanweer.data.remote.ToggleCompletionRequest(it) }
+                    val res = api.toggleExamCompletion(item.entityId, req)
+                    if (res.isSuccessful || res.code() == 404) {
+                        if (res.isSuccessful && isCompleted != null) {
+                            db.examDao().updateExamCompletion(item.entityId, isCompleted)
+                        }
+                        outboxDao.deleteOutbox(item.id)
+                        true
+                    } else if (res.code() in listOf(401, 403)) {
+                        if (isCompleted != null) {
+                            db.examDao().updateExamCompletion(item.entityId, !isCompleted)
+                        }
+                        outboxDao.deleteOutbox(item.id)
+                        false
+                    } else {
+                        handleMutationFailure(item, "فشل مزامنة حالة الاختبار مع الخادم (${res.code()})")
+                        false
                     }
                 }
                 "EXAM_CREATE" -> {
@@ -213,11 +334,14 @@ class UnifiedMutationQueue(
                                 db.examDao().updateSyncStatus(item.entityId, "SYNCED")
                             }
                             outboxDao.deleteOutbox(item.id)
+                            true
                         } else {
                             handleMutationFailure(item, "فشل رفع الاختبار إلى الخادم (${res.code()})")
+                            false
                         }
                     } else {
                         handleMutationFailure(item, "تعذر العثور على بيانات الاختبار محلياً (id: ${item.entityId})")
+                        false
                     }
                 }
                 "EVENT_CREATE" -> {
@@ -238,11 +362,14 @@ class UnifiedMutationQueue(
                         if (res.isSuccessful) {
                             db.eventDao().updateSyncStatus(ev.id, "SYNCED")
                             outboxDao.deleteOutbox(item.id)
+                            true
                         } else {
                             handleMutationFailure(item, "فشل رفع الفعالية إلى الخادم (${res.code()})")
+                            false
                         }
                     } else {
                         handleMutationFailure(item, "تعذر العثور على الفعالية محلياً للمزامنة (id: ${item.entityId})")
+                        false
                     }
                 }
                 "ISSUE_CREATE" -> {
@@ -262,11 +389,14 @@ class UnifiedMutationQueue(
                         if (res.isSuccessful) {
                             db.issueDao().updateSyncStatus(issue.id, "SYNCED")
                             outboxDao.deleteOutbox(item.id)
+                            true
                         } else {
                             handleMutationFailure(item, "فشل رفع السؤال إلى الخادم (${res.code()})")
+                            false
                         }
                     } else {
                         handleMutationFailure(item, "تعذر العثور على السؤال محلياً للمزامنة (id: ${item.entityId})")
+                        false
                     }
                 }
                 "ISSUE_COMMENT", "ISSUE_COMMENT_CREATE" -> {
@@ -279,8 +409,10 @@ class UnifiedMutationQueue(
                         if (res.isSuccessful) {
                             db.issueDao().updateCommentSyncStatus(comment.id, "SYNCED")
                             outboxDao.deleteOutbox(item.id)
+                            true
                         } else {
                             handleMutationFailure(item, "فشل إرسال التعليق (${res.code()})")
+                            false
                         }
                     } else {
                         try {
@@ -291,14 +423,18 @@ class UnifiedMutationQueue(
                                 val res = api.addIssueComment(issueId, com.magd.tanweer.data.remote.AddCommentRequest(id = item.entityId, comment = commentText))
                                 if (res.isSuccessful) {
                                     outboxDao.deleteOutbox(item.id)
+                                    true
                                 } else {
                                     handleMutationFailure(item, "فشل إرسال التعليق (${res.code()})")
+                                    false
                                 }
                             } else {
-                                outboxDao.deleteOutbox(item.id)
+                                handleMutationFailure(item, "تعذر قراءة بيانات التعليق للمزامنة")
+                                false
                             }
                         } catch (_: Exception) {
-                            outboxDao.deleteOutbox(item.id)
+                            handleMutationFailure(item, "صيغة بيانات التعليق غير صالحة")
+                            false
                         }
                     }
                 }
@@ -316,19 +452,24 @@ class UnifiedMutationQueue(
                         )
                         if (res.isSuccessful) {
                             outboxDao.deleteOutbox(item.id)
+                            true
                         } else {
                             handleMutationFailure(item, "فشل رفع طلب التصحيح (${res.code()})")
+                            false
                         }
                     } else {
                         handleMutationFailure(item, "تعذر العثور على طلب التصحيح محلياً (id: ${item.entityId})")
+                        false
                     }
                 }
                 "EXAM_DELETE" -> {
                     val res = api.deleteExam(item.entityId)
                     if (res.isSuccessful || res.code() == 404) {
                         outboxDao.deleteOutbox(item.id)
+                        true
                     } else {
                         handleMutationFailure(item, "فشل حذف الامتحان من الخادم (${res.code()})")
+                        false
                     }
                 }
                 "SCHEDULE_SLOT_DELETE" -> {
@@ -350,11 +491,14 @@ class UnifiedMutationQueue(
                         val res = api.deleteScheduleSlot(gId, day, order)
                         if (res.isSuccessful || res.code() == 404) {
                             outboxDao.deleteOutbox(item.id)
+                            true
                         } else {
                             handleMutationFailure(item, "فشل حذف الحصة من الخادم (${res.code()})")
+                            false
                         }
                     } else {
                         handleMutationFailure(item, "معرّف الحصة غير صالح للحذف: ${item.entityId}")
+                        false
                     }
                 }
                 "SCHEDULE_SLOT_UPDATE" -> {
@@ -403,11 +547,14 @@ class UnifiedMutationQueue(
                                 db.scheduleDao().insertSlots(listOf(slot.copy(syncStatus = "SYNCED")))
                             }
                             outboxDao.deleteOutbox(item.id)
+                            true
                         } else {
                             handleMutationFailure(item, "فشل حفظ الحصة في الخادم (${res.code()})")
+                            false
                         }
                     } else {
                         handleMutationFailure(item, "تعذر العثور على بيانات الحصة محلياً (id: ${item.entityId})")
+                        false
                     }
                 }
                 else -> {
@@ -415,10 +562,12 @@ class UnifiedMutationQueue(
                     // Retain them with an explicit failure state, error logging, and exponential backoff retry.
                     Log.w("UnifiedMutationQueue", "Unknown mutation operation type: ${item.entityType} (id: ${item.id}). Preserving in outbox.")
                     handleMutationFailure(item, "نوع العملية غير معرّف في المحرك الموحد: ${item.entityType}")
+                    false
                 }
             }
         } catch (e: Exception) {
             handleMutationFailure(item, e.localizedMessage ?: "خطأ في الاتصال بالشبكة")
+            false
         }
     }
 

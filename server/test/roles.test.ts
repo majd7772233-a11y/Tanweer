@@ -5,7 +5,7 @@ import {
   handleRedeemRoleCode,
 } from '../src/services/roleRequests';
 import { Env, UserContext } from '../src/env';
-import { Role } from '../src/lib/roles';
+import { Role, sanitizePublicRole } from '../src/lib/roles';
 import { hashString } from '../src/lib/crypto';
 
 class RolesMockDb {
@@ -438,4 +438,17 @@ describe('Roles, Upgrades & Verification Token Security', () => {
     const dbCode = mockDb.tables.role_verification_codes.find((c) => c.id === 'code_success_1');
     expect(dbCode.used_at).toBeDefined();
   });
+
+  it('SECURITY: sanitizePublicRole masks SYSTEM_OWNER and OWNER as ADMIN', () => {
+    expect(sanitizePublicRole('SYSTEM_OWNER')).toBe(Role.ADMIN);
+    expect(sanitizePublicRole('owner')).toBe(Role.ADMIN);
+    expect(sanitizePublicRole(Role.SYSTEM_OWNER)).toBe(Role.ADMIN);
+    expect(sanitizePublicRole(Role.ADMIN)).toBe(Role.ADMIN);
+    expect(sanitizePublicRole(Role.TEACHER)).toBe(Role.TEACHER);
+    expect(sanitizePublicRole(Role.MODERATOR)).toBe(Role.MODERATOR);
+    expect(sanitizePublicRole(Role.STUDENT)).toBe(Role.STUDENT);
+    expect(sanitizePublicRole(null)).toBe(Role.STUDENT);
+    expect(sanitizePublicRole(undefined)).toBe(Role.STUDENT);
+  });
 });
+

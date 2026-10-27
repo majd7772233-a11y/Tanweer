@@ -101,9 +101,10 @@ object TanweerNotificationManager {
                     }
                 }
 
-                // 2. Periodic Books Catalog Sync (12h cooldown)
+                // 2. Periodic Books Catalog Sync (12h cooldown, only if auto-sync is enabled)
+                val autoSyncEnabled = prefs.getBoolean("auto_sync_enabled", true)
                 val lastBooksSync = prefs.getLong("last_background_books_sync_ts", 0L)
-                if (now - lastBooksSync >= 12 * 60 * 60 * 1000L) {
+                if (autoSyncEnabled && now - lastBooksSync >= 12 * 60 * 60 * 1000L) {
                     try {
                         val db = TanweerDatabase.getInstance(context)
                         val user = db.userDao().getUserSync()
@@ -126,6 +127,7 @@ object TanweerNotificationManager {
         val notifyHw = prefs.getBoolean("notify_homework", true)
         val notifySch = prefs.getBoolean("notify_schedule", true)
         val notifyExm = prefs.getBoolean("notify_exams", true)
+        val autoSyncEnabled = prefs.getBoolean("auto_sync_enabled", true)
 
         initChannel(context)
 
@@ -139,14 +141,16 @@ object TanweerNotificationManager {
                 val groupId = user.defaultGroupId
                 if (groupId.isBlank()) return@launch
 
-                // Pre-sync with server before sending notifications so data is fresh
-                try {
-                    val repo = com.magd.tanweer.data.repository.TanweerRepository(db)
-                    repo.syncHomeworks(groupId)
-                    repo.syncExams(groupId)
-                    repo.syncSchedule(groupId)
-                    repo.syncEvents(groupId)
-                } catch (_: Exception) {}
+                // Pre-sync with server before sending notifications so data is fresh (only if auto-sync is enabled)
+                if (autoSyncEnabled) {
+                    try {
+                        val repo = com.magd.tanweer.data.repository.TanweerRepository(db)
+                        repo.syncHomeworks(groupId)
+                        repo.syncExams(groupId)
+                        repo.syncSchedule(groupId)
+                        repo.syncEvents(groupId)
+                    } catch (_: Exception) {}
+                }
 
                 val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
                 val todayStr = sdf.format(Date())

@@ -4,6 +4,7 @@ import { mapExam } from '../lib/mappers';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
+import { isValidIsoDate } from '../lib/validation';
 
 export async function handleGetExams(groupId: string, user: UserContext, env: Env): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
@@ -51,6 +52,10 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
 
   if (!body.groupId || !examDate || !body.subjectId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد تفاصيل الاختبار والمادة وتاريخه');
+  }
+
+  if (!isValidIsoDate(examDate)) {
+    return errorResponse('INVALID_INPUT', 'تاريخ الاختبار غير صالح، يرجى اختيار تاريخ تقويمي صحيح بصيغة YYYY-MM-DD');
   }
 
   const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
@@ -236,6 +241,7 @@ export async function handleDeleteExam(
 export async function handleToggleExamCompletion(
   examId: string,
   user: UserContext,
+  request: Request,
   env: Env
 ): Promise<Response> {
   const exam = await env.DB.prepare(`SELECT id, group_id FROM exams WHERE id = ?`).bind(examId).first<{
@@ -249,6 +255,34 @@ export async function handleToggleExamCompletion(
 
   const memberCheck = await requireGroupMember(user, exam.group_id, env.DB);
   if (memberCheck) return memberCheck;
+
+  let requestedStatus: boolean | null = null;
+  const contentType = request.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    try {
+      const body = await request.json() as { isCompleted?: boolean };
+      if (typeof body.isCompleted === 'boolean') {
+        requestedStatus = body.isCompleted;
+      }
+    } catch (_: any) {}
+  }
+
+  if (requestedStatus !== null) {
+    if (requestedStatus) {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO exam_completions (exam_id, user_id, completed_at) VALUES (?, ?, ?)`
+      ).bind(examId, user.userId, Date.now()).run();
+    } else {
+      await env.DB.prepare(
+        `DELETE FROM exam_completions WHERE exam_id = ? AND user_id = ?`
+      ).bind(examId, user.userId).run();
+    }
+    return jsonResponse({
+      success: true,
+      isCompleted: requestedStatus,
+      message: requestedStatus ? 'تم تعليم الاختبار كمراجع ومكتمل ✓' : 'تمت إعادة الاختبار لقائمة المراجعة القادمة'
+    });
+  }
 
   const existing = await env.DB.prepare(
     `SELECT * FROM exam_completions WHERE exam_id = ? AND user_id = ?`

@@ -143,3 +143,16 @@ export function isValidGradeSection(gradeId: number, sectionId: string): boolean
   if (gradeId === 12) return ['A', 'B', 'C'].includes(cleanSec);
   return false;
 }
+
+/**
+ * Validates whether a given string is a real calendar date in ISO YYYY-MM-DD format.
+ * Accurately handles month days, leap years, and calendar boundaries.
+ */
+export function isValidIsoDate(value: string | undefined | null): boolean {
+  if (!value || typeof value !== 'string') return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value;
+}

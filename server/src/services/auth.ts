@@ -50,36 +50,43 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   }
 
   const existingUser = await env.DB.prepare(
-    `SELECT id FROM users WHERE phone_number = ?`
-  ).bind(normalizedPhone).first();
+    `SELECT id, password_hash, grade_id, section_id FROM users WHERE phone_number = ?`
+  ).bind(normalizedPhone).first<{ id: string; password_hash: string; grade_id: number; section_id: string }>();
+
+  let userId: string;
+  let isRepairingIncompleteRegistration = false;
 
   if (existingUser) {
-    return errorResponse('PHONE_EXISTS', 'رقم الهاتف مسجل مسبقًا. يمكنك تسجيل الدخول بنفس الرقم وكلمة المرور أو برمز الاسترداد.');
+    // Check if user has an active membership and a valid session
+    const membership = await env.DB.prepare(
+      `SELECT group_id FROM group_members WHERE user_id = ? AND status = 'ACTIVE' LIMIT 1`
+    ).bind(existingUser.id).first();
+    const session = await env.DB.prepare(
+      `SELECT id FROM sessions WHERE user_id = ? AND expires_at > ? LIMIT 1`
+    ).bind(existingUser.id, Date.now()).first();
+
+    if (!membership || !session) {
+      // Incomplete registration: User record exists, but memberships or sessions failed/interrupted
+      const isPwdValid = await verifyPassword(body.password, existingUser.password_hash, pepper);
+      if (!isPwdValid) {
+        return errorResponse(
+          'INCOMPLETE_REGISTRATION',
+          'رقم الهاتف مسجل ولكن إنشاء الحساب لم يكتمل سابقاً. يرجى إدخال كلمة المرور المستخدمة سابقاً لإتمام تسجيل الحساب، أو استخدام رمز الاسترداد.'
+        );
+      }
+      userId = existingUser.id;
+      isRepairingIncompleteRegistration = true;
+    } else {
+      return errorResponse('PHONE_EXISTS', 'رقم الهاتف مسجل مسبقًا. يمكنك تسجيل الدخول بنفس الرقم وكلمة المرور أو برمز الاسترداد.');
+    }
+  } else {
+    userId = generateId('user');
   }
 
-  const userId = generateId('user');
   const now = Date.now();
   const { hash: passwordHash } = await hashPassword(body.password, pepper);
   const recoveryCode = generateRecoveryCode();
   const recoveryCodeHash = await hashString(recoveryCode.replace(/[\s\-]/g, '').toUpperCase(), pepper);
-
-  await env.DB.prepare(
-    `INSERT INTO users (id, phone_number, password_hash, full_name, grade_id, section_id, email, recovery_code_hash, role, last_seen, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    userId,
-    normalizedPhone,
-    passwordHash,
-    body.fullName.trim().replace(/\s+/g, ' '),
-    body.gradeId,
-    body.sectionId.toUpperCase(),
-    body.email?.trim() || null,
-    recoveryCodeHash,
-    Role.STUDENT,
-    now,
-    now,
-    now
-  ).run();
 
   const classGroupId = `class_${body.gradeId}_${body.sectionId.toUpperCase()}`;
   const gradeNameMap: Record<number, string> = {
@@ -91,22 +98,7 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     12: 'الثالث الثانوي'
   };
   const groupName = `${gradeNameMap[body.gradeId]} — شعبة (${body.sectionId.toUpperCase()})`;
-
   const academicYear = await getCurrentAcademicYearId(env.DB);
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO groups (id, name, type, description, academic_year_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(classGroupId, groupName, 'CLASS', `المجموعة الدراسية الرسمية لـ ${groupName}`, academicYear, now).run();
-
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO group_sections (group_id, grade_id, section_id)
-     VALUES (?, ?, ?)`
-  ).bind(classGroupId, body.gradeId, body.sectionId.toUpperCase()).run();
-
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at)
-     VALUES (?, ?, ?, ?, ?)`
-  ).bind(classGroupId, userId, Role.STUDENT, 'ACTIVE', now).run();
 
   const token = generateRandomToken();
   const tokenHash = await hashString(token, pepper);
@@ -114,10 +106,74 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   const deviceId = body.deviceId || generateId('dev');
   const expiresAt = now + 90 * 24 * 3600 * 1000;
 
-  await env.DB.prepare(
-    `INSERT INTO sessions (id, user_id, device_id, refresh_token_hash, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(sessionId, userId, deviceId, tokenHash, expiresAt, now).run();
+  // Single atomic batch execution for all registration entities
+  const batchStatements = [];
+
+  if (isRepairingIncompleteRegistration) {
+    batchStatements.push(
+      env.DB.prepare(
+        `UPDATE users SET full_name = ?, grade_id = ?, section_id = ?, email = ?, updated_at = ?, last_seen = ? WHERE id = ?`
+      ).bind(
+        body.fullName.trim().replace(/\s+/g, ' '),
+        body.gradeId,
+        body.sectionId.toUpperCase(),
+        body.email?.trim() || null,
+        now,
+        now,
+        userId
+      )
+    );
+  } else {
+    batchStatements.push(
+      env.DB.prepare(
+        `INSERT INTO users (id, phone_number, password_hash, full_name, grade_id, section_id, email, recovery_code_hash, role, last_seen, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        userId,
+        normalizedPhone,
+        passwordHash,
+        body.fullName.trim().replace(/\s+/g, ' '),
+        body.gradeId,
+        body.sectionId.toUpperCase(),
+        body.email?.trim() || null,
+        recoveryCodeHash,
+        Role.STUDENT,
+        now,
+        now,
+        now
+      )
+    );
+  }
+
+  batchStatements.push(
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO groups (id, name, type, description, academic_year_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(classGroupId, groupName, 'CLASS', `المجموعة الدراسية الرسمية لـ ${groupName}`, academicYear, now)
+  );
+
+  batchStatements.push(
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO group_sections (group_id, grade_id, section_id)
+       VALUES (?, ?, ?)`
+    ).bind(classGroupId, body.gradeId, body.sectionId.toUpperCase())
+  );
+
+  batchStatements.push(
+    env.DB.prepare(
+      `INSERT OR REPLACE INTO group_members (group_id, user_id, role, status, joined_at)
+       VALUES (?, ?, ?, 'ACTIVE', ?)`
+    ).bind(classGroupId, userId, Role.STUDENT, now)
+  );
+
+  batchStatements.push(
+    env.DB.prepare(
+      `INSERT INTO sessions (id, user_id, device_id, refresh_token_hash, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(sessionId, userId, deviceId, tokenHash, expiresAt, now)
+  );
+
+  await env.DB.batch(batchStatements);
 
   return jsonResponse({
     success: true,

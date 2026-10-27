@@ -97,25 +97,58 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
         const verName = tag.replace(/^v/i, '');
         const apkAsset = Array.isArray(rel.assets) ? rel.assets.find((a: any) => a.name?.endsWith('.apk')) : null;
         const parts = verName.split('.').map((p: string) => parseInt(p, 10) || 0);
-        const calcCode = parts.length === 3 ? parts[0] * 100 + parts[1] * 10 + parts[2] : (parts.length === 2 ? parts[0] * 100 + parts[1] : 2);
+        const calcCode = parts.length === 3 ? parts[0] * 100 + parts[1] * 10 + parts[2] : (parts.length === 2 ? parts[0] * 100 + parts[1] : 120);
+
+        let sha256Hex: string | null = null;
+        const shaAsset = Array.isArray(rel.assets)
+          ? rel.assets.find((a: any) => a.name?.toLowerCase().includes('sha256') || a.name?.toLowerCase().includes('checksum'))
+          : null;
+        if (shaAsset && shaAsset.browser_download_url) {
+          try {
+            const shaRes = await fetch(shaAsset.browser_download_url);
+            if (shaRes.ok) {
+              const text = await shaRes.text();
+              const m = text.match(/\b([a-fA-F0-9]{64})\b/);
+              if (m) sha256Hex = m[1].toLowerCase();
+            }
+          } catch {}
+        }
+        if (!sha256Hex && rel.body) {
+          const bodyMatch = rel.body.match(/\b([a-fA-F0-9]{64})\b/);
+          if (bodyMatch) sha256Hex = bodyMatch[1].toLowerCase();
+        }
+
+        let dataGeneration = 'gen_initial_1';
+        try {
+          const genRow = await env.DB.prepare('SELECT value FROM system_settings WHERE key = ?').bind('data_generation').first<{ value: string }>();
+          if (genRow?.value) dataGeneration = genRow.value;
+        } catch {}
 
         return jsonResponse({
           currentVersion: verName,
           versionCode: calcCode,
+          dataGeneration,
           minSupportedVersion: '1.0.0',
           minSupportedVersionCode: 1,
           isUpdateRequired: false,
           releaseDate: rel.published_at ? rel.published_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
           changelog: rel.body ? rel.body.split('\n').map((l: string) => l.trim().replace(/^[-*•]\s*/, '')).filter((l: string) => l.length > 0) : [],
           downloadUrl: apkAsset ? apkAsset.browser_download_url : (rel.html_url || 'https://github.com/majd7772233-a11y/Tanweer/releases/latest'),
-          sha256: null,
+          sha256: sha256Hex,
         });
       }
     } catch (_: any) {}
 
+    let fallbackDataGeneration = 'gen_initial_1';
+    try {
+      const genRow = await env.DB.prepare('SELECT value FROM system_settings WHERE key = ?').bind('data_generation').first<{ value: string }>();
+      if (genRow?.value) fallbackDataGeneration = genRow.value;
+    } catch {}
+
     return jsonResponse({
       currentVersion: '1.2.0',
-      versionCode: 2,
+      versionCode: 120,
+      dataGeneration: fallbackDataGeneration,
       minSupportedVersion: '1.0.0',
       minSupportedVersionCode: 1,
       isUpdateRequired: false,
@@ -129,7 +162,7 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
         '⚡ بنية مزامنة متكاملة Offline-First تضمن موثوقية العمل دون انقطاع'
       ],
       downloadUrl: 'https://github.com/majd7772233-a11y/Tanweer/releases/latest',
-      sha256: null
+      sha256: '9f8337ec80c50d3663a8e7e174b5c777a834241e3d366a6a70a0006ee7885b00'
     });
   }
 
@@ -314,7 +347,7 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
   if (path.startsWith('/api/v1/homeworks/') && path.endsWith('/toggle') && method === 'POST') {
     const hwId = path.split('/')[4];
-    return handleToggleHomeworkCompletion(hwId, user, env);
+    return handleToggleHomeworkCompletion(hwId, user, request, env);
   }
   if (path.startsWith('/api/v1/homeworks/') && !path.endsWith('/toggle')) {
     const hwId = path.split('/')[4];
@@ -338,7 +371,7 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     const parts = path.split('/');
     const examId = parts[4];
     if (parts[5] === 'toggle-completion' && method === 'POST') {
-      return handleToggleExamCompletion(examId, user, env);
+      return handleToggleExamCompletion(examId, user, request, env);
     }
     if (method === 'PUT' || method === 'PATCH') {
       return handleUpdateExam(examId, user, request, env);

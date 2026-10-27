@@ -115,8 +115,12 @@ fun ProfileScreen(
     }
 
     val currentUserName = currentUser?.fullName ?: ""
-    val monthLessonsCount by viewModel.repository.countContentsForAuthorBetween(currentUserName, currentMonthStart, currentMonthEnd)
-        .collectAsStateWithLifecycle(initialValue = 0)
+    val monthLessonsCount by viewModel.repository.countContentsForUserBetween(
+        userId = currentUserId,
+        authorName = currentUserName,
+        startDate = currentMonthStart,
+        endDate = currentMonthEnd
+    ).collectAsStateWithLifecycle(initialValue = 0)
 
     LazyColumn(
         modifier = Modifier
@@ -675,94 +679,44 @@ fun ProfileScreen(
                         }
                     }
 
-                    // Grade Selection
-                    Text(
-                        text = "الصف الدراسي:",
-                        fontSize = 12.sp,
-                        color = TextSecondary,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Row(
+                    // Academic Affiliation Card (Locked - requires admin approval)
+                    GlassCard(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        backgroundColor = GlassSurfaceLight
                     ) {
-                        SchoolHierarchy.grades.take(3).forEach { g ->
-                            val isSel = g.id == editGradeId
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSel) CyanGlow else GlassSurfaceLight)
-                                    .border(1.dp, if (isSel) CyanAccent else GlassBorderSubtle, RoundedCornerShape(8.dp))
-                                    .clickable { editGradeId = g.id }
-                                    .padding(vertical = 6.dp),
-                                contentAlignment = Alignment.Center
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = g.name.replace("الصف ", ""),
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSel) CyanAccent else TextPrimary
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = WarmAmber,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                            }
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        SchoolHierarchy.grades.drop(3).forEach { g ->
-                            val isSel = g.id == editGradeId
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSel) CyanGlow else GlassSurfaceLight)
-                                    .border(1.dp, if (isSel) CyanAccent else GlassBorderSubtle, RoundedCornerShape(8.dp))
-                                    .clickable { editGradeId = g.id }
-                                    .padding(vertical = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
                                 Text(
-                                    text = g.name,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSel) CyanAccent else TextPrimary
-                                )
-                            }
-                        }
-                    }
-
-                    // Section Selection
-                    Text(
-                        text = "الشعبة:",
-                        fontSize = 12.sp,
-                        color = TextSecondary,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        selectedGradeInfo.allowedSections.forEach { sec ->
-                            val isSel = sec == editSectionId
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSel) AmberGlow else GlassSurfaceLight)
-                                    .border(1.dp, if (isSel) WarmAmber else GlassBorderSubtle, RoundedCornerShape(8.dp))
-                                    .clickable { editSectionId = sec }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "شعبة (${SchoolHierarchy.getSectionArabicName(sec)})",
+                                    text = "الانتماء الأكاديمي المعتمد",
                                     fontSize = 12.sp,
-                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSel) WarmAmber else TextPrimary
+                                    fontWeight = FontWeight.Bold,
+                                    color = WarmAmber
                                 )
                             }
+                            Text(
+                                text = "$gradeName — شعبة ($sectionAr)",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "الانتقال إلى صف أو شعبة أخرى يتطلب مراجعة إدارة المدرسة أو المشرف المخول لضمان سلامة العزل الدراسي وسجلات الطلاب.",
+                                fontSize = 11.sp,
+                                color = TextMuted,
+                                lineHeight = 16.sp
+                            )
                         }
                     }
 
@@ -791,12 +745,12 @@ fun ProfileScreen(
                         editErrorMessage = null
                         viewModel.updateProfile(
                             fullName = editFullName.trim(),
-                            gradeId = editGradeId,
-                            sectionId = editSectionId,
+                            gradeId = null,
+                            sectionId = null,
                             onSuccess = {
                                 isSavingProfile = false
                                 isEditProfileDialogOpen = false
-                                Toast.makeText(context, "تم حفظ وتحديث بيانات الحساب بنجاح ✨", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "تم حفظ وتحديث الاسم بنجاح ✨", Toast.LENGTH_SHORT).show()
                             },
                             onError = { err ->
                                 isSavingProfile = false

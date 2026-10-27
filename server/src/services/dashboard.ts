@@ -10,6 +10,7 @@ import { Role, normalizeRole, ROLE_METADATA } from '../lib/roles';
 import { generateId } from '../lib/ids';
 import { hashString } from '../lib/crypto';
 import { applyDecisionExecution } from './governance';
+import { cleanupOrphanMedia } from './media';
 
 const OWNER_COOKIE_NAME = 'tanweer_owner_token';
 
@@ -257,35 +258,38 @@ export async function handleGetDashboardUsers(request: Request, env: Env): Promi
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
 
-  let query = `SELECT id, phone_number, full_name, grade_id, section_id, role, COALESCE(status, 'ACTIVE') as status, last_seen, created_at FROM users WHERE 1=1`;
+  let whereClause = ` WHERE 1=1`;
   const binds: any[] = [];
 
   if (search) {
-    query += ` AND (full_name LIKE ? OR phone_number LIKE ?)`;
+    whereClause += ` AND (full_name LIKE ? OR phone_number LIKE ?)`;
     binds.push(`%${search}%`, `%${search}%`);
   }
 
   if (roleFilter && roleFilter !== 'ALL') {
     if (roleFilter === 'STUDENT') {
-      query += ` AND (role = 'STUDENT' OR role = 'MEMBER')`;
+      whereClause += ` AND (role = 'STUDENT' OR role = 'MEMBER')`;
     } else if (roleFilter === 'TEACHER') {
-      query += ` AND (role = 'TEACHER' OR role = 'VERIFIED_TEACHER')`;
+      whereClause += ` AND (role = 'TEACHER' OR role = 'VERIFIED_TEACHER')`;
     } else {
-      query += ` AND role = ?`;
+      whereClause += ` AND role = ?`;
       binds.push(roleFilter);
     }
   }
 
   if (statusFilter && statusFilter !== 'ALL') {
-    query += ` AND COALESCE(status, 'ACTIVE') = ?`;
+    whereClause += ` AND COALESCE(status, 'ACTIVE') = ?`;
     binds.push(statusFilter);
   }
 
-  query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-  binds.push(limit, offset);
+  const countQuery = `SELECT COUNT(*) as total FROM users` + whereClause;
+  const countRow = await env.DB.prepare(countQuery).bind(...binds).first<{ total: number }>();
+  const totalCount = countRow?.total || 0;
 
-  const stmt = env.DB.prepare(query);
-  const results = await (binds.length > 0 ? stmt.bind(...binds) : stmt).all();
+  const dataQuery = `SELECT id, phone_number, full_name, grade_id, section_id, role, COALESCE(status, 'ACTIVE') as status, last_seen, created_at FROM users` + whereClause + ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+  const dataBinds = [...binds, limit, offset];
+
+  const results = await env.DB.prepare(dataQuery).bind(...dataBinds).all();
 
   const users = (results.results || []).map((u: any) => ({
     id: u.id,
@@ -302,6 +306,7 @@ export async function handleGetDashboardUsers(request: Request, env: Env): Promi
   return jsonResponse({
     success: true,
     users,
+    totalCount,
     count: users.length,
     offset,
     limit,
@@ -469,7 +474,17 @@ export async function handleRevokeUserSessions(
     return errorResponse('USER_NOT_FOUND', 'المستخدم غير موجود', 404);
   }
 
-  await env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
+  let sessionId: string | null = null;
+  try {
+    const body = await request.json() as { sessionId?: string };
+    if (body.sessionId) sessionId = body.sessionId;
+  } catch {}
+
+  if (sessionId) {
+    await env.DB.prepare(`DELETE FROM sessions WHERE id = ? AND user_id = ?`).bind(sessionId, userId).run();
+  } else {
+    await env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
+  }
 
   await logRoleAudit(
     env.DB,
@@ -477,13 +492,96 @@ export async function handleRevokeUserSessions(
     actorId,
     'SYSTEM_OWNER',
     userId,
-    `تم إنهاء وإلغاء جميع الجلسات النشطة للمستخدم ${user.full_name}`,
+    sessionId ? `تم إنهاء الجلسة (${sessionId}) للمستخدم ${user.full_name}` : `تم إنهاء وإلغاء جميع الجلسات النشطة للمستخدم ${user.full_name}`,
     request.headers.get('CF-Connecting-IP')
   );
 
   return jsonResponse({
     success: true,
-    message: `تم إبطال جميع جلسات ${user.full_name} بنجاح وإخراجه من التطبيق فورياً`,
+    message: sessionId ? `تم إنهاء الجلسة المحددة بنجاح` : `تم إبطال جميع جلسات ${user.full_name} بنجاح وإخراجه من التطبيق فورياً`,
+  });
+}
+
+/**
+ * God Mode: Unified User Detail Center (Point 32).
+ * Returns identity, memberships, sessions/devices, academic activity counts, audit logs, and credential status.
+ */
+export async function handleGetDashboardUserDetail(userId: string, env: Env): Promise<Response> {
+  const user = await env.DB.prepare(`
+    SELECT id, phone_number, full_name, grade_id, section_id, email, role,
+           COALESCE(status, 'ACTIVE') as status, last_seen, created_at, updated_at
+    FROM users
+    WHERE id = ?
+  `).bind(userId).first<any>();
+
+  if (!user) {
+    return errorResponse('USER_NOT_FOUND', 'المستخدم غير موجود', 404);
+  }
+
+  // 1. Memberships
+  const memberships = await env.DB.prepare(`
+    SELECT gm.group_id, gm.role, gm.joined_at, g.name as group_name, g.type as group_type
+    FROM group_members gm
+    JOIN groups g ON gm.group_id = g.id
+    WHERE gm.user_id = ?
+    ORDER BY gm.joined_at DESC
+  `).bind(userId).all<any>();
+
+  // 2. Active Sessions & Devices
+  const sessions = await env.DB.prepare(`
+    SELECT s.id as session_id, s.device_id, s.expires_at, s.created_at,
+           d.platform, d.app_version, d.last_seen as device_last_seen
+    FROM sessions s
+    LEFT JOIN devices d ON s.device_id = d.device_id AND s.user_id = d.user_id
+    WHERE s.user_id = ?
+    ORDER BY s.created_at DESC
+  `).bind(userId).all<any>();
+
+  // 3. Academic Activity Counts
+  const [lessonsRow, hwCreatedRow, hwCompletedRow, examsRow, issuesRow, commentsRow] = await Promise.all([
+    env.DB.prepare(`SELECT COUNT(*) as count FROM contents WHERE created_by = ?`).bind(userId).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as count FROM homeworks WHERE created_by = ?`).bind(userId).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as count FROM homework_completions WHERE user_id = ?`).bind(userId).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as count FROM exams WHERE created_by = ?`).bind(userId).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as count FROM issues WHERE created_by = ?`).bind(userId).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as count FROM issue_comments WHERE user_id = ?`).bind(userId).first<{ count: number }>(),
+  ]);
+
+  // 4. Role Audit Logs related to this user
+  const auditLogs = await env.DB.prepare(`
+    SELECT id, action, actor_id, actor_role, details, ip_address, created_at
+    FROM role_audit_log
+    WHERE target_user_id = ? OR actor_id = ?
+    ORDER BY created_at DESC
+    LIMIT 30
+  `).bind(userId, userId).all<any>();
+
+  return jsonResponse({
+    success: true,
+    user: {
+      id: user.id,
+      phoneNumber: user.phone_number,
+      fullName: user.full_name,
+      gradeId: user.grade_id,
+      sectionId: user.section_id,
+      email: user.email,
+      role: normalizeRole(user.role),
+      status: user.status,
+      lastSeen: user.last_seen,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at,
+    },
+    memberships: memberships.results || [],
+    sessions: sessions.results || [],
+    activity: {
+      lessonsCount: lessonsRow?.count || 0,
+      homeworksCreatedCount: hwCreatedRow?.count || 0,
+      homeworksCompletedCount: hwCompletedRow?.count || 0,
+      examsCreatedCount: examsRow?.count || 0,
+      issuesCount: issuesRow?.count || 0,
+      commentsCount: commentsRow?.count || 0,
+    },
+    auditLogs: auditLogs.results || [],
   });
 }
 
@@ -687,63 +785,219 @@ export async function handleGetDashboardGroups(env: Env): Promise<Response> {
 }
 
 /**
- * Returns administrative audit logs.
+ * Returns administrative audit logs with totalCount.
  */
 export async function handleGetAuditLogs(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
+  const search = url.searchParams.get('q') || '';
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
+  let whereClause = '';
+  const filterBinds: any[] = [];
+  if (search) {
+    whereClause = ` WHERE action LIKE ? OR actor_id LIKE ? OR details LIKE ? OR target_user_id LIKE ?`;
+    filterBinds.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  const countRow = await env.DB.prepare(
+    `SELECT COUNT(*) as total FROM role_audit_log ${whereClause}`
+  ).bind(...filterBinds).first<{ total: number }>();
+  const totalCount = countRow?.total || 0;
 
   const rows = await env.DB.prepare(
     `SELECT id, action, actor_id, actor_role, target_user_id, details, ip_address, created_at
      FROM role_audit_log
+     ${whereClause}
      ORDER BY created_at DESC
      LIMIT ? OFFSET ?`
-  ).bind(limit, offset).all();
+  ).bind(...filterBinds, limit, offset).all();
 
   return jsonResponse({
     success: true,
     logs: rows.results || [],
+    totalCount,
+    count: rows.results?.length || 0,
+    offset,
+    limit,
   });
 }
 
 /**
- * God Mode: Returns all lessons / content items across the platform with pagination.
+ * God Mode: Returns all lessons / content items across the platform with pagination and totalCount (Point 30 & 31).
  */
 export async function handleGetDashboardContents(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const search = url.searchParams.get('q') || '';
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 500);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
 
-  let query = `
-    SELECT c.id, c.group_id, c.subject_id, c.created_by, c.title, c.type, c.views_count, c.useful_count, c.is_pinned, c.created_at,
-           u.full_name as author_name, g.name as group_name
+  let whereClause = '';
+  const filterBinds: any[] = [];
+  if (search) {
+    whereClause = ` WHERE c.title LIKE ? OR u.full_name LIKE ? OR c.description LIKE ?`;
+    filterBinds.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  const countRow = await env.DB.prepare(
+    `SELECT COUNT(*) as total FROM contents c LEFT JOIN users u ON c.created_by = u.id ${whereClause}`
+  ).bind(...filterBinds).first<{ total: number }>();
+  const totalCount = countRow?.total || 0;
+
+  const query = `
+    SELECT c.id, c.group_id, c.study_date, c.subject_id, c.created_by, c.title, c.description, c.type,
+           c.views_count, c.useful_count, c.is_pinned, c.created_at,
+           u.full_name as author_name, g.name as group_name,
+           (SELECT COUNT(*) FROM content_media WHERE content_id = c.id) as media_count
     FROM contents c
     LEFT JOIN users u ON c.created_by = u.id
     LEFT JOIN groups g ON c.group_id = g.id
+    ${whereClause}
+    ORDER BY c.created_at DESC
+    LIMIT ? OFFSET ?
   `;
-  const binds: any[] = [];
-  if (search) {
-    query += ` WHERE c.title LIKE ? OR u.full_name LIKE ?`;
-    binds.push(`%${search}%`, `%${search}%`);
-  }
-  query += ` ORDER BY c.created_at DESC LIMIT ? OFFSET ?`;
-  binds.push(limit, offset);
+  const binds = [...filterBinds, limit, offset];
 
   const rows = await env.DB.prepare(query).bind(...binds).all();
-  return jsonResponse({ success: true, contents: rows.results || [], count: rows.results?.length || 0, offset, limit });
+  return jsonResponse({
+    success: true,
+    contents: rows.results || [],
+    totalCount,
+    count: rows.results?.length || 0,
+    offset,
+    limit,
+  });
+}
+
+/**
+ * God Mode: Returns full academic details of a single lesson with attachments (Point 30).
+ */
+export async function handleGetDashboardContentDetail(contentId: string, env: Env): Promise<Response> {
+  const content = await env.DB.prepare(`
+    SELECT c.*, u.full_name as author_name, u.phone_number as author_phone,
+           g.name as group_name, s.name as subject_name
+    FROM contents c
+    LEFT JOIN users u ON c.created_by = u.id
+    LEFT JOIN groups g ON c.group_id = g.id
+    LEFT JOIN subjects s ON c.subject_id = s.id
+    WHERE c.id = ?
+  `).bind(contentId).first<any>();
+
+  if (!content) {
+    return errorResponse('CONTENT_NOT_FOUND', 'الدرس غير موجود', 404);
+  }
+
+  const mediaRows = await env.DB.prepare(`
+    SELECT id, page_order, object_key, url, mime_type, file_size, checksum, is_primary, created_at
+    FROM content_media
+    WHERE content_id = ?
+    ORDER BY page_order ASC
+  `).bind(contentId).all<any>();
+
+  const mediaList = (mediaRows.results || []).map((m: any) => ({
+    id: m.id,
+    pageOrder: m.page_order,
+    objectKey: m.object_key,
+    url: m.url,
+    previewUrl: `/api/dashboard/media/${m.id}`,
+    mimeType: m.mime_type,
+    fileSize: m.file_size,
+    isPrimary: m.is_primary === 1,
+  }));
+
+  return jsonResponse({
+    success: true,
+    content: {
+      id: content.id,
+      groupId: content.group_id,
+      groupName: content.group_name,
+      studyDate: content.study_date,
+      subjectId: content.subject_id,
+      subjectName: content.subject_name || content.subject_id,
+      type: content.type,
+      title: content.title,
+      description: content.description,
+      createdBy: content.created_by,
+      authorName: content.author_name,
+      authorPhone: content.author_phone,
+      status: content.status,
+      version: content.version,
+      viewsCount: content.views_count,
+      usefulCount: content.useful_count,
+      isPinned: content.is_pinned === 1,
+      createdAt: content.created_at,
+      updatedAt: content.updated_at,
+      media: mediaList,
+    },
+  });
+}
+
+/**
+ * God Mode: Serves media blob preview with owner authentication (Point 30 & 33).
+ */
+export async function handleGetDashboardMedia(mediaKey: string, env: Env): Promise<Response> {
+  const cleanId = mediaKey.split('.')[0].trim();
+  const row = await env.DB.prepare(`
+    SELECT mime_type, data FROM media_blobs WHERE id = ? LIMIT 1
+  `).bind(cleanId).first<{ mime_type: string; data: ArrayBuffer | number[] | Uint8Array }>();
+
+  if (!row || !row.data) {
+    return errorResponse('NOT_FOUND', 'ملف الوسائط غير موجود', 404);
+  }
+
+  let bodyData: BodyInit;
+  if (row.data instanceof ArrayBuffer) {
+    bodyData = row.data;
+  } else if (Array.isArray(row.data)) {
+    bodyData = new Uint8Array(row.data);
+  } else {
+    bodyData = row.data as Uint8Array;
+  }
+
+  return new Response(bodyData, {
+    status: 200,
+    headers: {
+      'Content-Type': row.mime_type || 'image/jpeg',
+      'Cache-Control': 'public, max-age=86400',
+    },
+  });
 }
 
 /**
  * God Mode: Force deletes content.
  */
 export async function handleDeleteDashboardContent(contentId: string, actorId: string, env: Env): Promise<Response> {
+  const candidates: string[] = [];
+  try {
+    const mediaRows = await env.DB.prepare(
+      `SELECT object_key, url FROM content_media WHERE content_id = ?`
+    ).bind(contentId).all<{ object_key: string; url: string }>();
+    for (const r of mediaRows.results || []) {
+      if (r.object_key) candidates.push(r.object_key);
+      if (r.url) {
+        const match = r.url.match(/([a-zA-Z0-9_\-]+)$/);
+        if (match) candidates.push(match[1].replace(/\.[a-zA-Z0-9]+$/, ''));
+      }
+    }
+  } catch {}
+
   await env.DB.prepare(`DELETE FROM contents WHERE id = ?`).bind(contentId).run();
   await env.DB.prepare(`DELETE FROM content_media WHERE content_id = ?`).bind(contentId).run();
   await env.DB.prepare(`DELETE FROM content_corrections WHERE content_id = ?`).bind(contentId).run();
+
+  await cleanupOrphanMedia(env.DB, candidates);
+
   await logRoleAudit(env.DB, 'OWNER_DELETE_CONTENT', actorId, 'SYSTEM_OWNER', null, `حذف إداري شامل للدرس (${contentId}) من لوحة المالك`);
-  return jsonResponse({ success: true, message: 'تم حذف الدرس بنجاح' });
+  return jsonResponse({ success: true, message: 'تم حذف الدرس وتنظيف وسائطه بنجاح' });
+}
+
+/**
+ * God Mode: Safe cleanup of orphan media blobs across database.
+ */
+export async function handleCleanupDashboardMedia(actorId: string, env: Env): Promise<Response> {
+  const count = await cleanupOrphanMedia(env.DB);
+  await logRoleAudit(env.DB, 'OWNER_CLEANUP_MEDIA', actorId, 'SYSTEM_OWNER', null, `تنظيف الوسائط اليتيمة: تم حذف (${count}) صورة غير مستخدمة بأمان`);
+  return jsonResponse({ success: true, cleanedCount: count, message: `تم تنظيف (${count}) صورة يتيمة بنجاح دون المساس بالصور المشتركة` });
 }
 
 /**
@@ -759,21 +1013,43 @@ export async function handleTogglePinDashboardContent(contentId: string, actorId
 }
 
 /**
- * God Mode: Returns all homeworks across groups with pagination.
+ * God Mode: Returns all homeworks across groups with pagination and totalCount (Point 31).
  */
 export async function handleGetDashboardHomeworks(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+  const search = url.searchParams.get('q') || '';
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 500);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
+  let whereClause = '';
+  const filterBinds: any[] = [];
+  if (search) {
+    whereClause = ` WHERE h.title LIKE ? OR h.details LIKE ? OR u.full_name LIKE ?`;
+    filterBinds.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  const countRow = await env.DB.prepare(
+    `SELECT COUNT(*) as total FROM homeworks h LEFT JOIN users u ON h.created_by = u.id ${whereClause}`
+  ).bind(...filterBinds).first<{ total: number }>();
+  const totalCount = countRow?.total || 0;
 
   const rows = await env.DB.prepare(`
     SELECT h.*, u.full_name as author_name, g.name as group_name
     FROM homeworks h
     LEFT JOIN users u ON h.created_by = u.id
     LEFT JOIN groups g ON h.group_id = g.id
+    ${whereClause}
     ORDER BY h.created_at DESC LIMIT ? OFFSET ?
-  `).bind(limit, offset).all();
-  return jsonResponse({ success: true, homeworks: rows.results || [], count: rows.results?.length || 0, offset, limit });
+  `).bind(...filterBinds, limit, offset).all();
+
+  return jsonResponse({
+    success: true,
+    homeworks: rows.results || [],
+    totalCount,
+    count: rows.results?.length || 0,
+    offset,
+    limit,
+  });
 }
 
 /**
@@ -787,21 +1063,43 @@ export async function handleDeleteDashboardHomework(hwId: string, actorId: strin
 }
 
 /**
- * God Mode: Returns all exams across groups with pagination.
+ * God Mode: Returns all exams across groups with pagination and totalCount (Point 31).
  */
 export async function handleGetDashboardExams(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+  const search = url.searchParams.get('q') || '';
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 500);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
+  let whereClause = '';
+  const filterBinds: any[] = [];
+  if (search) {
+    whereClause = ` WHERE e.title LIKE ? OR e.description LIKE ? OR u.full_name LIKE ?`;
+    filterBinds.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  const countRow = await env.DB.prepare(
+    `SELECT COUNT(*) as total FROM exams e LEFT JOIN users u ON e.created_by = u.id ${whereClause}`
+  ).bind(...filterBinds).first<{ total: number }>();
+  const totalCount = countRow?.total || 0;
 
   const rows = await env.DB.prepare(`
     SELECT e.*, u.full_name as author_name, g.name as group_name
     FROM exams e
     LEFT JOIN users u ON e.created_by = u.id
     LEFT JOIN groups g ON e.group_id = g.id
+    ${whereClause}
     ORDER BY e.created_at DESC LIMIT ? OFFSET ?
-  `).bind(limit, offset).all();
-  return jsonResponse({ success: true, exams: rows.results || [], count: rows.results?.length || 0, offset, limit });
+  `).bind(...filterBinds, limit, offset).all();
+
+  return jsonResponse({
+    success: true,
+    exams: rows.results || [],
+    totalCount,
+    count: rows.results?.length || 0,
+    offset,
+    limit,
+  });
 }
 
 /**
@@ -814,21 +1112,43 @@ export async function handleDeleteDashboardExam(examId: string, actorId: string,
 }
 
 /**
- * God Mode: Returns all events across groups with pagination.
+ * God Mode: Returns all events across groups with pagination and totalCount (Point 31).
  */
 export async function handleGetDashboardEvents(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+  const search = url.searchParams.get('q') || '';
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 500);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
+  let whereClause = '';
+  const filterBinds: any[] = [];
+  if (search) {
+    whereClause = ` WHERE ev.title LIKE ? OR ev.description LIKE ? OR u.full_name LIKE ?`;
+    filterBinds.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  const countRow = await env.DB.prepare(
+    `SELECT COUNT(*) as total FROM events ev LEFT JOIN users u ON ev.created_by = u.id ${whereClause}`
+  ).bind(...filterBinds).first<{ total: number }>();
+  const totalCount = countRow?.total || 0;
 
   const rows = await env.DB.prepare(`
     SELECT ev.*, u.full_name as author_name, g.name as group_name
     FROM events ev
     LEFT JOIN users u ON ev.created_by = u.id
     LEFT JOIN groups g ON ev.group_id = g.id
+    ${whereClause}
     ORDER BY ev.created_at DESC LIMIT ? OFFSET ?
-  `).bind(limit, offset).all();
-  return jsonResponse({ success: true, events: rows.results || [], count: rows.results?.length || 0, offset, limit });
+  `).bind(...filterBinds, limit, offset).all();
+
+  return jsonResponse({
+    success: true,
+    events: rows.results || [],
+    totalCount,
+    count: rows.results?.length || 0,
+    offset,
+    limit,
+  });
 }
 
 /**
@@ -841,12 +1161,25 @@ export async function handleDeleteDashboardEvent(eventId: string, actorId: strin
 }
 
 /**
- * God Mode: Returns all issues / Q&A with pagination.
+ * God Mode: Returns all issues / Q&A with pagination and totalCount (Point 31).
  */
 export async function handleGetDashboardIssues(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+  const search = url.searchParams.get('q') || '';
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 500);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
+  let whereClause = '';
+  const filterBinds: any[] = [];
+  if (search) {
+    whereClause = ` WHERE i.title LIKE ? OR i.description LIKE ? OR u.full_name LIKE ?`;
+    filterBinds.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  const countRow = await env.DB.prepare(
+    `SELECT COUNT(*) as total FROM issues i LEFT JOIN users u ON i.created_by = u.id ${whereClause}`
+  ).bind(...filterBinds).first<{ total: number }>();
+  const totalCount = countRow?.total || 0;
 
   const rows = await env.DB.prepare(`
     SELECT i.*, u.full_name as author_name, g.name as group_name,
@@ -854,9 +1187,18 @@ export async function handleGetDashboardIssues(request: Request, env: Env): Prom
     FROM issues i
     LEFT JOIN users u ON i.created_by = u.id
     LEFT JOIN groups g ON i.group_id = g.id
+    ${whereClause}
     ORDER BY i.created_at DESC LIMIT ? OFFSET ?
-  `).bind(limit, offset).all();
-  return jsonResponse({ success: true, issues: rows.results || [], count: rows.results?.length || 0, offset, limit });
+  `).bind(...filterBinds, limit, offset).all();
+
+  return jsonResponse({
+    success: true,
+    issues: rows.results || [],
+    totalCount,
+    count: rows.results?.length || 0,
+    offset,
+    limit,
+  });
 }
 
 /**
@@ -987,18 +1329,44 @@ export async function handleRejectDashboardDecision(decisionId: string, actorId:
 }
 
 /**
- * God Mode: Returns recent chat messages across all groups.
+ * God Mode: Returns recent chat messages across all groups with pagination and totalCount (Point 31).
  */
 export async function handleGetDashboardChatMessages(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const search = url.searchParams.get('q') || '';
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 500);
+  const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+
+  let whereClause = '';
+  const filterBinds: any[] = [];
+  if (search) {
+    whereClause = ` WHERE cm.content LIKE ? OR u.full_name LIKE ?`;
+    filterBinds.push(`%${search}%`, `%${search}%`);
+  }
+
+  const countRow = await env.DB.prepare(
+    `SELECT COUNT(*) as total FROM chat_messages cm LEFT JOIN users u ON cm.user_id = u.id ${whereClause}`
+  ).bind(...filterBinds).first<{ total: number }>();
+  const totalCount = countRow?.total || 0;
+
   const rows = await env.DB.prepare(`
     SELECT cm.id, cm.group_id, cm.user_id, cm.content, cm.created_at,
            u.full_name, u.phone_number, u.role, g.name as group_name
     FROM chat_messages cm
     LEFT JOIN users u ON cm.user_id = u.id
     LEFT JOIN groups g ON cm.group_id = g.id
-    ORDER BY cm.created_at DESC LIMIT 100
-  `).all();
-  return jsonResponse({ success: true, messages: rows.results || [] });
+    ${whereClause}
+    ORDER BY cm.created_at DESC LIMIT ? OFFSET ?
+  `).bind(...filterBinds, limit, offset).all();
+
+  return jsonResponse({
+    success: true,
+    messages: rows.results || [],
+    totalCount,
+    count: rows.results?.length || 0,
+    offset,
+    limit,
+  });
 }
 
 /**
@@ -1023,6 +1391,202 @@ export async function handleGetDashboardCorrections(env: Env): Promise<Response>
     ORDER BY cc.created_at DESC LIMIT 100
   `).all();
   return jsonResponse({ success: true, corrections: rows.results || [] });
+}
+
+/**
+ * Phase 1: Preview Purge Statistics (Point 34).
+ */
+export async function handlePreviewPurge(actorId: string, env: Env): Promise<Response> {
+  const [
+    contents, mediaBlobs, homeworks, exams, events, issues, chatMessages,
+    schedules, decisions, users, sessions, devices
+  ] = await Promise.all([
+    env.DB.prepare(`SELECT COUNT(*) as c FROM contents`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM media_blobs`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM homeworks`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM exams`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM events`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM issues`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM chat_messages`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM schedule_slots`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM community_decisions`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM users WHERE role != 'SYSTEM_OWNER'`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM sessions`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM devices`).first<{ c: number }>(),
+  ]);
+
+  const counts = {
+    contents: contents?.c || 0,
+    mediaBlobs: mediaBlobs?.c || 0,
+    homeworks: homeworks?.c || 0,
+    exams: exams?.c || 0,
+    events: events?.c || 0,
+    issues: issues?.c || 0,
+    chatMessages: chatMessages?.c || 0,
+    scheduleSlots: schedules?.c || 0,
+    communityDecisions: decisions?.c || 0,
+    nonOwnerUsers: users?.c || 0,
+    activeSessions: sessions?.c || 0,
+    registeredDevices: devices?.c || 0,
+  };
+
+  const totalRecords = Object.values(counts).reduce((a, b) => a + b, 0);
+
+  return jsonResponse({
+    success: true,
+    preview: counts,
+    totalRecords,
+    message: 'تم حصر السجلات الجاهزة للتصفير. للتأكيد النهائي يلزم إدخال المفتاح السري وكتابة YES صراحة.',
+  });
+}
+
+/**
+ * Phase 2: Execute Complete Data Purge and Rotate data_generation (Point 34).
+ */
+export async function handleExecutePurge(request: Request, actorId: string, env: Env): Promise<Response> {
+  const body = await request.json() as { secret?: string; confirmationText?: string };
+
+  const ownerSecret = env.TANWEER_OWNER_SECRET;
+  if (!ownerSecret || body.secret !== ownerSecret) {
+    return errorResponse('INVALID_SECRET', 'مفتاح مالك المنظومة السري غير صحيح، تم إلغاء العملية فوراً', 403);
+  }
+
+  if (body.confirmationText !== 'YES') {
+    return errorResponse('CONFIRMATION_REQUIRED', 'يرجى كتابة كلمة "YES" بحروف كبيرة لتأكيد التصفير الكلي النهائي', 400);
+  }
+
+  // Atomic cascading execution in sequence
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM content_corrections`),
+    env.DB.prepare(`DELETE FROM content_media`),
+    env.DB.prepare(`DELETE FROM contents`),
+    env.DB.prepare(`DELETE FROM homework_completions`),
+    env.DB.prepare(`DELETE FROM homework_media`),
+    env.DB.prepare(`DELETE FROM homeworks`),
+    env.DB.prepare(`DELETE FROM exams`),
+    env.DB.prepare(`DELETE FROM events`),
+    env.DB.prepare(`DELETE FROM issue_comments`),
+    env.DB.prepare(`DELETE FROM issues`),
+    env.DB.prepare(`DELETE FROM chat_messages`),
+    env.DB.prepare(`DELETE FROM schedule_slots`),
+    env.DB.prepare(`DELETE FROM schedule_proposals`),
+    env.DB.prepare(`DELETE FROM schedule_versions`),
+    env.DB.prepare(`DELETE FROM community_votes`),
+    env.DB.prepare(`DELETE FROM community_decisions`),
+    env.DB.prepare(`DELETE FROM media_blobs`),
+    env.DB.prepare(`DELETE FROM sessions`),
+    env.DB.prepare(`DELETE FROM devices`),
+    env.DB.prepare(`DELETE FROM group_members WHERE user_id NOT IN (SELECT id FROM users WHERE role = 'SYSTEM_OWNER')`),
+    env.DB.prepare(`DELETE FROM users WHERE role != 'SYSTEM_OWNER'`),
+  ]);
+
+  // Generate new data generation id
+  const newGeneration = `gen_${Date.now()}_${generateId('g')}`;
+  await env.DB.prepare(`
+    INSERT INTO system_settings (key, value, updated_at)
+    VALUES ('data_generation', ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).bind(newGeneration, Date.now()).run();
+
+  await logRoleAudit(
+    env.DB,
+    'SYSTEM_PURGE_EXECUTED',
+    actorId,
+    'SYSTEM_OWNER',
+    null,
+    `تم تنفيذ التصفير الكلي والشامل لمنظومة تنوير وتدوير جيل البيانات إلى (${newGeneration})`
+  );
+
+  return jsonResponse({
+    success: true,
+    message: 'تم تصفير المنظومة وتدوير جيل البيانات بنجاح 🔄. ستتم مزامنة التطبيقات وإعادة تهيئتها تلقائياً.',
+    newGeneration,
+  });
+}
+
+/**
+ * God Mode: Holidays management (Point 35).
+ */
+export async function handleDashboardGetHolidays(env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(`
+    SELECT e.*, u.full_name as author_name, g.name as group_name
+    FROM events e
+    LEFT JOIN users u ON e.created_by = u.id
+    LEFT JOIN groups g ON e.group_id = g.id
+    WHERE e.category = 'HOLIDAY'
+    ORDER BY e.event_date DESC
+  `).all();
+  return jsonResponse({ success: true, holidays: rows.results || [] });
+}
+
+export async function handleDashboardCreateHoliday(
+  request: Request,
+  actorId: string,
+  env: Env
+): Promise<Response> {
+  const body = await request.json() as {
+    title?: string;
+    eventDate?: string;
+    description?: string;
+    isSchoolWide?: boolean;
+    groupId?: string;
+  };
+
+  if (!body.title?.trim() || !body.eventDate?.trim()) {
+    return errorResponse('INVALID_INPUT', 'يرجى إدخال اسم الإجازة وتاريخها');
+  }
+
+  if (!body.description?.trim()) {
+    return errorResponse('INVALID_INPUT', 'يرجى توضيح سبب الإجازة المدرسية في حقل الوصف');
+  }
+
+  const groupId = (body.isSchoolWide || !body.groupId) ? 'all' : body.groupId;
+  const id = generateId('evt');
+
+  await env.DB.prepare(`
+    INSERT INTO events (id, group_id, event_date, time_str, title, description, category, location, is_official, created_by, created_at)
+    VALUES (?, ?, ?, null, ?, ?, 'HOLIDAY', null, 1, ?, ?)
+  `).bind(
+    id,
+    groupId,
+    body.eventDate.trim(),
+    body.title.trim(),
+    body.description.trim(),
+    actorId,
+    Date.now()
+  ).run();
+
+  await logRoleAudit(
+    env.DB,
+    'CREATE_OFFICIAL_HOLIDAY',
+    actorId,
+    'SYSTEM_OWNER',
+    null,
+    `تسجيل إجازة مدرسية رسمية: (${body.title}) بتاريخ (${body.eventDate}) - النطاق: ${groupId}`
+  );
+
+  return jsonResponse({
+    success: true,
+    message: 'تم تسجيل الإجازة المدرسية المعتمدة بنجاح 🌴',
+    id,
+  });
+}
+
+export async function handleDashboardDeleteHoliday(
+  holidayId: string,
+  actorId: string,
+  env: Env
+): Promise<Response> {
+  await env.DB.prepare(`DELETE FROM events WHERE id = ? AND category = 'HOLIDAY'`).bind(holidayId).run();
+  await logRoleAudit(
+    env.DB,
+    'DELETE_OFFICIAL_HOLIDAY',
+    actorId,
+    'SYSTEM_OWNER',
+    null,
+    `إلغاء الإجازة المدرسية (${holidayId})`
+  );
+  return jsonResponse({ success: true, message: 'تم حذف الإجازة المدرسية بنجاح' });
 }
 
 /**
@@ -1668,6 +2232,12 @@ export function renderDashboardHtml(): Response {
       <div class="nav-item" onclick="switchTab('homeworks')">
         <span>📝</span> <span>Homework & Exams (الواجبات)</span>
       </div>
+      <div class="nav-item" onclick="switchTab('events')">
+        <span>🎪</span> <span>Events (الفعاليات المدرسية)</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('holidays')">
+        <span>🌴</span> <span>Holidays (الإجازات المعتمدة)</span>
+      </div>
       <div class="nav-item" onclick="switchTab('issues')">
         <span>❓</span> <span>Issues & Q&A (الاستفسارات)</span>
       </div>
@@ -1693,7 +2263,7 @@ export function renderDashboardHtml(): Response {
         <span>📜</span> <span>Audit Log (سجل العمليات)</span>
       </div>
       <div class="nav-item" onclick="switchTab('system')">
-        <span>⚙️</span> <span>Security & System (الأمان)</span>
+        <span>⚙️</span> <span>Security & System (الأمان والتصفير)</span>
       </div>
     </nav>
 
@@ -1835,6 +2405,7 @@ export function renderDashboardHtml(): Response {
               </tbody>
             </table>
           </div>
+          <div id="usersPagination" style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem; padding-top:0.75rem; border-top:1px solid var(--border);"></div>
         </div>
       </section>
 
@@ -1987,14 +2558,17 @@ export function renderDashboardHtml(): Response {
         </div>
       </section>
 
-      <!-- Contents Tab -->
+      <!-- Contents Tab (Point 30, 31, 33) -->
       <section id="tab-contents" style="display:none;">
         <div class="section-card">
           <div class="section-header">
-            <h2 style="font-size:1.1rem; font-weight:800;">📚 إدارة الدروس والمحتوى التعليمي (God Mode)</h2>
+            <div>
+              <h2 style="font-size:1.1rem; font-weight:800;">📚 إدارة الدروس والمحتوى التعليمي (God Mode)</h2>
+              <div style="font-size:0.8rem; color:var(--text-sec);">انقر على أي درس لعرض تفاصيله الأكاديمية وصوره بالكامل</div>
+            </div>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="contentSearch" placeholder="بحث بعنوان الدرس أو الكاتب..." oninput="loadContents()">
-              <button class="action-btn" onclick="loadContents()">تحديث 🔄</button>
+              <input type="text" class="search-input" id="contentSearch" placeholder="بحث بعنوان الدرس أو الكاتب..." oninput="debounceContentSearch()">
+              <button class="action-btn" onclick="loadContents(0)">تحديث 🔄</button>
             </div>
           </div>
           <div style="overflow-x:auto;">
@@ -2002,38 +2576,43 @@ export function renderDashboardHtml(): Response {
               <thead>
                 <tr>
                   <th>عنوان الدرس</th>
-                  <th>الشعبة</th>
+                  <th>المادة / الشعبة</th>
+                  <th>تاريخ الدرس</th>
                   <th>الكاتب</th>
+                  <th>المرفقات</th>
                   <th>المشاهدات</th>
                   <th>التثبيت</th>
-                  <th>التاريخ</th>
-                  <th>الإجراءات المباشرة</th>
+                  <th>الإجراءات</th>
                 </tr>
               </thead>
               <tbody id="contentsTableBody">
-                <tr><td colspan="7" style="text-align:center;">جاري التحميل...</td></tr>
+                <tr><td colspan="8" style="text-align:center;">جاري التحميل...</td></tr>
               </tbody>
             </table>
           </div>
+          <div id="contentsPagination" style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem; padding-top:0.75rem; border-top:1px solid var(--border);"></div>
         </div>
       </section>
 
-      <!-- Homework & Exams Tab -->
+      <!-- Homework & Exams Tab (Point 31 & 33) -->
       <section id="tab-homeworks" style="display:none;">
         <div class="section-card">
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">📝 إدارة الواجبات المدرسية والاختبارات</h2>
-            <button class="action-btn" onclick="loadHomeworks(); loadExams();">تحديث 🔄</button>
+            <div class="filter-bar">
+              <input type="text" class="search-input" id="homeworkSearch" placeholder="بحث بالواجب أو المادة..." oninput="debounceHomeworkSearch()">
+              <button class="action-btn" onclick="loadHomeworks(0); loadExams(0);">تحديث 🔄</button>
+            </div>
           </div>
           <h3 style="font-size:0.95rem; color:var(--cyan); margin:1rem 0 0.5rem;">الواجبات الحالية:</h3>
-          <div style="overflow-x:auto; margin-bottom:1.5rem;">
+          <div style="overflow-x:auto; margin-bottom:1rem;">
             <table>
               <thead>
                 <tr>
                   <th>عنوان الواجب</th>
-                  <th>المادة</th>
-                  <th>الشعبة</th>
+                  <th>الشعبة / المادة</th>
                   <th>تاريخ الاستحقاق</th>
+                  <th>الكاتب</th>
                   <th>الإجراء</th>
                 </tr>
               </thead>
@@ -2042,20 +2621,85 @@ export function renderDashboardHtml(): Response {
               </tbody>
             </table>
           </div>
+          <div id="homeworksPagination" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2rem;"></div>
+
           <h3 style="font-size:0.95rem; color:var(--ruby); margin:1rem 0 0.5rem;">الاختبارات المجدولة:</h3>
           <div style="overflow-x:auto;">
             <table>
               <thead>
                 <tr>
                   <th>عنوان الاختبار</th>
-                  <th>المادة</th>
-                  <th>الشعبة</th>
+                  <th>الشعبة / المادة</th>
                   <th>تاريخ الاختبار</th>
+                  <th>الكاتب</th>
                   <th>الإجراء</th>
                 </tr>
               </thead>
               <tbody id="examsTableBody">
                 <tr><td colspan="5" style="text-align:center;">جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="examsPagination" style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem;"></div>
+        </div>
+      </section>
+
+      <!-- Events Tab (Point 31 & 33) -->
+      <section id="tab-events" style="display:none;">
+        <div class="section-card">
+          <div class="section-header">
+            <h2 style="font-size:1.1rem; font-weight:800;">🎪 الفعاليات والأنشطة المدرسية</h2>
+            <div class="filter-bar">
+              <input type="text" class="search-input" id="eventSearch" placeholder="بحث بعنوان الفعالية..." oninput="debounceEventSearch()">
+              <button class="action-btn" onclick="loadEvents(0)">تحديث 🔄</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>عنوان الفعالية</th>
+                  <th>الشعبة / النطاق</th>
+                  <th>التاريخ والتوقيت</th>
+                  <th>التصنيف</th>
+                  <th>المنشئ</th>
+                  <th>الاعتماد</th>
+                  <th>الإجراء</th>
+                </tr>
+              </thead>
+              <tbody id="eventsTableBody">
+                <tr><td colspan="7" style="text-align:center;">جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="eventsPagination" style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem;"></div>
+        </div>
+      </section>
+
+      <!-- Holidays Tab (Point 35) -->
+      <section id="tab-holidays" style="display:none;">
+        <div class="section-card">
+          <div class="section-header">
+            <div>
+              <h2 style="font-size:1.1rem; font-weight:800;">🌴 إدارة الإجازات المدرسية المعتمدة (Holidays)</h2>
+              <div style="font-size:0.8rem; color:var(--text-sec);">الإجازات المحددة تظهر تلقائياً في تقويم الطلاب والأساتذة لجميع الشعب أو لشعبة محددة مع بيان السبب</div>
+            </div>
+            <button class="action-btn approve" onclick="openHolidayModal()">تسجيل إجازة مدرسية رسمية 🌴</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>اسم الإجازة</th>
+                  <th>تاريخ الإجازة</th>
+                  <th>نطاق التطبيق</th>
+                  <th>سبب الإجازة (إلزامي)</th>
+                  <th>المعتمد</th>
+                  <th>الإجراء الإداري</th>
+                </tr>
+              </thead>
+              <tbody id="holidaysTableBody">
+                <tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>
               </tbody>
             </table>
           </div>
@@ -2067,7 +2711,7 @@ export function renderDashboardHtml(): Response {
         <div class="section-card">
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">❓ بنك الأسئلة والاستفسارات (Q&A)</h2>
-            <button class="action-btn" onclick="loadIssues()">تحديث 🔄</button>
+            <button class="action-btn" onclick="loadIssues(0)">تحديث 🔄</button>
           </div>
           <div style="overflow-x:auto;">
             <table>
@@ -2087,6 +2731,7 @@ export function renderDashboardHtml(): Response {
               </tbody>
             </table>
           </div>
+          <div id="issuesPagination" style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem;"></div>
         </div>
       </section>
 
@@ -2149,7 +2794,7 @@ export function renderDashboardHtml(): Response {
         <div class="section-card">
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">💬 المحادثات المباشرة للشعب والنوادي</h2>
-            <button class="action-btn" onclick="loadChatMessages()">تحديث 🔄</button>
+            <button class="action-btn" onclick="loadChatMessages(0)">تحديث 🔄</button>
           </div>
           <div style="overflow-x:auto;">
             <table>
@@ -2167,6 +2812,7 @@ export function renderDashboardHtml(): Response {
               </tbody>
             </table>
           </div>
+          <div id="chatPagination" style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem;"></div>
         </div>
       </section>
 
@@ -2215,12 +2861,12 @@ export function renderDashboardHtml(): Response {
         </div>
       </section>
 
-      <!-- Audit Log Tab -->
+      <!-- Audit Log Tab (Point 31) -->
       <section id="tab-audit" style="display:none;">
         <div class="section-card">
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">📜 سجل العمليات الإدارية والرقابة (Audit Log)</h2>
-            <button class="action-btn" onclick="loadAudit()">تحديث السجل 🔄</button>
+            <button class="action-btn" onclick="loadAudit(0)">تحديث السجل 🔄</button>
           </div>
           <div style="overflow-x:auto;">
             <table>
@@ -2239,14 +2885,15 @@ export function renderDashboardHtml(): Response {
               </tbody>
             </table>
           </div>
+          <div id="auditPagination" style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem;"></div>
         </div>
       </section>
 
-      <!-- System & Security Tab -->
+      <!-- System & Security & Two-Phase Purge Tab (Point 34) -->
       <section id="tab-system" style="display:none;">
         <div class="section-card">
-          <h2 style="font-size:1.1rem; font-weight:800; margin-bottom:1rem;">⚙️ الأمان والبنية التحتية للخادم</h2>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem;">
+          <h2 style="font-size:1.1rem; font-weight:800; margin-bottom:1rem;">⚙️ الأمان والبنية التحتية وتصفير المنظومة</h2>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.5rem;">
             <div style="background:rgba(255,255,255,0.02); padding:1.25rem; border-radius:12px; border:1px solid var(--border);">
               <h3 style="font-size:0.95rem; color:var(--cyan); margin-bottom:0.75rem;">بيانات الخادم (Cloudflare Workers)</h3>
               <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">المسار المعتمد: <code>https://tanweer.magd.workers.dev/dashboard</code></p>
@@ -2259,6 +2906,44 @@ export function renderDashboardHtml(): Response {
               <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">المفتاح السري: <code>TANWEER_OWNER_SECRET</code> (محمي في Cloudflare Secrets)</p>
               <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">نوع الجلسة: <strong>HttpOnly Lax Secure Cookie</strong></p>
               <p style="font-size:0.85rem; color:var(--text-sec);">استقلالية الجلسة: <strong>مستقلة تماماً عن جلسات تطبيق الأندرويد</strong></p>
+            </div>
+          </div>
+
+          <!-- Two-Phase Purge Card (Point 34) -->
+          <div style="background:rgba(239, 68, 68, 0.05); border:1px solid rgba(239, 68, 68, 0.3); border-radius:14px; padding:1.5rem;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+              <div>
+                <h3 style="font-size:1.05rem; font-weight:800; color:var(--ruby);">💣 التصفير الكلي لبيانات المنظومة (Two-Phase Data Purge)</h3>
+                <p style="font-size:0.85rem; color:var(--text-sec); margin-top:0.25rem;">
+                  إجراء أمني معتمد من مرحلتين: مسح كافة السجلات التشغيلية والأكاديمية وحسابات المستخدمين مع تدوير جيل البيانات <code>data_generation</code> لإعادة ضبط تطبيقات الطلاب تلقائياً.
+                </p>
+              </div>
+              <button class="action-btn" onclick="previewPurge()" style="background:rgba(239, 68, 68, 0.2); border-color:var(--ruby); color:white; padding:0.6rem 1rem;">
+                المرحلة 1: فحص ومعاينة السجلات المتأثرة 🔍
+              </button>
+            </div>
+
+            <!-- Preview Results Box -->
+            <div id="purgePreviewBox" style="display:none; background:rgba(0,0,0,0.4); border-radius:10px; padding:1rem; margin-bottom:1.25rem;">
+              <h4 style="font-size:0.9rem; color:var(--amber); margin-bottom:0.75rem;">📊 إحصائية السجلات المرشحة للحذف النهائي:</h4>
+              <div id="purgeStatsGrid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:0.75rem; margin-bottom:1rem;"></div>
+
+              <div style="border-top:1px dashed rgba(239,68,68,0.4); padding-top:1rem; margin-top:1rem;">
+                <h4 style="font-size:0.95rem; color:var(--ruby); font-weight:800; margin-bottom:0.75rem;">المرحلة 2: التأكيد النهائي والتنفيذ الفعلي</h4>
+                <div style="display:flex; flex-direction:column; gap:0.75rem; max-width:500px;">
+                  <div>
+                    <label style="font-size:0.8rem; color:var(--text-sec); display:block; margin-bottom:0.3rem;">1. أدخل مفتاح المالك السري للتأكيد:</label>
+                    <input type="password" id="purgeSecretInput" class="form-control" placeholder="TANWEER_OWNER_SECRET">
+                  </div>
+                  <div>
+                    <label style="font-size:0.8rem; color:var(--text-sec); display:block; margin-bottom:0.3rem;">2. اكتب كلمة "YES" للتأكيد النهائي:</label>
+                    <input type="text" id="purgeConfirmInput" class="form-control" placeholder="YES" style="text-align:center; font-weight:800; letter-spacing:2px; color:var(--ruby);" oninput="checkPurgeConfirmMatch()">
+                  </div>
+                  <button id="executePurgeBtn" class="action-btn reject" onclick="executePurge()" disabled style="padding:0.75rem; font-size:0.9rem; font-weight:800; opacity:0.5; cursor:not-allowed;">
+                    تنفيذ التصفير الشامل وتدوير جيل البيانات فورياً 💣
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2315,11 +3000,220 @@ export function renderDashboardHtml(): Response {
     </div>
   </div>
 
+  <!-- User Detail Modal (Point 32) -->
+  <div class="modal-overlay" id="userDetailModal">
+    <div class="modal-card" style="max-width:750px; max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem;">
+        <div>
+          <div class="modal-title" id="udName" style="font-size:1.3rem;">تفاصيل المستخدم الشاملة 👤</div>
+          <div class="modal-sub" id="udIdPhone">-</div>
+        </div>
+        <button class="action-btn" onclick="closeUserDetailModal()" style="font-size:1rem; padding:0.4rem 0.8rem;">✕</button>
+      </div>
+
+      <!-- Identity & Status Badges -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:0.75rem; margin-bottom:1.25rem;">
+        <div style="background:rgba(255,255,255,0.02); padding:0.75rem; border-radius:10px; border:1px solid var(--border);">
+          <div style="font-size:0.7rem; color:var(--text-muted);">الرتبة المنظومية</div>
+          <div id="udRole" style="font-weight:700; color:var(--cyan); margin-top:0.25rem;">-</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.02); padding:0.75rem; border-radius:10px; border:1px solid var(--border);">
+          <div style="font-size:0.7rem; color:var(--text-muted);">حالة الحساب</div>
+          <div id="udStatus" style="font-weight:700; margin-top:0.25rem;">-</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.02); padding:0.75rem; border-radius:10px; border:1px solid var(--border);">
+          <div style="font-size:0.7rem; color:var(--text-muted);">تاريخ الإنشاء</div>
+          <div id="udCreatedAt" style="font-weight:700; color:var(--text-sec); margin-top:0.25rem;">-</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.02); padding:0.75rem; border-radius:10px; border:1px solid var(--border);">
+          <div style="font-size:0.7rem; color:var(--text-muted);">آخر نشاط</div>
+          <div id="udLastActive" style="font-weight:700; color:var(--text-sec); margin-top:0.25rem;">-</div>
+        </div>
+      </div>
+
+      <!-- Academic Activities Summary -->
+      <div style="margin-bottom:1.25rem;">
+        <h4 style="font-size:0.9rem; color:var(--cyan); margin-bottom:0.5rem;">📊 النشاط الأكاديمي والتفاعلي</h4>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:0.5rem; text-align:center;">
+          <div style="background:rgba(0,229,255,0.05); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+            <div style="font-size:1.1rem; font-weight:800; color:var(--cyan);" id="udCountContents">0</div>
+            <div style="font-size:0.7rem; color:var(--text-sec);">دروس منشورة</div>
+          </div>
+          <div style="background:rgba(255,183,77,0.05); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+            <div style="font-size:1.1rem; font-weight:800; color:var(--amber);" id="udCountHomeworks">0</div>
+            <div style="font-size:0.7rem; color:var(--text-sec);">واجبات مسندة</div>
+          </div>
+          <div style="background:rgba(239,83,80,0.05); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+            <div style="font-size:1.1rem; font-weight:800; color:var(--ruby);" id="udCountExams">0</div>
+            <div style="font-size:0.7rem; color:var(--text-sec);">اختبارات</div>
+          </div>
+          <div style="background:rgba(0,230,118,0.05); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+            <div style="font-size:1.1rem; font-weight:800; color:var(--emerald);" id="udCountChat">0</div>
+            <div style="font-size:0.7rem; color:var(--text-sec);">رسائل نقاش</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Group Memberships -->
+      <div style="margin-bottom:1.25rem;">
+        <h4 style="font-size:0.9rem; color:var(--cyan); margin-bottom:0.5rem;">🏫 الشعب والمجموعات المسجلة</h4>
+        <div id="udGroupsList" style="font-size:0.85rem; color:var(--text-sec); display:flex; gap:0.5rem; flex-wrap:wrap;">-</div>
+      </div>
+
+      <!-- Active Sessions & Devices -->
+      <div style="margin-bottom:1.25rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+          <h4 style="font-size:0.9rem; color:var(--cyan); margin:0;">📱 الجلسات والأجهزة النشطة</h4>
+          <button class="action-btn reject" onclick="revokeUserAllSessionsFromModal()" style="font-size:0.75rem; padding:0.3rem 0.6rem;">إنهاء كل الجلسات 🚪</button>
+        </div>
+        <div class="table-container" style="max-height:180px; overflow-y:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>المعرف</th>
+                <th>عنوان IP</th>
+                <th>الجهاز / المتصفح</th>
+                <th>تاريخ الجلسة</th>
+                <th>إجراء</th>
+              </tr>
+            </thead>
+            <tbody id="udSessionsTableBody">
+              <tr><td colspan="5" style="text-align:center;">جاري الفحص...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Role Audit Logs -->
+      <div>
+        <h4 style="font-size:0.9rem; color:var(--cyan); margin-bottom:0.5rem;">📜 تاريخ التعديلات والترقيات في الرقابة</h4>
+        <div class="table-container" style="max-height:160px; overflow-y:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>العملية</th>
+                <th>المنفذ</th>
+                <th>التفاصيل</th>
+                <th>التاريخ</th>
+              </tr>
+            </thead>
+            <tbody id="udAuditTableBody">
+              <tr><td colspan="4" style="text-align:center;">جاري الجلب...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top:1.25rem;">
+        <button class="action-btn" onclick="closeUserDetailModal()">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content Detail Modal (Point 30) -->
+  <div class="modal-overlay" id="contentDetailModal">
+    <div class="modal-card" style="max-width:700px; max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem;">
+        <div>
+          <div class="modal-title" id="cdTitle" style="font-size:1.3rem;">تفاصيل الدرس ومرفقاته 📖</div>
+          <div class="modal-sub" id="cdSubjectGroup">-</div>
+        </div>
+        <button class="action-btn" onclick="closeContentDetailModal()" style="font-size:1rem; padding:0.4rem 0.8rem;">✕</button>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:0.5rem; margin-bottom:1rem; font-size:0.8rem;">
+        <div style="background:rgba(255,255,255,0.02); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+          <div style="color:var(--text-muted);">تاريخ الدرس (Study Date)</div>
+          <div id="cdStudyDate" style="color:var(--cyan); font-weight:700; margin-top:0.2rem;">-</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.02); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+          <div style="color:var(--text-muted);">الكاتب / الأستاذ</div>
+          <div id="cdAuthor" style="color:var(--text-pri); font-weight:700; margin-top:0.2rem;">-</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.02); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+          <div style="color:var(--text-muted);">التفاعل</div>
+          <div id="cdMetrics" style="color:var(--emerald); font-weight:700; margin-top:0.2rem;">-</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:1.25rem;">
+        <h4 style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.4rem;">المحتوى والشرح:</h4>
+        <div id="cdDescription" style="background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:10px; padding:1rem; font-size:0.9rem; line-height:1.6; white-space:pre-wrap; max-height:220px; overflow-y:auto;">-</div>
+      </div>
+
+      <div>
+        <h4 style="font-size:0.85rem; color:var(--cyan); margin-bottom:0.6rem;">🖼️ الصور والمرفقات المرتبطة بالدرس (<span id="cdMediaCount">0</span>):</h4>
+        <div id="cdMediaGrid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:0.75rem;">
+          <div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">لا توجد مرفقات صورية</div>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top:1.5rem;">
+        <button class="action-btn" onclick="closeContentDetailModal()">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Media Lightbox Modal -->
+  <div class="modal-overlay" id="mediaLightboxModal" style="z-index:9999;" onclick="closeMediaLightbox()">
+    <div style="position:relative; max-width:90vw; max-height:90vh; text-align:center;" onclick="event.stopPropagation()">
+      <button class="action-btn" onclick="closeMediaLightbox()" style="position:absolute; top:-40px; right:0; background:rgba(0,0,0,0.8); border:none; color:white; font-size:1.2rem; padding:0.3rem 0.8rem; border-radius:50%;">✕</button>
+      <img id="lightboxImg" src="" alt="مرفق الدرس" style="max-width:100%; max-height:85vh; border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,0.8); border:1px solid var(--border);">
+    </div>
+  </div>
+
+  <!-- Create Holiday Modal (Point 35) -->
+  <div class="modal-overlay" id="holidayModal">
+    <div class="modal-card">
+      <div class="modal-title">إعلان إجازة مدرسية رسمية 🌴</div>
+      <div class="modal-sub">يتم تثبيت الإجازة في التقويم الدراسي والشعب المحددة</div>
+
+      <div class="form-group">
+        <label>عنوان الإجازة (مثال: إجازة عيد الاستقلال / إجازة رسمية)</label>
+        <input type="text" class="form-control" id="holidayTitle" placeholder="مثلاً: إجازة نهاية الأسبوع الرسمية">
+      </div>
+
+      <div class="form-group">
+        <label>تاريخ الإجازة (YYYY-MM-DD)</label>
+        <input type="date" class="form-control" id="holidayDate">
+      </div>
+
+      <div class="form-group">
+        <label>نطاق الإجازة</label>
+        <select class="form-control" id="holidayGroupId">
+          <option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>السبب والمبرر الإداري الرسمي (إلزامي) ⚠️</label>
+        <textarea class="form-control" id="holidayReason" rows="2" placeholder="اكتب سبب ومبرر اعتماد الإجازة لتوثيقها بالسجلات..."></textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button class="action-btn" onclick="closeHolidayModal()">إلغاء</button>
+        <button class="action-btn approve" onclick="submitCreateHoliday()">اعتماد وتثبيت الإجازة 🌴</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
     let activeUserId = '';
     let searchTimeout = null;
+
+    // Pagination state across dashboard entities (Point 31)
+    const pagination = {
+      users: { offset: 0, limit: 15 },
+      contents: { offset: 0, limit: 15 },
+      homeworks: { offset: 0, limit: 15 },
+      exams: { offset: 0, limit: 15 },
+      events: { offset: 0, limit: 15 },
+      issues: { offset: 0, limit: 15 },
+      chat: { offset: 0, limit: 20 },
+      audit: { offset: 0, limit: 20 }
+    };
 
     function showToast(msg) {
       const t = document.getElementById('toast');
@@ -2328,12 +3222,39 @@ export function renderDashboardHtml(): Response {
       setTimeout(() => { t.style.display = 'none'; }, 3000);
     }
 
+    function renderPaginationControls(containerId, offset, limit, count, totalCount, onPageFnName) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (totalCount === undefined || totalCount === null) totalCount = count;
+      const start = totalCount === 0 ? 0 : offset + 1;
+      const end = Math.min(offset + count, totalCount);
+
+      const hasPrev = offset > 0;
+      const prevOffset = Math.max(0, offset - limit);
+      const hasNext = offset + limit < totalCount;
+      const nextOffset = offset + limit;
+
+      container.innerHTML = `
+        <div style="font-size:0.85rem; color:var(--text-sec);">
+          عرض <strong>\${start}</strong> - <strong>\${end}</strong> من إجمالي <strong style="color:var(--cyan);">\${totalCount}</strong> سجل
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button class="action-btn" \${!hasPrev ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : ''} onclick="\${onPageFnName}(\${prevOffset})">السابق ◀</button>
+          <button class="action-btn" \${!hasNext ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : ''} onclick="\${onPageFnName}(\${nextOffset})">التالي ▶</button>
+        </div>
+      `;
+    }
+
     function switchTab(tabId) {
       document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
       const activeNav = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes(tabId));
       if (activeNav) activeNav.classList.add('active');
 
-      const tabs = ['overview', 'users', 'roles', 'teachers', 'moderators', 'admins', 'groups', 'requests', 'academic', 'audit', 'system'];
+      const tabs = [
+        'overview', 'users', 'roles', 'teachers', 'moderators', 'admins', 'groups', 
+        'requests', 'academic', 'contents', 'homeworks', 'exams', 'events', 'holidays',
+        'issues', 'chat', 'audit', 'system'
+      ];
       tabs.forEach(t => {
         const el = document.getElementById('tab-' + t);
         if (el) el.style.display = t === tabId ? 'block' : 'none';
@@ -2349,20 +3270,34 @@ export function renderDashboardHtml(): Response {
         groups: 'الشعب والمجموعات الرسمية',
         requests: 'طلبات ترقية الرتب (Role Requests)',
         academic: 'النشاط الأكاديمي والمحتوى',
+        contents: 'سجل الدروس المنهجية والمرفقات',
+        homeworks: 'سجل الواجبات المدرسية',
+        exams: 'سجل الاختبارات والتقييمات',
+        events: 'الأحداث والمناسبات المدرسية',
+        holidays: 'إدارة الإجازات المدرسية الرسمية',
+        issues: 'بلاغات ومشاكل الطلاب والمحتوى',
+        chat: 'رسائل نقاش الشعب والساحات',
         audit: 'سجل الرقابة والعمليات الإدارية',
-        system: 'إعدادات النظام والأمان'
+        system: 'إعدادات النظام وتصفير البيانات'
       };
       document.getElementById('pageTitle').textContent = titles[tabId] || 'غرفة التحكم';
 
       if (tabId === 'overview') loadStats();
-      if (tabId === 'users') loadUsers();
+      if (tabId === 'users') loadUsers(0);
       if (tabId === 'roles') loadRoles();
       if (tabId === 'teachers') loadTeachers();
       if (tabId === 'moderators') loadModerators();
       if (tabId === 'admins') loadAdmins();
       if (tabId === 'requests') loadRequests();
       if (tabId === 'groups') loadGroups();
-      if (tabId === 'audit') loadAudit();
+      if (tabId === 'contents') loadContents(0);
+      if (tabId === 'homeworks') loadHomeworks(0);
+      if (tabId === 'exams') loadExams(0);
+      if (tabId === 'events') loadEvents(0);
+      if (tabId === 'holidays') loadHolidays();
+      if (tabId === 'issues') loadIssues(0);
+      if (tabId === 'chat') loadChatMessages(0);
+      if (tabId === 'audit') loadAudit(0);
     }
 
     async function loadStats() {
@@ -2409,10 +3344,11 @@ export function renderDashboardHtml(): Response {
 
     function debounceUserSearch() {
       clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(loadUsers, 300);
+      searchTimeout = setTimeout(() => loadUsers(0), 300);
     }
 
-    async function loadUsers() {
+    async function loadUsers(offset = 0) {
+      pagination.users.offset = offset;
       const q = document.getElementById('userSearch')?.value || '';
       const role = document.getElementById('userRoleFilter')?.value || 'ALL';
       const status = document.getElementById('userStatusFilter')?.value || 'ALL';
@@ -2420,12 +3356,16 @@ export function renderDashboardHtml(): Response {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جاري البحث والتحميل...</td></tr>';
 
       try {
-        const res = await fetch('/api/dashboard/users?q=' + encodeURIComponent(q) + '&role=' + encodeURIComponent(role) + '&status=' + encodeURIComponent(status));
+        const url = `/api/dashboard/users?q=\${encodeURIComponent(q)}&role=\${encodeURIComponent(role)}&status=\${encodeURIComponent(status)}&offset=\${offset}&limit=\${pagination.users.limit}`;
+        const res = await fetch(url);
         const data = await res.json();
         if (!data.success || !data.users.length) {
           tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد حسابات مطابقة</td></tr>';
+          renderPaginationControls('usersPagination', 0, pagination.users.limit, 0, 0, 'loadUsers');
           return;
         }
+
+        renderPaginationControls('usersPagination', data.offset || 0, data.limit || pagination.users.limit, data.count, data.totalCount, 'loadUsers');
 
         tbody.innerHTML = data.users.map(u => {
           const roleClass = u.role.toLowerCase();
@@ -2447,7 +3387,9 @@ export function renderDashboardHtml(): Response {
             : \`<button class="action-btn freeze" onclick="disableUser('\${u.id}', '\${u.fullName}')">تجميد ❄️</button>\`;
 
           return \`<tr>
-            <td><strong>\${u.fullName}</strong></td>
+            <td>
+              <strong style="cursor:pointer; color:var(--cyan); text-decoration:underline;" onclick="openUserDetailModal('\${u.id}')">\${u.fullName}</strong>
+            </td>
             <td><code style="color:var(--cyan);">\${u.phoneNumber}</code></td>
             <td>الصف \${u.gradeId} — شعبة (\${u.sectionId})</td>
             <td><span class="badge \${roleClass}">\${roleName}</span></td>
@@ -2455,6 +3397,7 @@ export function renderDashboardHtml(): Response {
             <td>\${new Date(u.createdAt).toLocaleDateString('ar-EG')}</td>
             <td>
               <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+                <button class="action-btn" onclick="openUserDetailModal('\${u.id}')">التفاصيل 👤</button>
                 <button class="action-btn" onclick="openRoleModal('\${u.id}', '\${u.fullName}', '\${u.role}')">تعديل الرتبة 👑</button>
                 \${freezeBtn}
                 <button class="action-btn reject" onclick="revokeSessions('\${u.id}', '\${u.fullName}')">إنهاء الجلسات 🚪</button>
@@ -2464,6 +3407,123 @@ export function renderDashboardHtml(): Response {
         }).join('');
       } catch (e) {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--ruby);">فشل جلب المستخدمين</td></tr>';
+      }
+    }
+
+    // Unified User Detail Center (Point 32)
+    async function openUserDetailModal(userId) {
+      activeUserId = userId;
+      document.getElementById('userDetailModal').style.display = 'flex';
+      document.getElementById('udName').textContent = 'جاري التحميل...';
+      document.getElementById('udIdPhone').textContent = '';
+
+      try {
+        const res = await fetch('/api/dashboard/users/' + userId);
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.message || 'فشل جلب بيانات المستخدم');
+          closeUserDetailModal();
+          return;
+        }
+
+        const u = data.user;
+        document.getElementById('udName').textContent = u.fullName + ' 👤';
+        document.getElementById('udIdPhone').textContent = \`المعرف: \${u.id} | هاتف: \${u.phoneNumber || 'لا يوجد'}\`;
+        document.getElementById('udRole').textContent = u.role;
+        document.getElementById('udStatus').innerHTML = u.status === 'ACTIVE' 
+          ? '<span class="badge active">🟢 نشط</span>' 
+          : '<span class="badge disabled">❄️ مجمّد</span>';
+        document.getElementById('udCreatedAt').textContent = new Date(u.createdAt).toLocaleString('ar-EG');
+        document.getElementById('udLastActive').textContent = u.lastActiveAt ? new Date(u.lastActiveAt).toLocaleString('ar-EG') : 'غير متوفر';
+
+        // Activities
+        document.getElementById('udCountContents').textContent = data.activities?.contents || 0;
+        document.getElementById('udCountHomeworks').textContent = data.activities?.homeworks || 0;
+        document.getElementById('udCountExams').textContent = data.activities?.exams || 0;
+        document.getElementById('udCountChat').textContent = data.activities?.chatMessages || 0;
+
+        // Memberships
+        const grpContainer = document.getElementById('udGroupsList');
+        if (data.memberships && data.memberships.length) {
+          grpContainer.innerHTML = data.memberships.map(m => \`
+            <span class="badge" style="background:rgba(255,255,255,0.05); border:1px solid var(--border); padding:0.4rem 0.6rem;">
+              🏫 \${m.group_name} (\${m.role_in_group})
+            </span>
+          \`).join('');
+        } else {
+          grpContainer.innerHTML = '<span style="color:var(--text-muted);">لا توجد شعب منضم إليها</span>';
+        }
+
+        // Sessions
+        const sBody = document.getElementById('udSessionsTableBody');
+        if (data.sessions && data.sessions.length) {
+          sBody.innerHTML = data.sessions.map(s => \`
+            <tr>
+              <td><code>\${s.id.substring(0, 8)}...</code></td>
+              <td><code>\${s.ip_address || '-'}</code></td>
+              <td>\${s.device_info || 'تطبيق تنوير'}</td>
+              <td>\${new Date(s.created_at).toLocaleString('ar-EG')}</td>
+              <td>
+                <button class="action-btn reject" style="font-size:0.75rem; padding:0.2rem 0.5rem;" onclick="revokeSingleSession('\${u.id}', '\${s.id}')">طرد ✕</button>
+              </td>
+            </tr>
+          \`).join('');
+        } else {
+          sBody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا توجد جلسات نشطة حالياً</td></tr>';
+        }
+
+        // Audit Logs
+        const aBody = document.getElementById('udAuditTableBody');
+        if (data.auditLogs && data.auditLogs.length) {
+          aBody.innerHTML = data.auditLogs.map(l => \`
+            <tr>
+              <td><strong style="color:var(--cyan);">\${l.action}</strong></td>
+              <td>\${l.actor_id}</td>
+              <td>\${l.details}</td>
+              <td>\${new Date(l.created_at).toLocaleString('ar-EG')}</td>
+            </tr>
+          \`).join('');
+        } else {
+          aBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">لا توجد حركات إدارية سابقة</td></tr>';
+        }
+
+      } catch (e) {
+        alert('فشل الاتصال بالخادم لجلب تفاصيل المستخدم');
+        closeUserDetailModal();
+      }
+    }
+
+    function closeUserDetailModal() {
+      document.getElementById('userDetailModal').style.display = 'none';
+    }
+
+    async function revokeSingleSession(userId, sessionId) {
+      if (!confirm('هل تريد إنهاء هذه الجلسة تحديداً وطرد الجهاز؟')) return;
+      try {
+        const res = await fetch(\`/api/dashboard/users/\${userId}/revoke-sessions\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId })
+        });
+        const data = await res.json();
+        showToast(data.message || 'تم إنهاء الجلسة بنجاح');
+        openUserDetailModal(userId);
+        loadStats();
+      } catch (e) {
+        alert('حدث خطأ أثناء إنهاء الجلسة');
+      }
+    }
+
+    async function revokeUserAllSessionsFromModal() {
+      if (!confirm('هل تريد بالتأكيد إنهاء جميع جلسات هذا المستخدم وتسجيل خروجه من كافة الأجهزة؟')) return;
+      try {
+        const res = await fetch(\`/api/dashboard/users/\${activeUserId}/revoke-sessions\`, { method: 'POST' });
+        const data = await res.json();
+        showToast(data.message || 'تم إنهاء جميع الجلسات');
+        openUserDetailModal(activeUserId);
+        loadStats();
+      } catch (e) {
+        alert('حدث خطأ');
       }
     }
 
@@ -2762,15 +3822,392 @@ export function renderDashboardHtml(): Response {
       }
     }
 
-    async function loadAudit() {
-      const tbody = document.getElementById('auditTableBody');
+    // Lesson Details & Attachments (Point 30)
+    async function loadContents(offset = 0) {
+      pagination.contents.offset = offset;
+      const q = document.getElementById('contentSearchInput')?.value || '';
+      const tbody = document.getElementById('contentsTableBody');
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جاري جلب الدروس...</td></tr>';
+
       try {
-        const res = await fetch('/api/dashboard/audit-logs');
+        const res = await fetch(\`/api/dashboard/contents?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.contents.limit}\`);
         const data = await res.json();
-        if (!data.logs.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">لا توجد سجلات بعد</td></tr>';
+        if (!data.success || !data.contents.length) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد دروس مطابقة</td></tr>';
+          renderPaginationControls('contentsPagination', 0, pagination.contents.limit, 0, 0, 'loadContents');
           return;
         }
+
+        renderPaginationControls('contentsPagination', data.offset || 0, data.limit || pagination.contents.limit, data.count, data.totalCount, 'loadContents');
+
+        tbody.innerHTML = data.contents.map(c => \`
+          <tr>
+            <td>
+              <strong style="cursor:pointer; color:var(--cyan); text-decoration:underline;" onclick="openContentDetailModal('\${c.id}')">\${c.title}</strong>
+            </td>
+            <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${c.subject_name || c.subject_id}</span></td>
+            <td>\${c.group_name || c.group_id}</td>
+            <td><code>\${c.study_date || '-'}</code></td>
+            <td>
+              <span class="badge" style="background:rgba(255,255,255,0.05);">🖼️ \${c.media_count}</span>
+            </td>
+            <td>\${c.author_name}</td>
+            <td>
+              <button class="action-btn" onclick="openContentDetailModal('\${c.id}')">عرض المرفقات والتفاصيل 📖</button>
+            </td>
+          </tr>
+        \`).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--ruby);">فشل تحميل الدروس</td></tr>';
+      }
+    }
+
+    async function openContentDetailModal(contentId) {
+      document.getElementById('contentDetailModal').style.display = 'flex';
+      document.getElementById('cdTitle').textContent = 'جاري التحميل...';
+      document.getElementById('cdSubjectGroup').textContent = '';
+      document.getElementById('cdDescription').textContent = '';
+      document.getElementById('cdMediaGrid').innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">جاري جلب المرفقات...</div>';
+
+      try {
+        const res = await fetch('/api/dashboard/contents/' + contentId);
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.message || 'فشل جلب تفاصيل الدرس');
+          closeContentDetailModal();
+          return;
+        }
+
+        const c = data.content;
+        document.getElementById('cdTitle').textContent = c.title + ' 📖';
+        document.getElementById('cdSubjectGroup').textContent = \`المادة: \${c.subject_name || c.subject_id} | الشعبة: \${c.group_name || c.group_id}\`;
+        document.getElementById('cdStudyDate').textContent = c.study_date || 'غير محدد';
+        document.getElementById('cdAuthor').textContent = c.author_name;
+        document.getElementById('cdMetrics').textContent = \`👀 \${c.view_count || 0} مشاهدة | ❤️ \${c.likes_count || 0} إعجاب\`;
+        document.getElementById('cdDescription').textContent = c.description || 'لا يوجد وصف أو شرح تفصيلي مضاف';
+        document.getElementById('cdMediaCount').textContent = (data.media || []).length;
+
+        const grid = document.getElementById('cdMediaGrid');
+        if (data.media && data.media.length) {
+          grid.innerHTML = data.media.map(m => \`
+            <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.4); text-align:center; cursor:pointer;" onclick="openMediaLightbox('\${m.previewUrl}')">
+              <img src="\${m.previewUrl}" alt="مرفق" style="width:100%; height:90px; object-fit:cover; display:block;">
+              <div style="padding:0.3rem; font-size:0.7rem; color:var(--text-muted); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
+                \${m.mimeType || 'صورة'}
+              </div>
+            </div>
+          \`).join('');
+        } else {
+          grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">لا توجد صور أو مرفقات مرفوعة مع هذا الدرس</div>';
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء الاتصال بالخادم');
+        closeContentDetailModal();
+      }
+    }
+
+    function closeContentDetailModal() {
+      document.getElementById('contentDetailModal').style.display = 'none';
+    }
+
+    function openMediaLightbox(url) {
+      document.getElementById('lightboxImg').src = url;
+      document.getElementById('mediaLightboxModal').style.display = 'flex';
+    }
+
+    function closeMediaLightbox() {
+      document.getElementById('mediaLightboxModal').style.display = 'none';
+    }
+
+    // Homeworks Loader (Point 31 & 33)
+    async function loadHomeworks(offset = 0) {
+      pagination.homeworks.offset = offset;
+      const q = document.getElementById('homeworkSearchInput')?.value || '';
+      const tbody = document.getElementById('homeworksTableBody');
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>';
+
+      try {
+        const res = await fetch(\`/api/dashboard/homeworks?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.homeworks.limit}\`);
+        const data = await res.json();
+        if (!data.success || !data.homeworks.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:color; color:var(--text-sec);">لا توجد واجبات مطابقة</td></tr>';
+          renderPaginationControls('homeworksPagination', 0, pagination.homeworks.limit, 0, 0, 'loadHomeworks');
+          return;
+        }
+
+        renderPaginationControls('homeworksPagination', data.offset || 0, data.limit || pagination.homeworks.limit, data.count, data.totalCount, 'loadHomeworks');
+
+        tbody.innerHTML = data.homeworks.map(h => \`
+          <tr>
+            <td><strong>\${h.title}</strong></td>
+            <td>\${h.subject_name || h.subject_id}</td>
+            <td>\${h.group_name || h.group_id}</td>
+            <td><code>\${h.study_date || '-'}</code></td>
+            <td><code style="color:var(--amber);">\${h.due_date || '-'}</code></td>
+            <td>\${h.author_name}</td>
+          </tr>
+        \`).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--ruby);">فشل تحميل الواجبات</td></tr>';
+      }
+    }
+
+    // Exams Loader (Point 31 & 33)
+    async function loadExams(offset = 0) {
+      pagination.exams.offset = offset;
+      const q = document.getElementById('examSearchInput')?.value || '';
+      const tbody = document.getElementById('examsTableBody');
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>';
+
+      try {
+        const res = await fetch(\`/api/dashboard/exams?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.exams.limit}\`);
+        const data = await res.json();
+        if (!data.success || !data.exams.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد اختبارات مسجلة</td></tr>';
+          renderPaginationControls('examsPagination', 0, pagination.exams.limit, 0, 0, 'loadExams');
+          return;
+        }
+
+        renderPaginationControls('examsPagination', data.offset || 0, data.limit || pagination.exams.limit, data.count, data.totalCount, 'loadExams');
+
+        tbody.innerHTML = data.exams.map(x => \`
+          <tr>
+            <td><strong>\${x.title}</strong></td>
+            <td>\${x.subject_name || x.subject_id}</td>
+            <td>\${x.group_name || x.group_id}</td>
+            <td><code style="color:var(--ruby);">\${x.exam_date || '-'}</code></td>
+            <td><span class="badge" style="background:rgba(255,255,255,0.05);">\${x.type}</span></td>
+            <td>\${x.author_name}</td>
+          </tr>
+        \`).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--ruby);">فشل تحميل الاختبارات</td></tr>';
+      }
+    }
+
+    // Events Loader (Point 31 & 33)
+    async function loadEvents(offset = 0) {
+      pagination.events.offset = offset;
+      const q = document.getElementById('eventSearchInput')?.value || '';
+      const tbody = document.getElementById('eventsTableBody');
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>';
+
+      try {
+        const res = await fetch(\`/api/dashboard/events?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.events.limit}\`);
+        const data = await res.json();
+        if (!data.success || !data.events.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد أحداث مسجلة</td></tr>';
+          renderPaginationControls('eventsPagination', 0, pagination.events.limit, 0, 0, 'loadEvents');
+          return;
+        }
+
+        renderPaginationControls('eventsPagination', data.offset || 0, data.limit || pagination.events.limit, data.count, data.totalCount, 'loadEvents');
+
+        tbody.innerHTML = data.events.map(ev => \`
+          <tr>
+            <td><strong>\${ev.title}</strong></td>
+            <td>\${ev.event_date}</td>
+            <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${ev.category}</span></td>
+            <td>\${ev.group_id === 'all' ? '<span class="badge admin">كامل المدرسة 🏫</span>' : (ev.group_name || ev.group_id)}</td>
+            <td>\${ev.author_name}</td>
+            <td>\${ev.description || '-'}</td>
+          </tr>
+        \`).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--ruby);">فشل تحميل الفعاليات</td></tr>';
+      }
+    }
+
+    // Holidays Management (Point 35)
+    async function loadHolidays() {
+      const tbody = document.getElementById('holidaysTableBody');
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">جاري جلب الإجازات المدرسية...</td></tr>';
+
+      try {
+        const res = await fetch('/api/dashboard/holidays');
+        const data = await res.json();
+        if (!data.success || !data.holidays.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد إجازات مدرسية مسجلة حالياً</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.holidays.map(h => \`
+          <tr>
+            <td><strong style="color:var(--emerald);">🌴 \${h.title}</strong></td>
+            <td><code>\${h.event_date}</code></td>
+            <td>\${h.group_id === 'all' ? '<span class="badge admin">كامل المدرسة 🏫</span>' : (h.group_name || h.group_id)}</td>
+            <td>\${h.description || '-'}</td>
+            <td>\${h.author_name}</td>
+            <td>
+              <button class="action-btn reject" onclick="deleteHoliday('\${h.id}', '\${h.title}')">حذف الإجازة ✕</button>
+            </td>
+          </tr>
+        \`).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--ruby);">فشل تحميل الإجازات</td></tr>';
+      }
+    }
+
+    async function openHolidayModal() {
+      document.getElementById('holidayTitle').value = '';
+      document.getElementById('holidayDate').value = new Date().toISOString().split('T')[0];
+      document.getElementById('holidayReason').value = '';
+      
+      try {
+        const res = await fetch('/api/dashboard/groups');
+        const data = await res.json();
+        const sel = document.getElementById('holidayGroupId');
+        sel.innerHTML = '<option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>';
+        if (data.groups) {
+          data.groups.forEach(g => {
+            sel.innerHTML += \`<option value="\${g.id}">شعبة: \${g.name}</option>\`;
+          });
+        }
+      } catch (e) {}
+
+      document.getElementById('holidayModal').style.display = 'flex';
+    }
+
+    function closeHolidayModal() {
+      document.getElementById('holidayModal').style.display = 'none';
+    }
+
+    async function submitCreateHoliday() {
+      const title = document.getElementById('holidayTitle').value.trim();
+      const date = document.getElementById('holidayDate').value;
+      const groupId = document.getElementById('holidayGroupId').value;
+      const reason = document.getElementById('holidayReason').value.trim();
+
+      if (!title) { alert('الرجاء كتابة عنوان الإجازة'); return; }
+      if (!date) { alert('الرجاء تحديد تاريخ الإجازة'); return; }
+      if (!reason) { alert('السبب والمبرر الإداري إلزامي لاعتماد الإجازة الرسمية'); return; }
+
+      try {
+        const res = await fetch('/api/dashboard/holidays', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, date, groupId, reason })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || 'تم اعتماد وتثبيت الإجازة المدرسية بنجاح 🌴');
+          closeHolidayModal();
+          loadHolidays();
+          loadStats();
+        } else {
+          alert(data.message || 'فشلت عملية إنشاء الإجازة');
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء إنشاء الإجازة');
+      }
+    }
+
+    async function deleteHoliday(id, title) {
+      if (!confirm(\`هل أنت متأكد من إلغاء وحذف الإجازة الرسمية (\${title}) من التقويم؟\`)) return;
+      try {
+        const res = await fetch('/api/dashboard/holidays/' + id, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || 'تم حذف الإجازة بنجاح');
+          loadHolidays();
+          loadStats();
+        } else {
+          alert(data.message || 'فشل حذف الإجازة');
+        }
+      } catch (e) {
+        alert('حدث خطأ');
+      }
+    }
+
+    // Issues Loader (Point 31 & 33)
+    async function loadIssues(offset = 0) {
+      pagination.issues.offset = offset;
+      const status = document.getElementById('issueStatusFilter')?.value || 'ALL';
+      const tbody = document.getElementById('issuesTableBody');
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جاري جلب البلاغات...</td></tr>';
+
+      try {
+        const res = await fetch(\`/api/dashboard/issues?status=\${status}&offset=\${offset}&limit=\${pagination.issues.limit}\`);
+        const data = await res.json();
+        if (!data.success || !data.issues.length) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد بلاغات مسجلة</td></tr>';
+          renderPaginationControls('issuesPagination', 0, pagination.issues.limit, 0, 0, 'loadIssues');
+          return;
+        }
+
+        renderPaginationControls('issuesPagination', data.offset || 0, data.limit || pagination.issues.limit, data.count, data.totalCount, 'loadIssues');
+
+        tbody.innerHTML = data.issues.map(iss => \`
+          <tr>
+            <td><strong>\${iss.title}</strong></td>
+            <td>\${iss.description}</td>
+            <td><span class="badge" style="background:rgba(239,83,80,0.1); color:var(--ruby); border:1px solid var(--ruby);">\${iss.status}</span></td>
+            <td>\${iss.group_name || iss.group_id}</td>
+            <td>\${iss.reporter_name}</td>
+            <td>\${new Date(iss.created_at).toLocaleDateString('ar-EG')}</td>
+            <td>
+              <button class="action-btn" onclick="openUserDetailModal('\${iss.created_by}')">مقدم البلاغ 👤</button>
+            </td>
+          </tr>
+        \`).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--ruby);">فشل تحميل البلاغات</td></tr>';
+      }
+    }
+
+    // Chat Messages Loader (Point 31 & 33)
+    async function loadChatMessages(offset = 0) {
+      pagination.chat.offset = offset;
+      const q = document.getElementById('chatSearchInput')?.value || '';
+      const tbody = document.getElementById('chatTableBody');
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">جاري جلب الرسائل...</td></tr>';
+
+      try {
+        const res = await fetch(\`/api/dashboard/chat-messages?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.chat.limit}\`);
+        const data = await res.json();
+        if (!data.success || !data.messages.length) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا توجد رسائل مطابقة</td></tr>';
+          renderPaginationControls('chatPagination', 0, pagination.chat.limit, 0, 0, 'loadChatMessages');
+          return;
+        }
+
+        renderPaginationControls('chatPagination', data.offset || 0, data.limit || pagination.chat.limit, data.count, data.totalCount, 'loadChatMessages');
+
+        tbody.innerHTML = data.messages.map(m => \`
+          <tr>
+            <td>
+              <strong style="cursor:pointer; color:var(--cyan); text-decoration:underline;" onclick="openUserDetailModal('\${m.user_id}')">\${m.user_name}</strong>
+            </td>
+            <td>\${m.group_name || m.group_id}</td>
+            <td>\${m.message}</td>
+            <td>\${new Date(m.created_at).toLocaleString('ar-EG')}</td>
+            <td>
+              <button class="action-btn" onclick="openUserDetailModal('\${m.user_id}')">الملف 👤</button>
+            </td>
+          </tr>
+        \`).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--ruby);">فشل تحميل رسائل النقاش</td></tr>';
+      }
+    }
+
+    async function loadAudit(offset = 0) {
+      pagination.audit.offset = offset;
+      const q = document.getElementById('auditSearchInput')?.value || '';
+      const tbody = document.getElementById('auditTableBody');
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>';
+
+      try {
+        const res = await fetch(\`/api/dashboard/audit-logs?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.audit.limit}\`);
+        const data = await res.json();
+        if (!data.logs || !data.logs.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">لا توجد سجلات بعد</td></tr>';
+          renderPaginationControls('auditPagination', 0, pagination.audit.limit, 0, 0, 'loadAudit');
+          return;
+        }
+
+        renderPaginationControls('auditPagination', data.offset || 0, data.limit || pagination.audit.limit, data.count, data.totalCount, 'loadAudit');
+
         tbody.innerHTML = data.logs.map(l => \`<tr>
           <td><strong style="color:var(--cyan);">\${l.action}</strong></td>
           <td>\${l.actor_id} (\${l.actor_role})</td>
@@ -2781,6 +4218,90 @@ export function renderDashboardHtml(): Response {
         </tr>\`).join('');
       } catch (e) {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--ruby);">فشل تحميل سجل الرقابة</td></tr>';
+      }
+    }
+
+    // 2-Phase System Purge (Point 34)
+    async function previewPurge() {
+      const secret = document.getElementById('purgeSecretInput').value.trim();
+      const container = document.getElementById('purgePreviewResult');
+      if (!secret) {
+        alert('الرجاء إدخال الرمز السري الفائق للمالك أولاً');
+        return;
+      }
+
+      container.innerHTML = '<div style="color:var(--text-sec); font-size:0.85rem;">جاري جلب إحصاءات الجداول المستهدفة...</div>';
+
+      try {
+        const res = await fetch('/api/dashboard/system/purge/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          container.innerHTML = \`<div style="color:var(--ruby); font-size:0.85rem;">\${data.message || 'فشل الفحص'}</div>\`;
+          return;
+        }
+
+        const counts = data.counts || {};
+        let html = '<div style="font-size:0.8rem; color:var(--text-sec); margin-bottom:0.4rem;">السجلات المرشحة للحذف والإفراغ بالكامل:</div><div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:0.4rem; font-size:0.8rem;">';
+        for (const [tbl, count] of Object.entries(counts)) {
+          html += \`<div style="background:rgba(255,255,255,0.02); padding:0.4rem; border-radius:6px; border:1px solid var(--border); display:flex; justify-content:space-between;">
+            <span>\${tbl}</span>
+            <strong style="color:var(--ruby);">\${count}</strong>
+          </div>\`;
+        }
+        html += \`</div>
+          <div style="margin-top:0.6rem; font-size:0.75rem; color:var(--cyan);">
+            جيل البيانات الجديد المقترح: <code>\${data.nextGeneration}</code>
+          </div>
+        \`;
+        container.innerHTML = html;
+        document.getElementById('purgeExecutionBlock').style.display = 'block';
+      } catch (e) {
+        container.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
+      }
+    }
+
+    function checkPurgeConfirmMatch() {
+      const txt = document.getElementById('purgeConfirmInput').value.trim();
+      const btn = document.getElementById('executePurgeBtn');
+      if (txt === 'YES') {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+      } else {
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+      }
+    }
+
+    async function executePurge() {
+      const secret = document.getElementById('purgeSecretInput').value.trim();
+      const confirmation = document.getElementById('purgeConfirmInput').value.trim();
+      if (confirmation !== 'YES') return;
+
+      if (!confirm('تحذير نهائي: سيتم تصفير جميع جداول المحتوى والرسائل وتدوير جيل البيانات، مما سيجبر جميع تطبيقات الطلاب على تصفير قواعد البيانات المحلية فورياً. هل تريد المتابعة قطيعاً؟')) {
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/dashboard/system/purge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret, confirmation })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(\`تم تصفير البيانات بنجاح!\nالجيل الجديد: \${data.newGeneration}\nتم تفريغ \${data.tablesPurged.length} جدول\`);
+          window.location.reload();
+        } else {
+          alert(data.message || 'فشلت عملية التصفير');
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء تنفيذ التصفير');
       }
     }
 

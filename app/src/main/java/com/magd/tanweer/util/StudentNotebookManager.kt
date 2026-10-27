@@ -364,4 +364,33 @@ data class LessonCachingResult(
             Result.failure(Exception("تعذر حفظ اللوحات في المعرض، يرجى المحاولة لاحقاً"))
         }
     }
+
+    /**
+     * Clears all offline notebook records, transcribed lesson folders, and cached whiteboard images
+     * to ensure total user data isolation upon logout or account switch.
+     */
+    @Synchronized
+    fun clearAllUserData(context: Context) {
+        try {
+            // 1. Delete student_notebook_records.json
+            val recordsFile = getStorageFile(context)
+            if (recordsFile.exists()) {
+                recordsFile.delete()
+            }
+
+            // 2. Delete transcribed_lessons directory and all cached board images
+            val offlineDir = File(context.filesDir, DIR_NAME)
+            if (offlineDir.exists()) {
+                offlineDir.deleteRecursively()
+            }
+
+            // 3. Clear any temporary lesson files in cache directory
+            val cacheLessonsDir = File(context.cacheDir, "lessons")
+            if (cacheLessonsDir.exists()) {
+                cacheLessonsDir.deleteRecursively()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error clearing student notebook user data", e)
+        }
+    }
 }

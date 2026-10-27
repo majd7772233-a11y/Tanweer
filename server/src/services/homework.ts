@@ -4,6 +4,8 @@ import { mapHomework } from '../lib/mappers';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
+import { isValidIsoDate } from '../lib/validation';
+import { cleanupOrphanMedia } from './media';
 
 export async function handleGetHomeworks(groupId: string, user: UserContext, env: Env): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
@@ -46,6 +48,14 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
 
   if (!body.groupId || !body.dueDate || !body.subjectId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى ملء تفاصيل الواجب وتاريخ التسليم والمادة');
+  }
+
+  if (!isValidIsoDate(body.dueDate)) {
+    return errorResponse('INVALID_INPUT', 'تاريخ تسليم الواجب غير صالح، يرجى اختيار تاريخ تقويمي صحيح بصيغة YYYY-MM-DD');
+  }
+
+  if (body.studyDate && !isValidIsoDate(body.studyDate)) {
+    return errorResponse('INVALID_INPUT', 'تاريخ دراسة الواجب غير صالح، يرجى اختيار تاريخ تقويمي صحيح بصيغة YYYY-MM-DD');
   }
 
   const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
@@ -108,6 +118,23 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     user.userId,
     now
   ).run();
+
+  // Populate relational homework_media table
+  if (body.mediaUrls && Array.isArray(body.mediaUrls)) {
+    for (let i = 0; i < body.mediaUrls.length; i++) {
+      const url = body.mediaUrls[i];
+      if (!url || typeof url !== 'string') continue;
+      const mediaIdMatch = url.match(/([a-zA-Z0-9_\-]+)$/);
+      const extractedMediaId = mediaIdMatch ? mediaIdMatch[1].replace(/\.[a-zA-Z0-9]+$/, '') : generateId('med');
+      const hwMediaId = generateId('hwm');
+      try {
+        await env.DB.prepare(
+          `INSERT INTO homework_media (id, homework_id, media_id, url, page_order, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).bind(hwMediaId, hwId, extractedMediaId, url, i + 1, now).run();
+      } catch {}
+    }
+  }
 
   const msg = isOfficial === 1
     ? 'تم نشر الواجب الرسمي المعتمد للشعبة بنجاح 🎓'
@@ -224,8 +251,36 @@ export async function handleDeleteHomework(
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية حذف هذا الواجب', 403);
   }
 
+  const candidateMediaIds: string[] = [];
+  try {
+    const hwMediaRows = await env.DB.prepare(
+      `SELECT media_id FROM homework_media WHERE homework_id = ?`
+    ).bind(homeworkId).all<{ media_id: string }>();
+    for (const r of hwMediaRows.results || []) {
+      if (r.media_id) candidateMediaIds.push(r.media_id);
+    }
+  } catch {}
+
+  if (hw.media_urls) {
+    try {
+      const urls = JSON.parse(hw.media_urls);
+      if (Array.isArray(urls)) {
+        for (const u of urls) {
+          const match = String(u).match(/([a-zA-Z0-9_\-]+)$/);
+          if (match) candidateMediaIds.push(match[1].replace(/\.[a-zA-Z0-9]+$/, ''));
+        }
+      }
+    } catch {}
+  }
+
   await env.DB.prepare(`DELETE FROM homeworks WHERE id = ?`).bind(homeworkId).run();
   await env.DB.prepare(`DELETE FROM homework_completions WHERE homework_id = ?`).bind(homeworkId).run();
+  try {
+    await env.DB.prepare(`DELETE FROM homework_media WHERE homework_id = ?`).bind(homeworkId).run();
+  } catch {}
+
+  // Safely cleanup orphan media blobs that are no longer referenced anywhere
+  await cleanupOrphanMedia(env.DB, candidateMediaIds);
 
   return jsonResponse({
     success: true,
@@ -233,7 +288,12 @@ export async function handleDeleteHomework(
   });
 }
 
-export async function handleToggleHomeworkCompletion(homeworkId: string, user: UserContext, env: Env): Promise<Response> {
+export async function handleToggleHomeworkCompletion(
+  homeworkId: string,
+  user: UserContext,
+  request: Request,
+  env: Env
+): Promise<Response> {
   const hw = await env.DB.prepare(`SELECT group_id FROM homeworks WHERE id = ?`).bind(homeworkId).first<{ group_id: string }>();
   if (!hw) {
     return errorResponse('HOMEWORK_NOT_FOUND', 'الواجب غير موجود');
@@ -241,6 +301,30 @@ export async function handleToggleHomeworkCompletion(homeworkId: string, user: U
 
   const memberCheck = await requireGroupMember(user, hw.group_id, env.DB);
   if (memberCheck) return memberCheck;
+
+  let requestedStatus: boolean | null = null;
+  const contentType = request.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    try {
+      const body = await request.json() as { isCompleted?: boolean };
+      if (typeof body.isCompleted === 'boolean') {
+        requestedStatus = body.isCompleted;
+      }
+    } catch (_: any) {}
+  }
+
+  if (requestedStatus !== null) {
+    if (requestedStatus) {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO homework_completions (homework_id, user_id, completed_at) VALUES (?, ?, ?)`
+      ).bind(homeworkId, user.userId, Date.now()).run();
+    } else {
+      await env.DB.prepare(
+        `DELETE FROM homework_completions WHERE homework_id = ? AND user_id = ?`
+      ).bind(homeworkId, user.userId).run();
+    }
+    return jsonResponse({ success: true, isCompleted: requestedStatus });
+  }
 
   const existing = await env.DB.prepare(
     `SELECT 1 FROM homework_completions WHERE homework_id = ? AND user_id = ?`

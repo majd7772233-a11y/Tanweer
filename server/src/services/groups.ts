@@ -4,6 +4,7 @@ import { mapGroup } from '../lib/mappers';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Role, normalizeRole, sanitizePublicRole } from '../lib/roles';
 import { Permission, hasPermission } from '../lib/permissions';
+import { requireGroupMember } from '../middleware/permissions';
 
 export async function handleGetGroups(user: UserContext, env: Env): Promise<Response> {
   const userGroups = await env.DB.prepare(
@@ -66,16 +67,27 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
 /**
  * Lists all members of a group with their roles and statuses.
  */
+/**
+ * Lists all members of a group with their roles and statuses.
+ * Requires active group membership or global administrative authority.
+ * Scopes phone number visibility and pending status visibility strictly to group managers.
+ */
 export async function handleGetGroupMembers(groupId: string, user: UserContext, env: Env): Promise<Response> {
-  const canManage = await hasPermission(user, Permission.MANAGE_GROUP_MEMBERS, { db: env.DB, groupId }) ||
-                    ['TEACHER', 'MODERATOR', 'ADMIN', 'SYSTEM_OWNER'].includes(normalizeRole(user.role));
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
+  if (memberCheck) return memberCheck;
+
+  const normRole = normalizeRole(user.role);
+  const isGlobalAdmin = normRole === Role.ADMIN || normRole === Role.SYSTEM_OWNER;
+  const canManage = isGlobalAdmin || await hasPermission(user, Permission.MANAGE_GROUP_MEMBERS, { db: env.DB, groupId });
+
+  const statusFilter = canManage ? '' : "AND gm.status = 'ACTIVE'";
 
   const members = await env.DB.prepare(
     `SELECT gm.user_id, gm.role as member_role, gm.status, gm.joined_at,
             u.full_name, u.phone_number, u.role as global_role, u.grade_id, u.section_id
      FROM group_members gm
      JOIN users u ON gm.user_id = u.id
-     WHERE gm.group_id = ?
+     WHERE gm.group_id = ? ${statusFilter}
      ORDER BY CASE WHEN gm.role = 'ADMIN' THEN 1 WHEN gm.role = 'TEACHER' THEN 2 WHEN gm.role = 'MODERATOR' THEN 3 ELSE 4 END, gm.joined_at ASC`
   ).bind(groupId).all();
 
@@ -106,8 +118,9 @@ export async function handleUpdateGroupMemberRole(
   request: Request,
   env: Env
 ): Promise<Response> {
-  const canManage = await hasPermission(user, Permission.MANAGE_GROUP_MEMBERS, { db: env.DB, groupId }) ||
-                    ['TEACHER', 'MODERATOR', 'ADMIN', 'SYSTEM_OWNER'].includes(normalizeRole(user.role));
+  const normRole = normalizeRole(user.role);
+  const isGlobalAdmin = normRole === Role.ADMIN || normRole === Role.SYSTEM_OWNER;
+  const canManage = isGlobalAdmin || await hasPermission(user, Permission.MANAGE_GROUP_MEMBERS, { db: env.DB, groupId });
 
   if (!canManage) {
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية تعديل رتب أعضاء المجموعة', 403);
@@ -158,8 +171,9 @@ export async function handleRemoveGroupMember(
   user: UserContext,
   env: Env
 ): Promise<Response> {
-  const canManage = await hasPermission(user, Permission.MANAGE_GROUP_MEMBERS, { db: env.DB, groupId }) ||
-                    ['TEACHER', 'MODERATOR', 'ADMIN', 'SYSTEM_OWNER'].includes(normalizeRole(user.role));
+  const normRole = normalizeRole(user.role);
+  const isGlobalAdmin = normRole === Role.ADMIN || normRole === Role.SYSTEM_OWNER;
+  const canManage = isGlobalAdmin || await hasPermission(user, Permission.MANAGE_GROUP_MEMBERS, { db: env.DB, groupId });
 
   if (!canManage) {
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية إزالة أو حظر أعضاء المجموعة', 403);
@@ -191,8 +205,9 @@ export async function handleApproveGroupJoinRequest(
   user: UserContext,
   env: Env
 ): Promise<Response> {
-  const canManage = await hasPermission(user, Permission.MANAGE_GROUP_MEMBERS, { db: env.DB, groupId }) ||
-                    ['TEACHER', 'MODERATOR', 'ADMIN', 'SYSTEM_OWNER'].includes(normalizeRole(user.role));
+  const normRole = normalizeRole(user.role);
+  const isGlobalAdmin = normRole === Role.ADMIN || normRole === Role.SYSTEM_OWNER;
+  const canManage = isGlobalAdmin || await hasPermission(user, Permission.MANAGE_GROUP_MEMBERS, { db: env.DB, groupId });
 
   if (!canManage) {
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية اعتماد طلبات الانضمام', 403);

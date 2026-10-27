@@ -12,7 +12,7 @@ android {
     applicationId = "com.magd.tanweer"
     minSdk = 23
     targetSdk = 36
-    versionCode = 2
+    versionCode = 120
     versionName = "1.2.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

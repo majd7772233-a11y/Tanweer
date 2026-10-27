@@ -4,6 +4,7 @@ import { mapSchoolEvent } from '../lib/mappers';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
+import { isValidIsoDate } from '../lib/validation';
 
 export async function handleGetEvents(groupId: string, user: UserContext, env: Env): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
@@ -12,7 +13,7 @@ export async function handleGetEvents(groupId: string, user: UserContext, env: E
   const events = await env.DB.prepare(
     `SELECT id, group_id, event_date, time_str, title, description, category, location, is_official, created_by, created_at
      FROM events
-     WHERE group_id = ?
+     WHERE group_id = ? OR group_id = 'all'
      ORDER BY is_official DESC, event_date ASC`
   ).bind(groupId).all();
 
@@ -39,15 +40,42 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
     return errorResponse('INVALID_INPUT', 'يرجى تحديد عنوان الفعالية وتاريخها');
   }
 
-  const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
-  if (memberCheck) return memberCheck;
+  if (!isValidIsoDate(body.eventDate)) {
+    return errorResponse('INVALID_INPUT', 'تاريخ الفعالية غير صالح، يرجى اختيار تاريخ تقويمي صحيح بصيغة YYYY-MM-DD');
+  }
 
-  const canPublishOfficial = await hasPermission(user, Permission.PUBLISH_OFFICIAL_EVENT, {
-    db: env.DB,
-    groupId: body.groupId,
-  });
+  const isHoliday = body.category?.toUpperCase() === 'HOLIDAY';
+  const isSchoolWide = body.groupId === 'all';
 
-  const isOfficial = (body.isOfficial && canPublishOfficial) || canPublishOfficial ? 1 : 0;
+  if (isHoliday) {
+    if (!body.description || !body.description.trim()) {
+      return errorResponse('INVALID_INPUT', 'يرجى توضيح سبب الإجازة المدرسية في حقل الوصف');
+    }
+  }
+
+  let canPublishOfficial = false;
+  const isPrivilegedRole = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER' || user.role === 'TEACHER' || user.role === 'VERIFIED_TEACHER';
+
+  if (isSchoolWide) {
+    if (!isPrivilegedRole) {
+      return errorResponse('FORBIDDEN', 'صلاحية الإجازات أو الفعاليات العامة على مستوى المدرسة محصورة بالمعلمين وإدارة المدرسة', 403);
+    }
+    canPublishOfficial = true;
+  } else {
+    const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
+    if (memberCheck) return memberCheck;
+
+    canPublishOfficial = await hasPermission(user, Permission.PUBLISH_OFFICIAL_EVENT, {
+      db: env.DB,
+      groupId: body.groupId,
+    });
+  }
+
+  if (isHoliday && !canPublishOfficial && !isPrivilegedRole) {
+    return errorResponse('FORBIDDEN', 'لا تملك صلاحية تحديد إجازة مدرسية معتمدة', 403);
+  }
+
+  const isOfficial = (isHoliday || (body.isOfficial && canPublishOfficial) || canPublishOfficial) ? 1 : 0;
   const eventId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
     : generateId('evt');
@@ -67,9 +95,11 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
       success: true,
       eventId: existing.id,
       isOfficial: existing.is_official === 1,
-      message: existing.is_official === 1
-        ? 'تم نشر الفعالية المدرسية الرسمية بنجاح 🎪'
-        : 'تمت إضافة مقترح الفعالية ومشاركته مع الزملاء 📅',
+      message: isHoliday
+        ? 'تم تسجيل الإجازة المدرسية بنجاح 🌴'
+        : (existing.is_official === 1
+          ? 'تم نشر الفعالية المدرسية الرسمية بنجاح 🎪'
+          : 'تمت إضافة مقترح الفعالية ومشاركته مع الزملاء 📅'),
     });
   }
 
@@ -90,9 +120,11 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
     Date.now()
   ).run();
 
-  const msg = isOfficial === 1
-    ? 'تم نشر الفعالية المدرسية الرسمية بنجاح 🎪'
-    : 'تمت إضافة مقترح الفعالية ومشاركته مع الزملاء 📅';
+  const msg = isHoliday
+    ? 'تم تسجيل الإجازة المدرسية المعتمدة بنجاح 🌴'
+    : (isOfficial === 1
+      ? 'تم نشر الفعالية المدرسية الرسمية بنجاح 🎪'
+      : 'تمت إضافة مقترح الفعالية ومشاركته مع الزملاء 📅');
 
   return jsonResponse({
     success: true,
@@ -194,15 +226,22 @@ export async function handleDeleteEvent(
     return errorResponse('EVENT_NOT_FOUND', 'الفعالية غير موجودة', 404);
   }
 
-  const memberCheck = await requireGroupMember(user, event.group_id, env.DB);
-  if (memberCheck) return memberCheck;
+  const isSchoolWide = event.group_id === 'all';
+  const isPrivilegedRole = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER' || user.role === 'TEACHER' || user.role === 'VERIFIED_TEACHER';
+
+  if (!isSchoolWide) {
+    const memberCheck = await requireGroupMember(user, event.group_id, env.DB);
+    if (memberCheck) return memberCheck;
+  }
 
   const isOwner = event.created_by === user.userId;
-  const canManage = await hasPermission(user, Permission.MANAGE_EVENTS, {
-    db: env.DB,
-    groupId: event.group_id,
-    resourceOwnerId: event.created_by,
-  });
+  const canManage = isSchoolWide
+    ? isPrivilegedRole
+    : await hasPermission(user, Permission.MANAGE_EVENTS, {
+        db: env.DB,
+        groupId: event.group_id,
+        resourceOwnerId: event.created_by,
+      });
 
   if (!isOwner && !canManage) {
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية حذف هذه الفعالية', 403);

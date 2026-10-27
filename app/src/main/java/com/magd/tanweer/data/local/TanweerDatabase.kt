@@ -31,7 +31,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CorrectionRequestEntity::class,
         DailyPlanEntity::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 abstract class TanweerDatabase : RoomDatabase() {
@@ -150,16 +150,45 @@ abstract class TanweerDatabase : RoomDatabase() {
             try {
                 database.execSQL("ALTER TABLE `cached_schedule_slots` ADD COLUMN `syncStatus` TEXT NOT NULL DEFAULT 'SYNCED'")
             } catch (_: Exception) {}
+            try {
+                database.execSQL("ALTER TABLE `cached_contents` ADD COLUMN `createdBy` TEXT NOT NULL DEFAULT ''")
+            } catch (_: Exception) {}
+
+            // 5. Ensure cached_user matches UserEntity (remove recoveryCode for security)
+            try {
+                val userPragma = database.query("PRAGMA table_info(`cached_user`)")
+                val userCols = mutableSetOf<String>()
+                while (userPragma.moveToNext()) {
+                    userCols.add(userPragma.getString(1))
+                }
+                userPragma.close()
+
+                if (userCols.contains("recoveryCode")) {
+                    database.execSQL(
+                        "CREATE TABLE `cached_user_v13_temp` (" +
+                        "`id` TEXT NOT NULL, `fullName` TEXT NOT NULL, `phoneNumber` TEXT NOT NULL, " +
+                        "`gradeId` INTEGER NOT NULL, `sectionId` TEXT NOT NULL, `role` TEXT NOT NULL, " +
+                        "`defaultGroupId` TEXT NOT NULL, `token` TEXT NOT NULL, `lessonsCount` INTEGER NOT NULL, " +
+                        "`homeworksCount` INTEGER NOT NULL, `issuesCount` INTEGER NOT NULL, `photosCount` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+                    )
+                    database.execSQL(
+                        "INSERT INTO `cached_user_v13_temp` (`id`, `fullName`, `phoneNumber`, `gradeId`, `sectionId`, `role`, `defaultGroupId`, `token`, `lessonsCount`, `homeworksCount`, `issuesCount`, `photosCount`) " +
+                        "SELECT `id`, `fullName`, `phoneNumber`, `gradeId`, `sectionId`, `role`, `defaultGroupId`, `token`, `lessonsCount`, `homeworksCount`, `issuesCount`, `photosCount` FROM `cached_user`"
+                    )
+                    database.execSQL("DROP TABLE `cached_user`")
+                    database.execSQL("ALTER TABLE `cached_user_v13_temp` RENAME TO `cached_user`")
+                }
+            } catch (_: Exception) {}
         }
 
-        val MIGRATION_PRESERVE_ALL = object : Migration(1, 12) {
+        val MIGRATION_PRESERVE_ALL = object : Migration(1, 13) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 applyUniversalSchemaUpgrades(database)
             }
         }
 
-        val MIGRATIONS_FROM_LEGACY_VERSIONS: Array<Migration> = (2..9).map { fromVer ->
-            object : Migration(fromVer, 12) {
+        val MIGRATIONS_FROM_LEGACY_VERSIONS: Array<Migration> = (2..11).map { fromVer ->
+            object : Migration(fromVer, 13) {
                 override fun migrate(database: SupportSQLiteDatabase) {
                     applyUniversalSchemaUpgrades(database)
                 }
@@ -191,6 +220,12 @@ abstract class TanweerDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                applyUniversalSchemaUpgrades(database)
+            }
+        }
+
         fun getInstance(context: Context): TanweerDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -203,7 +238,8 @@ abstract class TanweerDatabase : RoomDatabase() {
                         *MIGRATIONS_FROM_LEGACY_VERSIONS,
                         MIGRATION_10_11,
                         MIGRATION_10_12,
-                        MIGRATION_11_12
+                        MIGRATION_11_12,
+                        MIGRATION_12_13
                     )
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()

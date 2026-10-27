@@ -407,6 +407,7 @@ data class ContentItem(
     val type: String = "LESSON", // 'LESSON', 'SUMMARY', 'NOTE', 'FILE'
     val title: String,
     val description: String? = null,
+    val createdBy: String = "",
     val authorName: String,
     val authorGradeSection: String,
     val viewsCount: Int = 0,
