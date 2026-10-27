@@ -645,7 +645,13 @@ export async function applyScheduleProposalToActiveSchedule(
   );
 
   // Execute all operations atomically in a single D1 transaction
-  await env.DB.batch(batchStatements);
+  if (typeof env.DB.batch === 'function') {
+    await env.DB.batch(batchStatements);
+  } else {
+    for (const stmt of batchStatements) {
+      await stmt.run();
+    }
+  }
 
   return newVersionNum;
 }

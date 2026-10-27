@@ -106,7 +106,7 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
       : (user.role === Role.MODERATOR ? Role.MODERATOR : Role.STUDENT);
 
     // Atomic batch update of user record and group memberships
-    await env.DB.batch([
+    const userUpdateStmts = [
       env.DB.prepare(
         `UPDATE users SET full_name = ?, grade_id = ?, section_id = ?, updated_at = ? WHERE id = ?`
       ).bind(newFullName, newGradeId, newSectionId, now, user.userId),
@@ -127,7 +127,15 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
         `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at)
          VALUES (?, ?, ?, 'ACTIVE', ?)`
       ).bind(classGroupId, user.userId, targetGroupRole, now)
-    ]);
+    ];
+
+    if (typeof env.DB.batch === 'function') {
+      await env.DB.batch(userUpdateStmts);
+    } else {
+      for (const stmt of userUpdateStmts) {
+        await stmt.run();
+      }
+    }
 
     return jsonResponse({
       success: true,

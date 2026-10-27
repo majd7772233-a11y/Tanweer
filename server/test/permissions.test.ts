@@ -68,9 +68,10 @@ describe('Permissions Matrix & Security Enforcements', () => {
     expect(await hasPermission(studentUser, Permission.ACCESS_OWNER_DASHBOARD)).toBe(false);
   });
 
-  it('verifies that moderator can moderate group, review content, and manage schedule', async () => {
+  it('verifies that moderator can moderate group and review content, but must propose schedule changes', async () => {
     expect(await hasPermission(moderatorUser, Permission.MODERATE_CONTENT)).toBe(true);
-    expect(await hasPermission(moderatorUser, Permission.MANAGE_SCHEDULE)).toBe(true);
+    expect(await hasPermission(moderatorUser, Permission.MANAGE_SCHEDULE)).toBe(false);
+    expect(await hasPermission(moderatorUser, Permission.PROPOSE_SCHEDULE)).toBe(true);
     expect(await hasPermission(moderatorUser, Permission.MODERATE_CHAT)).toBe(true);
     expect(await hasPermission(moderatorUser, Permission.MANAGE_GROUP_MEMBERS)).toBe(true);
 
@@ -179,13 +180,16 @@ describe('Permissions Matrix & Security Enforcements', () => {
       expect(body.error?.code || body.error).toBe('FORBIDDEN_SCHEDULE_MANAGEMENT');
     });
 
-    it('Teacher, Moderator, and Admin CAN directly manage established schedule', async () => {
+    it('Teacher and Admin CAN directly manage established schedule, while Moderator must submit proposal', async () => {
       const { requireScheduleManager } = await import('../src/middleware/permissions');
       const db = new ScheduleTestMockDb();
       db.slotsCount = 5;
 
       const modRes = await requireScheduleManager(moderatorUser, 'group_10_A', db as any);
-      expect(modRes).toBeNull();
+      expect(modRes).not.toBeNull();
+      expect(modRes!.status).toBe(403);
+      const modBody = await modRes!.json() as any;
+      expect(modBody.error?.code || modBody.error).toBe('FORBIDDEN_SCHEDULE_MANAGEMENT');
 
       const teacherRes = await requireScheduleManager(teacherUser, 'group_10_A', db as any);
       expect(teacherRes).toBeNull();

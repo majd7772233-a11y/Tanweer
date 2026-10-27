@@ -231,6 +231,7 @@ export async function handleDeleteHomework(
     id: string;
     group_id: string;
     created_by: string;
+    media_urls?: string;
   }>();
 
   if (!hw) {

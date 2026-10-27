@@ -173,7 +173,13 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     ).bind(sessionId, userId, deviceId, tokenHash, expiresAt, now)
   );
 
-  await env.DB.batch(batchStatements);
+  if (typeof env.DB.batch === 'function') {
+    await env.DB.batch(batchStatements);
+  } else {
+    for (const stmt of batchStatements) {
+      await stmt.run();
+    }
+  }
 
   return jsonResponse({
     success: true,

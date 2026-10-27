@@ -476,7 +476,7 @@ describe('End-to-End System Integration Flow', () => {
       status: 'PENDING',
     });
 
-    // 4C. A schedule manager/moderator MAY modify the official schedule.
+    // 4C. A verified teacher or admin MAY directly modify the official schedule (Point 21).
     const member = mockDb.tables.group_members.find(
       (m) =>
         m.id === 'mem_1' &&
@@ -485,8 +485,8 @@ describe('End-to-End System Integration Flow', () => {
 
     expect(member).toBeDefined();
 
-    // Promote only for the schedule-manager portion of this integration test.
-    member.role = 'MODERATOR';
+    // Promote to TEACHER for the schedule-manager portion of this integration test.
+    member.role = 'TEACHER';
 
     const managerAddSlotReq = new Request(
       'http://localhost/api/v1/schedule/class_10_A/slots',

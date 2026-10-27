@@ -1456,7 +1456,7 @@ export async function handleExecutePurge(request: Request, actorId: string, env:
   }
 
   // Atomic cascading execution in sequence
-  await env.DB.batch([
+  const purgeStatements = [
     env.DB.prepare(`DELETE FROM content_corrections`),
     env.DB.prepare(`DELETE FROM content_media`),
     env.DB.prepare(`DELETE FROM contents`),
@@ -1478,7 +1478,15 @@ export async function handleExecutePurge(request: Request, actorId: string, env:
     env.DB.prepare(`DELETE FROM devices`),
     env.DB.prepare(`DELETE FROM group_members WHERE user_id NOT IN (SELECT id FROM users WHERE role = 'SYSTEM_OWNER')`),
     env.DB.prepare(`DELETE FROM users WHERE role != 'SYSTEM_OWNER'`),
-  ]);
+  ];
+
+  if (typeof env.DB.batch === 'function') {
+    await env.DB.batch(purgeStatements);
+  } else {
+    for (const stmt of purgeStatements) {
+      await stmt.run();
+    }
+  }
 
   // Generate new data generation id
   const newGeneration = `gen_${Date.now()}_${generateId('g')}`;
@@ -3234,7 +3242,7 @@ export function renderDashboardHtml(): Response {
       const hasNext = offset + limit < totalCount;
       const nextOffset = offset + limit;
 
-      container.innerHTML = `
+      container.innerHTML = \`
         <div style="font-size:0.85rem; color:var(--text-sec);">
           عرض <strong>\${start}</strong> - <strong>\${end}</strong> من إجمالي <strong style="color:var(--cyan);">\${totalCount}</strong> سجل
         </div>
@@ -3242,7 +3250,7 @@ export function renderDashboardHtml(): Response {
           <button class="action-btn" \${!hasPrev ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : ''} onclick="\${onPageFnName}(\${prevOffset})">السابق ◀</button>
           <button class="action-btn" \${!hasNext ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : ''} onclick="\${onPageFnName}(\${nextOffset})">التالي ▶</button>
         </div>
-      `;
+      \`;
     }
 
     function switchTab(tabId) {
@@ -3356,7 +3364,7 @@ export function renderDashboardHtml(): Response {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جاري البحث والتحميل...</td></tr>';
 
       try {
-        const url = `/api/dashboard/users?q=\${encodeURIComponent(q)}&role=\${encodeURIComponent(role)}&status=\${encodeURIComponent(status)}&offset=\${offset}&limit=\${pagination.users.limit}`;
+        const url = \`/api/dashboard/users?q=\${encodeURIComponent(q)}&role=\${encodeURIComponent(role)}&status=\${encodeURIComponent(status)}&offset=\${offset}&limit=\${pagination.users.limit}\`;
         const res = await fetch(url);
         const data = await res.json();
         if (!data.success || !data.users.length) {
