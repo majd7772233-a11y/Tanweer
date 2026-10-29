@@ -17,6 +17,7 @@ import {
   handleDisableUser,
   handleEnableUser,
   handleRevokeUserSessions,
+  handleReissueUserCredentials,
   handleGetRoleRequests,
   handleApproveRoleRequest,
   handleRejectRoleRequest,
@@ -131,7 +132,7 @@ export default {
       return handleOwnerLogin(request, env);
     }
     if ((url.pathname === '/dashboard/logout' || url.pathname === '/api/dashboard/logout') && request.method === 'POST') {
-      return handleOwnerLogout();
+      return handleOwnerLogout(request, env);
     }
     if (url.pathname === '/dashboard' || url.pathname === '/dashboard/') {
       const auth = await verifyOwnerAuth(request, env);
@@ -169,6 +170,10 @@ export default {
       if (url.pathname.startsWith('/api/dashboard/users/') && url.pathname.endsWith('/revoke-sessions') && request.method === 'POST') {
         const userId = url.pathname.split('/')[4];
         return handleRevokeUserSessions(userId, auth.ownerId, request, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/users/') && url.pathname.endsWith('/reissue-credentials') && request.method === 'POST') {
+        const userId = url.pathname.split('/')[4];
+        return handleReissueUserCredentials(userId, auth.ownerId, request, env);
       }
       if (url.pathname === '/api/dashboard/role-requests' && request.method === 'GET') {
         return handleGetRoleRequests(request, env);

@@ -52,6 +52,16 @@ class UnifiedMutationQueue private constructor(
 
     init {
         start()
+        scope.launch {
+            try {
+                val recovered = outboxDao.resetAllStuckSyncingOnStartup()
+                if (recovered > 0) {
+                    Log.i("UnifiedMutationQueue", "Recovered $recovered stuck SYNCING items on queue startup")
+                }
+            } catch (e: Exception) {
+                Log.e("UnifiedMutationQueue", "Error recovering stuck syncing items on startup", e)
+            }
+        }
     }
 
     @Synchronized
@@ -160,6 +170,10 @@ class UnifiedMutationQueue private constructor(
         var processedCount = 0
 
         try {
+            // Recover any items that were reserved in SYNCING state by an interrupted worker
+            // and exceeded the safe 60-second lease window.
+            outboxDao.recoverStuckSyncingItems(now = System.currentTimeMillis(), timeoutMs = 60_000L)
+
             val pendingItems = outboxDao.getPendingItemsSync()
             for (rawItem in pendingItems) {
                 val item = normalizeLegacyOperation(rawItem)

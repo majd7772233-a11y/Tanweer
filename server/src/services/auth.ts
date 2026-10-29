@@ -4,7 +4,7 @@ import { generateId } from '../lib/ids';
 import { validateArabicFullName, validateYemenPhoneNumber, evaluatePasswordStrength, isValidGradeSection } from '../lib/validation';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { getCurrentAcademicYearId } from '../lib/school';
-import { Role, normalizeRole } from '../lib/roles';
+import { Role, normalizeRole, sanitizePublicRole } from '../lib/roles';
 
 export async function handleRegister(request: Request, env: Env): Promise<Response> {
   const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
@@ -270,7 +270,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
       phoneNumber: user.phone_number,
       gradeId: user.grade_id,
       sectionId: user.section_id,
-      role: normalizeRole(user.role),
+      role: sanitizePublicRole(user.role),
       defaultGroupId: classGroupId,
     },
   });
@@ -332,7 +332,35 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
   }
 
   const now = Date.now();
-  await env.DB.prepare(`UPDATE users SET last_seen = ? WHERE id = ?`).bind(now, user.id).run();
+
+  // Enforce single-use and expiration check if issued via user_recovery_tokens (TA-16)
+  try {
+    const recoveryToken = await env.DB.prepare(`
+      SELECT id, max_uses, uses_count, expires_at, revoked
+      FROM user_recovery_tokens
+      WHERE token_hash = ? AND user_id = ?
+      ORDER BY created_at DESC LIMIT 1
+    `).bind(recoveryHash, user.id).first<{ id: string; max_uses: number; uses_count: number; expires_at: number; revoked: number }>();
+
+    if (recoveryToken) {
+      if (recoveryToken.revoked === 1) {
+        return errorResponse('RECOVERY_CODE_REVOKED', 'تم إبطال رمز الاسترداد هذا، يرجى طلب رمز جديد', 400);
+      }
+      if (recoveryToken.expires_at < now) {
+        return errorResponse('RECOVERY_CODE_EXPIRED', 'رمز الاسترداد منتهي الصلاحية، يرجى طلب رمز جديد', 400);
+      }
+      if (recoveryToken.uses_count >= recoveryToken.max_uses) {
+        return errorResponse('RECOVERY_CODE_USED', 'تم استخدام رمز الاسترداد هذا مسبقاً، ولا يمكن استخدامه أكثر من مرة واحدة', 400);
+      }
+      await env.DB.prepare(`
+        UPDATE user_recovery_tokens SET uses_count = uses_count + 1, used_at = ? WHERE id = ?
+      `).bind(now, recoveryToken.id).run();
+    }
+  } catch {}
+
+  // Single-use enforcement: burn recovery_code_hash on users table so it cannot be used again
+  const burnedHash = 'USED_' + now + '_' + generateRandomToken().slice(0, 12);
+  await env.DB.prepare(`UPDATE users SET recovery_code_hash = ?, last_seen = ? WHERE id = ?`).bind(burnedHash, now, user.id).run();
 
   const token = generateRandomToken();
   const tokenHash = await hashString(token, pepper);
@@ -356,7 +384,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
       phoneNumber: user.phone_number,
       gradeId: user.grade_id,
       sectionId: user.section_id,
-      role: normalizeRole(user.role),
+      role: sanitizePublicRole(user.role),
       defaultGroupId: classGroupId,
     },
   });

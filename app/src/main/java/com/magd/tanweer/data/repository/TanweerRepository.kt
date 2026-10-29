@@ -527,28 +527,38 @@ class TanweerRepository(
                 val body = res.body()!!
 
                 // Reconcile Lessons for this date
-                db.contentDao().clearSyncedContentsForDate(groupId, date)
-                if (body.contents.isNotEmpty()) {
-                    val contents = body.contents.map {
-                        ContentEntity(
-                            id = it.id,
-                            groupId = it.groupId,
-                            studyDate = it.studyDate,
-                            subjectId = it.subjectId,
-                            type = it.type,
-                            title = it.title,
-                            description = it.description,
-                            createdBy = it.createdBy,
-                            authorName = it.authorName,
-                            authorGradeSection = it.authorGradeSection,
-                            viewsCount = it.viewsCount,
-                            usefulCount = it.usefulCount,
-                            createdAt = it.createdAt,
-                            subjectName = it.subjectName,
-                            subjectIcon = it.subjectIcon,
-                            colorHex = it.colorHex
-                        )
+                val contents = body.contents.map {
+                    val existing = db.contentDao().getContentById(it.id)
+                    val mediaJson = if (it.media.isNotEmpty()) {
+                        try {
+                            org.json.JSONArray(it.media.map { m -> m.url }).toString()
+                        } catch (_: Exception) { existing?.mediaUrlsJson ?: "[]" }
+                    } else {
+                        existing?.mediaUrlsJson ?: "[]"
                     }
+                    ContentEntity(
+                        id = it.id,
+                        groupId = it.groupId,
+                        studyDate = it.studyDate,
+                        subjectId = it.subjectId,
+                        type = it.type,
+                        title = it.title,
+                        description = it.description,
+                        createdBy = it.createdBy,
+                        authorName = it.authorName,
+                        authorGradeSection = it.authorGradeSection,
+                        viewsCount = it.viewsCount,
+                        usefulCount = it.usefulCount,
+                        createdAt = it.createdAt,
+                        subjectName = it.subjectName,
+                        subjectIcon = it.subjectIcon,
+                        colorHex = it.colorHex,
+                        mediaUrlsJson = mediaJson,
+                        syncStatus = "SYNCED"
+                    )
+                }
+                db.contentDao().clearSyncedContentsForDate(groupId, date)
+                if (contents.isNotEmpty()) {
                     db.contentDao().insertContents(contents)
                 }
 
@@ -3289,14 +3299,15 @@ class TanweerRepository(
         }
         if (lastGen != serverGeneration) {
             Log.w("TanweerRepo", "Server data generation changed from $lastGen to $serverGeneration. Purging local data!")
-            try {
+            return@withContext try {
                 db.clearAllTables()
                 NetworkModule.setAuthToken(null)
+                prefs.edit().putString("data_generation", serverGeneration).apply()
+                true
             } catch (e: Exception) {
                 Log.e("TanweerRepo", "Error clearing tables on data generation change", e)
+                false
             }
-            prefs.edit().putString("data_generation", serverGeneration).apply()
-            return@withContext true
         }
         false
     }

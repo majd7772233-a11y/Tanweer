@@ -157,13 +157,6 @@ export async function handleCreateScheduleSlot(
     activeVersion = { id: versionId, version_number: 1 };
   }
 
-  // 3. Ensure subject exists
-  if (body.subjectName) {
-    await env.DB.prepare(
-      `INSERT OR IGNORE INTO subjects (id, name_ar, icon, color_hex) VALUES (?, ?, ?, ?)`
-    ).bind(body.subjectId, body.subjectName, body.subjectIcon || '📚', body.colorHex || '#00E5FF').run();
-  }
-
   const finalStartTime = (body.startTime !== undefined && body.startTime !== null && body.startTime.trim() !== '')
     ? body.startTime.trim()
     : (existingSlot?.start_time || null);
@@ -171,25 +164,47 @@ export async function handleCreateScheduleSlot(
     ? body.endTime.trim()
     : (existingSlot?.end_time || null);
 
-  // Remove old slot at that day & slot_order in this version
-  await env.DB.prepare(
-    `DELETE FROM schedule_slots WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
-  ).bind(activeVersion.id, body.dayOfWeek, body.slotOrder).run();
-
-  // 4. Insert new slot with preserved times
   const slotId = generateId('slot');
-  await env.DB.prepare(
-    `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    slotId,
-    activeVersion.id,
-    body.dayOfWeek,
-    body.slotOrder,
-    body.subjectId,
-    finalStartTime,
-    finalEndTime
-  ).run();
+  const slotStatements: any[] = [];
+
+  // 3. Ensure subject exists
+  if (body.subjectName) {
+    slotStatements.push(
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO subjects (id, name_ar, icon, color_hex) VALUES (?, ?, ?, ?)`
+      ).bind(body.subjectId, body.subjectName, body.subjectIcon || '📚', body.colorHex || '#00E5FF')
+    );
+  }
+
+  // Atomic replace: Delete old slot and insert new slot in one transaction
+  slotStatements.push(
+    env.DB.prepare(
+      `DELETE FROM schedule_slots WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
+    ).bind(activeVersion.id, body.dayOfWeek, body.slotOrder)
+  );
+
+  slotStatements.push(
+    env.DB.prepare(
+      `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      slotId,
+      activeVersion.id,
+      body.dayOfWeek,
+      body.slotOrder,
+      body.subjectId,
+      finalStartTime,
+      finalEndTime
+    )
+  );
+
+  if (typeof env.DB.batch === 'function') {
+    await env.DB.batch(slotStatements);
+  } else {
+    for (const stmt of slotStatements) {
+      await stmt.run();
+    }
+  }
 
   return jsonResponse({
     success: true,
@@ -235,32 +250,90 @@ export async function handleSaveScheduleBatch(
     return errorResponse('INVALID_INPUT', 'يرجى تزويد قائمة الحصص لتحديث الجدول');
   }
 
+  // Pre-validate ALL slots strictly before modifying database
+  for (let i = 0; i < slotList.length; i++) {
+    const s = slotList[i];
+    if (
+      s.dayOfWeek === undefined ||
+      typeof s.dayOfWeek !== 'number' ||
+      s.dayOfWeek < 0 ||
+      s.dayOfWeek > 6 ||
+      !s.slotOrder ||
+      typeof s.slotOrder !== 'number' ||
+      s.slotOrder < 1 ||
+      s.slotOrder > 12 ||
+      !s.subjectId ||
+      typeof s.subjectId !== 'string' ||
+      !s.subjectId.trim()
+    ) {
+      return errorResponse(
+        'INVALID_INPUT',
+        `الحصة رقم (${i + 1}) غير صالحة، يرجى التأكد من اليوم ورقم الحصة والمادة لجميع الحصص وعدم ترك حصص ناقصة`
+      );
+    }
+  }
+
   const newVersionNum = currentVersion ? currentVersion.version_number + 1 : 1;
   const newVersionId = generateId('sch_ver');
   const now = Date.now();
   const validFrom = body.validFrom || new Date().toISOString().slice(0, 10);
 
-  // Deactivate previous versions
+  const batchStatements: any[] = [];
+
+  // 1. Deactivate previous active versions
   if (currentVersion) {
-    await env.DB.prepare(
-      `UPDATE schedule_versions SET is_active = 0, valid_until = ? WHERE group_id = ? AND is_active = 1`
-    ).bind(validFrom, groupId).run();
+    batchStatements.push(
+      env.DB.prepare(
+        `UPDATE schedule_versions SET is_active = 0, valid_until = ? WHERE group_id = ? AND is_active = 1`
+      ).bind(validFrom, groupId)
+    );
   }
 
-  // Insert new version
-  await env.DB.prepare(
-    `INSERT INTO schedule_versions (id, group_id, version_number, valid_from, is_active, created_at, created_by)
-     VALUES (?, ?, ?, ?, 1, ?, ?)`
-  ).bind(newVersionId, groupId, newVersionNum, validFrom, now, user.userId).run();
+  // 2. Insert new version
+  batchStatements.push(
+    env.DB.prepare(
+      `INSERT INTO schedule_versions (id, group_id, version_number, valid_from, is_active, created_at, created_by)
+       VALUES (?, ?, ?, ?, 1, ?, ?)`
+    ).bind(newVersionId, groupId, newVersionNum, validFrom, now, user.userId)
+  );
 
-  // Insert all slots
+  // 3. Ensure all subjects exist (if provided)
   for (const s of slotList) {
-    if (s.dayOfWeek === undefined || !s.slotOrder || !s.subjectId) continue;
+    if (s.subjectName) {
+      batchStatements.push(
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO subjects (id, name_ar, icon, color_hex) VALUES (?, ?, ?, ?)`
+        ).bind(s.subjectId, s.subjectName, s.subjectIcon || '📚', s.colorHex || '#00E5FF')
+      );
+    }
+  }
+
+  // 4. Insert all slots into the new version
+  for (const s of slotList) {
     const slotId = generateId('slot');
-    await env.DB.prepare(
-      `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(slotId, newVersionId, s.dayOfWeek, s.slotOrder, s.subjectId, s.startTime || null, s.endTime || null).run();
+    batchStatements.push(
+      env.DB.prepare(
+        `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        slotId,
+        newVersionId,
+        s.dayOfWeek,
+        s.slotOrder,
+        s.subjectId.trim(),
+        s.startTime || null,
+        s.endTime || null
+      )
+    );
+  }
+
+  // Execute atomic batch transaction
+  if (typeof env.DB.batch === 'function') {
+    await env.DB.batch(batchStatements);
+  } else {
+    for (const stmt of batchStatements) {
+      await stmt.run();
+    }
   }
 
   return jsonResponse({
@@ -380,6 +453,21 @@ export async function handleProposeScheduleChange(user: UserContext, request: Re
   const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
   if (memberCheck) return memberCheck;
 
+  // TA-19: Derive server truth for the slot's current subject from the active schedule version
+  const activeVersion = await env.DB.prepare(
+    `SELECT id FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
+  ).bind(body.groupId).first<{ id: string }>();
+
+  let serverCurrentSubjectId: string | null = null;
+  if (activeVersion) {
+    const currentSlot = await env.DB.prepare(
+      `SELECT subject_id FROM schedule_slots WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
+    ).bind(activeVersion.id, body.dayOfWeek, body.slotOrder).first<{ subject_id: string }>();
+    serverCurrentSubjectId = currentSlot?.subject_id || null;
+  }
+
+  const finalOldSubjectId = serverCurrentSubjectId !== null ? serverCurrentSubjectId : (body.oldSubjectId || null);
+
   const proposalId = generateId('prop');
   const now = Date.now();
 
@@ -392,8 +480,8 @@ export async function handleProposeScheduleChange(user: UserContext, request: Re
     user.userId,
     body.dayOfWeek,
     body.slotOrder,
-    body.oldSubjectId || null,
-    body.newSubjectId,
+    finalOldSubjectId,
+    body.newSubjectId.trim(),
     body.reason.trim(),
     'PENDING',
     1,
@@ -494,9 +582,14 @@ export async function handleVoteScheduleProposal(
     ).bind(proposalId).first<ScheduleProposalRow>();
 
     if (fullProposal) {
-      const newVersionNum = await applyScheduleProposalToActiveSchedule(fullProposal, 'SYSTEM_VOTE_CONSENSUS', env);
-      autoResolvedStatus = 'ACCEPTED';
-      autoResolvedMessage = `اكتمل نصاب تصويت الشعبة (${votesFor}/${quorum}) وتم اعتماد تغيير الحصة تلقائياً وتحديث الجدول للنسخة (${newVersionNum}) 🎉`;
+      const res = await applyScheduleProposalToActiveSchedule(fullProposal, 'SYSTEM_VOTE_CONSENSUS', env);
+      if (res.success) {
+        autoResolvedStatus = 'ACCEPTED';
+        autoResolvedMessage = `اكتمل نصاب تصويت الشعبة (${votesFor}/${quorum}) وتم اعتماد تغيير الحصة تلقائياً وتحديث الجدول للنسخة (${res.versionNumber}) 🎉`;
+      } else {
+        autoResolvedStatus = 'REJECTED';
+        autoResolvedMessage = res.message;
+      }
     }
   } else if (votesAgainst >= quorum && votesAgainst > votesFor * 1.5) {
     await env.DB.prepare(
@@ -527,14 +620,19 @@ interface ScheduleProposalRow {
   proposed_by: string;
 }
 
+export type ApplyProposalResult =
+  | { success: true; versionNumber: number }
+  | { success: false; conflict: true; currentSubjectId: string | null; expectedSubjectId: string | null; message: string };
+
 /**
  * Helper to apply an approved proposal to the active schedule and generate a new version.
+ * TA-19: Validates concurrency and verifies that current active slot still matches proposal.old_subject_id before applying.
  */
 export async function applyScheduleProposalToActiveSchedule(
   proposal: ScheduleProposalRow,
   resolvedByUserId: string,
   env: Env
-): Promise<number> {
+): Promise<ApplyProposalResult> {
   // 1. Idempotency check: verify if proposal is already resolved to prevent duplicate versions
   const freshProposal = await env.DB.prepare(
     `SELECT sp.status, sv.version_number
@@ -544,7 +642,7 @@ export async function applyScheduleProposalToActiveSchedule(
   ).bind(proposal.id).first<{ status: string; version_number: number | null }>();
 
   if (freshProposal && freshProposal.status === 'ACCEPTED') {
-    return freshProposal.version_number || 1;
+    return { success: true, versionNumber: freshProposal.version_number || 1 };
   }
 
   const currentVersion = await env.DB.prepare(
@@ -579,6 +677,27 @@ export async function applyScheduleProposalToActiveSchedule(
       start_time: string | null;
       end_time: string | null;
     }>();
+
+    // TA-19: Concurrency conflict detection.
+    // Verify that the active slot still has the subject upon which this proposal was formulated.
+    const activeSlot = (oldSlots.results || []).find(
+      s => s.day_of_week === proposal.day_of_week && s.slot_order === proposal.slot_order
+    );
+    const activeSubjectId = activeSlot?.subject_id || null;
+
+    if (proposal.old_subject_id && activeSubjectId !== proposal.old_subject_id) {
+      await env.DB.prepare(
+        `UPDATE schedule_proposals SET status = 'CONFLICTED' WHERE id = ?`
+      ).bind(proposal.id).run();
+
+      return {
+        success: false,
+        conflict: true,
+        currentSubjectId: activeSubjectId,
+        expectedSubjectId: proposal.old_subject_id,
+        message: `تعذر تطبيق المقترح لوجود تعارض: تم تغيير مادة الحصة في الجدول الفعال إلى (${activeSubjectId || 'فارغة'}) بعد إنشاء المقترح المبني على (${proposal.old_subject_id})`,
+      };
+    }
 
     for (const s of (oldSlots.results || [])) {
       if (s.day_of_week === proposal.day_of_week && s.slot_order === proposal.slot_order) {
@@ -653,7 +772,7 @@ export async function applyScheduleProposalToActiveSchedule(
     }
   }
 
-  return newVersionNum;
+  return { success: true, versionNumber: newVersionNum };
 }
 
 /**
@@ -685,12 +804,16 @@ export async function handleApproveScheduleProposal(
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية اعتماد وتطبيق مقترحات الجدول', 403);
   }
 
-  const newVersionNum = await applyScheduleProposalToActiveSchedule(proposal, user.userId, env);
+  const result = await applyScheduleProposalToActiveSchedule(proposal, user.userId, env);
+
+  if (!result.success) {
+    return errorResponse('SCHEDULE_CONFLICT', result.message, 409);
+  }
 
   return jsonResponse({
     success: true,
-    newVersionNumber: newVersionNum,
-    message: `تم اعتماد وتطبيق المقترح بنجاح وترقية الجدول إلى النسخة (${newVersionNum}) ✅`,
+    newVersionNumber: result.versionNumber,
+    message: `تم اعتماد وتطبيق المقترح بنجاح وترقية الجدول إلى النسخة (${result.versionNumber}) ✅`,
   });
 }
 

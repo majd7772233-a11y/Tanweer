@@ -163,6 +163,10 @@ export async function handleUpdateExam(
     examType?: string;
   };
 
+  if (body.examDate !== undefined && !isValidIsoDate(body.examDate)) {
+    return errorResponse('INVALID_INPUT', 'تاريخ الاختبار غير صالح، يرجى اختيار تاريخ تقويمي صحيح بصيغة YYYY-MM-DD');
+  }
+
   const canPublishOfficial = await hasPermission(user, Permission.PUBLISH_OFFICIAL_EXAM, {
     db: env.DB,
     groupId: exam.group_id,

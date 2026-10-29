@@ -60,6 +60,11 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
     if (!isPrivilegedRole) {
       return errorResponse('FORBIDDEN', 'صلاحية الإجازات أو الفعاليات العامة على مستوى المدرسة محصورة بالمعلمين وإدارة المدرسة', 403);
     }
+    // Ensure school-wide group 'all' exists in groups table for foreign key constraint
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO groups (id, name, type, description, academic_year_id, created_at)
+       VALUES ('all', 'كامل المدرسة', 'SHARED', 'المجموعة المدرسية العامة لجميع الشعب والصفوف', 'default', 1700000000000)`
+    ).run();
     canPublishOfficial = true;
   } else {
     const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
@@ -150,15 +155,22 @@ export async function handleUpdateEvent(
     return errorResponse('EVENT_NOT_FOUND', 'الفعالية غير موجودة', 404);
   }
 
-  const memberCheck = await requireGroupMember(user, event.group_id, env.DB);
-  if (memberCheck) return memberCheck;
+  const isSchoolWide = event.group_id === 'all';
+  const isPrivilegedRole = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER' || user.role === 'TEACHER' || user.role === 'VERIFIED_TEACHER';
+
+  if (!isSchoolWide) {
+    const memberCheck = await requireGroupMember(user, event.group_id, env.DB);
+    if (memberCheck) return memberCheck;
+  }
 
   const isOwner = event.created_by === user.userId;
-  const canManage = await hasPermission(user, Permission.MANAGE_EVENTS, {
-    db: env.DB,
-    groupId: event.group_id,
-    resourceOwnerId: event.created_by,
-  });
+  const canManage = isSchoolWide
+    ? isPrivilegedRole
+    : await hasPermission(user, Permission.MANAGE_EVENTS, {
+        db: env.DB,
+        groupId: event.group_id,
+        resourceOwnerId: event.created_by,
+      });
 
   if (!isOwner && !canManage) {
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية تعديل هذه الفعالية', 403);
@@ -174,10 +186,16 @@ export async function handleUpdateEvent(
     isOfficial?: boolean;
   };
 
-  const canPublishOfficial = await hasPermission(user, Permission.PUBLISH_OFFICIAL_EVENT, {
-    db: env.DB,
-    groupId: event.group_id,
-  });
+  if (body.eventDate !== undefined && !isValidIsoDate(body.eventDate)) {
+    return errorResponse('INVALID_INPUT', 'تاريخ الفعالية غير صالح، يرجى اختيار تاريخ تقويمي صحيح بصيغة YYYY-MM-DD');
+  }
+
+  const canPublishOfficial = isSchoolWide
+    ? isPrivilegedRole
+    : await hasPermission(user, Permission.PUBLISH_OFFICIAL_EVENT, {
+        db: env.DB,
+        groupId: event.group_id,
+      });
 
   let officialVal: number | null = null;
   if (body.isOfficial !== undefined && canPublishOfficial) {

@@ -187,6 +187,10 @@ export async function handleUpdateHomework(
     isOfficial?: boolean;
   };
 
+  if (body.dueDate !== undefined && !isValidIsoDate(body.dueDate)) {
+    return errorResponse('INVALID_INPUT', 'تاريخ تسليم الواجب غير صالح، يرجى اختيار تاريخ تقويمي صحيح بصيغة YYYY-MM-DD');
+  }
+
   const canPublishOfficial = await hasPermission(user, Permission.PUBLISH_OFFICIAL_HOMEWORK, {
     db: env.DB,
     groupId: hw.group_id,

@@ -234,10 +234,10 @@ interface ExamDao {
 
 @Dao
 interface EventDao {
-    @Query("SELECT * FROM cached_events WHERE groupId = :groupId ORDER BY eventDate ASC")
+    @Query("SELECT * FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') ORDER BY eventDate ASC")
     fun getEvents(groupId: String): Flow<List<EventEntity>>
 
-    @Query("SELECT * FROM cached_events WHERE groupId = :groupId AND eventDate = :date")
+    @Query("SELECT * FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate = :date")
     fun getEventsByDate(groupId: String, date: String): Flow<List<EventEntity>>
 
     @Query("SELECT * FROM cached_events WHERE id = :id LIMIT 1")
@@ -261,16 +261,16 @@ interface EventDao {
         insertEvent(newEntity)
     }
 
-    @Query("DELETE FROM cached_events WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
     suspend fun clearSyncedEvents(groupId: String)
 
-    @Query("DELETE FROM cached_events WHERE groupId = :groupId AND eventDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
     suspend fun clearSyncedEventsForDate(groupId: String, date: String)
 
-    @Query("DELETE FROM cached_events WHERE groupId = :groupId AND eventDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
     suspend fun clearSyncedEventsForMonth(groupId: String, monthPrefix: String)
 
-    @Query("DELETE FROM cached_events WHERE groupId = :groupId")
+    @Query("DELETE FROM cached_events WHERE groupId = :groupId OR groupId = 'all'")
     suspend fun clearEvents(groupId: String)
 }
 
@@ -528,6 +528,12 @@ interface OutboxDao {
 
     @Query("DELETE FROM outbox WHERE status = 'SYNCED'")
     suspend fun clearSynced()
+
+    @Query("UPDATE outbox SET status = CASE WHEN attempts >= 5 THEN 'FAILED' ELSE 'PENDING' END WHERE status = 'SYNCING' AND (:now - lastAttemptAt) > :timeoutMs")
+    suspend fun recoverStuckSyncingItems(now: Long = System.currentTimeMillis(), timeoutMs: Long = 60_000L): Int
+
+    @Query("UPDATE outbox SET status = CASE WHEN attempts >= 5 THEN 'FAILED' ELSE 'PENDING' END WHERE status = 'SYNCING'")
+    suspend fun resetAllStuckSyncingOnStartup(): Int
 }
 
 @Dao

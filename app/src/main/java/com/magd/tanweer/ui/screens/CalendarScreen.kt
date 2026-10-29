@@ -15,6 +15,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -983,6 +985,206 @@ fun CalendarScreen(
             containerColor = MidnightSurface,
             shape = RoundedCornerShape(16.dp)
         )
+    }
+
+    // 1. Content / Lesson Modal (TA-13)
+    activeViewingContent?.let { content ->
+        NotebookTranscriptionDialog(
+            content = content,
+            onDismiss = { activeViewingContent = null }
+        )
+    }
+
+    // 2. Homework Modal (TA-13)
+    activeViewingHomework?.let { hw ->
+        Dialog(onDismissRequest = { activeViewingHomework = null }) {
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                backgroundColor = MidnightSurface,
+                borderColor = WarmAmber
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GlassPill(text = hw.subjectName, color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.15f))
+                        IconButton(onClick = { activeViewingHomework = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextSecondary)
+                        }
+                    }
+
+                    Text(text = hw.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
+                    Text(text = "📅 تاريخ الطرح: ${hw.studyDate} • الاستحقاق: ${hw.dueDate}", fontSize = 11.sp, color = TextSecondary)
+
+                    if (!hw.details.isNullOrBlank()) {
+                        Text(text = hw.details, fontSize = 13.sp, color = TextPrimary, lineHeight = 18.sp)
+                    }
+
+                    if (!hw.pageNumbers.isNullOrBlank() || !hw.questionNumbers.isNullOrBlank()) {
+                        Text(text = "📖 الصفحات: ${hw.pageNumbers ?: "—"} • الأسئلة: ${hw.questionNumbers ?: "—"}", fontSize = 12.sp, color = CyanAccent)
+                    }
+
+                    if (hw.mediaUrls.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = "المرفقات (${hw.mediaUrls.size}):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            hw.mediaUrls.take(3).forEach { url ->
+                                AsyncImage(
+                                    model = url,
+                                    contentDescription = "مرفق الواجب",
+                                    modifier = Modifier
+                                        .size(70.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (hw.isCompleted) "تم إنجاز هذا الواجب ✓" else "الواجب غير منجز بعد",
+                            fontSize = 12.sp,
+                            color = if (hw.isCompleted) EmeraldGreen else WarmAmber,
+                            fontWeight = FontWeight.Bold
+                        )
+                        GlassButton(
+                            text = if (hw.isCompleted) "إلغاء الإنجاز" else "تحديد كمنجز ✓",
+                            color = if (hw.isCompleted) TextMuted else EmeraldGreen,
+                            onClick = {
+                                viewModel.toggleHomework(hw.id, hw.isCompleted)
+                                activeViewingHomework = hw.copy(isCompleted = !hw.isCompleted)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Exam Modal (TA-13)
+    activeViewingExam?.let { exam ->
+        Dialog(onDismissRequest = { activeViewingExam = null }) {
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                backgroundColor = MidnightSurface,
+                borderColor = RubyRed
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            GlassPill(text = exam.subjectName, color = RubyRed, bgColor = RubyRed.copy(alpha = 0.15f))
+                            GlassPill(text = exam.examType, color = CyanAccent, bgColor = CyanAccent.copy(alpha = 0.15f))
+                        }
+                        IconButton(onClick = { activeViewingExam = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextSecondary)
+                        }
+                    }
+
+                    Text(text = exam.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
+                    Text(text = "📅 موعد الاختبار: ${exam.examDate}", fontSize = 12.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+
+                    if (!exam.requiredChapters.isNullOrBlank()) {
+                        Text(text = "الفصول والمقرر: ${exam.requiredChapters}", fontSize = 13.sp, color = CyanAccent)
+                    }
+                    if (!exam.notes.isNullOrBlank()) {
+                        Text(text = "ملاحظات: ${exam.notes}", fontSize = 12.sp, color = TextSecondary)
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (exam.isCompleted) "تمت المذاكرة بالكامل ✓" else "مطلوب المذاكرة",
+                            fontSize = 12.sp,
+                            color = if (exam.isCompleted) EmeraldGreen else RubyRed,
+                            fontWeight = FontWeight.Bold
+                        )
+                        GlassButton(
+                            text = if (exam.isCompleted) "إلغاء الإنجاز" else "تمت المذاكرة ✓",
+                            color = if (exam.isCompleted) TextMuted else EmeraldGreen,
+                            onClick = {
+                                viewModel.toggleExamCompletion(exam.id, !exam.isCompleted)
+                                activeViewingExam = exam.copy(isCompleted = !exam.isCompleted)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Event Modal (TA-13)
+    activeViewingEvent?.let { event ->
+        Dialog(onDismissRequest = { activeViewingEvent = null }) {
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                backgroundColor = MidnightSurface,
+                borderColor = PurpleAccent
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            GlassPill(text = event.category, color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
+                            if (event.groupId == "all") {
+                                GlassPill(text = "كامل المدرسة 🏫", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
+                            }
+                        }
+                        IconButton(onClick = { activeViewingEvent = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextSecondary)
+                        }
+                    }
+
+                    Text(text = event.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
+                    Text(text = "📅 التاريخ: ${event.eventDate} ${event.timeStr?.let { "• $it" } ?: ""}", fontSize = 11.sp, color = TextSecondary)
+
+                    if (!event.location.isNullOrBlank()) {
+                        Text(text = "📍 المكان: ${event.location}", fontSize = 13.sp, color = CyanAccent, fontWeight = FontWeight.Bold)
+                    }
+                    if (!event.description.isNullOrBlank()) {
+                        Text(text = event.description, fontSize = 13.sp, color = TextPrimary, lineHeight = 18.sp)
+                    }
+                }
+            }
+        }
     }
 }
 

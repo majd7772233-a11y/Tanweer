@@ -1,6 +1,7 @@
 import { Env, UserContext } from '../env';
 import { hashString, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
 import { errorResponse } from '../lib/response';
+import { sanitizePublicRole } from '../lib/roles';
 
 export async function getUserFromToken(token: string, env: Env): Promise<UserContext | null> {
   const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
@@ -51,13 +52,17 @@ export async function getUserFromToken(token: string, env: Env): Promise<UserCon
     throw new Error('USER_DISABLED');
   }
 
+  // Android sessions MUST NEVER operate with SYSTEM_OWNER role.
+  // Mask to ADMIN via sanitizePublicRole so client sessions never inherit SYSTEM_OWNER.
+  const safeRole = sanitizePublicRole(session.role);
+
   return {
     userId: session.user_id,
     phoneNumber: session.phone_number,
     fullName: session.full_name,
     gradeId: session.grade_id,
     sectionId: session.section_id,
-    role: session.role,
+    role: safeRole,
     deviceId: session.device_id,
     defaultGroupId: `class_${session.grade_id}_${session.section_id}`,
   };
