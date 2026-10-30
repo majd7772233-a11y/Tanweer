@@ -239,13 +239,39 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
     return errorResponse('INVALID_CREDENTIALS', 'رقم الهاتف أو كلمة المرور غير صحيحة');
   }
 
+  const now = Date.now();
+
+  // TA-21: Check if user logged in using a single-use temporary password (TEMP_PASSWORD)
+  try {
+    const tempToken = await env.DB.prepare(
+      `SELECT id, expires_at, max_uses, uses_count, revoked FROM user_recovery_tokens
+       WHERE user_id = ? AND type = 'TEMP_PASSWORD'
+       ORDER BY created_at DESC LIMIT 1`
+    ).bind(user.id).first<{
+      id: string;
+      expires_at: number;
+      max_uses: number;
+      uses_count: number;
+      revoked: number;
+    }>();
+
+    if (tempToken) {
+      if (tempToken.revoked || now > tempToken.expires_at || tempToken.uses_count >= tempToken.max_uses) {
+        return errorResponse('CREDENTIALS_EXPIRED', 'انتهت صلاحية كلمة المرور المؤقتة، يرجى طلب إعادة إصدار جديدة من إدارة المنظومة', 401);
+      }
+      // Single-use enforcement: burn the temporary password immediately upon successful login
+      await env.DB.prepare(
+        `UPDATE user_recovery_tokens SET uses_count = uses_count + 1, used_at = ?, revoked = 1 WHERE id = ?`
+      ).bind(now, tempToken.id).run();
+    }
+  } catch {}
+
   // Transparently upgrade legacy hash or rehash with current configured secret pepper
   if (verification.needsRehash || !user.password_hash.startsWith('pbkdf2$')) {
     const { hash: newPbkdf2Hash } = await hashPassword(body.password, pepper);
     await env.DB.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).bind(newPbkdf2Hash, user.id).run();
   }
 
-  const now = Date.now();
   await env.DB.prepare(`UPDATE users SET last_seen = ? WHERE id = ?`).bind(now, user.id).run();
 
   const token = generateRandomToken();

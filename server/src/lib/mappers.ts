@@ -1,11 +1,14 @@
+import { sanitizePublicRole } from './roles';
+
 export function mapGroup(r: any, defaultRole = 'MEMBER') {
+  const rawRole = r.role ?? defaultRole;
   return {
     id: r.id,
     name: r.name,
     type: r.type,
     description: r.description ?? null,
     icon: r.icon ?? null,
-    role: r.role ?? defaultRole,
+    role: sanitizePublicRole(rawRole),
     memberCount: Number(r.member_count ?? r.memberCount ?? 1),
   };
 }

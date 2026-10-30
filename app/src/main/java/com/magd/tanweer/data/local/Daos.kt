@@ -508,7 +508,7 @@ interface OutboxDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOutbox(item: OutboxEntity)
 
-    @Query("UPDATE outbox SET status = :status, attempts = attempts + 1, lastAttemptAt = :now, error = :error WHERE id = :id")
+    @Query("UPDATE outbox SET status = :status, lastAttemptAt = :now, error = :error WHERE id = :id")
     suspend fun updateOutboxStatus(id: String, status: String, now: Long = System.currentTimeMillis(), error: String? = null)
 
     @Query("UPDATE outbox SET status = 'SYNCING', attempts = attempts + 1, lastAttemptAt = :now WHERE id = :id AND status IN ('PENDING', 'FAILED')")

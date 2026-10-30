@@ -342,3 +342,43 @@ export async function handleGetContents(
   });
 }
 
+/**
+ * Fetches the user's cross-grade academic archive (TA-26).
+ * Returns all published contents authored by the user across any group (including historical/previous classes),
+ * plus contents from groups where the user has active membership, without requiring current membership in previous groups.
+ */
+export async function handleGetAcademicArchive(
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  const contents = await env.DB.prepare(
+    `SELECT c.id, c.group_id, c.study_date, c.subject_id, c.type, c.title, c.description,
+            c.author_name, c.author_grade_section, c.views_count, c.useful_count, c.created_at,
+            s.name_ar as subject_name, s.icon as subject_icon, s.color_hex,
+            g.name as group_name
+     FROM contents c
+     LEFT JOIN subjects s ON c.subject_id = s.id
+     LEFT JOIN groups g ON c.group_id = g.id
+     WHERE c.status = 'PUBLISHED'
+       AND (
+         c.created_by = ?
+         OR c.group_id IN (SELECT group_id FROM group_members WHERE user_id = ?)
+       )
+     ORDER BY c.study_date DESC, c.created_at DESC`
+  ).bind(user.userId, user.userId).all();
+
+  const contentList = [];
+  for (const c of (contents.results as any[])) {
+    const media = await env.DB.prepare(
+      `SELECT id, page_order, url, mime_type, file_size FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
+    ).bind(c.id).all();
+    contentList.push(mapContent(c, media.results || []));
+  }
+
+  return jsonResponse({
+    success: true,
+    contents: contentList,
+    totalCount: contentList.length,
+  });
+}
+

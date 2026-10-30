@@ -439,6 +439,9 @@ interface TanweerApiService {
         @Query("groupId") groupId: String
     ): Response<ContentsResponse>
 
+    @GET("api/v1/contents/archive")
+    suspend fun getAcademicArchive(): Response<ContentsResponse>
+
     @POST("api/v1/content")
     suspend fun createContent(@Body req: CreateContentRequest): Response<GenericResponse>
 

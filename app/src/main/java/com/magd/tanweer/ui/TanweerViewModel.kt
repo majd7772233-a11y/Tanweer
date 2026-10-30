@@ -10,6 +10,7 @@ import com.magd.tanweer.data.remote.ConnectionStatus
 import com.magd.tanweer.data.remote.NetworkModule
 import com.magd.tanweer.data.repository.SyncResult
 import com.magd.tanweer.data.repository.TanweerRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -354,9 +355,35 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     val groupsSyncState: StateFlow<SyncState> = _groupsSyncState.asStateFlow()
 
     val chatConnectionStatus: StateFlow<ConnectionStatus> = repository.chatManager.status
+    private val dataGenerationReady = CompletableDeferred<Unit>()
 
     init {
+        // TA-20: Block outbox queue draining until data generation check is verified
+        repository.mutationQueue.isDrainAllowed = false
+
         viewModelScope.launch {
+            try {
+                val res = repository.getSystemVersion()
+                if (res.isSuccess) {
+                    val sysVer = res.getOrNull()
+                    val purged = repository.checkAndApplyDataGeneration(getApplication(), sysVer?.dataGeneration)
+                    if (purged) {
+                        logout()
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                repository.mutationQueue.isDrainAllowed = true
+                dataGenerationReady.complete(Unit)
+                if (_autoSyncEnabled.value) {
+                    repository.mutationQueue.triggerDrain()
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            // TA-20: Guarantee that initial sync NEVER starts before data_generation verification completes
+            dataGenerationReady.await()
             currentUser
                 .distinctUntilChangedBy { it?.id }
                 .collect { user ->
@@ -370,19 +397,6 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
                 }
-        }
-
-        viewModelScope.launch {
-            try {
-                val res = repository.getSystemVersion()
-                if (res.isSuccess) {
-                    val sysVer = res.getOrNull()
-                    val purged = repository.checkAndApplyDataGeneration(getApplication(), sysVer?.dataGeneration)
-                    if (purged) {
-                        logout()
-                    }
-                }
-            } catch (_: Exception) {}
         }
     }
 

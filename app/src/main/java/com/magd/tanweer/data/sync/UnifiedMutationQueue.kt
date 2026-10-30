@@ -47,6 +47,9 @@ class UnifiedMutationQueue private constructor(
     @Volatile
     var isAutoSyncEnabled: Boolean = true
 
+    @Volatile
+    var isDrainAllowed: Boolean = true
+
     var onRetryHomework: (suspend (String) -> Result<Unit>)? = null
     var onRetryContent: (suspend (String) -> Result<Unit>)? = null
 
@@ -165,6 +168,10 @@ class UnifiedMutationQueue private constructor(
      * Drains all pending items in the outbox queue using unified execution and atomic reservation.
      */
     suspend fun drainQueue(): Int = withContext(Dispatchers.IO) {
+        if (!isDrainAllowed) {
+            Log.d("UnifiedMutationQueue", "Drain blocked: awaiting data_generation verification")
+            return@withContext 0
+        }
         if (_isDraining.value) return@withContext 0
         _isDraining.value = true
         var processedCount = 0

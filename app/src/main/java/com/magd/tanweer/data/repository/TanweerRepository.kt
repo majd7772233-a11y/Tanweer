@@ -344,10 +344,50 @@ class TanweerRepository(
 
     suspend fun syncStudentAcademicArchive(): SyncResult = withContext(Dispatchers.IO) {
         try {
-            val myGroups = db.groupDao().getMyGroupsSync()
-            if (myGroups.isEmpty()) return@withContext SyncResult.Success()
-
             val subResults = mutableListOf<SyncResult>()
+
+            // TA-26: Fetch historical cross-grade contributions/lessons directly from server archive
+            try {
+                val archiveRes = api.getAcademicArchive()
+                if (archiveRes.isSuccessful && archiveRes.body() != null) {
+                    val archiveContents = archiveRes.body()!!.contents
+                    if (archiveContents.isNotEmpty()) {
+                        val entities = archiveContents.map {
+                            val mediaJson = if (it.media.isNotEmpty()) {
+                                try {
+                                    org.json.JSONArray(it.media.map { m -> m.url }).toString()
+                                } catch (_: Exception) { "[]" }
+                            } else "[]"
+                            ContentEntity(
+                                id = it.id,
+                                groupId = it.groupId,
+                                studyDate = it.studyDate,
+                                subjectId = it.subjectId,
+                                type = it.type,
+                                title = it.title,
+                                description = it.description,
+                                createdBy = it.createdBy,
+                                authorName = it.authorName,
+                                authorGradeSection = it.authorGradeSection,
+                                viewsCount = it.viewsCount,
+                                usefulCount = it.usefulCount,
+                                createdAt = it.createdAt,
+                                subjectName = it.subjectName,
+                                subjectIcon = it.subjectIcon,
+                                colorHex = it.colorHex,
+                                mediaUrlsJson = mediaJson,
+                                syncStatus = "SYNCED"
+                            )
+                        }
+                        db.contentDao().insertContents(entities)
+                        subResults.add(SyncResult.Success(entities.size))
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("TanweerRepository", "Failed fetching academic archive from server: ${e.message}")
+            }
+
+            val myGroups = db.groupDao().getMyGroupsSync()
             for (grp in myGroups) {
                 try {
                     subResults.add(syncContents(grp.id))
@@ -3294,8 +3334,26 @@ class TanweerRepository(
         val prefs = context.getSharedPreferences("tanweer_prefs", android.content.Context.MODE_PRIVATE)
         val lastGen = prefs.getString("data_generation", null)
         if (lastGen == null) {
-            prefs.edit().putString("data_generation", serverGeneration).apply()
-            return@withContext false
+            // TA-20: Distinguish between clean fresh installation and legacy local data/outbox items
+            val hasExistingUser = db.userDao().getUserSync() != null
+            val hasPendingOutbox = db.outboxDao().getPendingItemsSync().isNotEmpty()
+            val hasExistingGroups = db.groupDao().getMyGroupsSync().isNotEmpty()
+
+            if (hasExistingUser || hasPendingOutbox || hasExistingGroups) {
+                Log.w("TanweerRepo", "No data_generation in preferences but local tables/outbox contain pre-existing data. Purging stale local data to align with server generation $serverGeneration!")
+                return@withContext try {
+                    db.clearAllTables()
+                    NetworkModule.setAuthToken(null)
+                    prefs.edit().putString("data_generation", serverGeneration).apply()
+                    true
+                } catch (e: Exception) {
+                    Log.e("TanweerRepo", "Error clearing tables on missing generation with existing data", e)
+                    false
+                }
+            } else {
+                prefs.edit().putString("data_generation", serverGeneration).apply()
+                return@withContext false
+            }
         }
         if (lastGen != serverGeneration) {
             Log.w("TanweerRepo", "Server data generation changed from $lastGen to $serverGeneration. Purging local data!")

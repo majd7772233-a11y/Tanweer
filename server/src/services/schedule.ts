@@ -118,8 +118,24 @@ export async function handleCreateScheduleSlot(
 
   const body = await request.json() as ScheduleSlotInput;
 
-  if (body.dayOfWeek === undefined || !body.slotOrder || !body.subjectId) {
-    return errorResponse('INVALID_INPUT', 'يرجى تحديد اليوم ورقم الحصة والمادة');
+  // TA-23: Strict unified validation matching batch schedule rules
+  if (
+    body.dayOfWeek === undefined ||
+    typeof body.dayOfWeek !== 'number' ||
+    body.dayOfWeek < 0 ||
+    body.dayOfWeek > 6 ||
+    !body.slotOrder ||
+    typeof body.slotOrder !== 'number' ||
+    body.slotOrder < 1 ||
+    body.slotOrder > 12 ||
+    !body.subjectId ||
+    typeof body.subjectId !== 'string' ||
+    !body.subjectId.trim()
+  ) {
+    return errorResponse(
+      'INVALID_INPUT',
+      'بيانات الحصة غير صالحة، يرجى التأكد من اليوم (0-6) ورقم الحصة (1-12) والمادة وعدم ترك حقول فارغة'
+    );
   }
 
   const isScheduleManager = await hasPermission(user, Permission.MANAGE_SCHEDULE, {
@@ -147,14 +163,22 @@ export async function handleCreateScheduleSlot(
     );
   }
 
+  const slotStatements: any[] = [];
+  let targetVersionId = activeVersion?.id;
+  let targetVersionNumber = activeVersion?.version_number || 1;
+
+  // TA-23: Atomicity - if no active version exists yet, add its creation to the SAME atomic batch!
+  // This prevents orphaned empty active versions if inserting the slot subsequently fails.
   if (!activeVersion) {
-    const versionId = generateId('sch_ver');
+    targetVersionId = generateId('sch_ver');
+    targetVersionNumber = 1;
     const today = new Date().toISOString().slice(0, 10);
-    await env.DB.prepare(
-      `INSERT INTO schedule_versions (id, group_id, version_number, valid_from, is_active, created_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(versionId, groupId, 1, today, 1, Date.now(), user.userId).run();
-    activeVersion = { id: versionId, version_number: 1 };
+    slotStatements.push(
+      env.DB.prepare(
+        `INSERT INTO schedule_versions (id, group_id, version_number, valid_from, is_active, created_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(targetVersionId, groupId, 1, today, 1, Date.now(), user.userId)
+    );
   }
 
   const finalStartTime = (body.startTime !== undefined && body.startTime !== null && body.startTime.trim() !== '')
@@ -165,7 +189,6 @@ export async function handleCreateScheduleSlot(
     : (existingSlot?.end_time || null);
 
   const slotId = generateId('slot');
-  const slotStatements: any[] = [];
 
   // 3. Ensure subject exists
   if (body.subjectName) {
@@ -180,7 +203,7 @@ export async function handleCreateScheduleSlot(
   slotStatements.push(
     env.DB.prepare(
       `DELETE FROM schedule_slots WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
-    ).bind(activeVersion.id, body.dayOfWeek, body.slotOrder)
+    ).bind(targetVersionId, body.dayOfWeek, body.slotOrder)
   );
 
   slotStatements.push(
@@ -189,10 +212,10 @@ export async function handleCreateScheduleSlot(
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       slotId,
-      activeVersion.id,
+      targetVersionId,
       body.dayOfWeek,
       body.slotOrder,
-      body.subjectId,
+      body.subjectId.trim(),
       finalStartTime,
       finalEndTime
     )
@@ -209,7 +232,7 @@ export async function handleCreateScheduleSlot(
   return jsonResponse({
     success: true,
     slotId,
-    versionNumber: activeVersion.version_number,
+    versionNumber: targetVersionNumber,
     message: 'تم حفظ الحصة في الجدول بنجاح',
   });
 }
@@ -573,7 +596,7 @@ export async function handleVoteScheduleProposal(
   // Quorum: between 2 and 5 members or ~35% of group
   const quorum = Math.max(2, Math.min(5, Math.ceil(totalMembers * 0.35)));
 
-  let autoResolvedStatus: 'ACCEPTED' | 'REJECTED' | null = null;
+  let autoResolvedStatus: 'ACCEPTED' | 'REJECTED' | 'CONFLICTED' | null = null;
   let autoResolvedMessage: string | null = null;
 
   if (votesFor >= quorum && votesFor > votesAgainst * 1.5) {
@@ -587,7 +610,7 @@ export async function handleVoteScheduleProposal(
         autoResolvedStatus = 'ACCEPTED';
         autoResolvedMessage = `اكتمل نصاب تصويت الشعبة (${votesFor}/${quorum}) وتم اعتماد تغيير الحصة تلقائياً وتحديث الجدول للنسخة (${res.versionNumber}) 🎉`;
       } else {
-        autoResolvedStatus = 'REJECTED';
+        autoResolvedStatus = res.conflict ? 'CONFLICTED' : 'REJECTED';
         autoResolvedMessage = res.message;
       }
     }
@@ -678,14 +701,15 @@ export async function applyScheduleProposalToActiveSchedule(
       end_time: string | null;
     }>();
 
-    // TA-19: Concurrency conflict detection.
-    // Verify that the active slot still has the subject upon which this proposal was formulated.
+    // TA-19 & TA-24: Concurrency conflict detection.
+    // Verify that the active slot still has the expected subject (or is still empty if proposal started from empty).
     const activeSlot = (oldSlots.results || []).find(
       s => s.day_of_week === proposal.day_of_week && s.slot_order === proposal.slot_order
     );
     const activeSubjectId = activeSlot?.subject_id || null;
+    const expectedSubjectId = proposal.old_subject_id || null;
 
-    if (proposal.old_subject_id && activeSubjectId !== proposal.old_subject_id) {
+    if (activeSubjectId !== expectedSubjectId) {
       await env.DB.prepare(
         `UPDATE schedule_proposals SET status = 'CONFLICTED' WHERE id = ?`
       ).bind(proposal.id).run();
@@ -694,8 +718,10 @@ export async function applyScheduleProposalToActiveSchedule(
         success: false,
         conflict: true,
         currentSubjectId: activeSubjectId,
-        expectedSubjectId: proposal.old_subject_id,
-        message: `تعذر تطبيق المقترح لوجود تعارض: تم تغيير مادة الحصة في الجدول الفعال إلى (${activeSubjectId || 'فارغة'}) بعد إنشاء المقترح المبني على (${proposal.old_subject_id})`,
+        expectedSubjectId: expectedSubjectId,
+        message: expectedSubjectId === null
+          ? `تعذر تطبيق المقترح لوجود تعارض: تم إشغال الحصة في الجدول الفعال بالمادة (${activeSubjectId}) بعد إنشاء المقترح الذي افترض أن الحصة فارغة`
+          : `تعذر تطبيق المقترح لوجود تعارض: تم تغيير مادة الحصة في الجدول الفعال إلى (${activeSubjectId || 'فارغة'}) بعد إنشاء المقترح المبني على (${expectedSubjectId})`,
       };
     }
 

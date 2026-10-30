@@ -8,7 +8,8 @@ import { Env } from '../env';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Role, normalizeRole, ROLE_METADATA } from '../lib/roles';
 import { generateId } from '../lib/ids';
-import { hashString, generateRandomToken, generateRecoveryCode, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
+import { hashString, hashPassword, generateRandomToken, generateRecoveryCode, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
+import { isValidIsoDate } from '../lib/validation';
 import { applyDecisionExecution } from './governance';
 import { cleanupOrphanMedia } from './media';
 
@@ -649,16 +650,20 @@ export async function handleReissueUserCredentials(
 
   let plainSecret = '';
   let cleanSecret = '';
+  let tokenHash = '';
 
   if (credentialType === 'RECOVERY_CODE') {
     plainSecret = generateRecoveryCode();
     cleanSecret = plainSecret.replace(/[\s\-]/g, '').toUpperCase();
+    tokenHash = await hashString(cleanSecret, pepper);
   } else {
+    // TA-21: Generate standard temporary password and compute real PBKDF2 hash
     plainSecret = 'Tmp#' + generateRandomToken().slice(0, 8).toUpperCase();
     cleanSecret = plainSecret;
+    const { hash: pbkdf2Hash } = await hashPassword(cleanSecret, pepper);
+    tokenHash = pbkdf2Hash;
   }
 
-  const tokenHash = await hashString(cleanSecret, pepper);
   const tokenId = generateId('rec_tok');
 
   // Ensure recovery tokens table exists
@@ -692,10 +697,17 @@ export async function handleReissueUserCredentials(
     VALUES (?, ?, ?, ?, 1, 0, ?, 0, ?, ?)
   `).bind(tokenId, userId, tokenHash, credentialType, expiresAt, actorId, now).run();
 
-  // Also update users.recovery_code_hash so native mobile loginWithRecoveryCode works immediately
-  await env.DB.prepare(
-    `UPDATE users SET recovery_code_hash = ?, updated_at = ? WHERE id = ?`
-  ).bind(tokenHash, now, userId).run();
+  // Update appropriate column on users table
+  if (credentialType === 'RECOVERY_CODE') {
+    await env.DB.prepare(
+      `UPDATE users SET recovery_code_hash = ?, updated_at = ? WHERE id = ?`
+    ).bind(tokenHash, now, userId).run();
+  } else {
+    // TA-21: Update password_hash so normal login with phone + password works seamlessly
+    await env.DB.prepare(
+      `UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`
+    ).bind(tokenHash, now, userId).run();
+  }
 
   // Optionally revoke existing sessions to immediately protect the account
   if (revokeExistingSessions) {
@@ -1670,53 +1682,150 @@ export async function handleGetDashboardCorrections(env: Env): Promise<Response>
  */
 export async function handlePreviewPurge(actorId: string, env: Env): Promise<Response> {
   const [
-    contents, mediaBlobs, homeworks, exams, events, issues, chatMessages,
-    schedules, decisions, users, sessions, devices,
-    userBookmarks, votes, roleTokens, examCompletions, homeworkCompletions,
-    usefulVotes, contentCorrections
+    contents, contentMedia, usefulVotes, userBookmarks, userNotes, votes,
+    deletionRequests, correctionRequests, contentCorrections,
+    homeworks, homeworkMedia, homeworkCompletions,
+    exams, examCompletions,
+    events,
+    issues, issueComments,
+    chatMessages, mediaBlobs,
+    scheduleSlots, scheduleVersions, scheduleProposals, scheduleProposalVotes,
+    communityDecisions, communityVotes,
+    roleVerificationTokens, roleVerificationCodes, roleRequests, teacherAssignments,
+    sessions, devices,
+    nonOwnerGroupMembers, nonOwnerUsers,
+    ownerUsers, ownerMemberships, systemSettingsCount
   ] = await Promise.all([
     env.DB.prepare(`SELECT COUNT(*) as c FROM contents`).first<{ c: number }>(),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM media_blobs`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM content_media`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM content_useful_votes`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM user_bookmarks`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM user_notes`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM votes`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM deletion_requests`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM correction_requests`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM content_corrections`).first<{ c: number }>(),
     env.DB.prepare(`SELECT COUNT(*) as c FROM homeworks`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM homework_media`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM homework_completions`).first<{ c: number }>(),
     env.DB.prepare(`SELECT COUNT(*) as c FROM exams`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM exam_completions`).first<{ c: number }>(),
     env.DB.prepare(`SELECT COUNT(*) as c FROM events`).first<{ c: number }>(),
     env.DB.prepare(`SELECT COUNT(*) as c FROM issues`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM issue_comments`).first<{ c: number }>(),
     env.DB.prepare(`SELECT COUNT(*) as c FROM chat_messages`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM media_blobs`).first<{ c: number }>(),
     env.DB.prepare(`SELECT COUNT(*) as c FROM schedule_slots`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM schedule_versions`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM schedule_proposals`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM schedule_proposal_votes`).first<{ c: number }>(),
     env.DB.prepare(`SELECT COUNT(*) as c FROM community_decisions`).first<{ c: number }>(),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM users WHERE role != 'SYSTEM_OWNER'`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM community_votes`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM role_verification_tokens`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM role_verification_codes`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM role_requests`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM teacher_assignments`).first<{ c: number }>(),
     env.DB.prepare(`SELECT COUNT(*) as c FROM sessions`).first<{ c: number }>(),
     env.DB.prepare(`SELECT COUNT(*) as c FROM devices`).first<{ c: number }>(),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM user_bookmarks`).first<{ c: number }>(),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM votes`).first<{ c: number }>(),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM role_verification_tokens`).first<{ c: number }>(),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM exam_completions`).first<{ c: number }>(),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM homework_completions`).first<{ c: number }>(),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM content_useful_votes`).first<{ c: number }>(),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM content_corrections`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM group_members WHERE user_id NOT IN (SELECT id FROM users WHERE role = 'SYSTEM_OWNER')`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM users WHERE role != 'SYSTEM_OWNER'`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM users WHERE role = 'SYSTEM_OWNER'`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM group_members WHERE user_id IN (SELECT id FROM users WHERE role = 'SYSTEM_OWNER')`).first<{ c: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM system_settings`).first<{ c: number }>(),
   ]);
 
-  const counts = {
+  const counts: Record<string, number> = {
     contents: contents?.c || 0,
-    mediaBlobs: mediaBlobs?.c || 0,
+    contentMedia: contentMedia?.c || 0,
+    contentUsefulVotes: usefulVotes?.c || 0,
+    userBookmarks: userBookmarks?.c || 0,
+    userNotes: userNotes?.c || 0,
+    votes: votes?.c || 0,
+    deletionRequests: deletionRequests?.c || 0,
+    correctionRequests: correctionRequests?.c || 0,
+    contentCorrections: contentCorrections?.c || 0,
     homeworks: homeworks?.c || 0,
+    homeworkMedia: homeworkMedia?.c || 0,
+    homeworkCompletions: homeworkCompletions?.c || 0,
     exams: exams?.c || 0,
+    examCompletions: examCompletions?.c || 0,
     events: events?.c || 0,
     issues: issues?.c || 0,
+    issueComments: issueComments?.c || 0,
     chatMessages: chatMessages?.c || 0,
-    scheduleSlots: schedules?.c || 0,
-    communityDecisions: decisions?.c || 0,
-    nonOwnerUsers: users?.c || 0,
-    activeSessions: sessions?.c || 0,
-    registeredDevices: devices?.c || 0,
-    userBookmarks: userBookmarks?.c || 0,
-    votes: votes?.c || 0,
-    roleVerificationTokens: roleTokens?.c || 0,
-    examCompletions: examCompletions?.c || 0,
-    homeworkCompletions: homeworkCompletions?.c || 0,
-    contentUsefulVotes: usefulVotes?.c || 0,
-    contentCorrections: contentCorrections?.c || 0,
+    mediaBlobs: mediaBlobs?.c || 0,
+    scheduleSlots: scheduleSlots?.c || 0,
+    scheduleVersions: scheduleVersions?.c || 0,
+    scheduleProposals: scheduleProposals?.c || 0,
+    scheduleProposalVotes: scheduleProposalVotes?.c || 0,
+    communityDecisions: communityDecisions?.c || 0,
+    communityVotes: communityVotes?.c || 0,
+    roleVerificationTokens: roleVerificationTokens?.c || 0,
+    roleVerificationCodes: roleVerificationCodes?.c || 0,
+    roleRequests: roleRequests?.c || 0,
+    teacherAssignments: teacherAssignments?.c || 0,
+    sessions: sessions?.c || 0,
+    devices: devices?.c || 0,
+    nonOwnerUsers: nonOwnerUsers?.c || 0,
+    nonOwnerGroupMembers: nonOwnerGroupMembers?.c || 0,
   };
+
+  const fullyPurgedTables = [
+    { table: 'contents', count: contents?.c || 0 },
+    { table: 'content_media', count: contentMedia?.c || 0 },
+    { table: 'content_useful_votes', count: usefulVotes?.c || 0 },
+    { table: 'user_bookmarks', count: userBookmarks?.c || 0 },
+    { table: 'user_notes', count: userNotes?.c || 0 },
+    { table: 'votes', count: votes?.c || 0 },
+    { table: 'deletion_requests', count: deletionRequests?.c || 0 },
+    { table: 'correction_requests', count: correctionRequests?.c || 0 },
+    { table: 'content_corrections', count: contentCorrections?.c || 0 },
+    { table: 'homeworks', count: homeworks?.c || 0 },
+    { table: 'homework_media', count: homeworkMedia?.c || 0 },
+    { table: 'homework_completions', count: homeworkCompletions?.c || 0 },
+    { table: 'exams', count: exams?.c || 0 },
+    { table: 'exam_completions', count: examCompletions?.c || 0 },
+    { table: 'events', count: events?.c || 0 },
+    { table: 'issues', count: issues?.c || 0 },
+    { table: 'issue_comments', count: issueComments?.c || 0 },
+    { table: 'chat_messages', count: chatMessages?.c || 0 },
+    { table: 'media_blobs', count: mediaBlobs?.c || 0 },
+    { table: 'schedule_slots', count: scheduleSlots?.c || 0 },
+    { table: 'schedule_versions', count: scheduleVersions?.c || 0 },
+    { table: 'schedule_proposals', count: scheduleProposals?.c || 0 },
+    { table: 'schedule_proposal_votes', count: scheduleProposalVotes?.c || 0 },
+    { table: 'community_decisions', count: communityDecisions?.c || 0 },
+    { table: 'community_votes', count: communityVotes?.c || 0 },
+    { table: 'role_verification_tokens', count: roleVerificationTokens?.c || 0 },
+    { table: 'role_verification_codes', count: roleVerificationCodes?.c || 0 },
+    { table: 'role_requests', count: roleRequests?.c || 0 },
+    { table: 'teacher_assignments', count: teacherAssignments?.c || 0 },
+    { table: 'sessions', count: sessions?.c || 0 },
+    { table: 'devices', count: devices?.c || 0 },
+  ];
+
+  const partiallyPurgedTables = [
+    {
+      table: 'users',
+      purgedCount: nonOwnerUsers?.c || 0,
+      retainedCount: ownerUsers?.c || 0,
+      policy: 'حذف جميع المستخدمين والطلاب والمعلمين مع استثناء وحفظ حساب مالك المنظومة (SYSTEM_OWNER) بالكامل'
+    },
+    {
+      table: 'group_members',
+      purgedCount: nonOwnerGroupMembers?.c || 0,
+      retainedCount: ownerMemberships?.c || 0,
+      policy: 'حذف جميع عضويات الشعب والمجموعات مع استثناء وحفظ عضويات مالك المنظومة'
+    }
+  ];
+
+  const preservedTables = [
+    {
+      table: 'system_settings',
+      action: 'تدوير مفتاح data_generation ذرياً وتحديثه مع الاحتفاظ بتهيئة النظام',
+      totalRecords: systemSettingsCount?.c || 0
+    }
+  ];
 
   const totalRecords = Object.values(counts).reduce((a, b) => a + b, 0);
   const nextGeneration = `gen_${Date.now()}_candidate`;
@@ -1725,14 +1834,17 @@ export async function handlePreviewPurge(actorId: string, env: Env): Promise<Res
     success: true,
     preview: counts,
     counts,
+    fullyPurgedTables,
+    partiallyPurgedTables,
+    preservedTables,
     totalRecords,
     nextGeneration,
-    message: 'تم حصر السجلات الجاهزة للتصفير. للتأكيد النهائي يلزم إدخال المفتاح السري وكتابة YES صراحة.',
+    message: 'تم حصر السجلات الجاهزة للتصفير بدقة وتصنيف نطاق الحذف والاستثناءات. للتأكيد النهائي يلزم إدخال المفتاح السري وكتابة YES صراحة.',
   });
 }
 
 /**
- * Phase 2: Execute Complete Data Purge and Rotate data_generation Atomically (Point 34, TA-11, TA-15).
+ * Phase 2: Execute Complete Data Purge and Rotate data_generation Atomically (Point 34, TA-11, TA-15, TA-22).
  */
 export async function handleExecutePurge(request: Request, actorId: string, env: Env): Promise<Response> {
   const body = await request.json() as { secret?: string; confirmationText?: string; confirmation?: string };
@@ -1751,7 +1863,7 @@ export async function handleExecutePurge(request: Request, actorId: string, env:
   const newGeneration = `gen_${Date.now()}_${generateId('g')}`;
   const now = Date.now();
 
-  // Atomic cascading execution in sequence including data_generation rotation (TA-11, TA-15)
+  // Atomic cascading execution in sequence including data_generation rotation (TA-11, TA-15, TA-22)
   const purgeStatements = [
     // Content-related auxiliary tables
     env.DB.prepare(`DELETE FROM content_useful_votes`),
@@ -1793,7 +1905,7 @@ export async function handleExecutePurge(request: Request, actorId: string, env:
     // Sessions & Devices
     env.DB.prepare(`DELETE FROM sessions`),
     env.DB.prepare(`DELETE FROM devices`),
-    // Group memberships & users
+    // Group memberships & users (partial purge: non-owner users only)
     env.DB.prepare(`DELETE FROM group_members WHERE user_id NOT IN (SELECT id FROM users WHERE role = 'SYSTEM_OWNER')`),
     env.DB.prepare(`DELETE FROM users WHERE role != 'SYSTEM_OWNER'`),
     // TA-11: Atomic rotation of data_generation inside the exact same batch
@@ -1821,7 +1933,7 @@ export async function handleExecutePurge(request: Request, actorId: string, env:
     `تم تنفيذ التصفير الكلي والشامل لمنظومة تنوير وتدوير جيل البيانات إلى (${newGeneration}) ذرياً`
   );
 
-  const tablesPurged = [
+  const fullyPurged = [
     'content_useful_votes', 'user_bookmarks', 'user_notes', 'votes',
     'deletion_requests', 'correction_requests', 'content_corrections',
     'content_media', 'contents', 'homework_completions', 'homework_media',
@@ -1830,15 +1942,31 @@ export async function handleExecutePurge(request: Request, actorId: string, env:
     'schedule_proposal_votes', 'schedule_proposals', 'schedule_versions',
     'community_votes', 'community_decisions', 'role_verification_tokens',
     'role_verification_codes', 'role_requests', 'teacher_assignments',
-    'sessions', 'devices', 'group_members', 'users', 'system_settings'
+    'sessions', 'devices'
+  ];
+
+  const partiallyPurged = [
+    { table: 'users', criteria: 'حذف جميع المستخدمين والطلاب والمعلمين مع استثناء وحفظ حساب مالك المنظومة (SYSTEM_OWNER) بالكامل' },
+    { table: 'group_members', criteria: 'حذف جميع عضويات الشعب والمجموعات مع استثناء وحفظ عضويات مالك المنظومة' }
+  ];
+
+  const preserved = [
+    { table: 'system_settings', action: 'تدوير مفتاح data_generation إلى الجيل الجديد ذرياً والاحتفاظ بإعدادات النظام الأخرى' }
   ];
 
   return jsonResponse({
     success: true,
-    message: 'تم تصفير المنظومة وتدوير جيل البيانات بنجاح 🔄. ستتم مزامنة التطبيقات وإعادة تهيئتها تلقائياً.',
+    message: 'تم تصفير المنظومة وتدوير جيل البيانات بنجاح 🔄. تم إفراغ الجداول المحددة بالكامل وتصفية المستخدمين غير المالكين وتدوير الجيل ذرياً.',
     newGeneration,
-    tablesPurged,
-    totalTables: tablesPurged.length,
+    tablesPurged: fullyPurged, // For backward compatibility
+    fullyPurgedTables: fullyPurged,
+    partiallyPurgedTables: partiallyPurged,
+    preservedTables: preserved,
+    summary: {
+      fullyPurgedCount: fullyPurged.length,
+      partiallyPurgedCount: partiallyPurged.length,
+      preservedCount: preserved.length,
+    }
   });
 }
 
@@ -1878,6 +2006,11 @@ export async function handleDashboardCreateHoliday(
 
   if (!title || !eventDate) {
     return errorResponse('INVALID_INPUT', 'يرجى إدخال اسم الإجازة وتاريخها');
+  }
+
+  // TA-27: Strict ISO date validation for holiday creation from dashboard
+  if (!isValidIsoDate(eventDate)) {
+    return errorResponse('INVALID_INPUT', 'تاريخ الإجازة غير صالح، يرجى إدخال تاريخ تقويمي صحيح بصيغة YYYY-MM-DD');
   }
 
   if (!description) {

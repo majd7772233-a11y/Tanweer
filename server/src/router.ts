@@ -23,7 +23,7 @@ import {
   handleGetScheduleVersions,
 } from './services/schedule';
 import { handleGetCalendarOverview, handleGetDayDetail } from './services/calendar';
-import { handleCreateContent, handleVoteUseful, handleUpdateContent, handleDeleteContent, handleGetContents } from './services/content';
+import { handleCreateContent, handleVoteUseful, handleUpdateContent, handleDeleteContent, handleGetContents, handleGetAcademicArchive } from './services/content';
 import { handleCreateHomework, handleGetHomeworks, handleToggleHomeworkCompletion, handleUpdateHomework, handleDeleteHomework } from './services/homework';
 import { handleCreateExam, handleGetExams, handleUpdateExam, handleDeleteExam, handleToggleExamCompletion } from './services/exams';
 import { handleCreateEvent, handleGetEvents, handleUpdateEvent, handleDeleteEvent } from './services/events';
@@ -308,6 +308,9 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
 
   // Content / Lessons & Media Upload
+  if ((path === '/api/v1/contents/archive' || path === '/api/v1/content/archive') && method === 'GET') {
+    return handleGetAcademicArchive(user, env);
+  }
   if (path === '/api/v1/contents' && method === 'GET') {
     const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
     return handleGetContents(groupId, user, env);
