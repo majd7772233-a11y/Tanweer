@@ -372,16 +372,32 @@ export async function handleCreatePublicGroup(request: Request, user: UserContex
 
   const groupId = generateId('grp');
   const now = Date.now();
-  await env.DB.prepare(
-    `INSERT INTO groups (id, name, type, description, icon, is_official, is_discoverable, created_by, created_at, updated_at)
-     VALUES (?, ?, 'OPTIONAL', ?, ?, 0, 1, ?, ?, ?)`
-  ).bind(groupId, body.name.trim(), body.description?.trim() || null, body.icon || '👥', user.userId, now, now).run();
 
-  // Add creator as MODERATOR
-  await env.DB.prepare(
-    `INSERT INTO group_members (group_id, user_id, role, status, joined_at)
-     VALUES (?, ?, ?, 'ACTIVE', ?)`
-  ).bind(groupId, user.userId, Role.MODERATOR, now).run();
+  if (typeof env.DB.batch !== 'function') {
+    return errorResponse('GROUP_CREATION_UNAVAILABLE', 'قاعدة البيانات لا تدعم إنشاء المجموعة بصورة ذرية حالياً', 503);
+  }
+
+  // The group and its creator membership form one invariant: never publish a
+  // discoverable group unless its creator is an active moderator.
+  try {
+    const results = await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO groups (id, name, type, description, icon, is_official, is_discoverable, created_by, created_at, updated_at)
+         VALUES (?, ?, 'OPTIONAL', ?, ?, 0, 1, ?, ?, ?)`
+      ).bind(groupId, body.name.trim(), body.description?.trim() || null, body.icon || '👥', user.userId, now, now),
+      env.DB.prepare(
+        `INSERT INTO group_members (group_id, user_id, role, status, joined_at)
+         VALUES (?, ?, ?, 'ACTIVE', ?)`
+      ).bind(groupId, user.userId, Role.MODERATOR, now),
+    ]);
+
+    if (results.length !== 2 || results.some(result => result.meta?.changes !== 1)) {
+      return errorResponse('GROUP_CREATION_FAILED', 'تعذر إنشاء المجموعة وتعيين مشرفها بصورة مكتملة', 500);
+    }
+  } catch (error) {
+    console.error('Failed to create public group atomically:', error);
+    return errorResponse('GROUP_CREATION_FAILED', 'تعذر إنشاء المجموعة حالياً. لم يتم نشر مجموعة ناقصة.', 500);
+  }
 
   return jsonResponse({
     success: true,
