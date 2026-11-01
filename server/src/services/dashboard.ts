@@ -4101,6 +4101,13 @@ export function renderDashboardHtml(): Response {
       };
       document.getElementById('pageTitle').textContent = titles[tabId] || 'غرفة التحكم';
 
+      const mobileNav = document.getElementById('dashboardNav');
+      const ownerInfo = document.querySelector('.owner-info');
+      if (mobileNav?.classList.contains('mobile-open')) {
+        mobileNav.classList.remove('mobile-open');
+        ownerInfo?.classList.remove('mobile-open');
+      }
+
       if (tabId === 'overview') loadStats();
       if (tabId === 'users') loadUsers(0);
       if (tabId === 'roles') loadRoles();
@@ -4160,6 +4167,14 @@ export function renderDashboardHtml(): Response {
       }
     }
 
+    function toggleMobileMenu() {
+      const nav = document.getElementById('dashboardNav');
+      const ownerInfo = document.querySelector('.owner-info');
+      if (!nav) return;
+
+      const isOpen = nav.classList.toggle('mobile-open');
+      if (ownerInfo) ownerInfo.classList.toggle('mobile-open', isOpen);
+    }
     function debounceUserSearch() {
       clearTimeout(searchTimeout);
       searchTimeout = setTimeout(() => loadUsers(0), 300);
@@ -5041,6 +5056,7 @@ export function renderDashboardHtml(): Response {
         const data = await res.json();
         if (data.success) {
           showToast('تم حذف الواجب بنجاح');
+          closeHomeworkDetailModal();
           loadHomeworks(pagination.homeworks.offset);
           loadStats();
         } else {
