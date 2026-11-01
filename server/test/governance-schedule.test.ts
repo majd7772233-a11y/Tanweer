@@ -98,9 +98,9 @@ class ScheduleDecisionDb {
       async all<T = unknown>(): Promise<{ results: T[] }> {
         return { results: db.query(sql, params) as T[] };
       },
-      async run(): Promise<{ success: boolean }> {
-        db.execute(sql, params);
-        return { success: true };
+      async run(): Promise<{ success: boolean; meta: { changes: number } }> {
+        const changes = db.execute(sql, params);
+        return { success: true, meta: { changes } };
       },
     };
     return statement as any;
@@ -147,76 +147,116 @@ class ScheduleDecisionDb {
     return [];
   }
 
-  private execute(sql: string, params: unknown[]): void {
+  private execute(sql: string, params: unknown[]): number {
     const normalized = sql.trim().replace(/\\s+/g, ' ');
     this.statements.push(normalized);
 
-    if (/UPDATE schedule_proposals/i.test(normalized) && /\\b(reviewed_by|reviewed_at|subject_id)\\b/i.test(normalized)) {
-      throw new Error('no such column in schedule_proposals');
+    if (normalized.startsWith("UPDATE schedule_proposals SET status = 'APPLYING'")) {
+      const proposal = this.proposals.find((row) =>
+        row.id === params[0] && row.group_id === params[1] && row.status === 'PENDING'
+      );
+      if (!proposal) return 0;
+      proposal.status = 'APPLYING';
+      return 1;
     }
 
     if (normalized.startsWith('UPDATE schedule_versions SET is_active = 0')) {
-      const [validUntil, versionId] = params as [string, string];
-      const version = this.versions.find((row) => row.id === versionId);
-      if (version) {
-        version.is_active = 0;
-        version.valid_until = validUntil;
-      }
-      return;
+      const [validUntil, versionId, groupId, proposalId, proposalGroupId] = params as [
+        string, string, string, string, string,
+      ];
+      const proposal = this.proposals.find((row) =>
+        row.id === proposalId && row.group_id === proposalGroupId && row.status === 'APPLYING'
+      );
+      const version = this.versions.find((row) =>
+        row.id === versionId && row.group_id === groupId && row.is_active === 1
+      );
+      if (!proposal || !version) return 0;
+      version.is_active = 0;
+      version.valid_until = validUntil;
+      return 1;
     }
 
     if (normalized.startsWith('INSERT INTO schedule_versions')) {
-      const [id, groupId, versionNumber, validFrom, createdAt, createdBy] = params as [
-        string, string, number, string, number, string,
+      const [id, groupId, versionNumber, validFrom, createdAt, createdBy, proposalId, proposalGroupId, guardGroupId] = params as [
+        string, string, number, string, number, string, string, string, string,
       ];
+      const proposal = this.proposals.find((row) =>
+        row.id === proposalId && row.group_id === proposalGroupId && row.status === 'APPLYING'
+      );
+      const hasActive = this.versions.some((row) => row.group_id === guardGroupId && row.is_active === 1);
+      if (!proposal || hasActive) return 0;
       this.versions.push({
         id, group_id: groupId, version_number: versionNumber, valid_from: validFrom,
         valid_until: null, is_active: 1, created_at: createdAt, created_by: createdBy,
       });
-      return;
+      return 1;
     }
 
     if (normalized.startsWith('INSERT INTO schedule_slots')) {
-      const [id, versionId, day, order, subjectId, startTime, endTime] = params as [
-        string, string, number, number, string, string | null, string | null,
+      const [id, versionId, day, order, subjectId, startTime, endTime, guardedVersionId, groupId] = params as [
+        string, string, number, number, string, string | null, string | null, string, string,
       ];
+      const version = this.versions.find((row) =>
+        row.id === guardedVersionId && row.id === versionId && row.group_id === groupId && row.is_active === 1
+      );
+      if (!version) return 0;
       this.slots.push({
         id, version_id: versionId, day_of_week: day, slot_order: order,
         subject_id: subjectId, start_time: startTime, end_time: endTime,
       });
-      return;
+      return 1;
     }
 
     if (normalized.startsWith("UPDATE schedule_proposals SET status = 'ACCEPTED'")) {
-      const proposal = this.proposals.find((row) => row.id === params[0] && row.status === 'PENDING');
-      if (proposal) proposal.status = 'ACCEPTED';
-      return;
+      const [proposalId, groupId, versionId, versionGroupId] = params as [string, string, string, string];
+      const proposal = this.proposals.find((row) =>
+        row.id === proposalId && row.group_id === groupId && row.status === 'APPLYING'
+      );
+      const version = this.versions.find((row) =>
+        row.id === versionId && row.group_id === versionGroupId && row.is_active === 1
+      );
+      if (!proposal || !version) return 0;
+      proposal.status = 'ACCEPTED';
+      return 1;
     }
 
     if (normalized.startsWith("UPDATE schedule_proposals SET status = 'CONFLICTED'")) {
-      const proposal = this.proposals.find((row) => row.id === params[0]);
-      if (proposal) proposal.status = 'CONFLICTED';
-      return;
+      const [proposalId, groupId, versionId, versionGroupId] = params as [string, string, string, string];
+      const proposal = this.proposals.find((row) => row.id === proposalId);
+      if (!proposal) return 0;
+
+      if (params.length === 1) {
+        if (proposal.status !== 'PENDING') return 0;
+        proposal.status = 'CONFLICTED';
+        return 1;
+      }
+
+      const version = this.versions.find((row) =>
+        row.id === versionId && row.group_id === versionGroupId && row.is_active === 1
+      );
+      if (proposal.group_id !== groupId || proposal.status !== 'APPLYING' || version) return 0;
+      proposal.status = 'CONFLICTED';
+      return 1;
     }
 
     if (normalized.startsWith("UPDATE community_decisions SET status = 'APPLIED'")) {
       const [appliedAt, appliedBy, decisionId, groupId] = params as [number, string, string, string];
-      if (this.decision.id === decisionId && this.decision.group_id === groupId) {
-        this.decision.status = 'APPLIED';
-        this.decision.applied_at = appliedAt;
-        this.decision.applied_by = appliedBy;
-      }
-      return;
+      if (this.decision.id !== decisionId || this.decision.group_id !== groupId || this.decision.status !== 'PENDING') return 0;
+      this.decision.status = 'APPLIED';
+      this.decision.applied_at = appliedAt;
+      this.decision.applied_by = appliedBy;
+      return 1;
     }
 
     if (normalized.startsWith("UPDATE community_decisions SET status = 'REJECTED'")) {
       const [decisionId, groupId] = params as [string, string];
-      if (this.decision.id === decisionId && this.decision.group_id === groupId) {
-        this.decision.status = 'REJECTED';
-      }
+      if (this.decision.id !== decisionId || this.decision.group_id !== groupId) return 0;
+      this.decision.status = 'REJECTED';
+      return 1;
     }
-  }
-}
+
+    return 0;
+  }}
 
 function createEnv(db: ScheduleDecisionDb): Env {
   return { DB: db as any } as Env;
@@ -261,6 +301,32 @@ describe('Schedule community decision execution', () => {
 
     expect(db.statements.some((sql) => /reviewed_by|reviewed_at/.test(sql))).toBe(false);
     expect(db.statements.some((sql) => /UPDATE schedule_slots SET subject_id/.test(sql))).toBe(false);
+  });
+
+  it('allows only one concurrent proposal to create the next active schedule version', async () => {
+    const db = new ScheduleDecisionDb();
+    db.proposals.push({
+      id: 'proposal-2',
+      group_id: 'group-1',
+      proposed_by: 'student-2',
+      day_of_week: 2,
+      slot_order: 1,
+      old_subject_id: 'english',
+      new_subject_id: 'physics',
+      status: 'PENDING',
+    });
+
+    const [first, second] = await Promise.all([
+      applyScheduleProposalToActiveSchedule(db.proposals[0], 'student-1', createEnv(db)),
+      applyScheduleProposalToActiveSchedule(db.proposals[1], 'student-2', createEnv(db)),
+    ]);
+
+    const activeVersions = db.versions.filter((version) => version.is_active === 1);
+    expect(activeVersions).toHaveLength(1);
+    expect(db.versions).toHaveLength(2);
+    expect([first, second].filter((result) => result.success)).toHaveLength(1);
+    expect(db.proposals.filter((proposal) => proposal.status === 'ACCEPTED')).toHaveLength(1);
+    expect(db.proposals.some((proposal) => proposal.status === 'CONFLICTED')).toBe(true);
   });
 
   it('does not mark a conflicted proposal as applied or create another schedule version', async () => {
