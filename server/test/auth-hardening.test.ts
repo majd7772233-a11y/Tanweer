@@ -93,6 +93,11 @@ describe('Authentication hardening regressions', () => {
       used_at: null as number | null,
     };
     const sessions: Array<Record<string, unknown>> = [];
+    let recoveryTokenReadCount = 0;
+    let releaseRecoveryTokenReads!: () => void;
+    const bothRecoveryTokenReads = new Promise<void>((resolve) => {
+      releaseRecoveryTokenReads = resolve;
+    });
 
     const env = {
       SESSION_PEPPER: pepper,
@@ -107,6 +112,11 @@ describe('Authentication hardening regressions', () => {
                     return user.recovery_code_hash === params[0] ? { ...user } : null;
                   }
                   if (sql.includes('FROM user_recovery_tokens')) {
+                    // Force both requests to read the same valid token snapshot before either
+                    // can reach the conditional UPDATE, exercising the real race boundary.
+                    recoveryTokenReadCount += 1;
+                    if (recoveryTokenReadCount === 2) releaseRecoveryTokenReads();
+                    await bothRecoveryTokenReads;
                     return recoveryToken.token_hash === params[0] && recoveryToken.user_id === params[1]
                       ? { ...recoveryToken }
                       : null;
