@@ -1161,16 +1161,24 @@ export async function handleGetDashboardContentDetail(contentId: string, env: En
     ORDER BY page_order ASC
   `).bind(contentId).all<any>();
 
-  const mediaList = (mediaRows.results || []).map((m: any) => ({
-    id: m.id,
-    pageOrder: m.page_order,
-    objectKey: m.object_key,
-    url: m.url,
-    previewUrl: `/api/dashboard/media/${m.id}`,
-    mimeType: m.mime_type,
-    fileSize: m.file_size,
-    isPrimary: m.is_primary === 1,
-  }));
+  const mediaList = (mediaRows.results || []).map((m: any) => {
+    // Older content_media rows may have an empty object_key while url stores
+    // the actual media_blobs ID in its final path segment.
+    const linkedMediaId = String(m.object_key || '').trim()
+      || String(m.url || '').split('/').filter(Boolean).pop()
+      || m.id;
+
+    return {
+      id: m.id,
+      pageOrder: m.page_order,
+      objectKey: linkedMediaId,
+      url: m.url,
+      previewUrl: `/api/dashboard/media/${encodeURIComponent(linkedMediaId)}`,
+      mimeType: m.mime_type,
+      fileSize: m.file_size,
+      isPrimary: m.is_primary === 1,
+    };
+  });
 
   return jsonResponse({
     success: true,
