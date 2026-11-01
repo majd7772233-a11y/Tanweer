@@ -45,11 +45,26 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   if (!Array.isArray(mediaList)) {
     return errorResponse('INVALID_MEDIA', 'قائمة المرفقات غير صالحة');
   }
-  const mediaValidation = await validateMediaAttachmentAccess(
-    user,
-    mediaList.map(item => item?.url as string),
-    env.DB
-  );
+
+  const mediaReferences: string[] = [];
+  for (const item of mediaList) {
+    if (!item || typeof item.url !== 'string') {
+      return errorResponse('INVALID_MEDIA', 'يوجد مرفق لا يحتوي على رابط صالح');
+    }
+    mediaReferences.push(item.url);
+
+    if (item.objectKey !== undefined && item.objectKey !== null && String(item.objectKey).trim()) {
+      const objectKey = String(item.objectKey).trim();
+      if (!/^[A-Za-z0-9_-]+$/.test(objectKey)) {
+        return errorResponse('INVALID_MEDIA_OBJECT_KEY', 'مفتاح ملف الوسائط غير صالح');
+      }
+      // The media download route also authorizes content_media.object_key matches.
+      // Validate that reference through the exact same ownership path as a media URL.
+      mediaReferences.push(`/api/v1/media/${objectKey}`);
+    }
+  }
+
+  const mediaValidation = await validateMediaAttachmentAccess(user, mediaReferences, env.DB);
   if (mediaValidation) return mediaValidation;
 
   // Check duplicate checksum if media provided
