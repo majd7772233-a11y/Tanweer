@@ -247,14 +247,34 @@ export async function handleRemoveGroupMember(
   }
 
   if (isBan) {
-    await env.DB.prepare(
-      `UPDATE group_members SET status = 'BANNED' WHERE group_id = ? AND user_id = ?`
+    const target = await env.DB.prepare(
+      `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
+    ).bind(groupId, targetUserId).first<{ status: string }>();
+
+    if (!target) {
+      return errorResponse('MEMBER_NOT_FOUND', 'العضو غير موجود في هذه المجموعة', 404);
+    }
+    if (target.status === 'BANNED') {
+      return errorResponse('ALREADY_BANNED', 'هذا العضو محظور بالفعل من المجموعة', 409);
+    }
+
+    const banResult = await env.DB.prepare(
+      `UPDATE group_members SET status = 'BANNED'
+       WHERE group_id = ? AND user_id = ? AND status != 'BANNED'`
     ).bind(groupId, targetUserId).run();
+
+    if (banResult.meta?.changes !== 1) {
+      return errorResponse('MEMBER_STATE_CHANGED', 'تغيرت حالة العضو قبل إتمام الحظر. حدّث القائمة وحاول مجدداً.', 409);
+    }
     return jsonResponse({ success: true, message: 'تم حظر العضو من المجموعة بنجاح 🚫' });
   } else {
-    await env.DB.prepare(
+    const removeResult = await env.DB.prepare(
       `DELETE FROM group_members WHERE group_id = ? AND user_id = ?`
     ).bind(groupId, targetUserId).run();
+
+    if (removeResult.meta?.changes !== 1) {
+      return errorResponse('MEMBER_NOT_FOUND', 'العضو غير موجود في هذه المجموعة', 404);
+    }
     return jsonResponse({ success: true, message: 'تمت إزالة العضو من المجموعة بنجاح' });
   }
 }
