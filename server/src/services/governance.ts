@@ -367,12 +367,72 @@ export async function applyDecisionExecution(
 
   try {
     if (normType === 'DELETION' || normType === 'CONTENT_DELETION') {
-      await env.DB.prepare(`DELETE FROM content_media WHERE content_id IN (SELECT id FROM contents WHERE id = ? AND group_id = ?)`).bind(targetId, groupId).run();
-      await env.DB.prepare(`DELETE FROM content_corrections WHERE content_id = ? AND group_id = ?`).bind(targetId, groupId).run();
-      await env.DB.prepare(`DELETE FROM contents WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
-      await env.DB.prepare(`DELETE FROM homeworks WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
-      await env.DB.prepare(`DELETE FROM exams WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
-      await env.DB.prepare(`DELETE FROM issues WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
+      type DeletionTargetType = 'CONTENT' | 'HOMEWORK' | 'EXAM' | 'ISSUE';
+      const decisionMeta = await env.DB.prepare(
+        `SELECT description FROM community_decisions WHERE id = ? AND group_id = ?`
+      ).bind(decisionId, groupId).first<{ description: string | null }>();
+
+      let declaredTargetType: string | null = null;
+      if (decisionMeta?.description) {
+        try {
+          const parsed = JSON.parse(decisionMeta.description);
+          if (parsed && typeof parsed.targetType === 'string') {
+            declaredTargetType = parsed.targetType;
+          }
+        } catch {
+          // Older decisions stored plain-text descriptions and need safe type resolution below.
+        }
+      }
+
+      const targetQueries: Record<DeletionTargetType, string> = {
+        CONTENT: `SELECT id FROM contents WHERE id = ? AND group_id = ?`,
+        HOMEWORK: `SELECT id FROM homeworks WHERE id = ? AND group_id = ?`,
+        EXAM: `SELECT id FROM exams WHERE id = ? AND group_id = ?`,
+        ISSUE: `SELECT id FROM issues WHERE id = ? AND group_id = ?`,
+      };
+      const allTargetTypes: DeletionTargetType[] = ['CONTENT', 'HOMEWORK', 'EXAM', 'ISSUE'];
+
+      if (declaredTargetType && !allTargetTypes.includes(declaredTargetType as DeletionTargetType)) {
+        return { success: false, message: 'نوع المورد المسجل في قرار الحذف غير معروف؛ أوقفنا التنفيذ لحماية البيانات' };
+      }
+
+      const candidates = declaredTargetType
+        ? [declaredTargetType as DeletionTargetType]
+        : allTargetTypes;
+
+      const matches: DeletionTargetType[] = [];
+      for (const candidate of candidates) {
+        const target = await env.DB.prepare(targetQueries[candidate])
+          .bind(targetId, groupId)
+          .first<{ id: string }>();
+        if (target) matches.push(candidate);
+      }
+
+      if (matches.length === 0) {
+        return { success: false, message: 'المورد المستهدف للحذف لم يعد موجوداً في هذه المجموعة' };
+      }
+      if (matches.length > 1) {
+        return {
+          success: false,
+          message: 'معرّف المورد يطابق أكثر من نوع في المجموعة. أوقفنا الحذف لتجنب حذف بيانات أخرى.',
+        };
+      }
+
+      // Each parent table has ON DELETE CASCADE for its owned child records.
+      // Delete exactly one typed resource; never run the same ID against every table.
+      const deleteResult = await env.DB.prepare(
+        `DELETE FROM ${matches[0] === 'CONTENT' ? 'contents' :
+          matches[0] === 'HOMEWORK' ? 'homeworks' :
+          matches[0] === 'EXAM' ? 'exams' : 'issues'}
+         WHERE id = ? AND group_id = ?`
+      ).bind(targetId, groupId).run();
+
+      if (deleteResult.meta?.changes !== 1) {
+        return {
+          success: false,
+          message: 'تغيرت حالة المورد قبل الحذف. لم نكمل العملية، أعد تحميل القرار وحاول مجدداً.',
+        };
+      }
     } else if (normType === 'CORRECTION') {
       const corr = await env.DB.prepare(
         `SELECT * FROM content_corrections WHERE id = ? AND group_id = ?`
@@ -501,15 +561,31 @@ export async function handleCreateCommunityDecision(
     );
   }
 
-  // Strict Cross-group isolation: Verify targetId belongs to groupId
+  // Strict cross-group isolation and unambiguous resource typing for deletion decisions.
+  let deletionTargetType: 'CONTENT' | 'HOMEWORK' | 'EXAM' | 'ISSUE' | null = null;
   if (normType === 'DELETION' || normType === 'CONTENT_DELETION') {
-    const content = await env.DB.prepare(`SELECT id FROM contents WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first();
-    const hw = !content ? await env.DB.prepare(`SELECT id FROM homeworks WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first() : null;
-    const exam = (!content && !hw) ? await env.DB.prepare(`SELECT id FROM exams WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first() : null;
-    const issue = (!content && !hw && !exam) ? await env.DB.prepare(`SELECT id FROM issues WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first() : null;
-    if (!content && !hw && !exam && !issue) {
+    const candidates = await Promise.all([
+      env.DB.prepare(`SELECT id FROM contents WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first(),
+      env.DB.prepare(`SELECT id FROM homeworks WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first(),
+      env.DB.prepare(`SELECT id FROM exams WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first(),
+      env.DB.prepare(`SELECT id FROM issues WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first(),
+    ]);
+
+    const matches = (['CONTENT', 'HOMEWORK', 'EXAM', 'ISSUE'] as const)
+      .filter((_, index) => Boolean(candidates[index]));
+
+    if (matches.length === 0) {
       return errorResponse('TARGET_NOT_FOUND', 'المورد المستهدف للحذف غير موجود أو لا ينتمي إلى هذه المجموعة', 404);
     }
+    if (matches.length > 1) {
+      return errorResponse(
+        'AMBIGUOUS_DELETE_TARGET',
+        'معرّف المورد مستخدم لأكثر من نوع داخل المجموعة. حدّد المورد المقصود بمعرّف مستقل قبل إنشاء قرار الحذف.',
+        409
+      );
+    }
+
+    deletionTargetType = matches[0];
   } else if (normType === 'CORRECTION') {
     const corr = await env.DB.prepare(`SELECT id FROM content_corrections WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first();
     if (!corr) {
@@ -569,6 +645,7 @@ export async function handleCreateCommunityDecision(
   const metaPackage = JSON.stringify({
     text: body.description?.trim() || '',
     voters: eligibleVoterIds,
+    targetType: deletionTargetType,
   });
 
   await env.DB.prepare(
