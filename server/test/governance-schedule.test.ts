@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Env } from '../src/env';
 import { applyDecisionExecution } from '../src/services/governance';
+import { applyScheduleProposalToActiveSchedule } from '../src/services/schedule';
 
 type ProposalRow = {
   id: string;
