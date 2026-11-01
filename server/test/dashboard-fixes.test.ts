@@ -377,8 +377,8 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
         type: 'LESSON', views_count: 2, useful_count: 1, is_pinned: 0, created_at: 1,
       });
       db.tables.content_media.push({
-        id: 'media1', content_id: 'c1', page_order: 1, object_key: 'media1',
-        url: '/api/dashboard/media/media1', mime_type: 'image/jpeg', file_size: 100,
+        id: 'media1', content_id: 'c1', page_order: 1, object_key: '',
+        url: 'https://tanweer.magd.workers.dev/api/v1/media/blob1', mime_type: 'image/jpeg', file_size: 100,
         checksum: null, is_primary: 1, created_at: 1,
       });
 
@@ -388,6 +388,8 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       expect(data.success).toBe(true);
       expect(data.content.subject_name).toBe('الفيزياء');
       expect(data.media).toHaveLength(1);
+      expect(data.media[0].objectKey).toBe('blob1');
+      expect(data.media[0].previewUrl).toBe('/api/dashboard/media/blob1');
     });
 
     it('resolves decision creators through requested_by and requester_name', async () => {
