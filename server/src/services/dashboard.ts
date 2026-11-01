@@ -1169,7 +1169,6 @@ export async function handleGetDashboardContentDetail(contentId: string, env: En
       try {
         const mediaPath = new URL(String(m.url), 'https://tanweer.invalid').pathname;
         const match = mediaPath.match(/\/api\/v1\/media\/([^/]+)$/) || mediaPath.match(/\/api\/dashboard\/media\/([^/]+)$/);
-          || mediaPath.match(/\\/api\\/dashboard\\/media\\/([^/]+)$/);
         if (match?.[1]) linkedMediaId = decodeURIComponent(match[1]);
       } catch {
         // Keep the original URL below when it is not a recognized internal media route.
