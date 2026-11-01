@@ -4,6 +4,7 @@ import { Role } from '../src/lib/roles';
 import {
   handleApproveGroupJoinRequest,
   handleRejectGroupJoinRequest,
+  handleRemoveGroupMember,
   handleUpdateGroupMemberRole,
 } from '../src/services/groups';
 
@@ -57,6 +58,13 @@ class GroupsManagementDb {
           return (actor ? { role: actor.role } as T : null);
         }
 
+        if (normalized.includes('SELECT status FROM group_members WHERE group_id = ? AND user_id = ?')) {
+          const member = db.members.find((row) =>
+            row.group_id === params[0] && row.user_id === params[1]
+          );
+          return (member ? { status: member.status } as T : null);
+        }
+
         if (normalized.includes('FROM group_members gm JOIN users u')) {
           const member = db.members.find((row) =>
             row.group_id === params[0] && row.user_id === params[1]
@@ -92,6 +100,17 @@ class GroupsManagementDb {
           return { success: true, meta: { changes: 1 } };
         }
 
+        if (normalized.startsWith("UPDATE group_members SET status = 'BANNED'")) {
+          const member = db.members.find((row) =>
+            row.group_id === params[0] &&
+            row.user_id === params[1] &&
+            row.status !== 'BANNED'
+          );
+          if (!member) return { success: true, meta: { changes: 0 } };
+          member.status = 'BANNED';
+          return { success: true, meta: { changes: 1 } };
+        }
+
         if (normalized.startsWith("UPDATE group_members SET status = 'ACTIVE'")) {
           const member = db.members.find((row) =>
             row.group_id === params[0] &&
@@ -107,7 +126,7 @@ class GroupsManagementDb {
           const index = db.members.findIndex((row) =>
             row.group_id === params[0] &&
             row.user_id === params[1] &&
-            row.status === 'PENDING'
+            (!normalized.includes("AND status = 'PENDING'") || row.status === 'PENDING')
           );
           if (index < 0) return { success: true, meta: { changes: 0 } };
           db.members.splice(index, 1);
@@ -198,6 +217,53 @@ describe('Group member management state and scope', () => {
     expect(response.status).toBe(200);
     expect((await response.json() as any).success).toBe(true);
     expect(db.members.find((row) => row.user_id === 'student-1')?.role).toBe('MODERATOR');
+  });
+
+  it('returns MEMBER_NOT_FOUND instead of success when banning a non-member', async () => {
+    const db = new GroupsManagementDb();
+    const response = await handleRemoveGroupMember(
+      'group-1', 'missing-user', true, moderator, createEnv(db),
+    );
+
+    expect(response.status).toBe(404);
+    expect((await response.json() as any).error.code).toBe('MEMBER_NOT_FOUND');
+    expect(db.members.some((row) => row.user_id === 'missing-user')).toBe(false);
+  });
+
+  it('bans an existing member once and rejects duplicate ban attempts', async () => {
+    const db = new GroupsManagementDb();
+    const first = await handleRemoveGroupMember(
+      'group-1', 'student-1', true, moderator, createEnv(db),
+    );
+    const second = await handleRemoveGroupMember(
+      'group-1', 'student-1', true, moderator, createEnv(db),
+    );
+
+    expect(first.status).toBe(200);
+    expect(db.members.find((row) => row.user_id === 'student-1')?.status).toBe('BANNED');
+    expect(second.status).toBe(409);
+    expect((await second.json() as any).error.code).toBe('ALREADY_BANNED');
+  });
+
+  it('returns MEMBER_NOT_FOUND instead of success when removing a non-member', async () => {
+    const db = new GroupsManagementDb();
+    const response = await handleRemoveGroupMember(
+      'group-1', 'missing-user', false, moderator, createEnv(db),
+    );
+
+    expect(response.status).toBe(404);
+    expect((await response.json() as any).error.code).toBe('MEMBER_NOT_FOUND');
+  });
+
+  it('removes an existing member from this group only', async () => {
+    const db = new GroupsManagementDb();
+    const response = await handleRemoveGroupMember(
+      'group-1', 'student-1', false, moderator, createEnv(db),
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.members.some((row) => row.user_id === 'student-1')).toBe(false);
+    expect(db.members.some((row) => row.user_id === 'moderator-1')).toBe(true);
   });
 
   it('does not report success or post a system message when an approval is stale', async () => {
