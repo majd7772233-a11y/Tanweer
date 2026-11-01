@@ -37,9 +37,9 @@ class RolesMockDb {
       async all<T = any>(): Promise<{ results: T[] }> {
         return { results: db.execute(sql, boundParams) as T[] };
       },
-      async run(): Promise<{ success: boolean }> {
-        db.execute(sql, boundParams);
-        return { success: true };
+      async run(): Promise<{ success: boolean; meta: { changes: number } }> {
+        const changes = db.execute(sql, boundParams);
+        return { success: true, meta: { changes: changes.length || 1 } };
       },
     };
   }
@@ -91,12 +91,14 @@ class RolesMockDb {
           if (user && trimmed.includes('role = ?')) user.role = params[0];
         }
         if (table === 'role_verification_codes' && trimmed.includes('WHERE id = ?')) {
-          const codeId = params[params.length - 1];
-          const c = rows.find((r) => r.id === codeId);
+          const codeId = params[trimmed.includes('attempts = attempts + 1') ? 0 : 1];
+          const c = rows.find((r) => r.id === codeId) || rows.find((r) => r.id === params[params.length - 1]);
           if (c) {
             if (trimmed.includes('used_at = ?')) c.used_at = params[0];
-            if (trimmed.includes('attempts = ?')) c.attempts = params[0];
+            if (trimmed.includes('attempts = attempts + 1')) c.attempts += 1;
+            else if (trimmed.includes('attempts = ?')) c.attempts = params[0];
           }
+          return c ? [c] : [];
         }
         if (table === 'role_requests' && trimmed.includes('WHERE id = ?')) {
           const reqId = params[params.length - 1];
@@ -215,6 +217,73 @@ describe('Roles, Upgrades & Verification Token Security', () => {
     expect(savedReq).toBeDefined();
     expect(savedReq.status).toBe('PENDING');
     expect(savedReq.requested_role).toBe('TEACHER');
+  });
+
+  it('SECURITY: a group-scoped role request requires active membership in that group', async () => {
+    const user: UserContext = {
+      userId: 'usr_student_scope',
+      phoneNumber: '777112233',
+      fullName: 'محمد علي سالم',
+      gradeId: 10,
+      sectionId: 'A',
+      role: Role.STUDENT,
+    };
+
+    const response = await handleCreateRoleRequest(user, new Request('http://localhost/api/v1/role-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestedRole: 'MODERATOR',
+        reason: 'أرغب في الإشراف على مجموعتي',
+        groupId: 'group-not-joined',
+      }),
+    }), env);
+
+    expect(response.status).toBe(403);
+    expect(mockDb.tables.role_requests).toHaveLength(0);
+  });
+
+  it('SECURITY: a code linked to a rejected role request cannot be redeemed', async () => {
+    const userId = 'usr_rejected_request';
+    const cleanCode = '91827364';
+    const codeHash = await hashString(cleanCode, env.PASSWORD_PEPPER);
+    mockDb.tables.role_requests.push({
+      id: 'req_rejected',
+      user_id: userId,
+      requested_role: 'TEACHER',
+      group_id: null,
+      status: 'REJECTED',
+    });
+    mockDb.tables.role_verification_codes.push({
+      id: 'code_rejected',
+      request_id: 'req_rejected',
+      user_id: userId,
+      role: 'TEACHER',
+      code_hash: codeHash,
+      attempts: 0,
+      max_attempts: 5,
+      expires_at: Date.now() + 60_000,
+      used_at: null,
+    });
+
+    const user: UserContext = {
+      userId,
+      phoneNumber: '777000007',
+      fullName: 'طالب مرفوض',
+      gradeId: 10,
+      sectionId: 'A',
+      role: Role.STUDENT,
+    };
+    const response = await handleRedeemRoleCode(user, new Request('http://localhost/api/v1/role-requests/redeem', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: '9182-7364' }),
+    }), env);
+
+    expect(response.status).toBe(404);
+    expect((await response.json() as any).error.code).toBe('NO_ACTIVE_CODE');
+    expect(mockDb.tables.role_verification_codes[0].used_at).toBeNull();
+    expect(mockDb.tables.users.find((row) => row.id === userId)).toBeUndefined();
   });
 
   it('SECURITY: Expired verification code (>24h) is rejected', async () => {
