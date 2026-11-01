@@ -55,10 +55,11 @@ describe('Audit Fixes 20-28 (Server verification)', () => {
               if (sql.includes('UPDATE users SET password_hash = ?')) {
                 updatedPasswordHash = params[0];
               }
-              if (sql.includes('UPDATE user_recovery_tokens SET uses_count = uses_count + 1')) {
+              if (sql.includes('UPDATE user_recovery_tokens') && sql.includes('uses_count = uses_count + 1')) {
                 tokenBurned = true;
+                return { success: true, meta: { changes: 1 } };
               }
-              return { success: true };
+              return { success: true, meta: { changes: 1 } };
             },
           }),
           run: async () => ({ success: true }),
