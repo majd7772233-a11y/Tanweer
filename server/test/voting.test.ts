@@ -30,9 +30,9 @@ class VotingMockDb {
       async all<T = any>(): Promise<{ results: T[] }> {
         return { results: db.execute(sql, boundParams) as T[] };
       },
-      async run(): Promise<{ success: boolean }> {
-        db.execute(sql, boundParams);
-        return { success: true };
+      async run(): Promise<{ success: boolean; meta: { changes: number } }> {
+        const changes = db.execute(sql, boundParams);
+        return { success: true, meta: { changes: changes.length } };
       },
     };
   }
@@ -51,13 +51,24 @@ class VotingMockDb {
     }
 
     if (/^DELETE/i.test(trimmed)) {
-      const match = trimmed.match(/DELETE FROM (\w+)/i);
+      const match = trimmed.match(/DELETE FROM (\\w+)/i);
       if (match) {
         const table = match[1];
+        const rows = this.tables[table] || [];
         if (trimmed.includes('content_id = ?')) {
-          this.tables[table] = (this.tables[table] || []).filter((r) => r.content_id !== params[0]);
-        } else if (trimmed.includes('WHERE id = ?')) {
-          this.tables[table] = (this.tables[table] || []).filter((r) => r.id !== params[0]);
+          const before = rows.length;
+          this.tables[table] = rows.filter((r) => r.content_id !== params[0]);
+          return Array.from({ length: before - this.tables[table].length }, () => ({}));
+        }
+        if (trimmed.includes('WHERE id = ? AND group_id = ?')) {
+          const before = rows.length;
+          this.tables[table] = rows.filter((r) => !(r.id === params[0] && r.group_id === params[1]));
+          return Array.from({ length: before - this.tables[table].length }, () => ({}));
+        }
+        if (trimmed.includes('WHERE id = ?')) {
+          const before = rows.length;
+          this.tables[table] = rows.filter((r) => r.id !== params[0]);
+          return Array.from({ length: before - this.tables[table].length }, () => ({}));
         }
         return [];
       }
@@ -91,6 +102,10 @@ class VotingMockDb {
         const vFor = this.tables.community_votes.filter((v) => v.decision_id === decisionId && v.vote_choice === 1).length;
         const vAgainst = this.tables.community_votes.filter((v) => v.decision_id === decisionId && v.vote_choice === 0).length;
         return [{ v_for: vFor, v_against: vAgainst }];
+      }
+
+      if (trimmed.includes('WHERE id = ? AND group_id = ?')) {
+        return rows.filter((row) => row.id === params[0] && row.group_id === params[1]);
       }
 
       if (table === 'community_decisions' && trimmed.includes('WHERE id = ?')) {
