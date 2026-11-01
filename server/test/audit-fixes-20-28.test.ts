@@ -141,15 +141,27 @@ describe('Audit Fixes 20-28 (Server verification)', () => {
     const mockEnv = {
       DB: {
         prepare: (sql: string) => ({
-          bind: () => ({
+          bind: (...params: any[]) => ({
             first: async () => {
-              if (sql.includes('FROM schedule_versions')) return { id: 'ver_1', version_number: 1 };
+              if (sql.includes('FROM schedule_versions') && sql.includes('is_active = 1')) {
+                return { id: 'ver_1', version_number: 1 };
+              }
+              if (sql.includes('SELECT id, start_time, end_time FROM schedule_slots')) return null;
               return null;
             },
-            run: async () => ({ success: true }),
+            run: async () => ({ success: true, meta: { changes: 1 } }),
+            sql,
+            params,
           }),
-          run: async () => ({ success: true }),
+          run: async () => ({ success: true, meta: { changes: 1 } }),
         }),
+        batch: async (statements: any[]) => {
+          const results = [];
+          for (const statement of statements) {
+            results.push(await statement.run());
+          }
+          return results;
+        },
       },
     } as unknown as Env;
 
