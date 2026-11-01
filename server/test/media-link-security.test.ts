@@ -190,6 +190,35 @@ describe('Private media attachment authorization', () => {
     expect(db.writes.some(sql => sql.includes('INSERT INTO content_media'))).toBe(false);
   });
 
+  it('checks objectKey references instead of allowing them to bypass URL validation', async () => {
+    const db = new MediaAccessDb();
+    db.blobs.push({ id: 'med_private_object_key', uploaded_by: 'student-a' });
+    db.contentLinks.push({
+      group_id: 'group-a',
+      object_key: 'med_private_object_key',
+    });
+    db.memberships.add('group-b:' + user.userId);
+
+    const response = await handleCreateContent(user, new Request('https://tanweer.test/api/v1/contents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        groupId: 'group-b',
+        studyDate: '2026-11-02',
+        subjectId: 'math',
+        title: 'درس بمفتاح مرفق غير مصرح',
+        media: [{
+          url: 'https://images.example.test/public/photo.jpg',
+          objectKey: 'med_private_object_key',
+        }],
+      }),
+    }), { DB: db as any } as Env);
+
+    expect(response.status).toBe(403);
+    expect((await response.json() as any).error.code).toBe('FORBIDDEN_MEDIA_SOURCE');
+    expect(db.writes.some(sql => sql.includes('INSERT INTO contents'))).toBe(false);
+  });
+
   it('blocks homework from linking another group private image', async () => {
     const db = new MediaAccessDb();
     db.blobs.push({ id: 'med_private_homework', uploaded_by: 'student-a' });
