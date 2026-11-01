@@ -5,6 +5,146 @@ import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
 import { Role, normalizeRole } from '../lib/roles';
 import { applyScheduleProposalToActiveSchedule } from './schedule';
+import { isValidIsoDate } from '../lib/validation';
+
+type CorrectionField = 'TITLE' | 'DESCRIPTION' | 'STUDY_DATE' | 'PAGE_NUMBERS';
+
+function normalizeCorrectionField(value: string): CorrectionField | null {
+  const normalized = value.trim().toUpperCase();
+  if (normalized === 'TITLE' || normalized === 'العنوان') return 'TITLE';
+  if (normalized === 'DESCRIPTION' || normalized === 'الوصف' || normalized === 'الشرح') return 'DESCRIPTION';
+  if (
+    normalized === 'STUDY_DATE' || normalized === 'STUDYDATE' ||
+    normalized === 'DATE' || normalized === 'التاريخ'
+  ) return 'STUDY_DATE';
+  if (
+    normalized === 'PAGE_NUMBERS' || normalized === 'ORDER' ||
+    normalized === 'الصفحات'
+  ) return 'PAGE_NUMBERS';
+  return null;
+}
+
+interface CorrectionApplication {
+  id: string;
+  content_id: string;
+  group_id: string;
+  field_name: string;
+  proposed_value: string;
+  status?: string;
+}
+
+/**
+ * Applies only correction fields with an implemented, group-scoped update.
+ * Both the content mutation and correction state transition run in one D1 batch.
+ */
+async function applyContentCorrection(
+  db: D1Database,
+  correction: CorrectionApplication,
+  reviewerId: string,
+  now: number
+): Promise<{ success: boolean; code?: string; message: string }> {
+  const field = normalizeCorrectionField(correction.field_name || '');
+  const value = correction.proposed_value?.trim();
+
+  if (!field) {
+    return {
+      success: false,
+      code: 'UNSUPPORTED_CORRECTION_FIELD',
+      message: 'حقل التصحيح غير مدعوم ولا يمكن اعتماده تلقائياً',
+    };
+  }
+
+  if (!value) {
+    return {
+      success: false,
+      code: 'INVALID_CORRECTION_VALUE',
+      message: 'القيمة المقترحة للتصحيح فارغة',
+    };
+  }
+
+  if (field === 'STUDY_DATE' && !isValidIsoDate(value)) {
+    return {
+      success: false,
+      code: 'INVALID_CORRECTION_VALUE',
+      message: 'تاريخ التصحيح غير صالح. استخدم تاريخاً تقويمياً بصيغة YYYY-MM-DD',
+    };
+  }
+
+  let updateSql: string;
+  let updateParams: unknown[];
+
+  if (field === 'TITLE') {
+    updateSql = `UPDATE contents
+      SET title = ?, updated_at = ?
+      WHERE id = ? AND group_id = ?
+        AND EXISTS (
+          SELECT 1 FROM content_corrections
+          WHERE id = ? AND group_id = ? AND status = 'PENDING'
+        )`;
+    updateParams = [value, now, correction.content_id, correction.group_id, correction.id, correction.group_id];
+  } else if (field === 'DESCRIPTION') {
+    updateSql = `UPDATE contents
+      SET description = ?, updated_at = ?
+      WHERE id = ? AND group_id = ?
+        AND EXISTS (
+          SELECT 1 FROM content_corrections
+          WHERE id = ? AND group_id = ? AND status = 'PENDING'
+        )`;
+    updateParams = [value, now, correction.content_id, correction.group_id, correction.id, correction.group_id];
+  } else if (field === 'STUDY_DATE') {
+    updateSql = `UPDATE contents
+      SET study_date = ?, updated_at = ?
+      WHERE id = ? AND group_id = ?
+        AND EXISTS (
+          SELECT 1 FROM content_corrections
+          WHERE id = ? AND group_id = ? AND status = 'PENDING'
+        )`;
+    updateParams = [value, now, correction.content_id, correction.group_id, correction.id, correction.group_id];
+  } else {
+    updateSql = `UPDATE contents
+      SET description = COALESCE(description, '') || ?, updated_at = ?
+      WHERE id = ? AND group_id = ?
+        AND EXISTS (
+          SELECT 1 FROM content_corrections
+          WHERE id = ? AND group_id = ? AND status = 'PENDING'
+        )`;
+    updateParams = [
+      `\\n[أرقام الصفحات المصوبة: ${value}]`,
+      now,
+      correction.content_id,
+      correction.group_id,
+      correction.id,
+      correction.group_id,
+    ];
+  }
+
+  const results = await db.batch([
+    db.prepare(updateSql).bind(...updateParams),
+    db.prepare(
+      `UPDATE content_corrections
+       SET status = 'APPROVED', reviewed_by = ?, reviewed_at = ?
+       WHERE id = ? AND group_id = ? AND status = 'PENDING'
+         AND EXISTS (SELECT 1 FROM contents WHERE id = ? AND group_id = ?)`
+    ).bind(
+      reviewerId,
+      now,
+      correction.id,
+      correction.group_id,
+      correction.content_id,
+      correction.group_id
+    ),
+  ]);
+
+  if (results[1]?.meta?.changes !== 1) {
+    return {
+      success: false,
+      code: 'CORRECTION_NOT_APPLIED',
+      message: 'تعذر تطبيق التصحيح؛ ربما حُسم الطلب مسبقاً أو لم يعد المحتوى موجوداً في المجموعة',
+    };
+  }
+
+  return { success: true, message: 'تم تطبيق التصحيح واعتماده بنجاح' };
+}
 
 /**
  * -------------------------------------------------------------
@@ -41,8 +181,27 @@ export async function handleCreateContentCorrection(
     reason?: string;
   };
 
-  if (!body.fieldName || !body.proposedValue || !body.reason) {
+  if (
+    typeof body.fieldName !== 'string' ||
+    typeof body.proposedValue !== 'string' ||
+    !body.proposedValue.trim() ||
+    typeof body.reason !== 'string' ||
+    !body.reason.trim()
+  ) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد الحقل، القيمة المصوبة وسبب التعديل');
+  }
+
+  const correctionField = normalizeCorrectionField(body.fieldName);
+  if (!correctionField) {
+    return errorResponse(
+      'INVALID_CORRECTION_FIELD',
+      'الحقول القابلة للتصحيح حالياً هي العنوان والوصف وتاريخ الدرس وأرقام الصفحات فقط'
+    );
+  }
+
+  const proposedValue = body.proposedValue.trim();
+  if (correctionField === 'STUDY_DATE' && !isValidIsoDate(proposedValue)) {
+    return errorResponse('INVALID_CORRECTION_VALUE', 'تاريخ التصحيح غير صالح. استخدم الصيغة YYYY-MM-DD');
   }
 
   const corrId = generateId('cor');
@@ -57,9 +216,9 @@ export async function handleCreateContentCorrection(
     content.group_id,
     user.userId,
     user.fullName,
-    body.fieldName,
+    correctionField,
     body.originalValue || null,
-    body.proposedValue.trim(),
+    proposedValue,
     body.reason.trim(),
     'PENDING',
     now
@@ -101,14 +260,7 @@ export async function handleApproveCorrection(
 ): Promise<Response> {
   const corr = await env.DB.prepare(
     `SELECT * FROM content_corrections WHERE id = ?`
-  ).bind(correctionId).first<{
-    id: string;
-    content_id: string;
-    group_id: string;
-    field_name: string;
-    proposed_value: string;
-    status: string;
-  }>();
+  ).bind(correctionId).first<CorrectionApplication>();
 
   if (!corr) {
     return errorResponse('CORRECTION_NOT_FOUND', 'طلب التصحيح غير موجود', 404);
@@ -125,23 +277,11 @@ export async function handleApproveCorrection(
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية مراجعة وتطبيق التصحيحات', 403);
   }
 
-  const now = Date.now();
-  const normField = (corr.field_name || '').toUpperCase().trim();
-
-  // Apply to content table safely within group
-  if (normField === 'TITLE' || normField === 'العنوان') {
-    await env.DB.prepare(`UPDATE contents SET title = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-  } else if (normField === 'DESCRIPTION' || normField === 'الوصف' || normField === 'الشرح') {
-    await env.DB.prepare(`UPDATE contents SET description = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-  } else if (normField === 'STUDY_DATE' || normField === 'STUDYDATE' || normField === 'DATE' || normField === 'التاريخ') {
-    await env.DB.prepare(`UPDATE contents SET study_date = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-  } else if (normField === 'PAGE_NUMBERS' || normField === 'ORDER' || normField === 'الصفحات') {
-    await env.DB.prepare(`UPDATE contents SET description = description || ' \n[أرقام الصفحات المصوبة: ' || ? || ']', updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
+  const result = await applyContentCorrection(env.DB, corr, user.userId, Date.now());
+  if (!result.success) {
+    const status = result.code === 'UNSUPPORTED_CORRECTION_FIELD' || result.code === 'INVALID_CORRECTION_VALUE' ? 400 : 409;
+    return errorResponse(result.code || 'CORRECTION_NOT_APPLIED', result.message, status);
   }
-
-  await env.DB.prepare(
-    `UPDATE content_corrections SET status = 'APPROVED', reviewed_by = ?, reviewed_at = ? WHERE id = ? AND group_id = ?`
-  ).bind(user.userId, now, correctionId, corr.group_id).run();
 
   return jsonResponse({
     success: true,
