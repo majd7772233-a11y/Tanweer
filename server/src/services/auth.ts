@@ -49,6 +49,8 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     return errorResponse('INVALID_SECTION', 'الشعبة غير متوافقة مع الصف المحدد');
   }
 
+  const classGroupId = `class_${body.gradeId}_${body.sectionId.toUpperCase()}`;
+
   const existingUser = await env.DB.prepare(
     `SELECT id, password_hash, grade_id, section_id, status FROM users WHERE phone_number = ?`
   ).bind(normalizedPhone).first<{ id: string; password_hash: string; grade_id: number; section_id: string; status?: string }>();
@@ -59,6 +61,14 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   if (existingUser) {
     if (existingUser.status === 'DISABLED') {
       return errorResponse('ACCOUNT_DISABLED', 'هذا الحساب موقوف من قِبل إدارة المنظومة، يرجى التواصل مع الإدارة', 403);
+    }
+
+    const targetMembership = await env.DB.prepare(
+      `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
+    ).bind(classGroupId, existingUser.id).first<{ status: string }>();
+
+    if (targetMembership?.status === 'BANNED') {
+      return errorResponse('GROUP_BANNED', 'تم حظرك من هذه المجموعة، ولا يمكن استعادة عضويتك عبر إعادة التسجيل', 403);
     }
 
     // Check if user has an active membership and a valid session
@@ -92,7 +102,6 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   const recoveryCode = generateRecoveryCode();
   const recoveryCodeHash = await hashString(recoveryCode.replace(/[\s\-]/g, '').toUpperCase(), pepper);
 
-  const classGroupId = `class_${body.gradeId}_${body.sectionId.toUpperCase()}`;
   const gradeNameMap: Record<number, string> = {
     7: 'الصف السابع',
     8: 'الصف الثامن',
@@ -170,8 +179,13 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
 
   batchStatements.push(
     env.DB.prepare(
-      `INSERT OR REPLACE INTO group_members (group_id, user_id, role, status, joined_at)
-       VALUES (?, ?, ?, 'ACTIVE', ?)`
+      `INSERT INTO group_members (group_id, user_id, role, status, joined_at)
+       VALUES (?, ?, ?, 'ACTIVE', ?)
+       ON CONFLICT(group_id, user_id) DO UPDATE SET
+         role = excluded.role,
+         status = 'ACTIVE',
+         joined_at = excluded.joined_at
+       WHERE group_members.status != 'BANNED'`
     ).bind(classGroupId, userId, Role.STUDENT, now)
   );
 
