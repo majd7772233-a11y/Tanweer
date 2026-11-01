@@ -37,7 +37,7 @@ class GroupsManagementDb {
   prepare(sql: string) {
     const db = this;
     let params: unknown[] = [];
-    const normalized = sql.trim().replace(/\\s+/g, ' ');
+    const normalized = sql.trim().replace(/\s+/g, ' ');
 
     const statement = {
       bind(...values: unknown[]) {
