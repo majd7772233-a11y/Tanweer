@@ -301,6 +301,14 @@ describe('Roles, Upgrades & Verification Token Security', () => {
     // Expired 25 hours ago
     const expiredTimestamp = Date.now() - (25 * 60 * 60 * 1000);
 
+    mockDb.tables.role_requests.push({
+      id: 'req_expired',
+      user_id: studentId,
+      requested_role: 'TEACHER',
+      group_id: null,
+      status: 'APPROVED',
+    });
+
     mockDb.tables.role_verification_codes.push({
       id: 'code_expired_1',
       request_id: 'req_expired',
