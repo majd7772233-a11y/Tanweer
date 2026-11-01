@@ -362,6 +362,9 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
 
   const cleanCode = body.recoveryCode.replace(/[\s\-]/g, '').toUpperCase();
   const recoveryHash = await hashString(cleanCode, pepper);
+  // Preserve the exact hash format that matched the user row; issuance metadata can
+  // remain keyed by the legacy hash until the credential is consumed.
+  let matchedRecoveryHash = recoveryHash;
 
   let user = await env.DB.prepare(
     `SELECT id, phone_number, full_name, grade_id, section_id, role, status
@@ -393,8 +396,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
     }>();
 
     if (user) {
-      // Seamlessly migrate recovery code hash to current configured pepper
-      await env.DB.prepare(`UPDATE users SET recovery_code_hash = ? WHERE id = ?`).bind(recoveryHash, user.id).run();
+      matchedRecoveryHash = legacyRecoveryHash;
     }
   }
 
@@ -424,7 +426,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
       FROM user_recovery_tokens
       WHERE token_hash = ? AND user_id = ?
       ORDER BY created_at DESC LIMIT 1
-    `).bind(recoveryHash, user.id).first<{
+    `).bind(matchedRecoveryHash, user.id).first<{
       id: string;
       max_uses: number;
       uses_count: number;
@@ -470,7 +472,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
       burnedHash,
       now,
       user.id,
-      recoveryHash,
+      matchedRecoveryHash,
       recoveryToken?.id ?? null,
       recoveryToken?.id ?? null,
       user.id,
