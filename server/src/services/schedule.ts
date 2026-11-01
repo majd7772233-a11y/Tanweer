@@ -531,9 +531,22 @@ export async function handleDeleteScheduleSlot(
     return errorResponse('SCHEDULE_NOT_FOUND', 'لا يوجد جدول فعال لهذه المجموعة');
   }
 
-  await env.DB.prepare(
-    `DELETE FROM schedule_slots WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
-  ).bind(activeVersion.id, dayOfWeek, slotOrder).run();
+  const deletion = await env.DB.prepare(
+    `DELETE FROM schedule_slots
+     WHERE version_id = ? AND day_of_week = ? AND slot_order = ?
+       AND EXISTS (
+         SELECT 1 FROM schedule_versions
+         WHERE id = ? AND group_id = ? AND is_active = 1
+       )`
+  ).bind(activeVersion.id, dayOfWeek, slotOrder, activeVersion.id, groupId).run();
+
+  if (deletion.meta?.changes !== 1) {
+    return errorResponse(
+      'SCHEDULE_SLOT_CHANGED',
+      'تغيرت النسخة النشطة أو لم تعد الحصة موجودة. حدّث الجدول وحاول مجدداً.',
+      409
+    );
+  }
 
   return jsonResponse({
     success: true,
