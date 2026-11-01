@@ -35,7 +35,6 @@
   },
   "env": {
     "staging": {
-      "name": "tanweer-staging",
       "d1_databases": [
         {
           "binding": "DB",
