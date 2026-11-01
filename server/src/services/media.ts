@@ -78,10 +78,10 @@ function extractInternalMediaId(value: string): string | null {
 async function getMediaLinkedGroupIds(mediaId: string, db: D1Database): Promise<Set<string>> {
   const [contentLinks, homeworkLinks, legacyHomeworkLinks] = await Promise.all([
     db.prepare(
-      \`SELECT c.group_id, cm.id, cm.url, cm.object_key
+      `SELECT c.group_id, cm.id, cm.url, cm.object_key
        FROM content_media cm
        JOIN contents c ON cm.content_id = c.id
-       WHERE cm.url LIKE ? OR cm.id = ? OR cm.object_key = ?\`
+       WHERE cm.url LIKE ? OR cm.id = ? OR cm.object_key = ?`
     ).bind('%' + mediaId + '%', mediaId, mediaId).all<{
       group_id: string;
       id: string;
@@ -89,19 +89,19 @@ async function getMediaLinkedGroupIds(mediaId: string, db: D1Database): Promise<
       object_key: string | null;
     }>(),
     db.prepare(
-      \`SELECT h.group_id, hm.media_id, hm.url
+      `SELECT h.group_id, hm.media_id, hm.url
        FROM homework_media hm
        JOIN homeworks h ON hm.homework_id = h.id
-       WHERE hm.media_id = ? OR hm.url LIKE ?\`
+       WHERE hm.media_id = ? OR hm.url LIKE ?`
     ).bind(mediaId, '%' + mediaId + '%').all<{
       group_id: string;
       media_id: string;
       url: string | null;
     }>(),
     db.prepare(
-      \`SELECT group_id, media_urls
+      `SELECT group_id, media_urls
        FROM homeworks
-       WHERE media_urls LIKE ?\`
+       WHERE media_urls LIKE ?`
     ).bind('%' + mediaId + '%').all<{
       group_id: string;
       media_urls: string | null;
