@@ -442,9 +442,9 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       const response = renderDashboardHtml();
       expect(response.status).toBe(200);
       const html = await response.text();
-      const script = html.match(/<script>([\\s\\S]*?)<\\/script>/)?.[1] || '';
-      const ids = new Set(Array.from(html.matchAll(/\\bid=[\"']([^\"']+)[\"']/g)).map(match => match[1]));
-      const references = Array.from(script.matchAll(/getElementById\\([\"']([^\"']+)[\"']\\)/g)).map(match => match[1]);
+      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+      const ids = new Set(Array.from(html.matchAll(/\bid=["']([^"']+)["']/g)).map(match => match[1]));
+      const references = Array.from(script.matchAll(/getElementById\(["']([^"']+)["']\)/g)).map(match => match[1]);
       const criticalReferences = references.filter(id => /^(hd|hwModal|purge|acad)/.test(id));
       const missing = criticalReferences.filter(id => !ids.has(id));
 
