@@ -246,7 +246,7 @@ export async function handleOwnerLogout(request?: Request, env?: Env): Promise<R
       try {
         const tokenHash = await hashString(token, pepper);
         const revoke = await env.DB.prepare(
-          `UPDATE owner_sessions SET revoked = 1 WHERE token_hash = ? AND revoked = 0`
+          `UPDATE owner_sessions SET revoked = 1 WHERE token_hash = ?`
         ).bind(tokenHash).run();
 
         // A missing or already-revoked token is also a completed logout.
