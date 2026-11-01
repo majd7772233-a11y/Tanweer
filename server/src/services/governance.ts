@@ -314,9 +314,15 @@ export async function handleRejectCorrection(
   }
 
   const now = Date.now();
-  await env.DB.prepare(
-    `UPDATE content_corrections SET status = 'REJECTED', reviewed_by = ?, reviewed_at = ? WHERE id = ? AND group_id = ?`
+  const rejection = await env.DB.prepare(
+    `UPDATE content_corrections
+     SET status = 'REJECTED', reviewed_by = ?, reviewed_at = ?
+     WHERE id = ? AND group_id = ? AND status = 'PENDING'`
   ).bind(user.userId, now, correctionId, corr.group_id).run();
+
+  if (rejection.meta?.changes !== 1) {
+    return errorResponse('CORRECTION_RESOLVED', 'تم حسم طلب التصحيح مسبقاً');
+  }
 
   return jsonResponse({
     success: true,
@@ -370,24 +376,27 @@ export async function applyDecisionExecution(
     } else if (normType === 'CORRECTION') {
       const corr = await env.DB.prepare(
         `SELECT * FROM content_corrections WHERE id = ? AND group_id = ?`
-      ).bind(targetId, groupId).first<{
-        content_id: string;
-        group_id: string;
-        field_name: string;
-        proposed_value: string;
-      }>();
-      if (corr) {
-        const normField = (corr.field_name || '').toUpperCase().trim();
-        if (normField === 'TITLE' || normField === 'العنوان') {
-          await env.DB.prepare(`UPDATE contents SET title = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-        } else if (normField === 'DESCRIPTION' || normField === 'الوصف' || normField === 'الشرح') {
-          await env.DB.prepare(`UPDATE contents SET description = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-        } else if (normField === 'STUDY_DATE' || normField === 'STUDYDATE' || normField === 'DATE' || normField === 'التاريخ') {
-          await env.DB.prepare(`UPDATE contents SET study_date = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-        }
-        await env.DB.prepare(
-          `UPDATE content_corrections SET status = 'APPROVED', reviewed_by = 'COMMUNITY_CONSENSUS', reviewed_at = ? WHERE id = ? AND group_id = ?`
-        ).bind(now, targetId, groupId).run();
+      ).bind(targetId, groupId).first<CorrectionApplication>();
+
+      if (!corr) {
+        return { success: false, message: 'طلب التصحيح المرتبط بالقرار لم يعد موجوداً في هذه المجموعة' };
+      }
+      if (corr.status !== 'PENDING') {
+        return { success: false, message: 'طلب التصحيح لم يعد في حالة تسمح بتطبيقه' };
+      }
+
+      const correctionResult = await applyContentCorrection(
+        env.DB,
+        corr,
+        actorId || 'COMMUNITY_CONSENSUS',
+        now
+      );
+
+      if (!correctionResult.success) {
+        return {
+          success: false,
+          message: correctionResult.message,
+        };
       }
     } else if (normType === 'SCHEDULE' || normType === 'SCHEDULE_CHANGE') {
       const prop = await env.DB.prepare(
