@@ -1,0 +1,102 @@
+name: Capture Server Dependency Audit
+
+on:
+  push:
+    branches:
+      - work/release-readiness
+    paths:
+      - 'server/package.json'
+      - '.github/workflows/capture-server-dependency-audit.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: server-dependency-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/work/release-readiness'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout release-readiness branch
+        uses: actions/checkout@v4
+        with:
+          ref: work/release-readiness
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Refresh lockfile without running package scripts
+        working-directory: ./server
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Generate structured npm audit report
+        working-directory: ./server
+        run: |
+          npm audit --json > npm-audit-report.json || true
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          let report;
+          try {
+            report = JSON.parse(fs.readFileSync('npm-audit-report.json', 'utf8'));
+          } catch (error) {
+            console.error('Could not parse npm audit JSON:', error.message);
+            process.exit(1);
+          }
+
+          const reduced = {
+            generatedAt: new Date().toISOString(),
+            summary: report.metadata?.vulnerabilities ?? {},
+            vulnerabilities: Object.fromEntries(
+              Object.entries(report.vulnerabilities ?? {}).map(([name, item]) => [
+                name,
+                {
+                  severity: item.severity,
+                  isDirect: item.isDirect,
+                  range: item.range,
+                  fixAvailable: item.fixAvailable ?? null,
+                  nodes: item.nodes ?? [],
+                  via: (item.via ?? []).map((entry) =>
+                    typeof entry === 'string'
+                      ? { dependency: entry }
+                      : {
+                          title: entry.title ?? null,
+                          url: entry.url ?? null,
+                          range: entry.range ?? null,
+                          severity: entry.severity ?? null,
+                          cwe: entry.cwe ?? [],
+                          cvss: entry.cvss ?? null
+                        }
+                  )
+                }
+              ])
+            )
+          };
+
+          const target = path.resolve('..', '.security', 'server-npm-audit.json');
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.writeFileSync(target, JSON.stringify(reduced, null, 2) + '\n');
+          console.log('Audit summary:', JSON.stringify(reduced.summary));
+          console.log('Vulnerable package count:', Object.keys(reduced.vulnerabilities).length);
+          NODE
+          rm -f npm-audit-report.json
+
+      - name: Commit refreshed lockfile and audit snapshot to this branch only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/package-lock.json .security/server-npm-audit.json
+          if git diff --cached --quiet; then
+            echo "No lockfile or audit-report changes to commit."
+          else
+            git commit -m "chore: refresh server lockfile and capture audit baseline"
+            git push origin HEAD:refs/heads/work/release-readiness
+          fi
