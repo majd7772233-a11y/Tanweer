@@ -5,7 +5,7 @@ import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
 import { isValidIsoDate } from '../lib/validation';
-import { cleanupOrphanMedia } from './media';
+import { cleanupOrphanMedia, validateMediaAttachmentAccess } from './media';
 
 export async function handleGetHomeworks(groupId: string, user: UserContext, env: Env): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
@@ -60,6 +60,14 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
 
   const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
   if (memberCheck) return memberCheck;
+
+  if (body.mediaUrls !== undefined) {
+    if (!Array.isArray(body.mediaUrls)) {
+      return errorResponse('INVALID_MEDIA', 'قائمة مرفقات الواجب غير صالحة');
+    }
+    const mediaValidation = await validateMediaAttachmentAccess(user, body.mediaUrls, env.DB);
+    if (mediaValidation) return mediaValidation;
+  }
 
   // Check if publishing official homework is authorized
   const canPublishOfficial = await hasPermission(user, Permission.PUBLISH_OFFICIAL_HOMEWORK, {
