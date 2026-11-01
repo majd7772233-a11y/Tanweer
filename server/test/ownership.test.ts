@@ -32,11 +32,17 @@ class OwnershipMockDb {
       async all<T = any>(): Promise<{ results: T[] }> {
         return { results: db.execute(sql, boundParams) as T[] };
       },
-      async run(): Promise<{ success: boolean }> {
-        db.execute(sql, boundParams);
-        return { success: true };
+      async run(): Promise<{ success: boolean; meta: { changes: number } }> {
+        const changes = db.execute(sql, boundParams);
+        return { success: true, meta: { changes: changes.length } };
       },
     };
+  }
+
+  async batch(statements: Array<{ run: () => Promise<{ success: boolean; meta: { changes: number } }> }>) {
+    const results = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
   }
 
   execute(sql: string, params: any[]): any[] {
@@ -66,20 +72,40 @@ class OwnershipMockDb {
         const table = match[1];
         const rows = this.tables[table] || [];
         if (table === 'contents' && trimmed.includes('WHERE id = ?')) {
-          const c = rows.find((r) => params.includes(r.id));
-          if (c) {
-            if (params[0] !== null && params[0] !== undefined) c.title = params[0];
-            if (params[1] !== null && params[1] !== undefined) c.description = params[1];
+          const contentId = params[2];
+          const groupId = params[3];
+          const correctionId = params[4];
+          const correctionGroupId = params[5];
+          const c = rows.find((r) => r.id === contentId && r.group_id === groupId);
+          const corr = this.tables.content_corrections.find((r) =>
+            r.id === correctionId && r.group_id === correctionGroupId && r.status === 'PENDING'
+          );
+
+          if (!c || !corr) return [];
+          if (trimmed.startsWith('UPDATE contents SET title = ?')) c.title = params[0];
+          else if (trimmed.startsWith('UPDATE contents SET description = ?')) c.description = params[0];
+          else if (trimmed.startsWith('UPDATE contents SET study_date = ?')) c.study_date = params[0];
+          else if (trimmed.startsWith("UPDATE contents SET description = COALESCE(description")) {
+            c.description = (c.description || '') + params[0];
           }
+          c.updated_at = params[1];
+          return [c];
         }
         if (table === 'content_corrections' && trimmed.includes('WHERE id = ?')) {
-          const corr = rows.find((r) => params.includes(r.id));
-          if (corr) {
-            if (trimmed.includes("status = 'APPROVED'")) corr.status = 'APPROVED';
-            if (trimmed.includes("status = 'REJECTED'")) corr.status = 'REJECTED';
+          const corr = rows.find((r) =>
+            r.id === params[2] && r.group_id === params[3] && r.status === 'PENDING'
+          );
+          const content = this.tables.contents.find((r) => r.id === params[4] && r.group_id === params[5]);
+          if (!corr || !content) return [];
+          if (trimmed.includes("status = 'APPROVED'")) {
+            corr.status = 'APPROVED';
+            corr.reviewed_by = params[0];
+            corr.reviewed_at = params[1];
           }
+          if (trimmed.includes("status = 'REJECTED'")) corr.status = 'REJECTED';
+          return [corr];
         }
-        return rows;
+        return [];
       }
     }
 
