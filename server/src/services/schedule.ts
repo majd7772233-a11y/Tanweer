@@ -656,20 +656,34 @@ export async function applyScheduleProposalToActiveSchedule(
   resolvedByUserId: string,
   env: Env
 ): Promise<ApplyProposalResult> {
-  // 1. Idempotency check: verify if proposal is already resolved to prevent duplicate versions
-  const freshProposal = await env.DB.prepare(
+  const readFreshProposal = () => env.DB.prepare(
     `SELECT sp.status, sv.version_number
      FROM schedule_proposals sp
      LEFT JOIN schedule_versions sv ON sv.group_id = sp.group_id AND sv.is_active = 1
      WHERE sp.id = ?`
   ).bind(proposal.id).first<{ status: string; version_number: number | null }>();
 
-  if (freshProposal && freshProposal.status === 'ACCEPTED') {
+  // Idempotency check before reading the active schedule.
+  const freshProposal = await readFreshProposal();
+  if (freshProposal?.status === 'ACCEPTED') {
     return { success: true, versionNumber: freshProposal.version_number || 1 };
+  }
+  if (!freshProposal || freshProposal.status !== 'PENDING') {
+    return {
+      success: false,
+      conflict: true,
+      currentSubjectId: null,
+      expectedSubjectId: proposal.old_subject_id || null,
+      message: 'هذا المقترح لم يعد معلّقاً أو تم حسمه بواسطة عملية أخرى',
+    };
   }
 
   const currentVersion = await env.DB.prepare(
-    `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
+    `SELECT id, version_number
+     FROM schedule_versions
+     WHERE group_id = ? AND is_active = 1
+     ORDER BY version_number DESC
+     LIMIT 1`
   ).bind(proposal.group_id).first<{ id: string; version_number: number }>();
 
   const newVersionNum = currentVersion ? currentVersion.version_number + 1 : 1;
@@ -692,7 +706,8 @@ export async function applyScheduleProposalToActiveSchedule(
 
   if (currentVersion) {
     const oldSlots = await env.DB.prepare(
-      `SELECT day_of_week, slot_order, subject_id, start_time, end_time FROM schedule_slots WHERE version_id = ?`
+      `SELECT day_of_week, slot_order, subject_id, start_time, end_time
+       FROM schedule_slots WHERE version_id = ?`
     ).bind(currentVersion.id).all<{
       day_of_week: number;
       slot_order: number;
@@ -701,101 +716,205 @@ export async function applyScheduleProposalToActiveSchedule(
       end_time: string | null;
     }>();
 
-    // TA-19 & TA-24: Concurrency conflict detection.
-    // Verify that the active slot still has the expected subject (or is still empty if proposal started from empty).
+    // Verify the target slot still matches the state the proposal was based on.
     const activeSlot = (oldSlots.results || []).find(
-      s => s.day_of_week === proposal.day_of_week && s.slot_order === proposal.slot_order
+      slot => slot.day_of_week === proposal.day_of_week && slot.slot_order === proposal.slot_order
     );
     const activeSubjectId = activeSlot?.subject_id || null;
     const expectedSubjectId = proposal.old_subject_id || null;
 
     if (activeSubjectId !== expectedSubjectId) {
       await env.DB.prepare(
-        `UPDATE schedule_proposals SET status = 'CONFLICTED' WHERE id = ?`
+        `UPDATE schedule_proposals SET status = 'CONFLICTED'
+         WHERE id = ? AND status = 'PENDING'`
       ).bind(proposal.id).run();
 
       return {
         success: false,
         conflict: true,
         currentSubjectId: activeSubjectId,
-        expectedSubjectId: expectedSubjectId,
+        expectedSubjectId,
         message: expectedSubjectId === null
           ? `تعذر تطبيق المقترح لوجود تعارض: تم إشغال الحصة في الجدول الفعال بالمادة (${activeSubjectId}) بعد إنشاء المقترح الذي افترض أن الحصة فارغة`
           : `تعذر تطبيق المقترح لوجود تعارض: تم تغيير مادة الحصة في الجدول الفعال إلى (${activeSubjectId || 'فارغة'}) بعد إنشاء المقترح المبني على (${expectedSubjectId})`,
       };
     }
 
-    for (const s of (oldSlots.results || [])) {
-      if (s.day_of_week === proposal.day_of_week && s.slot_order === proposal.slot_order) {
-        preservedStartTime = s.start_time;
-        preservedEndTime = s.end_time;
-        continue; // skip the slot being replaced
+    for (const slot of (oldSlots.results || [])) {
+      if (slot.day_of_week === proposal.day_of_week && slot.slot_order === proposal.slot_order) {
+        preservedStartTime = slot.start_time;
+        preservedEndTime = slot.end_time;
+        continue;
       }
       slotsToCopy.push({
         id: generateId('slot'),
-        day_of_week: s.day_of_week,
-        slot_order: s.slot_order,
-        subject_id: s.subject_id,
-        start_time: s.start_time,
-        end_time: s.end_time,
+        day_of_week: slot.day_of_week,
+        slot_order: slot.slot_order,
+        subject_id: slot.subject_id,
+        start_time: slot.start_time,
+        end_time: slot.end_time,
       });
     }
   }
 
   const appliedSlotId = generateId('slot');
-
-  // Build atomic transaction batch (Point 22)
   const batchStatements: D1PreparedStatement[] = [];
 
-  // A. Deactivate previous version
+  // 1. Atomically claim this proposal. Only one application can claim PENDING.
+  batchStatements.push(
+    env.DB.prepare(
+      `UPDATE schedule_proposals SET status = 'APPLYING'
+       WHERE id = ? AND group_id = ? AND status = 'PENDING'`
+    ).bind(proposal.id, proposal.group_id)
+  );
+
+  // 2. Compare-and-swap the active version. A competing schedule update can win only once.
   if (currentVersion) {
     batchStatements.push(
       env.DB.prepare(
-        `UPDATE schedule_versions SET is_active = 0, valid_until = ? WHERE id = ?`
-      ).bind(today, currentVersion.id)
+        `UPDATE schedule_versions
+         SET is_active = 0, valid_until = ?
+         WHERE id = ? AND group_id = ? AND is_active = 1
+           AND EXISTS (
+             SELECT 1 FROM schedule_proposals
+             WHERE id = ? AND group_id = ? AND status = 'APPLYING'
+           )`
+      ).bind(today, currentVersion.id, proposal.group_id, proposal.id, proposal.group_id)
     );
   }
 
-  // B. Insert new active schedule version
+  // 3. Insert a new active version only if the proposal is claimed and the group
+  // has no other active version after the compare-and-swap above.
   batchStatements.push(
     env.DB.prepare(
-      `INSERT INTO schedule_versions (id, group_id, version_number, valid_from, is_active, created_at, created_by)
-       VALUES (?, ?, ?, ?, 1, ?, ?)`
-    ).bind(newVersionId, proposal.group_id, newVersionNum, today, now, resolvedByUserId)
+      `INSERT INTO schedule_versions
+         (id, group_id, version_number, valid_from, is_active, created_at, created_by)
+       SELECT ?, ?, ?, ?, 1, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM schedule_proposals
+         WHERE id = ? AND group_id = ? AND status = 'APPLYING'
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM schedule_versions
+         WHERE group_id = ? AND is_active = 1
+       )`
+    ).bind(
+      newVersionId,
+      proposal.group_id,
+      newVersionNum,
+      today,
+      now,
+      resolvedByUserId,
+      proposal.id,
+      proposal.group_id,
+      proposal.group_id
+    )
   );
 
-  // C. Copy existing unchanged slots
+  // 4. Copy unchanged slots only when this attempt actually created its active version.
   for (const slot of slotsToCopy) {
     batchStatements.push(
       env.DB.prepare(
-        `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).bind(slot.id, newVersionId, slot.day_of_week, slot.slot_order, slot.subject_id, slot.start_time, slot.end_time)
+        `INSERT INTO schedule_slots
+           (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
+         SELECT ?, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM schedule_versions
+           WHERE id = ? AND group_id = ? AND is_active = 1
+         )`
+      ).bind(
+        slot.id,
+        newVersionId,
+        slot.day_of_week,
+        slot.slot_order,
+        slot.subject_id,
+        slot.start_time,
+        slot.end_time,
+        newVersionId,
+        proposal.group_id
+      )
     );
   }
 
-  // D. Insert replaced slot
+  // 5. Insert the changed slot under the same active-version guard.
   batchStatements.push(
     env.DB.prepare(
-      `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(appliedSlotId, newVersionId, proposal.day_of_week, proposal.slot_order, proposal.new_subject_id, preservedStartTime, preservedEndTime)
+      `INSERT INTO schedule_slots
+         (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
+       SELECT ?, ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM schedule_versions
+         WHERE id = ? AND group_id = ? AND is_active = 1
+       )`
+    ).bind(
+      appliedSlotId,
+      newVersionId,
+      proposal.day_of_week,
+      proposal.slot_order,
+      proposal.new_subject_id,
+      preservedStartTime,
+      preservedEndTime,
+      newVersionId,
+      proposal.group_id
+    )
   );
 
-  // E. Atomically resolve proposal to ACCEPTED
+  // 6. Resolve only if our version was successfully created.
+  const acceptedIndex = batchStatements.length;
   batchStatements.push(
     env.DB.prepare(
-      `UPDATE schedule_proposals SET status = 'ACCEPTED' WHERE id = ? AND status = 'PENDING'`
-    ).bind(proposal.id)
+      `UPDATE schedule_proposals SET status = 'ACCEPTED'
+       WHERE id = ? AND group_id = ? AND status = 'APPLYING'
+         AND EXISTS (
+           SELECT 1 FROM schedule_versions
+           WHERE id = ? AND group_id = ? AND is_active = 1
+         )`
+    ).bind(proposal.id, proposal.group_id, newVersionId, proposal.group_id)
   );
 
-  // Execute all operations atomically in a single D1 transaction
-  if (typeof env.DB.batch === 'function') {
-    await env.DB.batch(batchStatements);
-  } else {
-    for (const stmt of batchStatements) {
-      await stmt.run();
+  // 7. If another schedule operation won the active-version compare-and-swap,
+  // close this proposal as conflicted without creating another active version.
+  batchStatements.push(
+    env.DB.prepare(
+      `UPDATE schedule_proposals SET status = 'CONFLICTED'
+       WHERE id = ? AND group_id = ? AND status = 'APPLYING'
+         AND NOT EXISTS (
+           SELECT 1 FROM schedule_versions
+           WHERE id = ? AND group_id = ? AND is_active = 1
+         )`
+    ).bind(proposal.id, proposal.group_id, newVersionId, proposal.group_id)
+  );
+
+  if (typeof env.DB.batch !== 'function') {
+    return {
+      success: false,
+      conflict: true,
+      currentSubjectId: null,
+      expectedSubjectId: proposal.old_subject_id || null,
+      message: 'قاعدة البيانات لا تدعم تنفيذ تحديث الجدول الذري؛ تم إيقاف العملية لحماية النسخ النشطة',
+    };
+  }
+
+  const results = await env.DB.batch(batchStatements);
+  const claimResult = results[0];
+  const versionInsertIndex = currentVersion ? 2 : 1;
+  const versionResult = results[versionInsertIndex];
+  const acceptedResult = results[acceptedIndex];
+
+  if (claimResult?.meta?.changes !== 1 || versionResult?.meta?.changes !== 1 || acceptedResult?.meta?.changes !== 1) {
+    // Another worker may have completed this exact proposal while this request was running.
+    const latest = await readFreshProposal();
+    if (latest?.status === 'ACCEPTED') {
+      return { success: true, versionNumber: latest.version_number || newVersionNum };
     }
+
+    return {
+      success: false,
+      conflict: true,
+      currentSubjectId: null,
+      expectedSubjectId: proposal.old_subject_id || null,
+      message: 'لم نتمكن من حجز نسخة الجدول للمقترح؛ ربما طبّقت عملية أخرى تغييراً متزامناً. راجع الجدول وأعد تقديم المقترح عند الحاجة.',
+    };
   }
 
   return { success: true, versionNumber: newVersionNum };
