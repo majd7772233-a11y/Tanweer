@@ -4,6 +4,7 @@ import { Role } from '../src/lib/roles';
 import {
   handleApproveGroupJoinRequest,
   handleCreatePublicGroup,
+  handleJoinGroupRequest,
   handleRejectGroupJoinRequest,
   handleRemoveGroupMember,
   handleUpdateGroupMemberRole,
@@ -420,5 +421,142 @@ describe('Public group creation consistency', () => {
     expect(db.batchCalls).toBe(1);
     expect(db.groups).toHaveLength(0);
     expect(db.members).toHaveLength(0);
+  });
+});
+
+class GroupJoinDb {
+  groups = [
+    { id: 'optional-group', type: 'OPTIONAL' },
+    { id: 'class-group', type: 'CLASS' },
+  ];
+  members: Array<Record<string, unknown>> = [];
+  messages: Array<Record<string, unknown>> = [];
+
+  prepare(sql: string) {
+    const db = this;
+    let params: unknown[] = [];
+    const statement = {
+      bind(...values: unknown[]) {
+        params = values;
+        return statement;
+      },
+      async first<T = unknown>(): Promise<T | null> {
+        if (sql.includes('SELECT id, type FROM groups WHERE id = ?')) {
+          return (db.groups.find(row => row.id === params[0]) as T | undefined) ?? null;
+        }
+        if (sql.includes('SELECT status FROM group_members WHERE group_id = ? AND user_id = ?')) {
+          return (db.members.find(row =>
+            row.group_id === params[0] && row.user_id === params[1]
+          ) as T | undefined) ?? null;
+        }
+        return null;
+      },
+      async run() {
+        if (sql.includes('INSERT OR IGNORE INTO group_members')) {
+          const exists = db.members.some(row =>
+            row.group_id === params[0] && row.user_id === params[1]
+          );
+          if (exists) return { success: true, meta: { changes: 0 } };
+          db.members.push({
+            group_id: params[0],
+            user_id: params[1],
+            role: params[2],
+            status: params[3],
+            joined_at: params[4],
+            request_reason: params[5],
+          });
+          return { success: true, meta: { changes: 1 } };
+        }
+        if (sql.includes('INSERT INTO chat_messages')) {
+          db.messages.push({ group_id: params[1], text: params[2] });
+          return { success: true, meta: { changes: 1 } };
+        }
+        return { success: true, meta: { changes: 0 } };
+      },
+    };
+    return statement;
+  }
+}
+
+describe('Group join request concurrency and state', () => {
+  const student: UserContext = {
+    userId: 'student-join',
+    phoneNumber: '777000010',
+    fullName: 'طالب جديد',
+    gradeId: 10,
+    sectionId: 'A',
+    role: Role.STUDENT,
+  };
+
+  const joinRequest = (reason = 'أرغب في الانضمام') => new Request('https://tanweer.test/api/v1/groups/optional-group/join', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+
+  it('allows only one of two concurrent optional-group join requests to create membership and welcome message', async () => {
+    const db = new GroupJoinDb();
+    const [first, second] = await Promise.all([
+      handleJoinGroupRequest('optional-group', student, joinRequest(), { DB: db as any } as Env),
+      handleJoinGroupRequest('optional-group', student, joinRequest(), { DB: db as any } as Env),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([200, 409]);
+    const success = first.status === 200 ? first : second;
+    const conflict = first.status === 409 ? first : second;
+
+    expect((await success.json() as any).status).toBe('ACTIVE');
+    expect((await conflict.json() as any).error.code).toBe('ALREADY_MEMBER');
+    expect(db.members).toHaveLength(1);
+    expect(db.members[0]).toMatchObject({
+      group_id: 'optional-group',
+      user_id: student.userId,
+      status: 'ACTIVE',
+    });
+    expect(db.messages).toHaveLength(1);
+  });
+
+  it('creates a pending request for a class group without posting a membership message', async () => {
+    const db = new GroupJoinDb();
+    const response = await handleJoinGroupRequest(
+      'class-group',
+      student,
+      new Request('https://tanweer.test/api/v1/groups/class-group/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'أدرس في هذه الشعبة' }),
+      }),
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json() as any).status).toBe('PENDING');
+    expect(db.members[0]).toMatchObject({
+      group_id: 'class-group',
+      user_id: student.userId,
+      status: 'PENDING',
+      request_reason: 'أدرس في هذه الشعبة',
+    });
+    expect(db.messages).toHaveLength(0);
+  });
+
+  it('never replaces a banned membership when a user requests to join again', async () => {
+    const db = new GroupJoinDb();
+    db.members.push({
+      group_id: 'optional-group',
+      user_id: student.userId,
+      role: 'STUDENT',
+      status: 'BANNED',
+      joined_at: 1,
+    });
+
+    const response = await handleJoinGroupRequest(
+      'optional-group', student, joinRequest(), { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(403);
+    expect((await response.json() as any).error.code).toBe('BANNED');
+    expect(db.members).toHaveLength(1);
+    expect(db.members[0].status).toBe('BANNED');
   });
 });
