@@ -174,6 +174,8 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
   it('TA-16: handleLoginWithRecoveryCode enforces single-use and burns code', async () => {
     let burnedRecoveryHash: string | null = null;
     let tokenIncremented = false;
+    let recoveryHashAvailable = true;
+    let tokenUsesCount = 0;
     const pepper = 'test-pepper-123';
     const cleanCode = 'ABCDEFGHJKLMNPQR';
     const recoveryHash = await hashString(cleanCode, pepper);
@@ -207,13 +209,24 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
               return null;
             },
             run: async () => {
-              if (sql.includes('UPDATE user_recovery_tokens SET uses_count = uses_count + 1')) {
+              if (sql.includes('UPDATE users') && sql.includes('recovery_code_hash = ?')) {
+                const casMatches = recoveryHashAvailable && params[3] === recoveryHash;
+                if (!casMatches) return { success: true, meta: { changes: 0 } };
+                recoveryHashAvailable = false;
+                burnedRecoveryHash = String(params[0]);
+                return { success: true, meta: { changes: 1 } };
+              }
+
+              if (sql.includes('UPDATE user_recovery_tokens') && sql.includes('uses_count = uses_count + 1')) {
+                const valid = params[1] === 'tok_1' &&
+                  tokenUsesCount < 1;
+                if (!valid) return { success: true, meta: { changes: 0 } };
                 tokenIncremented = true;
+                tokenUsesCount += 1;
+                return { success: true, meta: { changes: 1 } };
               }
-              if (sql.includes('UPDATE users SET recovery_code_hash = ?')) {
-                burnedRecoveryHash = params[0];
-              }
-              return { success: true };
+
+              return { success: true, meta: { changes: 1 } };
             },
           }),
         }),
