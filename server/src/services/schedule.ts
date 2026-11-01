@@ -295,9 +295,12 @@ export async function handleSaveScheduleBatch(
   request: Request,
   env: Env
 ): Promise<Response> {
-  // Determine current active version
   const currentVersion = await env.DB.prepare(
-    `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
+    `SELECT id, version_number
+     FROM schedule_versions
+     WHERE group_id = ? AND is_active = 1
+     ORDER BY version_number DESC
+     LIMIT 1`
   ).bind(groupId).first<{ id: string; version_number: number }>();
 
   let hasSlots = false;
@@ -322,90 +325,179 @@ export async function handleSaveScheduleBatch(
     return errorResponse('INVALID_INPUT', 'يرجى تزويد قائمة الحصص لتحديث الجدول');
   }
 
-  // Pre-validate ALL slots strictly before modifying database
+  const seenPositions = new Set<string>();
   for (let i = 0; i < slotList.length; i++) {
-    const s = slotList[i];
+    const slot = slotList[i];
     if (
-      s.dayOfWeek === undefined ||
-      typeof s.dayOfWeek !== 'number' ||
-      s.dayOfWeek < 0 ||
-      s.dayOfWeek > 6 ||
-      !s.slotOrder ||
-      typeof s.slotOrder !== 'number' ||
-      s.slotOrder < 1 ||
-      s.slotOrder > 12 ||
-      !s.subjectId ||
-      typeof s.subjectId !== 'string' ||
-      !s.subjectId.trim()
+      slot.dayOfWeek === undefined ||
+      typeof slot.dayOfWeek !== 'number' ||
+      !Number.isInteger(slot.dayOfWeek) ||
+      slot.dayOfWeek < 0 ||
+      slot.dayOfWeek > 6 ||
+      !Number.isInteger(slot.slotOrder) ||
+      slot.slotOrder < 1 ||
+      slot.slotOrder > 12 ||
+      typeof slot.subjectId !== 'string' ||
+      !slot.subjectId.trim()
     ) {
       return errorResponse(
         'INVALID_INPUT',
         `الحصة رقم (${i + 1}) غير صالحة، يرجى التأكد من اليوم ورقم الحصة والمادة لجميع الحصص وعدم ترك حصص ناقصة`
       );
     }
+
+    const positionKey = `${slot.dayOfWeek}:${slot.slotOrder}`;
+    if (seenPositions.has(positionKey)) {
+      return errorResponse(
+        'DUPLICATE_SCHEDULE_SLOT',
+        `يوجد أكثر من حصة محددة في الموضع نفسه (اليوم ${slot.dayOfWeek}، الحصة ${slot.slotOrder})`
+      );
+    }
+    seenPositions.add(positionKey);
   }
 
-  const newVersionNum = currentVersion ? currentVersion.version_number + 1 : 1;
+  let newVersionNum: number;
+  if (currentVersion) {
+    newVersionNum = currentVersion.version_number + 1;
+  } else {
+    const latest = await env.DB.prepare(
+      `SELECT MAX(version_number) as version_number
+       FROM schedule_versions WHERE group_id = ?`
+    ).bind(groupId).first<{ version_number: number | null }>();
+    newVersionNum = (latest?.version_number || 0) + 1;
+  }
+
   const newVersionId = generateId('sch_ver');
   const now = Date.now();
   const validFrom = body.validFrom || new Date().toISOString().slice(0, 10);
+  const lockMarker = `${validFrom}#${generateId('schedule_lock')}`;
 
-  const batchStatements: any[] = [];
+  if (typeof env.DB.batch !== 'function') {
+    return errorResponse('SCHEDULE_WRITE_UNAVAILABLE', 'قاعدة البيانات لا تدعم حفظ الجدول الذري حالياً', 503);
+  }
 
-  // 1. Deactivate previous active versions
+  const batchStatements: D1PreparedStatement[] = [];
+  let deactivateIndex = -1;
+
+  // Compare-and-swap the exact active version observed before validation.
   if (currentVersion) {
+    deactivateIndex = batchStatements.length;
     batchStatements.push(
       env.DB.prepare(
-        `UPDATE schedule_versions SET is_active = 0, valid_until = ? WHERE group_id = ? AND is_active = 1`
-      ).bind(validFrom, groupId)
+        `UPDATE schedule_versions
+         SET is_active = 0, valid_until = ?
+         WHERE id = ? AND group_id = ? AND is_active = 1`
+      ).bind(lockMarker, currentVersion.id, groupId)
     );
   }
 
-  // 2. Insert new version
-  batchStatements.push(
-    env.DB.prepare(
-      `INSERT INTO schedule_versions (id, group_id, version_number, valid_from, is_active, created_at, created_by)
-       VALUES (?, ?, ?, ?, 1, ?, ?)`
-    ).bind(newVersionId, groupId, newVersionNum, validFrom, now, user.userId)
-  );
+  const versionInsertIndex = batchStatements.length;
+  const versionInsertSql = currentVersion
+    ? `INSERT INTO schedule_versions
+         (id, group_id, version_number, valid_from, is_active, created_at, created_by)
+       SELECT ?, ?, ?, ?, 1, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM schedule_versions
+         WHERE id = ? AND group_id = ? AND is_active = 0 AND valid_until = ?
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM schedule_versions WHERE group_id = ? AND is_active = 1
+       )`
+    : `INSERT INTO schedule_versions
+         (id, group_id, version_number, valid_from, is_active, created_at, created_by)
+       SELECT ?, ?, ?, ?, 1, ?, ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM schedule_versions WHERE group_id = ? AND is_active = 1
+       )`;
 
-  // 3. Ensure all subjects exist (if provided)
-  for (const s of slotList) {
-    if (s.subjectName) {
+  const versionParams = currentVersion
+    ? [newVersionId, groupId, newVersionNum, validFrom, now, user.userId,
+       currentVersion.id, groupId, lockMarker, groupId]
+    : [newVersionId, groupId, newVersionNum, validFrom, now, user.userId, groupId];
+
+  batchStatements.push(env.DB.prepare(versionInsertSql).bind(...versionParams));
+
+  // Create optional subjects only after the new version has been inserted.
+  for (const slot of slotList) {
+    if (slot.subjectName) {
       batchStatements.push(
         env.DB.prepare(
-          `INSERT OR IGNORE INTO subjects (id, name_ar, icon, color_hex) VALUES (?, ?, ?, ?)`
-        ).bind(s.subjectId, s.subjectName, s.subjectIcon || '📚', s.colorHex || '#00E5FF')
+          `INSERT OR IGNORE INTO subjects (id, name_ar, icon, color_hex)
+           SELECT ?, ?, ?, ?
+           WHERE EXISTS (
+             SELECT 1 FROM schedule_versions
+             WHERE id = ? AND group_id = ? AND is_active = 1
+           )`
+        ).bind(
+          slot.subjectId,
+          slot.subjectName,
+          slot.subjectIcon || '📚',
+          slot.colorHex || '#00E5FF',
+          newVersionId,
+          groupId
+        )
       );
     }
   }
 
-  // 4. Insert all slots into the new version
-  for (const s of slotList) {
+  const slotInsertIndexes: number[] = [];
+  for (const slot of slotList) {
     const slotId = generateId('slot');
+    slotInsertIndexes.push(batchStatements.length);
     batchStatements.push(
       env.DB.prepare(
-        `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO schedule_slots
+           (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
+         SELECT ?, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM schedule_versions
+           WHERE id = ? AND group_id = ? AND is_active = 1
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM schedule_slots
+           WHERE version_id = ? AND day_of_week = ? AND slot_order = ?
+         )`
       ).bind(
         slotId,
         newVersionId,
-        s.dayOfWeek,
-        s.slotOrder,
-        s.subjectId.trim(),
-        s.startTime || null,
-        s.endTime || null
+        slot.dayOfWeek,
+        slot.slotOrder,
+        slot.subjectId.trim(),
+        slot.startTime?.trim() || null,
+        slot.endTime?.trim() || null,
+        newVersionId,
+        groupId,
+        newVersionId,
+        slot.dayOfWeek,
+        slot.slotOrder
       )
     );
   }
 
-  // Execute atomic batch transaction
-  if (typeof env.DB.batch === 'function') {
-    await env.DB.batch(batchStatements);
-  } else {
-    for (const stmt of batchStatements) {
-      await stmt.run();
-    }
+  // Restore the externally visible calendar date after using a transaction-unique
+  // marker to prove the old active version was claimed by this exact batch.
+  if (currentVersion) {
+    batchStatements.push(
+      env.DB.prepare(
+        `UPDATE schedule_versions
+         SET valid_until = ?
+         WHERE id = ? AND group_id = ? AND is_active = 0 AND valid_until = ?`
+      ).bind(validFrom, currentVersion.id, groupId, lockMarker)
+    );
+  }
+
+  const results = await env.DB.batch(batchStatements);
+
+  if (currentVersion && results[deactivateIndex]?.meta?.changes !== 1) {
+    return errorResponse('SCHEDULE_VERSION_CHANGED', 'تغيرت النسخة النشطة أثناء تجهيز الجدول. حدّث الصفحة وحاول مجدداً.', 409);
+  }
+  if (results[versionInsertIndex]?.meta?.changes !== 1) {
+    return errorResponse('SCHEDULE_VERSION_CHANGED', 'أنشأ طلب آخر نسخة نشطة للجدول. حدّث الصفحة ثم أعد المحاولة.', 409);
+  }
+
+  const failedSlot = slotInsertIndexes.find(index => results[index]?.meta?.changes !== 1);
+  if (failedSlot !== undefined) {
+    return errorResponse('SCHEDULE_SLOT_CHANGED', 'تعذر إدراج إحدى الحصص بسبب تغير متزامن في الجدول. أعد تحميل الصفحة قبل المحاولة.', 409);
   }
 
   return jsonResponse({
