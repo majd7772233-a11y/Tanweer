@@ -226,6 +226,70 @@ describe('Authentication hardening regressions', () => {
     await expect(getUserFromToken(token, env)).resolves.toBeNull();
   });
 
+  it('does not restore a banned class membership during incomplete-registration repair', async () => {
+    const password = 'Magd#School2026';
+    const passwordHash = (await hashPassword(password, pepper)).hash;
+    let batchAttempted = false;
+
+    const env = {
+      SESSION_PEPPER: pepper,
+      PASSWORD_PEPPER: pepper,
+      DB: {
+        prepare(sql: string) {
+          return {
+            bind(...params: unknown[]) {
+              return {
+                async first() {
+                  if (sql.includes('FROM users WHERE phone_number = ?')) {
+                    return {
+                      id: 'banned-user',
+                      password_hash: passwordHash,
+                      grade_id: 10,
+                      section_id: 'A',
+                      status: 'ACTIVE',
+                    };
+                  }
+                  if (sql.includes('FROM group_members WHERE group_id = ? AND user_id = ?')) {
+                    return { status: 'BANNED' };
+                  }
+                  if (sql.includes('FROM group_members WHERE user_id = ?')) return null;
+                  if (sql.includes('FROM sessions WHERE user_id = ?')) return null;
+                  return null;
+                },
+                async run() {
+                  return { success: true, meta: { changes: 1 } };
+                },
+              };
+            },
+          };
+        },
+        async batch() {
+          batchAttempted = true;
+          return [];
+        },
+      },
+    } as unknown as Env;
+
+    const response = await handleRegister(new Request('https://tanweer.test/api/v1/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phoneNumber: '771234567',
+        password,
+        fullName: 'مجد أنور عبدالرحمن',
+        gradeId: 10,
+        sectionId: 'A',
+      }),
+    }), env);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      error: { code: 'GROUP_BANNED' },
+    });
+    expect(batchAttempted).toBe(false);
+  });
+
   it('stores the new password and recovery-code hashes when repairing an incomplete registration', async () => {
     const password = 'Magd#School2026';
     const existingPasswordHash = (await hashPassword(password, pepper)).hash;
