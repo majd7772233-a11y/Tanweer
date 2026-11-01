@@ -90,6 +90,7 @@ describe('Authentication hardening regressions', () => {
       uses_count: 0,
       expires_at: Date.now() + 60_000,
       revoked: 0,
+      used_at: null as number | null,
     };
     const sessions: Array<Record<string, unknown>> = [];
 
