@@ -273,8 +273,8 @@ export async function handleRedeemRoleCode(
       `UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?`
     ).bind(targetRole, originalReq.group_id, user.userId).run();
 
-    // If upgraded to TEACHER or ADMIN, also reflect in global user profile
-    if (targetRole === Role.TEACHER || targetRole === Role.ADMIN) {
+    // Teacher certification is also reflected in the global user profile.
+    if (targetRole === Role.TEACHER) {
       await env.DB.prepare(
         `UPDATE users SET role = ?, updated_at = ? WHERE id = ?`
       ).bind(targetRole, now, user.userId).run();
@@ -285,7 +285,7 @@ export async function handleRedeemRoleCode(
       `UPDATE users SET role = ?, updated_at = ? WHERE id = ?`
     ).bind(targetRole, now, user.userId).run();
 
-    if (targetRole === Role.TEACHER || targetRole === Role.ADMIN) {
+    if (targetRole === Role.TEACHER) {
       await env.DB.prepare(
         `UPDATE group_members SET role = ? WHERE user_id = ?`
       ).bind(targetRole, user.userId).run();
