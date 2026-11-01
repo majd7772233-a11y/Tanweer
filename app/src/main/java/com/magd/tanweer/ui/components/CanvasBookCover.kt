@@ -416,7 +416,7 @@ fun CanvasBookshelfSpine(
                 )
 
                 Text(
-                    text = book.subjectName.take(12),
+                    text = book.subjectName,
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,

@@ -8,10 +8,10 @@ data class UserEntity(
     @PrimaryKey val id: String,
     val fullName: String,
     val phoneNumber: String,
-    val gradeId: Int,
-    val sectionId: String,
+    val gradeId: Int? = null,
+    val sectionId: String? = null,
     val role: String,
-    val defaultGroupId: String,
+    val defaultGroupId: String = "",
     val token: String,
     val lessonsCount: Int = 0,
     val homeworksCount: Int = 0,
@@ -242,6 +242,16 @@ data class BookVocabularyEntity(
     val meaning: String,
     val pageIndex: Int,
     val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "book_extracted_pages")
+data class BookExtractedPageEntity(
+    @PrimaryKey val id: String, // "${bookId}_${pageIndex}"
+    val bookId: String,
+    val pageIndex: Int,
+    val extractedText: String,
+    val extractionType: String = "PDFBOX",
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "cached_sync_meta")

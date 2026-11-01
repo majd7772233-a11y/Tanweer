@@ -839,7 +839,7 @@ fun CalendarScreen(
                     }
                 }
 
-                if (currentUser?.role in listOf("TEACHER", "ADMIN", "SYSTEM_OWNER")) {
+                if (currentUser?.role in listOf("TEACHER", "ADMIN")) {
                     GlassCard(
                         modifier = Modifier.fillMaxWidth(),
                         backgroundColor = GlassSurface,

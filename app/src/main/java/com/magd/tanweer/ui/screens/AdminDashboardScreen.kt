@@ -115,7 +115,7 @@ fun AdminDashboardScreen(
                                         color = TextPrimary
                                     )
                                     GlassPill(
-                                        text = "مدير المنظومة 👑",
+                                        text = "مدير المدرسة 👑",
                                         color = Color(0xFFFFD700),
                                         bgColor = Color(0xFFFFD700).copy(alpha = 0.15f)
                                     )

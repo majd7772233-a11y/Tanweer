@@ -261,7 +261,8 @@ fun CanvasPageCurlViewer(
                     progress = abs(progress),
                     isForward = progress > 0,
                     readingTheme = readingTheme,
-                    size = size
+                    size = size,
+                    currentStrokes = currentStrokes
                 )
             } else {
                 // Standard Flat Page Drawing with Theme Filters
@@ -270,10 +271,9 @@ fun CanvasPageCurlViewer(
                     readingTheme = readingTheme,
                     size = size
                 )
+                // Draw Freehand Annotations & Drawings on Top of Page
+                drawPageStrokes(currentStrokes)
             }
-
-            // Draw Freehand Annotations & Drawings on Top of Page
-            drawPageStrokes(currentStrokes)
 
             // Draw Live Active Stroke
             if (activeStrokePoints.size > 1) {
@@ -418,7 +418,8 @@ private fun DrawScope.drawPageCurlEffect(
     progress: Float,
     isForward: Boolean,
     readingTheme: ReadingTheme,
-    size: Size
+    size: Size,
+    currentStrokes: List<DrawnStroke>
 ) {
     val width = size.width
     val height = size.height
@@ -473,6 +474,9 @@ private fun DrawScope.drawPageCurlEffect(
             dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
             dstSize = androidx.compose.ui.unit.IntSize(width.toInt(), height.toInt())
         )
+
+        // Draw page strokes deformed/clipped synchronously with the curled paper
+        drawPageStrokes(currentStrokes)
 
         // Add soft curl shadow along the fold edge
         val shadowBrush = if (isForward) {

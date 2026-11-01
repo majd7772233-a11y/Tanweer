@@ -444,6 +444,15 @@ interface BookReadingDao {
 
     @Query("DELETE FROM book_drawings WHERE bookId = :bookId AND pageIndex = :pageIndex")
     suspend fun clearDrawingForPage(bookId: String, pageIndex: Int)
+
+    @Query("SELECT * FROM book_extracted_pages WHERE bookId = :bookId AND pageIndex = :pageIndex LIMIT 1")
+    suspend fun getExtractedPage(bookId: String, pageIndex: Int): BookExtractedPageEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertExtractedPage(page: BookExtractedPageEntity)
+
+    @Query("DELETE FROM book_extracted_pages WHERE bookId = :bookId")
+    suspend fun clearExtractedPages(bookId: String)
 }
 
 @Dao

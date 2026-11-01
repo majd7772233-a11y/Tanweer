@@ -48,7 +48,7 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
   const examDate = body.examDate || body.date;
   const chapters = body.requiredChapters || body.topics;
   const rawType = (body.examType || 'MONTHLY').trim().toUpperCase();
-  const examType = ['MONTHLY', 'QUIZ', 'MIDTERM', 'FINAL'].includes(rawType) ? rawType : 'MONTHLY';
+  const examType = ['MONTHLY', 'ORAL', 'QUIZ', 'MIDTERM', 'FINAL'].includes(rawType) ? rawType : 'MONTHLY';
 
   if (!body.groupId || !examDate || !body.subjectId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد تفاصيل الاختبار والمادة وتاريخه');
@@ -178,7 +178,7 @@ export async function handleUpdateExam(
   }
 
   const rawType = body.examType ? body.examType.trim().toUpperCase() : null;
-  const examTypeVal = rawType && ['MONTHLY', 'QUIZ', 'MIDTERM', 'FINAL'].includes(rawType) ? rawType : null;
+  const examTypeVal = rawType && ['MONTHLY', 'ORAL', 'QUIZ', 'MIDTERM', 'FINAL'].includes(rawType) ? rawType : null;
 
   await env.DB.prepare(
     `UPDATE exams
@@ -223,15 +223,14 @@ export async function handleDeleteExam(
   const memberCheck = await requireGroupMember(user, exam.group_id, env.DB);
   if (memberCheck) return memberCheck;
 
-  const isOwner = exam.created_by === user.userId;
   const canManage = await hasPermission(user, Permission.MANAGE_EXAMS, {
     db: env.DB,
     groupId: exam.group_id,
     resourceOwnerId: exam.created_by,
   });
 
-  if (!isOwner && !canManage) {
-    return errorResponse('FORBIDDEN', 'لا تملك صلاحية حذف هذا الاختبار', 403);
+  if (!canManage) {
+    return errorResponse('FORBIDDEN', 'لا تملك صلاحية حذف هذا الاختبار، حذف الاختبارات مقتصر على المعلمين والإدارة', 403);
   }
 
   await env.DB.prepare(`DELETE FROM exams WHERE id = ?`).bind(examId).run();

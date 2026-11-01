@@ -32,6 +32,11 @@ async function ensureOwnerSessionsTable(db: D1Database): Promise<void> {
   } catch (e) {
     // If already exists or mock doesn't support schema creation, silently proceed
   }
+  try {
+    await db.prepare(`ALTER TABLE contents ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0`).run();
+  } catch (e) {
+    // Column already exists or mock doesn't support ALTER TABLE
+  }
 }
 
 /**
@@ -94,13 +99,7 @@ export async function verifyOwnerAuth(request: Request, env: Env): Promise<{ isO
       return { isOwner: true, ownerId: 'SYSTEM_OWNER' };
     }
   } catch (e) {
-    // If table query fails in mock environments, check fallback
-  }
-
-  // 4. Fallback check for deterministic HMAC tokens (for test suite backwards compatibility)
-  const legacyDeterministicToken = await hashString(`owner_authenticated_${secretKey}`, pepper);
-  if (token === legacyDeterministicToken) {
-    return { isOwner: true, ownerId: 'SYSTEM_OWNER' };
+    // If table query fails, reject unauthorized
   }
 
   return { isOwner: false, ownerId: '' };
@@ -172,6 +171,7 @@ export async function handleOwnerLogin(request: Request, env: Env): Promise<Resp
     `).bind(sessionId, tokenHash, expiresAt, now).run();
   } catch (e) {
     console.error('Failed to store owner session in DB:', e);
+    return errorResponse('DATABASE_ERROR', 'فشل إنشاء وحفظ جلسة المالك في قاعدة البيانات', 500);
   }
 
   await logRoleAudit(
@@ -1342,12 +1342,64 @@ export async function handleGetDashboardHomeworks(request: Request, env: Env): P
 export async function handleDeleteDashboardHomework(hwId: string, actorId: string, env: Env): Promise<Response> {
   await env.DB.prepare(`DELETE FROM homeworks WHERE id = ?`).bind(hwId).run();
   await env.DB.prepare(`DELETE FROM homework_completions WHERE homework_id = ?`).bind(hwId).run();
+  try {
+    await env.DB.prepare(`DELETE FROM homework_media WHERE homework_id = ?`).bind(hwId).run();
+  } catch (e) {}
   await logRoleAudit(env.DB, 'OWNER_DELETE_HOMEWORK', actorId, 'SYSTEM_OWNER', null, `حذف الواجب (${hwId}) من لوحة المالك`);
   return jsonResponse({ success: true, message: 'تم حذف الواجب بنجاح' });
 }
 
 /**
- * God Mode: Returns all exams across groups with pagination and totalCount (Point 31).
+ * God Mode: Returns homework details and attached images/media (D-06).
+ */
+export async function handleGetDashboardHomeworkDetail(homeworkId: string, env: Env): Promise<Response> {
+  const hw = await env.DB.prepare(`
+    SELECT h.*, u.full_name as author_name, u.phone_number as author_phone,
+           g.name as group_name, COALESCE(s.name_ar, s.id) as subject_name
+    FROM homeworks h
+    LEFT JOIN users u ON h.created_by = u.id
+    LEFT JOIN groups g ON h.group_id = g.id
+    LEFT JOIN subjects s ON h.subject_id = s.id
+    WHERE h.id = ?
+  `).bind(homeworkId).first<any>();
+
+  if (!hw) {
+    return errorResponse('HOMEWORK_NOT_FOUND', 'الواجب المدرسي غير موجود', 404);
+  }
+
+  let mediaList: any[] = [];
+  try {
+    const mediaRows = await env.DB.prepare(`
+      SELECT id, media_id, url, page_order, created_at
+      FROM homework_media
+      WHERE homework_id = ?
+      ORDER BY page_order ASC
+    `).bind(homeworkId).all<any>();
+
+    mediaList = (mediaRows.results || []).map((m: any) => ({
+      id: m.id,
+      mediaId: m.media_id,
+      url: m.url,
+      previewUrl: `/api/dashboard/media/${m.media_id || m.id}`,
+      pageOrder: m.page_order,
+      createdAt: m.created_at,
+    }));
+  } catch (e) {
+    // If homework_media table doesn't exist
+  }
+
+  return jsonResponse({
+    success: true,
+    homework: {
+      ...hw,
+      media: mediaList,
+    },
+    media: mediaList,
+  });
+}
+
+/**
+ * God Mode: Returns all exams across groups with pagination and totalCount (Point 31, D-05).
  */
 export async function handleGetDashboardExams(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -1358,8 +1410,8 @@ export async function handleGetDashboardExams(request: Request, env: Env): Promi
   let whereClause = '';
   const filterBinds: any[] = [];
   if (search) {
-    whereClause = ` WHERE e.title LIKE ? OR e.description LIKE ? OR u.full_name LIKE ?`;
-    filterBinds.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    whereClause = ` WHERE e.title LIKE ? OR e.required_chapters LIKE ? OR e.notes LIKE ? OR u.full_name LIKE ?`;
+    filterBinds.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
   }
 
   const countRow = await env.DB.prepare(
@@ -1368,10 +1420,11 @@ export async function handleGetDashboardExams(request: Request, env: Env): Promi
   const totalCount = countRow?.total || 0;
 
   const rows = await env.DB.prepare(`
-    SELECT e.*, u.full_name as author_name, g.name as group_name
+    SELECT e.*, u.full_name as author_name, g.name as group_name, COALESCE(s.name_ar, s.id) as subject_name
     FROM exams e
     LEFT JOIN users u ON e.created_by = u.id
     LEFT JOIN groups g ON e.group_id = g.id
+    LEFT JOIN subjects s ON e.subject_id = s.id
     ${whereClause}
     ORDER BY e.created_at DESC LIMIT ? OFFSET ?
   `).bind(...filterBinds, limit, offset).all();
@@ -1498,7 +1551,13 @@ export async function handleDeleteDashboardIssue(issueId: string, actorId: strin
 /**
  * God Mode: Returns active schedules across groups.
  */
-export async function handleGetDashboardSchedules(env: Env): Promise<Response> {
+export async function handleGetDashboardSchedules(env: Env, request?: Request): Promise<Response> {
+  const url = request ? new URL(request.url) : null;
+  const groupId = url?.searchParams.get('groupId') || '';
+
+  const whereClause = groupId ? 'WHERE sv.is_active = 1 AND sv.group_id = ?' : 'WHERE sv.is_active = 1';
+  const binds = groupId ? [groupId] : [];
+
   const rows = await env.DB.prepare(`
     SELECT sv.id, sv.group_id, sv.version_number, sv.valid_from, sv.is_active, sv.created_at, sv.created_by,
            g.name as group_name, u.full_name as author_name,
@@ -1506,10 +1565,24 @@ export async function handleGetDashboardSchedules(env: Env): Promise<Response> {
     FROM schedule_versions sv
     LEFT JOIN groups g ON sv.group_id = g.id
     LEFT JOIN users u ON sv.created_by = u.id
-    WHERE sv.is_active = 1
+    ${whereClause}
     ORDER BY sv.group_id ASC
-  `).all();
-  return jsonResponse({ success: true, schedules: rows.results || [] });
+  `).bind(...binds).all<any>();
+
+  let slots: any[] = [];
+  if (groupId && rows.results && rows.results.length > 0) {
+    const versionId = rows.results[0].id;
+    const slotRows = await env.DB.prepare(`
+      SELECT ss.*, COALESCE(s.name_ar, s.id) as subject_name, s.color_hex, s.icon
+      FROM schedule_slots ss
+      LEFT JOIN subjects s ON ss.subject_id = s.id
+      WHERE ss.version_id = ?
+      ORDER BY ss.day_of_week ASC, ss.slot_order ASC
+    `).bind(versionId).all();
+    slots = slotRows.results || [];
+  }
+
+  return jsonResponse({ success: true, schedules: rows.results || [], slots });
 }
 
 /**
@@ -1613,34 +1686,48 @@ export async function handleRejectDashboardDecision(decisionId: string, actorId:
 }
 
 /**
- * God Mode: Returns recent chat messages across all groups with pagination and totalCount (Point 31).
+ * God Mode: Returns recent chat messages across all groups with pagination and totalCount (Point 31, D-03).
  */
 export async function handleGetDashboardChatMessages(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const search = url.searchParams.get('q') || '';
+  const groupId = url.searchParams.get('groupId') || '';
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 500);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
+  const order = url.searchParams.get('order')?.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
 
-  let whereClause = '';
+  const whereConditions: string[] = [];
   const filterBinds: any[] = [];
+
+  if (groupId) {
+    whereConditions.push('cm.group_id = ?');
+    filterBinds.push(groupId);
+  }
   if (search) {
-    whereClause = ` WHERE cm.content LIKE ? OR u.full_name LIKE ?`;
-    filterBinds.push(`%${search}%`, `%${search}%`);
+    whereConditions.push('(cm.text LIKE ? OR cm.sender_name LIKE ? OR u.full_name LIKE ?)');
+    filterBinds.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
 
+  const whereClause = whereConditions.length > 0 ? ` WHERE ${whereConditions.join(' AND ')}` : '';
+
   const countRow = await env.DB.prepare(
-    `SELECT COUNT(*) as total FROM chat_messages cm LEFT JOIN users u ON cm.user_id = u.id ${whereClause}`
+    `SELECT COUNT(*) as total FROM chat_messages cm LEFT JOIN users u ON cm.sender_id = u.id ${whereClause}`
   ).bind(...filterBinds).first<{ total: number }>();
   const totalCount = countRow?.total || 0;
 
   const rows = await env.DB.prepare(`
-    SELECT cm.id, cm.group_id, cm.user_id, cm.content, cm.created_at,
-           u.full_name, u.phone_number, u.role, g.name as group_name
+    SELECT cm.id, cm.group_id, cm.sender_id, cm.sender_id as user_id,
+           cm.text as content, cm.text as message, cm.text,
+           cm.sender_name, cm.sender_grade_section,
+           cm.timestamp as created_at, cm.timestamp,
+           COALESCE(u.full_name, cm.sender_name) as full_name,
+           COALESCE(u.full_name, cm.sender_name) as user_name,
+           u.phone_number, u.role, g.name as group_name
     FROM chat_messages cm
-    LEFT JOIN users u ON cm.user_id = u.id
+    LEFT JOIN users u ON cm.sender_id = u.id
     LEFT JOIN groups g ON cm.group_id = g.id
     ${whereClause}
-    ORDER BY cm.created_at DESC LIMIT ? OFFSET ?
+    ORDER BY cm.timestamp ${order} LIMIT ? OFFSET ?
   `).bind(...filterBinds, limit, offset).all();
 
   return jsonResponse({
@@ -1650,6 +1737,7 @@ export async function handleGetDashboardChatMessages(request: Request, env: Env)
     count: rows.results?.length || 0,
     offset,
     limit,
+    groupId: groupId || null,
   });
 }
 
@@ -1678,9 +1766,43 @@ export async function handleGetDashboardCorrections(env: Env): Promise<Response>
 }
 
 /**
- * Phase 1: Preview Purge Statistics (Point 34, TA-15).
+ * Phase 1: Preview Purge Statistics (Point 34, TA-15, D-01).
+ * Supports both (request, actorId, env) for API calls with secret validation
+ * and (actorId, env) for test suite compatibility.
  */
-export async function handlePreviewPurge(actorId: string, env: Env): Promise<Response> {
+export async function handlePreviewPurge(
+  requestOrActorId: Request | string,
+  actorIdOrEnv: string | Env,
+  maybeEnv?: Env
+): Promise<Response> {
+  let request: Request | null = null;
+  let actorId = 'SYSTEM_OWNER';
+  let env: Env;
+
+  if (typeof requestOrActorId === 'string') {
+    actorId = requestOrActorId;
+    env = actorIdOrEnv as Env;
+  } else {
+    request = requestOrActorId;
+    actorId = actorIdOrEnv as string;
+    env = maybeEnv!;
+  }
+
+  // When called via HTTP request, strictly enforce owner secret verification (D-01)
+  if (request) {
+    let secret = '';
+    try {
+      const cloned = request.clone();
+      const body = await cloned.json() as { secret?: string };
+      secret = (body.secret || '').trim();
+    } catch {}
+
+    const ownerSecret = env.TANWEER_OWNER_SECRET;
+    if (!ownerSecret || !secret || secret !== ownerSecret) {
+      return errorResponse('INVALID_SECRET', 'مفتاح مالك المنظومة السري غير صحيح، تم إلغاء المعاينة فوراً', 403);
+    }
+  }
+
   const [
     contents, contentMedia, usefulVotes, userBookmarks, userNotes, votes,
     deletionRequests, correctionRequests, contentCorrections,
@@ -3050,7 +3172,7 @@ export function renderDashboardHtml(): Response {
         </div>
       </section>
 
-      <!-- Contents Tab (Point 30, 31, 33) -->
+      <!-- Contents Tab (Point 30, 31, 33, D-02) -->
       <section id="tab-contents" style="display:none;">
         <div class="section-card">
           <div class="section-header">
@@ -3059,7 +3181,7 @@ export function renderDashboardHtml(): Response {
               <div style="font-size:0.8rem; color:var(--text-sec);">انقر على أي درس لعرض تفاصيله الأكاديمية وصوره بالكامل</div>
             </div>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="contentSearch" placeholder="بحث بعنوان الدرس أو الكاتب..." oninput="debounceContentSearch()">
+              <input type="text" class="search-input" id="contentSearchInput" placeholder="بحث بعنوان الدرس أو الكاتب..." oninput="debounceContentSearch()">
               <button class="action-btn" onclick="loadContents(0)">تحديث 🔄</button>
             </div>
           </div>
@@ -3086,13 +3208,13 @@ export function renderDashboardHtml(): Response {
         </div>
       </section>
 
-      <!-- Homework & Exams Tab (Point 31 & 33) -->
+      <!-- Homework & Exams Tab (Point 31, 33, D-05, D-06) -->
       <section id="tab-homeworks" style="display:none;">
         <div class="section-card">
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">📝 إدارة الواجبات المدرسية والاختبارات</h2>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="homeworkSearch" placeholder="بحث بالواجب أو المادة..." oninput="debounceHomeworkSearch()">
+              <input type="text" class="search-input" id="homeworkSearchInput" placeholder="بحث بالواجب أو المادة..." oninput="debounceHomeworkSearch()">
               <button class="action-btn" onclick="loadHomeworks(0); loadExams(0);">تحديث 🔄</button>
             </div>
           </div>
@@ -3105,30 +3227,39 @@ export function renderDashboardHtml(): Response {
                   <th>الشعبة / المادة</th>
                   <th>تاريخ الاستحقاق</th>
                   <th>الكاتب</th>
+                  <th>التفاصيل والصور</th>
                   <th>الإجراء</th>
                 </tr>
               </thead>
               <tbody id="homeworksTableBody">
-                <tr><td colspan="5" style="text-align:center;">جاري التحميل...</td></tr>
+                <tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>
               </tbody>
             </table>
           </div>
           <div id="homeworksPagination" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2rem;"></div>
 
-          <h3 style="font-size:0.95rem; color:var(--ruby); margin:1rem 0 0.5rem;">الاختبارات المجدولة:</h3>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin:1.5rem 0 0.5rem; flex-wrap:wrap; gap:0.5rem;">
+            <h3 style="font-size:0.95rem; color:var(--ruby); margin:0;">الاختبارات المجدولة:</h3>
+            <div class="filter-bar">
+              <input type="text" class="search-input" id="examSearchInput" placeholder="بحث بالاختبار أو المقرر..." oninput="debounceExamSearch()" style="width:220px;">
+              <button class="action-btn" onclick="loadExams(0)">تحديث 🔄</button>
+            </div>
+          </div>
           <div style="overflow-x:auto;">
             <table>
               <thead>
                 <tr>
                   <th>عنوان الاختبار</th>
-                  <th>الشعبة / المادة</th>
+                  <th>المادة</th>
+                  <th>الشعبة</th>
                   <th>تاريخ الاختبار</th>
+                  <th>نوع الاختبار</th>
                   <th>الكاتب</th>
                   <th>الإجراء</th>
                 </tr>
               </thead>
               <tbody id="examsTableBody">
-                <tr><td colspan="5" style="text-align:center;">جاري التحميل...</td></tr>
+                <tr><td colspan="7" style="text-align:center;">جاري التحميل...</td></tr>
               </tbody>
             </table>
           </div>
@@ -3227,13 +3358,23 @@ export function renderDashboardHtml(): Response {
         </div>
       </section>
 
-      <!-- Schedules Tab -->
+      <!-- Schedules Tab (D-04) -->
       <section id="tab-schedules" style="display:none;">
         <div class="section-card">
           <div class="section-header">
-            <h2 style="font-size:1.1rem; font-weight:800;">📅 الجداول المعتمدة وتصفير الحصص</h2>
-            <button class="action-btn" onclick="loadSchedules()">تحديث 🔄</button>
+            <div>
+              <h2 style="font-size:1.1rem; font-weight:800;">📅 الجداول الأسبوعية المعتمدة وتوزيع الحصص</h2>
+              <div style="font-size:0.8rem; color:var(--text-sec);">استعراض جداول الشعب بالشبكة الأسبوعية (الحصص والمواد والأوقات) وتصفيرها إدارياً</div>
+            </div>
+            <div class="filter-bar">
+              <select class="search-input" id="scheduleGroupFilter" onchange="onScheduleGroupFilterChanged(this.value)">
+                <option value="">جميع الشعب (نظرة عامة)</option>
+              </select>
+              <button class="action-btn" onclick="loadSchedules()">تحديث 🔄</button>
+            </div>
           </div>
+
+          <h3 style="font-size:0.95rem; color:var(--cyan); margin:1rem 0 0.5rem;">نسخ الجداول الفعالة لكل شعبة:</h3>
           <div style="overflow-x:auto;">
             <table>
               <thead>
@@ -3251,14 +3392,28 @@ export function renderDashboardHtml(): Response {
               </tbody>
             </table>
           </div>
+
+          <!-- Weekly Schedule Interactive Grid Container (D-04) -->
+          <div id="weeklyScheduleGridContainer" style="margin-top:2rem; display:none; background:rgba(0,0,0,0.25); border:1px solid var(--border); border-radius:12px; padding:1.25rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+              <h3 id="weeklyGridTitle" style="font-size:1rem; color:var(--emerald); margin:0; font-weight:800;">الجدول الأسبوعي للشعبة</h3>
+              <button class="action-btn" onclick="closeWeeklyGrid()" style="padding:0.3rem 0.75rem;">إغلاق الشبكة ✕</button>
+            </div>
+            <div id="weeklyGridContent" style="overflow-x:auto;">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
         </div>
       </section>
 
-      <!-- Decisions & Governance Tab -->
+      <!-- Decisions & Governance Tab (D-04) -->
       <section id="tab-decisions" style="display:none;">
         <div class="section-card">
           <div class="section-header">
-            <h2 style="font-size:1.1rem; font-weight:800;">🗳️ القرارات الجماعية والتصويتات (Governance Engine)</h2>
+            <div>
+              <h2 style="font-size:1.1rem; font-weight:800;">🗳️ القرارات الجماعية والتصويتات (Governance Engine)</h2>
+              <div style="font-size:0.8rem; color:var(--text-sec);">متابعة وتطبيق أو رفض القرارات المرفوعة من الطلاب والشعب إدارياً</div>
+            </div>
             <button class="action-btn" onclick="loadDecisions()">تحديث 🔄</button>
           </div>
           <div style="overflow-x:auto;">
@@ -3266,27 +3421,41 @@ export function renderDashboardHtml(): Response {
               <thead>
                 <tr>
                   <th>نوع القرار</th>
-                  <th>العنوان</th>
+                  <th>المبرر / الوصف</th>
                   <th>الشعبة</th>
-                  <th>الأصوات (موافق/معارض)</th>
+                  <th>الأصوات (موافق / معارض)</th>
                   <th>الحالة</th>
+                  <th>مقدم القرار</th>
                   <th>الإجراء الإداري المباشر</th>
                 </tr>
               </thead>
               <tbody id="decisionsTableBody">
-                <tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>
+                <tr><td colspan="7" style="text-align:center;">جاري التحميل...</td></tr>
               </tbody>
             </table>
           </div>
         </div>
       </section>
 
-      <!-- Live Chat Messages Tab -->
+      <!-- Live Chat Messages Tab (D-03) -->
       <section id="tab-chat" style="display:none;">
         <div class="section-card">
           <div class="section-header">
-            <h2 style="font-size:1.1rem; font-weight:800;">💬 المحادثات المباشرة للشعب والنوادي</h2>
-            <button class="action-btn" onclick="loadChatMessages(0)">تحديث 🔄</button>
+            <div>
+              <h2 style="font-size:1.1rem; font-weight:800;">💬 المحادثات المباشرة للشعب والنوادي</h2>
+              <div style="font-size:0.8rem; color:var(--text-sec);">عرض رسائل الشات بتسلسل زمني سليم مع تصفية الشعب والبحث الفوري</div>
+            </div>
+            <div class="filter-bar" style="display:flex; flex-wrap:wrap; gap:0.5rem;">
+              <select class="search-input" id="chatGroupFilter" onchange="loadChatMessages(0)">
+                <option value="">جميع الشعب والمجموعات</option>
+              </select>
+              <select class="search-input" id="chatOrderFilter" onchange="loadChatMessages(0)" style="width:140px;">
+                <option value="ASC">الأقدم أولاً (تسلسل زمني)</option>
+                <option value="DESC">الأحدث أولاً</option>
+              </select>
+              <input type="text" class="search-input" id="chatSearchInput" placeholder="بحث بنص الرسالة أو المرسل..." oninput="debounceChatSearch()" style="width:200px;">
+              <button class="action-btn" onclick="loadChatMessages(0)">تحديث 🔄</button>
+            </div>
           </div>
           <div style="overflow-x:auto;">
             <table>
@@ -3401,42 +3570,20 @@ export function renderDashboardHtml(): Response {
             </div>
           </div>
 
-          <!-- Two-Phase Purge Card (Point 34) -->
+          <!-- Two-Phase Purge Card (Point 34, D-01) -->
           <div style="background:rgba(239, 68, 68, 0.05); border:1px solid rgba(239, 68, 68, 0.3); border-radius:14px; padding:1.5rem;">
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem; flex-wrap:wrap; gap:0.5rem;">
               <div>
                 <h3 style="font-size:1.05rem; font-weight:800; color:var(--ruby);">💣 التصفير الكلي لبيانات المنظومة (Two-Phase Data Purge)</h3>
                 <p style="font-size:0.85rem; color:var(--text-sec); margin-top:0.25rem;">
                   إجراء أمني معتمد من مرحلتين: مسح كافة السجلات التشغيلية والأكاديمية وحسابات المستخدمين مع تدوير جيل البيانات <code>data_generation</code> لإعادة ضبط تطبيقات الطلاب تلقائياً.
                 </p>
               </div>
-              <button class="action-btn" onclick="previewPurge()" style="background:rgba(239, 68, 68, 0.2); border-color:var(--ruby); color:white; padding:0.6rem 1rem;">
+              <button class="action-btn" onclick="openPurgeModal()" style="background:rgba(239, 68, 68, 0.2); border-color:var(--ruby); color:white; padding:0.6rem 1.25rem; font-weight:700;">
                 المرحلة 1: فحص ومعاينة السجلات المتأثرة 🔍
               </button>
             </div>
-
-            <!-- Preview Results Box -->
-            <div id="purgePreviewBox" style="display:none; background:rgba(0,0,0,0.4); border-radius:10px; padding:1rem; margin-bottom:1.25rem;">
-              <h4 style="font-size:0.9rem; color:var(--amber); margin-bottom:0.75rem;">📊 إحصائية السجلات المرشحة للحذف النهائي:</h4>
-              <div id="purgeStatsGrid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:0.75rem; margin-bottom:1rem;"></div>
-
-              <div style="border-top:1px dashed rgba(239,68,68,0.4); padding-top:1rem; margin-top:1rem;">
-                <h4 style="font-size:0.95rem; color:var(--ruby); font-weight:800; margin-bottom:0.75rem;">المرحلة 2: التأكيد النهائي والتنفيذ الفعلي</h4>
-                <div style="display:flex; flex-direction:column; gap:0.75rem; max-width:500px;">
-                  <div>
-                    <label style="font-size:0.8rem; color:var(--text-sec); display:block; margin-bottom:0.3rem;">1. أدخل مفتاح المالك السري للتأكيد:</label>
-                    <input type="password" id="purgeSecretInput" class="form-control" placeholder="TANWEER_OWNER_SECRET">
-                  </div>
-                  <div>
-                    <label style="font-size:0.8rem; color:var(--text-sec); display:block; margin-bottom:0.3rem;">2. اكتب كلمة "YES" للتأكيد النهائي:</label>
-                    <input type="text" id="purgeConfirmInput" class="form-control" placeholder="YES" style="text-align:center; font-weight:800; letter-spacing:2px; color:var(--ruby);" oninput="checkPurgeConfirmMatch()">
-                  </div>
-                  <button id="executePurgeBtn" class="action-btn reject" onclick="executePurge()" disabled style="padding:0.75rem; font-size:0.9rem; font-weight:800; opacity:0.5; cursor:not-allowed;">
-                    تنفيذ التصفير الشامل وتدوير جيل البيانات فورياً 💣
-                  </button>
-                </div>
-              </div>
-            </div>
+            <div style="font-size:0.75rem; color:var(--amber);">⚠️ يتطلب هذا الإجراء إدخال مفتاح المالك السري <code>TANWEER_OWNER_SECRET</code> مسبقاً قبل المعاينة ولا يتم تخزينه في المتصفح.</div>
           </div>
         </div>
       </section>
@@ -3664,6 +3811,154 @@ export function renderDashboardHtml(): Response {
     </div>
   </div>
 
+  <!-- Homework Detail Modal (D-06) -->
+  <div class="modal-overlay" id="homeworkDetailModal">
+    <div class="modal-card" style="max-width:720px; max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem;">
+        <div>
+          <div class="modal-title" id="hdTitle" style="font-size:1.3rem;">تفاصيل الواجب المدرسي ومرفقاته 📝</div>
+          <div class="modal-sub" id="hdSubjectGroup">-</div>
+        </div>
+        <button class="action-btn" onclick="closeHomeworkDetailModal()" style="font-size:1rem; padding:0.4rem 0.8rem;">✕</button>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:0.5rem; margin-bottom:1rem; font-size:0.8rem;">
+        <div style="background:rgba(255,255,255,0.02); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+          <div style="color:var(--text-muted);">تاريخ الدرس</div>
+          <div id="hdStudyDate" style="color:var(--cyan); font-weight:700; margin-top:0.2rem;">-</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.02); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+          <div style="color:var(--text-muted);">تاريخ الاستحقاق</div>
+          <div id="hdDueDate" style="color:var(--amber); font-weight:700; margin-top:0.2rem;">-</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.02); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+          <div style="color:var(--text-muted);">نوع المهمة</div>
+          <div id="hdTaskType" style="color:var(--emerald); font-weight:700; margin-top:0.2rem;">-</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.02); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+          <div style="color:var(--text-muted);">الكاتب / الأستاذ</div>
+          <div id="hdAuthor" style="color:var(--text-pri); font-weight:700; margin-top:0.2rem;">-</div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-bottom:1rem; font-size:0.8rem;">
+        <div style="background:rgba(255,255,255,0.02); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+          <div style="color:var(--text-muted);">أرقام الصفحات المطلوبة:</div>
+          <div id="hdPages" style="color:var(--text-pri); font-weight:700; margin-top:0.2rem;">-</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.02); padding:0.6rem; border-radius:8px; border:1px solid var(--border);">
+          <div style="color:var(--text-muted);">أرقام الأسئلة / التمارين:</div>
+          <div id="hdQuestions" style="color:var(--text-pri); font-weight:700; margin-top:0.2rem;">-</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:1.25rem;">
+        <h4 style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.4rem;">تفاصيل وتعليمات الواجب:</h4>
+        <div id="hdDetails" style="background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:10px; padding:1rem; font-size:0.9rem; line-height:1.6; white-space:pre-wrap; max-height:200px; overflow-y:auto;">-</div>
+      </div>
+
+      <div>
+        <h4 style="font-size:0.85rem; color:var(--cyan); margin-bottom:0.6rem;">🖼️ الصور والمرفقات (<span id="hdMediaCount">0</span>):</h4>
+        <div id="hdMediaGrid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:0.75rem;">
+          <div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">لا توجد صور مرفقة</div>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top:1.5rem; display:flex; justify-content:space-between;">
+        <button id="hdDeleteBtn" class="action-btn reject" style="font-size:0.85rem;">حذف الواجب 🗑️</button>
+        <button class="action-btn" onclick="closeHomeworkDetailModal()">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dedicated System Purge Modal (D-01) -->
+  <div class="modal-overlay" id="purgeModal" style="z-index:9990;">
+    <div class="modal-card" style="max-width:780px; max-height:92vh; overflow-y:auto; border-color:rgba(239, 68, 68, 0.4); box-shadow:0 10px 40px rgba(239, 68, 68, 0.2);">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem;">
+        <div>
+          <div class="modal-title" style="font-size:1.3rem; color:var(--ruby);">💣 تصفير المنظومة وتدوير جيل البيانات (Two-Phase Purge)</div>
+          <div class="modal-sub">إجراء استثنائي لمسح البيانات التشغيلية وإعادة ضبط أجهزة الطلاب تلقائياً</div>
+        </div>
+        <button class="action-btn" onclick="closePurgeModal()" style="font-size:1rem; padding:0.4rem 0.8rem;">✕</button>
+      </div>
+
+      <!-- Stage 1: Secret Verification -->
+      <div id="purgeStage1Section" style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:12px; padding:1.25rem; margin-bottom:1.25rem;">
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+          <span style="background:var(--ruby); color:white; border-radius:50%; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:800;">1</span>
+          <h4 style="font-size:0.95rem; color:var(--text-pri); font-weight:700; margin:0;">المرحلة الأولى: إدخال المفتاح السري المعتمد للمالك</h4>
+        </div>
+        <p style="font-size:0.82rem; color:var(--text-sec); margin-bottom:1rem;">
+          لحماية المنظومة من التصفير العرضي، لن يتم فحص أو معاينة الجداول حتى يتم التحقق من صحة مفتاح المالك السري أولاً. (لا يتم حفظ المفتاح في التخزين المحلي).
+        </p>
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+          <input type="password" id="purgeStage1Secret" class="form-control" placeholder="أدخل TANWEER_OWNER_SECRET" style="flex:1; min-width:240px;">
+          <button id="purgeStage1Btn" class="action-btn approve" onclick="submitPurgeStage1()" style="padding:0.6rem 1.25rem;">
+            التحقق وفحص السجلات المتأثرة 🔍
+          </button>
+        </div>
+        <div id="purgeStage1Error" style="color:var(--ruby); font-size:0.85rem; margin-top:0.75rem; display:none;"></div>
+      </div>
+
+      <!-- Stage 2: Preview & Execution (Rendered after secret verified) -->
+      <div id="purgeStage2Section" style="display:none;">
+        <div style="background:rgba(0, 229, 255, 0.05); border:1px solid rgba(0, 229, 255, 0.2); border-radius:12px; padding:1.25rem; margin-bottom:1.25rem;">
+          <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+            <span style="background:var(--emerald); color:white; border-radius:50%; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:800;">✓</span>
+            <h4 style="font-size:0.95rem; color:var(--emerald); font-weight:700; margin:0;">تم التحقق من هوية المالك بنجاح — معاينة نطاق الحذف والتصفير</h4>
+          </div>
+
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.75rem; margin-bottom:1rem;">
+            <div style="background:rgba(0,0,0,0.3); padding:0.75rem; border-radius:8px; border:1px solid var(--border);">
+              <div style="font-size:0.75rem; color:var(--text-muted);">إجمالي السجلات المستهدفة</div>
+              <div id="purgeTotalRecordsDisplay" style="font-size:1.4rem; font-weight:900; color:var(--ruby); margin-top:0.25rem;">0</div>
+            </div>
+            <div style="background:rgba(0,0,0,0.3); padding:0.75rem; border-radius:8px; border:1px solid var(--border);">
+              <div style="font-size:0.75rem; color:var(--text-muted);">الجيل الجديد المقترح</div>
+              <div id="purgeNextGenDisplay" style="font-size:0.9rem; font-weight:700; color:var(--cyan); margin-top:0.4rem; font-family:monospace;">-</div>
+            </div>
+          </div>
+
+          <div style="margin-bottom:1rem;">
+            <div style="font-size:0.85rem; font-weight:700; color:var(--text-pri); margin-bottom:0.5rem;">جداول يتم مسحها بالكامل (31 جدول):</div>
+            <div id="purgeFullyPurgedGrid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:0.4rem; max-height:160px; overflow-y:auto; padding:0.5rem; background:rgba(0,0,0,0.2); border-radius:8px;"></div>
+          </div>
+
+          <div style="margin-bottom:1rem;">
+            <div style="font-size:0.85rem; font-weight:700; color:var(--amber); margin-bottom:0.5rem;">جداول يتم مسحها جزئياً مع استثناء وحفظ حساب وعضويات المالك:</div>
+            <div id="purgePartiallyPurgedBox" style="font-size:0.8rem; color:var(--text-sec); background:rgba(0,0,0,0.2); padding:0.6rem; border-radius:8px;"></div>
+          </div>
+
+          <div>
+            <div style="font-size:0.85rem; font-weight:700; color:var(--emerald); margin-bottom:0.5rem;">جداول محفوظة:</div>
+            <div id="purgePreservedBox" style="font-size:0.8rem; color:var(--text-sec); background:rgba(0,0,0,0.2); padding:0.6rem; border-radius:8px;"></div>
+          </div>
+        </div>
+
+        <!-- Phase 2: Confirmation & Execution -->
+        <div style="background:rgba(239, 68, 68, 0.08); border:1px solid rgba(239, 68, 68, 0.4); border-radius:12px; padding:1.25rem;">
+          <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+            <span style="background:var(--ruby); color:white; border-radius:50%; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:800;">2</span>
+            <h4 style="font-size:0.95rem; color:var(--ruby); font-weight:800; margin:0;">المرحلة الثانية: تأكيد التنفيذ الفعلي النهائي</h4>
+          </div>
+          <p style="font-size:0.82rem; color:var(--text-sec); margin-bottom:1rem;">
+            اكتب كلمة <strong>YES</strong> بحروف كبيرة للتأكيد والبدء الفوري في تفريغ الجداول وتدوير <code>data_generation</code>:
+          </p>
+          <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+            <input type="text" id="purgeConfirmYesInput" class="form-control" placeholder="اكتب YES للتأكيد" style="max-width:200px; text-align:center; font-weight:900; letter-spacing:2px; color:var(--ruby);" oninput="checkPurgeConfirmMatch()">
+            <button id="executePurgeFinalBtn" class="action-btn reject" onclick="executePurgeFinal()" disabled style="padding:0.75rem 1.5rem; font-weight:800; opacity:0.5; cursor:not-allowed;">
+              تنفيذ التصفير الشامل وتدوير الجيل فورياً 💣
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top:1.5rem;">
+        <button class="action-btn" onclick="closePurgeModal()">إغلاق وإلغاء</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Media Lightbox Modal -->
   <div class="modal-overlay" id="mediaLightboxModal" style="z-index:9999;" onclick="closeMediaLightbox()">
     <div style="position:relative; max-width:90vw; max-height:90vh; text-align:center;" onclick="event.stopPropagation()">
@@ -3773,7 +4068,7 @@ export function renderDashboardHtml(): Response {
       const tabs = [
         'overview', 'users', 'roles', 'teachers', 'moderators', 'admins', 'groups', 
         'requests', 'academic', 'contents', 'homeworks', 'exams', 'events', 'holidays',
-        'issues', 'chat', 'audit', 'system'
+        'issues', 'schedules', 'decisions', 'chat', 'corrections', 'sql', 'audit', 'system'
       ];
       tabs.forEach(t => {
         const el = document.getElementById('tab-' + t);
@@ -3791,12 +4086,16 @@ export function renderDashboardHtml(): Response {
         requests: 'طلبات ترقية الرتب (Role Requests)',
         academic: 'النشاط الأكاديمي والمحتوى',
         contents: 'سجل الدروس المنهجية والمرفقات',
-        homeworks: 'سجل الواجبات المدرسية',
+        homeworks: 'سجل الواجبات المدرسية والاختبارات',
         exams: 'سجل الاختبارات والتقييمات',
         events: 'الأحداث والمناسبات المدرسية',
         holidays: 'إدارة الإجازات المدرسية الرسمية',
         issues: 'بلاغات ومشاكل الطلاب والمحتوى',
+        schedules: 'الجداول المعتمدة وتوزيع الحصص',
+        decisions: 'القرارات الجماعية والتصويتات (Governance)',
         chat: 'رسائل نقاش الشعب والساحات',
+        corrections: 'طلبات تصحيح المحتوى والدروس',
+        sql: 'استوديو SQL المباشر لقاعدة البيانات (D1 Studio)',
         audit: 'سجل الرقابة والعمليات الإدارية',
         system: 'إعدادات النظام وتصفير البيانات'
       };
@@ -3811,12 +4110,16 @@ export function renderDashboardHtml(): Response {
       if (tabId === 'requests') loadRequests();
       if (tabId === 'groups') loadGroups();
       if (tabId === 'contents') loadContents(0);
-      if (tabId === 'homeworks') loadHomeworks(0);
+      if (tabId === 'homeworks') { loadHomeworks(0); loadExams(0); }
       if (tabId === 'exams') loadExams(0);
       if (tabId === 'events') loadEvents(0);
       if (tabId === 'holidays') loadHolidays();
       if (tabId === 'issues') loadIssues(0);
-      if (tabId === 'chat') loadChatMessages(0);
+      if (tabId === 'schedules') loadSchedules();
+      if (tabId === 'decisions') loadDecisions();
+      if (tabId === 'chat') { loadGroupsForChat(); loadChatMessages(0); }
+      if (tabId === 'corrections') loadCorrections();
+      if (tabId === 'sql') document.getElementById('sqlQuery')?.focus();
       if (tabId === 'audit') loadAudit(0);
     }
 
@@ -3865,6 +4168,31 @@ export function renderDashboardHtml(): Response {
     function debounceUserSearch() {
       clearTimeout(searchTimeout);
       searchTimeout = setTimeout(() => loadUsers(0), 300);
+    }
+
+    function debounceContentSearch() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => loadContents(0), 300);
+    }
+
+    function debounceHomeworkSearch() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => loadHomeworks(0), 300);
+    }
+
+    function debounceExamSearch() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => loadExams(0), 300);
+    }
+
+    function debounceEventSearch() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => loadEvents(0), 300);
+    }
+
+    function debounceChatSearch() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => loadChatMessages(0), 300);
     }
 
     async function loadUsers(offset = 0) {
@@ -4442,13 +4770,13 @@ export function renderDashboardHtml(): Response {
       pagination.contents.offset = offset;
       const q = document.getElementById('contentSearchInput')?.value || '';
       const tbody = document.getElementById('contentsTableBody');
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جاري جلب الدروس...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">جاري جلب الدروس...</td></tr>';
 
       try {
         const res = await fetch(\`/api/dashboard/contents?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.contents.limit}\`);
         const data = await res.json();
         if (!data.success || !data.contents.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد دروس مطابقة</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--text-sec);">لا توجد دروس مطابقة</td></tr>';
           renderPaginationControls('contentsPagination', 0, pagination.contents.limit, 0, 0, 'loadContents');
           return;
         }
@@ -4463,25 +4791,47 @@ export function renderDashboardHtml(): Response {
           const safeDate = escapeHtml(c.study_date || '-');
           const safeMediaCount = escapeHtml(c.media_count);
           const safeAuthor = escapeHtml(c.author_name);
+          const viewsCount = c.views_count ?? c.view_count ?? 0;
+          const isPinned = c.is_pinned === 1 || c.is_pinned === true;
 
           return \`<tr>
             <td>
               <strong style="cursor:pointer; color:var(--cyan); text-decoration:underline;" data-id="\${safeId}" onclick="openContentDetailModal(this.getAttribute('data-id'))">\${safeTitle}</strong>
             </td>
-            <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${safeSubject}</span></td>
-            <td>\${safeGroup}</td>
+            <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${safeSubject} (\${safeGroup})</span></td>
             <td><code>\${safeDate}</code></td>
             <td>
               <span class="badge" style="background:rgba(255,255,255,0.05);">🖼️ \${safeMediaCount}</span>
             </td>
+            <td><code>👁️ \${viewsCount}</code></td>
             <td>\${safeAuthor}</td>
             <td>
-              <button class="action-btn" data-id="\${safeId}" onclick="openContentDetailModal(this.getAttribute('data-id'))">عرض المرفقات والتفاصيل 📖</button>
+              \${isPinned 
+                ? \`<button class="action-btn" style="background:rgba(0,229,255,0.2); color:var(--cyan); font-weight:bold; border:1px solid var(--cyan);" onclick="togglePinContent('\${safeId}')">مثبت 📌</button>\`
+                : \`<button class="action-btn" style="background:rgba(255,255,255,0.05); color:var(--text-muted);" onclick="togglePinContent('\${safeId}')">تثبيت 📍</button>\`}
+            </td>
+            <td>
+              <button class="action-btn" data-id="\${safeId}" onclick="openContentDetailModal(this.getAttribute('data-id'))">عرض التفاصيل 📖</button>
             </td>
           </tr>\`;
         }).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--ruby);">فشل تحميل الدروس</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--ruby);">فشل تحميل الدروس</td></tr>';
+      }
+    }
+
+    async function togglePinContent(contentId) {
+      try {
+        const res = await fetch('/api/dashboard/contents/' + encodeURIComponent(contentId) + '/pin', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.isPinned ? 'تم تثبيت الدرس بنجاح 📌' : 'تم إلغاء تثبيت الدرس بنجاح');
+          loadContents(pagination.contents.offset);
+        } else {
+          alert(data.message || 'فشل تحديث حالة التثبيت');
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء الاتصال بالخادم');
       }
     }
 
@@ -4554,7 +4904,7 @@ export function renderDashboardHtml(): Response {
       document.getElementById('mediaLightboxModal').style.display = 'none';
     }
 
-    // Homeworks Loader (Point 31 & 33)
+    // Homeworks Loader (Point 31 & 33 & D-06)
     async function loadHomeworks(offset = 0) {
       pagination.homeworks.offset = offset;
       const q = document.getElementById('homeworkSearchInput')?.value || '';
@@ -4565,58 +4915,177 @@ export function renderDashboardHtml(): Response {
         const res = await fetch(\`/api/dashboard/homeworks?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.homeworks.limit}\`);
         const data = await res.json();
         if (!data.success || !data.homeworks.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:color; color:var(--text-sec);">لا توجد واجبات مطابقة</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد واجبات مطابقة</td></tr>';
           renderPaginationControls('homeworksPagination', 0, pagination.homeworks.limit, 0, 0, 'loadHomeworks');
           return;
         }
 
         renderPaginationControls('homeworksPagination', data.offset || 0, data.limit || pagination.homeworks.limit, data.count, data.totalCount, 'loadHomeworks');
 
-        tbody.innerHTML = data.homeworks.map(h => \`
-          <tr>
-            <td><strong>\${escapeHtml(h.title)}</strong></td>
-            <td>\${escapeHtml(h.subject_name || h.subject_id)}</td>
-            <td>\${escapeHtml(h.group_name || h.group_id)}</td>
-            <td><code>\${escapeHtml(h.study_date || '-')}</code></td>
-            <td><code style="color:var(--amber);">\${escapeHtml(h.due_date || '-')}</code></td>
-            <td>\${escapeHtml(h.author_name)}</td>
-          </tr>
-        \`).join('');
+        tbody.innerHTML = data.homeworks.map(h => {
+          const safeId = escapeHtml(h.id);
+          const safeTitle = escapeHtml(h.title);
+          const safeSubject = escapeHtml(h.subject_name || h.subject_id);
+          const safeGroup = escapeHtml(h.group_name || h.group_id);
+          const safeDueDate = escapeHtml(h.due_date || '-');
+          const safeAuthor = escapeHtml(h.author_name);
+
+          return \`<tr>
+            <td><strong>\${safeTitle}</strong></td>
+            <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${safeGroup} / \${safeSubject}</span></td>
+            <td><code style="color:var(--amber);">\${safeDueDate}</code></td>
+            <td>\${safeAuthor}</td>
+            <td>
+              <button class="action-btn" onclick="openHomeworkDetailModal('\${safeId}')">التفاصيل والصور 📖</button>
+            </td>
+            <td>
+              <button class="action-btn reject" onclick="deleteHomework('\${safeId}', '\${safeTitle}')">حذف ✕</button>
+            </td>
+          </tr>\`;
+        }).join('');
       } catch (e) {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--ruby);">فشل تحميل الواجبات</td></tr>';
       }
     }
 
-    // Exams Loader (Point 31 & 33)
+    async function openHomeworkDetailModal(hwId) {
+      document.getElementById('homeworkDetailModal').style.display = 'flex';
+      document.getElementById('hwModalTitle').textContent = 'جاري التحميل...';
+      document.getElementById('hwModalGroupSubject').textContent = '';
+      document.getElementById('hwModalDueDate').textContent = '-';
+      document.getElementById('hwModalAuthor').textContent = '-';
+      document.getElementById('hwModalDetails').textContent = '';
+      document.getElementById('hwModalMediaCount').textContent = '0';
+      document.getElementById('hwModalMediaGrid').innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">جاري جلب المرفقات...</div>';
+
+      try {
+        const res = await fetch('/api/dashboard/homeworks/' + encodeURIComponent(hwId));
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.message || 'فشل جلب تفاصيل الواجب');
+          closeHomeworkDetailModal();
+          return;
+        }
+
+        const hw = data.homework || {};
+        const media = data.media || [];
+        const subjectName = hw.subject_name || hw.subject_id || '';
+        const groupName = hw.group_name || hw.group_id || '';
+
+        document.getElementById('hwModalTitle').textContent = (hw.title || '') + ' 📝';
+        document.getElementById('hwModalGroupSubject').textContent = \`الشعبة: \${groupName} | المادة: \${subjectName}\`;
+        document.getElementById('hwModalDueDate').textContent = hw.due_date || '-';
+        document.getElementById('hwModalAuthor').textContent = hw.author_name || '-';
+        document.getElementById('hwModalDetails').textContent = hw.details || 'لا يوجد شرح تفصيلي إضافي';
+        document.getElementById('hwModalMediaCount').textContent = media.length;
+
+        const grid = document.getElementById('hwModalMediaGrid');
+        if (media.length) {
+          grid.innerHTML = media.map(m => {
+            const safeUrl = encodeURI(m.media_url || m.url || '');
+            const safeMime = escapeHtml(m.mime_type || 'صورة');
+            return \`
+              <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.4); text-align:center; cursor:pointer;" data-url="\${escapeHtml(safeUrl)}" onclick="openMediaLightbox(this.getAttribute('data-url'))">
+                <img src="\${escapeHtml(safeUrl)}" alt="مرفق الواجب" style="width:100%; height:90px; object-fit:cover; display:block;">
+                <div style="padding:0.3rem; font-size:0.7rem; color:var(--text-muted); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
+                  \${safeMime}
+                </div>
+              </div>
+            \`;
+          }).join('');
+        } else {
+          grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">لا توجد صور أو مرفقات مرفوعة مع هذا الواجب</div>';
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء تحميل بيانات الواجب');
+        closeHomeworkDetailModal();
+      }
+    }
+
+    function closeHomeworkDetailModal() {
+      document.getElementById('homeworkDetailModal').style.display = 'none';
+    }
+
+    async function deleteHomework(hwId, title) {
+      if (!confirm(\`هل أنت متأكد من حذف الواجب الدراسي (\${title})؟\`)) return;
+      try {
+        const res = await fetch('/api/dashboard/homeworks/' + encodeURIComponent(hwId), { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('تم حذف الواجب بنجاح');
+          loadHomeworks(pagination.homeworks.offset);
+          loadStats();
+        } else {
+          alert(data.message || 'فشل حذف الواجب');
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء الاتصال بالخادم');
+      }
+    }
+
+    // Exams Loader (Point 31 & 33 & D-05)
     async function loadExams(offset = 0) {
       pagination.exams.offset = offset;
       const q = document.getElementById('examSearchInput')?.value || '';
       const tbody = document.getElementById('examsTableBody');
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">جاري التحميل...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جاري التحميل...</td></tr>';
 
       try {
         const res = await fetch(\`/api/dashboard/exams?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.exams.limit}\`);
         const data = await res.json();
         if (!data.success || !data.exams.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد اختبارات مسجلة</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد اختبارات مسجلة</td></tr>';
           renderPaginationControls('examsPagination', 0, pagination.exams.limit, 0, 0, 'loadExams');
           return;
         }
 
         renderPaginationControls('examsPagination', data.offset || 0, data.limit || pagination.exams.limit, data.count, data.totalCount, 'loadExams');
 
-        tbody.innerHTML = data.exams.map(x => \`
-          <tr>
-            <td><strong>\${escapeHtml(x.title)}</strong></td>
+        const examTypeLabels = {
+          'MIDTERM': 'منتصف الفصل 📝',
+          'FINAL': 'نهائي 🎓',
+          'QUIZ': 'قصير ⚡',
+          'ORAL': 'شفهي 🗣️',
+          'PRACTICAL': 'عملي 🧪'
+        };
+
+        tbody.innerHTML = data.exams.map(x => {
+          const safeId = escapeHtml(x.id);
+          const safeTitle = escapeHtml(x.title);
+          const rawType = (x.exam_type || x.type || '').toUpperCase();
+          const displayType = examTypeLabels[rawType] || escapeHtml(rawType || 'اختبار');
+
+          return \`<tr>
+            <td><strong>\${safeTitle}</strong></td>
             <td>\${escapeHtml(x.subject_name || x.subject_id)}</td>
             <td>\${escapeHtml(x.group_name || x.group_id)}</td>
             <td><code style="color:var(--ruby);">\${escapeHtml(x.exam_date || '-')}</code></td>
-            <td><span class="badge" style="background:rgba(255,255,255,0.05);">\${escapeHtml(x.type)}</span></td>
+            <td><span class="badge" style="background:rgba(255,255,255,0.05);">\${displayType}</span></td>
             <td>\${escapeHtml(x.author_name)}</td>
-          </tr>
-        \`).join('');
+            <td>
+              <button class="action-btn reject" onclick="deleteExam('\${safeId}', '\${safeTitle}')">حذف ✕</button>
+            </td>
+          </tr>\`;
+        }).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--ruby);">فشل تحميل الاختبارات</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--ruby);">فشل تحميل الاختبارات</td></tr>';
+      }
+    }
+
+    async function deleteExam(examId, title) {
+      if (!confirm(\`هل أنت متأكد من حذف الاختبار (\${title})؟\`)) return;
+      try {
+        const res = await fetch('/api/dashboard/exams/' + encodeURIComponent(examId), { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('تم حذف الاختبار بنجاح');
+          loadExams(pagination.exams.offset);
+          loadStats();
+        } else {
+          alert(data.message || 'فشل حذف الاختبار');
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء الاتصال بالخادم');
       }
     }
 
@@ -4798,15 +5267,259 @@ export function renderDashboardHtml(): Response {
       }
     }
 
-    // Chat Messages Loader (Point 31 & 33)
+    // Schedules Management (D-04)
+    async function loadSchedules() {
+      const tbody = document.getElementById('schedulesTableBody');
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">جاري جلب الجداول الدراسية...</td></tr>';
+      
+      const groupFilter = document.getElementById('scheduleGroupFilter');
+      if (groupFilter && groupFilter.options.length <= 1) {
+        try {
+          const gRes = await fetch('/api/dashboard/groups');
+          const gData = await gRes.json();
+          if (gData.groups) {
+            groupFilter.innerHTML = '<option value="">-- جميع الشعب الدراسية --</option>';
+            gData.groups.forEach(g => {
+              groupFilter.innerHTML += \`<option value="\${escapeHtml(g.id)}">\${escapeHtml(g.name)} (\${escapeHtml(g.grade || '')})</option>\`;
+            });
+          }
+        } catch (e) {}
+      }
+
+      const selectedGroupId = groupFilter?.value || '';
+      try {
+        const res = await fetch('/api/dashboard/schedules' + (selectedGroupId ? '?groupId=' + encodeURIComponent(selectedGroupId) : ''));
+        const data = await res.json();
+        if (!data.success || !data.groups || !data.groups.length) {
+          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-sec);">لا توجد جداول مسجلة للشعب المحددة</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.groups.map(g => {
+          const safeId = escapeHtml(g.id);
+          const safeName = escapeHtml(g.name);
+          const totalSlots = g.totalSlots || (g.slots ? g.slots.length : 0);
+
+          return \`<tr>
+            <td><strong>\${safeName}</strong> <span style="font-size:0.75rem; color:var(--text-sec);">(\${escapeHtml(g.grade || '')})</span></td>
+            <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${totalSlots} حصة مسجلة</span></td>
+            <td><code>الأحد - الخميس (7 حصص يومياً)</code></td>
+            <td>
+              <button class="action-btn" onclick="viewWeeklyGrid('\${safeId}', '\${safeName}')">عرض الجدول الأسبوعي 📅</button>
+              <button class="action-btn reject" onclick="resetSchedule('\${safeId}', '\${safeName}')">تصفير الجدول ⚠️</button>
+            </td>
+          </tr>\`;
+        }).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--ruby);">فشل تحميل الجداول الدراسية</td></tr>';
+      }
+    }
+
+    function onScheduleGroupFilterChanged() {
+      closeWeeklyGrid();
+      loadSchedules();
+    }
+
+    async function viewWeeklyGrid(groupId, groupName) {
+      const container = document.getElementById('weeklyScheduleGridContainer');
+      const titleElem = document.getElementById('weeklyGridGroupTitle');
+      const tableBody = document.getElementById('weeklyGridTableBody');
+      if (titleElem) titleElem.textContent = 'الجدول الأسبوعي المعتمد: ' + groupName;
+      if (tableBody) tableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;">جاري جلب وتوزيع حصص الأسبوع...</td></tr>';
+      container.style.display = 'block';
+      container.scrollIntoView({ behavior: 'smooth' });
+
+      try {
+        const res = await fetch('/api/dashboard/schedules?groupId=' + encodeURIComponent(groupId));
+        const data = await res.json();
+        const slots = data.slots || [];
+        const days = [
+          { key: 0, name: 'الأحد' },
+          { key: 1, name: 'الإثنين' },
+          { key: 2, name: 'الثلاثاء' },
+          { key: 3, name: 'الأربعاء' },
+          { key: 4, name: 'الخميس' }
+        ];
+
+        let rowsHtml = '';
+        days.forEach(day => {
+          rowsHtml += \`<tr><td><strong>\${day.name}</strong></td>\`;
+          for (let slotNum = 1; slotNum <= 7; slotNum++) {
+            const slotItem = slots.find(s => Number(s.day_of_week) === day.key && Number(s.slot_number) === slotNum);
+            if (slotItem) {
+              const subject = escapeHtml(slotItem.subject_name || slotItem.subject_id || 'مادة');
+              const color = slotItem.color_hex || 'var(--cyan)';
+              const timeStr = (slotItem.start_time && slotItem.end_time) ? \`<div style="font-size:0.65rem; color:var(--text-muted);">\${escapeHtml(slotItem.start_time)}-\${escapeHtml(slotItem.end_time)}</div>\` : '';
+              rowsHtml += \`<td><span class="badge" style="background:rgba(255,255,255,0.04); border:1px solid \${escapeHtml(color)}; color:\${escapeHtml(color)};">\${subject}</span>\${timeStr}</td>\`;
+            } else {
+              rowsHtml += '<td style="color:var(--text-muted); font-size:0.75rem;">-</td>';
+            }
+          }
+          rowsHtml += '</tr>';
+        });
+
+        tableBody.innerHTML = rowsHtml;
+      } catch (e) {
+        tableBody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--ruby);">فشل تحميل الحصص الأسبوعية</td></tr>';
+      }
+    }
+
+    function closeWeeklyGrid() {
+      const container = document.getElementById('weeklyScheduleGridContainer');
+      if (container) container.style.display = 'none';
+    }
+
+    async function resetSchedule(groupId, groupName) {
+      if (!confirm(\`هل أنت متأكد من رغبتك في تصفير وحذف جميع الحصص المجدولة لشعبة (\${groupName})؟\`)) return;
+      try {
+        const res = await fetch('/api/dashboard/schedules/' + encodeURIComponent(groupId) + '/reset', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('تم تصفير جدول الشعبة بنجاح ⚠️');
+          closeWeeklyGrid();
+          loadSchedules();
+        } else {
+          alert(data.message || 'فشل تصفير الجدول');
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء الاتصال بالخادم');
+      }
+    }
+
+    // Decisions & Voting Governance (D-04)
+    async function loadDecisions() {
+      const tbody = document.getElementById('decisionsTableBody');
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جاري جلب القرارات والتصويتات...</td></tr>';
+      try {
+        const res = await fetch('/api/dashboard/decisions');
+        const data = await res.json();
+        if (!data.success || !data.decisions || !data.decisions.length) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد قرارات أو تصويتات مسجلة</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.decisions.map(d => {
+          const safeId = escapeHtml(d.id);
+          const reqType = escapeHtml(d.request_type || d.type || 'قرار');
+          const reason = escapeHtml(d.reason || d.description || '-');
+          const group = escapeHtml(d.group_name || d.group_id || 'عام');
+          const yesVotes = d.votes_for ?? d.yes_votes ?? 0;
+          const noVotes = d.votes_against ?? d.no_votes ?? 0;
+          const status = (d.status || 'PENDING').toUpperCase();
+          const creator = escapeHtml(d.creator_name || d.created_by || '-');
+
+          let statusBadge = \`<span class="badge" style="background:rgba(255,160,0,0.1); color:var(--amber); border:1px solid var(--amber);">\${status}</span>\`;
+          if (status === 'APPROVED' || status === 'APPLIED') {
+            statusBadge = '<span class="badge" style="background:rgba(0,230,118,0.1); color:var(--emerald); border:1px solid var(--emerald);">معتمد ✅</span>';
+          } else if (status === 'REJECTED') {
+            statusBadge = '<span class="badge" style="background:rgba(239,83,80,0.1); color:var(--ruby); border:1px solid var(--ruby);">مرفوض ✕</span>';
+          }
+
+          const canAction = status === 'PENDING';
+
+          return \`<tr>
+            <td><strong style="color:var(--cyan);">\${reqType}</strong></td>
+            <td>\${reason}</td>
+            <td>\${group}</td>
+            <td><span style="color:var(--emerald);">👍 \${yesVotes}</span> / <span style="color:var(--ruby);">👎 \${noVotes}</span></td>
+            <td>\${statusBadge}</td>
+            <td>\${creator}</td>
+            <td>
+              \${canAction ? \`
+                <button class="action-btn" onclick="applyDecision('\${safeId}')">اعتماد وتطبيق ✅</button>
+                <button class="action-btn reject" onclick="rejectDecision('\${safeId}')">رفض ✕</button>
+              \` : '<span style="color:var(--text-muted); font-size:0.75rem;">تم البت فيه</span>'}
+            </td>
+          </tr>\`;
+        }).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--ruby);">فشل تحميل القرارات</td></tr>';
+      }
+    }
+
+    async function applyDecision(id) {
+      if (!confirm('هل أنت متأكد من اعتماد وتطبيق هذا القرار رسمياً؟')) return;
+      try {
+        const res = await fetch('/api/dashboard/decisions/' + encodeURIComponent(id) + '/apply', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('تم اعتماد القرار وتطبيقه بنجاح ✅');
+          loadDecisions();
+        } else {
+          alert(data.message || 'فشل تطبيق القرار');
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء الاتصال بالخادم');
+      }
+    }
+
+    async function rejectDecision(id) {
+      if (!confirm('هل أنت متأكد من رفض هذا القرار رسمياً؟')) return;
+      try {
+        const res = await fetch('/api/dashboard/decisions/' + encodeURIComponent(id) + '/reject', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('تم رفض القرار وإغلاقه');
+          loadDecisions();
+        } else {
+          alert(data.message || 'فشل رفض القرار');
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء الاتصال بالخادم');
+      }
+    }
+
+    // Content Corrections (D-04)
+    async function loadCorrections() {
+      const tbody = document.getElementById('correctionsTableBody');
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">جاري جلب مقترحات التصحيح...</td></tr>';
+      try {
+        const res = await fetch('/api/dashboard/corrections');
+        const data = await res.json();
+        if (!data.success || !data.corrections || !data.corrections.length) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا توجد مقترحات تصحيح مسجلة</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.corrections.map(c => \`<tr>
+          <td><strong>\${escapeHtml(c.target_title || c.target_id || '-')}</strong></td>
+          <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${escapeHtml(c.correction_type || c.target_type || 'محتوى')}</span></td>
+          <td>\${escapeHtml(c.suggested_text || c.note || c.correction_text || '-')}</td>
+          <td>\${escapeHtml(c.user_name || c.author_name || c.created_by || '-')}</td>
+          <td><code>\${escapeHtml(new Date(c.created_at).toLocaleString('ar-EG'))}</code></td>
+        </tr>\`).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--ruby);">فشل تحميل مقترحات التصحيح</td></tr>';
+      }
+    }
+
+    // Chat Messages Loader & Filter (Point 31, 33 & D-03)
+    async function loadGroupsForChat() {
+      const sel = document.getElementById('chatGroupFilter');
+      if (!sel || sel.options.length > 1) return;
+      try {
+        const res = await fetch('/api/dashboard/groups');
+        const data = await res.json();
+        if (data.groups) {
+          sel.innerHTML = '<option value="">-- جميع الشعب --</option>';
+          data.groups.forEach(g => {
+            sel.innerHTML += \`<option value="\${escapeHtml(g.id)}">\${escapeHtml(g.name)}</option>\`;
+          });
+        }
+      } catch (e) {}
+    }
+
     async function loadChatMessages(offset = 0) {
       pagination.chat.offset = offset;
+      await loadGroupsForChat();
       const q = document.getElementById('chatSearchInput')?.value || '';
+      const groupId = document.getElementById('chatGroupFilter')?.value || '';
+      const order = document.getElementById('chatOrderFilter')?.value || 'DESC';
       const tbody = document.getElementById('chatTableBody');
       tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">جاري جلب الرسائل...</td></tr>';
 
       try {
-        const res = await fetch(\`/api/dashboard/chat-messages?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.chat.limit}\`);
+        const res = await fetch(\`/api/dashboard/chat-messages?q=\${encodeURIComponent(q)}&groupId=\${encodeURIComponent(groupId)}&order=\${encodeURIComponent(order)}&offset=\${offset}&limit=\${pagination.chat.limit}\`);
         const data = await res.json();
         if (!data.success || !data.messages.length) {
           tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا توجد رسائل مطابقة</td></tr>';
@@ -4816,21 +5529,101 @@ export function renderDashboardHtml(): Response {
 
         renderPaginationControls('chatPagination', data.offset || 0, data.limit || pagination.chat.limit, data.count, data.totalCount, 'loadChatMessages');
 
-        tbody.innerHTML = data.messages.map(m => \`
-          <tr>
+        tbody.innerHTML = data.messages.map(m => {
+          const safeId = escapeHtml(m.id);
+          const safeUserId = escapeHtml(m.user_id || m.sender_id || '');
+          const safeUserName = escapeHtml(m.full_name || m.user_name || m.sender_name || 'طالب');
+          const safeGroupName = escapeHtml(m.group_name || m.group_id || '-');
+          const safeMessage = escapeHtml(m.message || m.content || m.text || '');
+          const safeDate = escapeHtml(new Date(m.created_at || m.timestamp).toLocaleString('ar-EG'));
+
+          return \`<tr>
             <td>
-              <strong style="cursor:pointer; color:var(--cyan); text-decoration:underline;" data-id="\${escapeHtml(m.user_id)}" onclick="openUserDetailModal(this.getAttribute('data-id'))">\${escapeHtml(m.user_name)}</strong>
+              <strong style="cursor:pointer; color:var(--cyan); text-decoration:underline;" data-id="\${safeUserId}" onclick="openUserDetailModal(this.getAttribute('data-id'))">\${safeUserName}</strong>
             </td>
-            <td>\${escapeHtml(m.group_name || m.group_id)}</td>
-            <td>\${escapeHtml(m.message || m.content || '')}</td>
-            <td>\${escapeHtml(new Date(m.created_at).toLocaleString('ar-EG'))}</td>
+            <td><span class="badge" style="background:rgba(255,255,255,0.05);">\${safeGroupName}</span></td>
+            <td style="max-width:300px; word-break:break-word;">\${safeMessage}</td>
+            <td><code>\${safeDate}</code></td>
             <td>
-              <button class="action-btn" data-id="\${escapeHtml(m.user_id)}" onclick="openUserDetailModal(this.getAttribute('data-id'))">الملف 👤</button>
+              <button class="action-btn reject" onclick="deleteChatMessage('\${safeId}')">حذف ✕</button>
             </td>
-          </tr>
-        \`).join('');
+          </tr>\`;
+        }).join('');
       } catch (e) {
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--ruby);">فشل تحميل رسائل النقاش</td></tr>';
+      }
+    }
+
+    async function deleteChatMessage(msgId) {
+      if (!confirm('هل أنت متأكد من حذف هذه الرسالة من النقاش العام؟')) return;
+      try {
+        const res = await fetch('/api/dashboard/chat-messages/' + encodeURIComponent(msgId), { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('تم حذف الرسالة بنجاح');
+          loadChatMessages(pagination.chat.offset);
+          loadStats();
+        } else {
+          alert(data.message || 'فشل حذف الرسالة');
+        }
+      } catch (e) {
+        alert('حدث خطأ أثناء الاتصال بالخادم');
+      }
+    }
+
+    // SQL Studio Runner (D-04)
+    async function runSqlConsole() {
+      const query = document.getElementById('sqlQueryInput')?.value.trim();
+      const output = document.getElementById('sqlConsoleOutput');
+      if (!query) {
+        alert('الرجاء كتابة استعلام SQL أولاً');
+        return;
+      }
+
+      output.innerHTML = '<div style="color:var(--text-sec); font-size:0.85rem;">جاري تنفيذ الاستعلام في قاعدة البيانات...</div>';
+
+      try {
+        const res = await fetch('/api/dashboard/sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          output.innerHTML = \`<div style="color:var(--ruby); font-family:monospace; font-size:0.85rem; padding:0.5rem; background:rgba(239,83,80,0.1); border-radius:6px;">خطأ في التنفيذ: \${escapeHtml(data.message || 'فشل الاستعلام')}</div>\`;
+          return;
+        }
+
+        if (data.isMutation) {
+          output.innerHTML = \`<div style="color:var(--emerald); font-family:monospace; font-size:0.85rem; padding:0.5rem; background:rgba(0,230,118,0.1); border-radius:6px;">تم تنفيذ أمر التعديل بنجاح! تم التأثير على \${data.changes || 0} صف.</div>\`;
+          return;
+        }
+
+        const rows = data.results || data.rows || [];
+        if (!rows.length) {
+          output.innerHTML = '<div style="color:var(--text-sec); font-size:0.85rem;">تم تنفيذ الاستعلام بنجاح. لا توجد نتائج معادة (0 صفوف).</div>';
+          return;
+        }
+
+        const cols = Object.keys(rows[0]);
+        let tableHtml = \`<div style="margin-bottom:0.4rem; font-size:0.8rem; color:var(--cyan);">عدد السجلات المعادة: \${rows.length}</div>\`;
+        tableHtml += '<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:0.75rem; font-family:monospace;"><thead><tr style="background:rgba(255,255,255,0.05);">';
+        cols.forEach(col => {
+          tableHtml += \`<th style="padding:0.4rem 0.6rem; border:1px solid var(--border); text-align:right;">\${escapeHtml(col)}</th>\`;
+        });
+        tableHtml += '</tr></thead><tbody>';
+        rows.forEach(r => {
+          tableHtml += '<tr>';
+          cols.forEach(col => {
+            const val = r[col];
+            tableHtml += \`<td style="padding:0.4rem 0.6rem; border:1px solid var(--border); text-align:right;">\${escapeHtml(val === null ? 'NULL' : String(val))}</td>\`;
+          });
+          tableHtml += '</tr>';
+        });
+        tableHtml += '</tbody></table></div>';
+        output.innerHTML = tableHtml;
+      } catch (e) {
+        output.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ أثناء الاتصال بالخادم</div>';
       }
     }
 
@@ -4864,16 +5657,57 @@ export function renderDashboardHtml(): Response {
       }
     }
 
-    // 2-Phase System Purge (Point 34)
-    async function previewPurge() {
-      const secret = document.getElementById('purgeSecretInput').value.trim();
-      const container = document.getElementById('purgePreviewResult');
+    // 2-Phase System Purge Modal & Execution (D-01)
+    let currentPurgeSecret = ''; // In-memory only; NEVER written to localStorage/sessionStorage
+
+    function openPurgeModal() {
+      currentPurgeSecret = '';
+      const secretInput = document.getElementById('purgeModalSecretInput');
+      if (secretInput) secretInput.value = '';
+      const errBox = document.getElementById('purgeStage1Error');
+      if (errBox) { errBox.style.display = 'none'; errBox.textContent = ''; }
+      const stage1 = document.getElementById('purgeModalStage1');
+      if (stage1) stage1.style.display = 'block';
+      const stage2 = document.getElementById('purgeModalStage2');
+      if (stage2) stage2.style.display = 'none';
+      const confirmInput = document.getElementById('purgeConfirmInput');
+      if (confirmInput) confirmInput.value = '';
+      const execBtn = document.getElementById('executePurgeBtn');
+      if (execBtn) {
+        execBtn.disabled = true;
+        execBtn.style.opacity = '0.5';
+        execBtn.style.cursor = 'not-allowed';
+      }
+      document.getElementById('purgeModal').style.display = 'flex';
+    }
+
+    function closePurgeModal() {
+      currentPurgeSecret = '';
+      const secretInput = document.getElementById('purgeModalSecretInput');
+      if (secretInput) secretInput.value = '';
+      const confirmInput = document.getElementById('purgeConfirmInput');
+      if (confirmInput) confirmInput.value = '';
+      document.getElementById('purgeModal').style.display = 'none';
+    }
+
+    async function submitPurgeStage1() {
+      const secretInput = document.getElementById('purgeModalSecretInput');
+      const errBox = document.getElementById('purgeStage1Error');
+      const secret = (secretInput?.value || '').trim();
+
       if (!secret) {
-        alert('الرجاء إدخال الرمز السري الفائق للمالك أولاً');
+        if (errBox) {
+          errBox.style.display = 'block';
+          errBox.textContent = 'الرمز السري الفائق إلزامي للمتابعة إلى المعاينة.';
+        } else {
+          alert('الرجاء إدخال الرمز السري الفائق');
+        }
         return;
       }
 
-      container.innerHTML = '<div style="color:var(--text-sec); font-size:0.85rem;">جاري جلب إحصاءات الجداول المستهدفة...</div>';
+      if (errBox) { errBox.style.display = 'none'; errBox.textContent = ''; }
+      const submitBtn = document.getElementById('submitPurgeStage1Btn');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'جاري التحقق من السر وفحص الجداول...'; }
 
       try {
         const res = await fetch('/api/dashboard/system/purge/preview', {
@@ -4882,34 +5716,103 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ secret })
         });
         const data = await res.json();
+
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'التحقق والمتابعة للمعاينة 🔒'; }
+
         if (!data.success) {
-          container.innerHTML = \`<div style="color:var(--ruby); font-size:0.85rem;">\${escapeHtml(data.message || 'فشل الفحص')}</div>\`;
+          currentPurgeSecret = '';
+          if (errBox) {
+            errBox.style.display = 'block';
+            errBox.textContent = data.message || 'فشل التحقق من الرمز السري أو جلب المعاينة';
+          } else {
+            alert(data.message || 'فشل التحقق من الرمز السري');
+          }
           return;
         }
 
+        // Secret verified! Store in memory variable only, wipe DOM input immediately
+        currentPurgeSecret = secret;
+        if (secretInput) secretInput.value = '';
+
+        // Transition from Stage 1 to Stage 2
+        document.getElementById('purgeModalStage1').style.display = 'none';
+        document.getElementById('purgeModalStage2').style.display = 'block';
+
         const counts = data.counts || data.preview || {};
-        let html = '<div style="font-size:0.8rem; color:var(--text-sec); margin-bottom:0.4rem;">السجلات المرشحة للحذف والإفراغ بالكامل:</div><div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:0.4rem; font-size:0.8rem;">';
-        for (const [tbl, count] of Object.entries(counts)) {
-          html += \`<div style="background:rgba(255,255,255,0.02); padding:0.4rem; border-radius:6px; border:1px solid var(--border); display:flex; justify-content:space-between;">
-            <span>\${escapeHtml(tbl)}</span>
-            <strong style="color:var(--ruby);">\${escapeHtml(String(count))}</strong>
-          </div>\`;
+        const fullyPurged = data.fullyPurgedTables || [
+          'contents', 'content_media', 'homeworks', 'homework_media', 'exams',
+          'events', 'schedule_slots', 'chat_messages', 'notifications', 'school_holidays',
+          'decisions', 'decision_votes', 'reports', 'attendance', 'badges',
+          'user_badges', 'correction_suggestions', 'rate_limits', 'sync_mutations',
+          'outbox_mutations', 'groups', 'subjects', 'content_reads', 'content_views',
+          'content_useful', 'teacher_assistants', 'admin_audit_logs', 'system_audit_logs',
+          'role_audit_logs', 'sync_generation_history', 'audit_logs'
+        ];
+
+        let summaryHtml = \`
+          <div style="background:rgba(0,229,255,0.05); border:1px solid rgba(0,229,255,0.3); border-radius:8px; padding:0.8rem; margin-bottom:1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:0.85rem; color:var(--text-sec);">جيل البيانات الحالي: <code>\${escapeHtml(String(data.currentGeneration || 'غير محدد'))}</code></span>
+              <span style="font-size:0.85rem; color:var(--cyan); font-weight:bold;">جيل البيانات الجديد: <code>\${escapeHtml(String(data.nextGeneration || ''))}</code></span>
+            </div>
+          </div>
+
+          <div style="margin-bottom:0.8rem;">
+            <div style="font-size:0.85rem; font-weight:bold; color:var(--ruby); margin-bottom:0.4rem;">
+              🗑️ جداول سيتم تصفيرها وحذفها بالكامل (31 جدولاً):
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:0.4rem; font-size:0.75rem; max-height:160px; overflow-y:auto; padding:0.4rem; background:rgba(0,0,0,0.3); border-radius:6px; border:1px solid var(--border);">
+        \`;
+
+        for (const tbl of fullyPurged) {
+          const count = counts[tbl] !== undefined ? counts[tbl] : (counts[tbl] ?? 0);
+          summaryHtml += \`
+            <div style="display:flex; justify-content:space-between; padding:0.25rem 0.4rem; background:rgba(255,255,255,0.02); border-radius:4px;">
+              <span>\${escapeHtml(tbl)}</span>
+              <strong style="color:var(--ruby);">\${escapeHtml(String(count))}</strong>
+            </div>
+          \`;
         }
-        html += \`</div>
-          <div style="margin-top:0.6rem; font-size:0.75rem; color:var(--cyan);">
-            جيل البيانات الجديد المقترح: <code>\${escapeHtml(String(data.nextGeneration || ''))}</code>
+
+        summaryHtml += \`
+            </div>
+          </div>
+
+          <div style="margin-bottom:0.8rem;">
+            <div style="font-size:0.85rem; font-weight:bold; color:var(--amber); margin-bottom:0.4rem;">
+              ⚠️ جداول سيتم تصفيرها جزئياً (جدولان):
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem; font-size:0.75rem;">
+              <div style="background:rgba(255,160,0,0.05); border:1px solid rgba(255,160,0,0.2); padding:0.4rem; border-radius:4px;">
+                <strong>users</strong>: يتم الإبقاء على حساب المالك وحذف باقي الحسابات
+              </div>
+              <div style="background:rgba(255,160,0,0.05); border:1px solid rgba(255,160,0,0.2); padding:0.4rem; border-radius:4px;">
+                <strong>device_sync_tokens</strong>: يتم إلغاء وإبطال جميع رموز الأجهزة القديمة
+              </div>
+            </div>
+          </div>
+
+          <div style="background:rgba(0,230,118,0.05); border:1px solid rgba(0,230,118,0.2); border-radius:6px; padding:0.5rem 0.8rem; font-size:0.75rem; color:var(--emerald);">
+            🛡️ جداول محفوظة بالكامل دون مساس: <strong>schema_migrations</strong> (لحماية بنية وتاريخ مخطط قاعدة البيانات)
           </div>
         \`;
-        container.innerHTML = html;
-        document.getElementById('purgeExecutionBlock').style.display = 'block';
+
+        document.getElementById('purgeStage2Summary').innerHTML = summaryHtml;
       } catch (e) {
-        container.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'التحقق والمتابعة للمعاينة 🔒'; }
+        if (errBox) {
+          errBox.style.display = 'block';
+          errBox.textContent = 'حدث خطأ في الاتصال بالخادم';
+        } else {
+          alert('حدث خطأ في الاتصال بالخادم');
+        }
       }
     }
 
     function checkPurgeConfirmMatch() {
-      const txt = document.getElementById('purgeConfirmInput').value.trim();
+      const txt = (document.getElementById('purgeConfirmInput')?.value || '').trim();
       const btn = document.getElementById('executePurgeBtn');
+      if (!btn) return;
       if (txt === 'YES') {
         btn.disabled = false;
         btn.style.opacity = '1';
@@ -4921,31 +5824,47 @@ export function renderDashboardHtml(): Response {
       }
     }
 
-    async function executePurge() {
-      const secret = document.getElementById('purgeSecretInput').value.trim();
-      const confirmation = document.getElementById('purgeConfirmInput').value.trim();
-      if (confirmation !== 'YES') return;
-
-      if (!confirm('تحذير نهائي: سيتم تصفير جميع جداول المحتوى والرسائل وتدوير جيل البيانات، مما سيجبر جميع تطبيقات الطلاب على تصفير قواعد البيانات المحلية فورياً. هل تريد المتابعة قطيعاً؟')) {
+    async function executePurgeFinal() {
+      const confirmation = (document.getElementById('purgeConfirmInput')?.value || '').trim();
+      if (confirmation !== 'YES' || !currentPurgeSecret) {
+        alert('يجب كتابة كلمة YES بالحروف الإنجليزية الكبيرة للتأكيد.');
         return;
       }
+
+      if (!confirm('تحذير نهائي وقاطع:\nسيتم حذف جميع البيانات والملفات المسجلة وإصدار جيل بيانات جديد، مما سيجبر جميع تطبيقات الطلاب على مسح التخزين المحلي فور المزامنة.\nهل أنت متأكد تماماً من التنفيذ؟')) {
+        return;
+      }
+
+      const execBtn = document.getElementById('executePurgeBtn');
+      if (execBtn) { execBtn.disabled = true; execBtn.textContent = 'جاري تصفير قاعدة البيانات وتوليد الجيل الجديد...'; }
+
+      const secretToSend = currentPurgeSecret;
+      // Wipe from in-memory variable immediately
+      currentPurgeSecret = '';
 
       try {
         const res = await fetch('/api/dashboard/system/purge', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ secret, confirmation, confirmationText: confirmation })
+          body: JSON.stringify({
+            secret: secretToSend,
+            confirmation: 'YES',
+            confirmationText: 'YES'
+          })
         });
         const data = await res.json();
         if (data.success) {
-          const purgedCount = Array.isArray(data.tablesPurged) ? data.tablesPurged.length : (data.totalTables || 21);
-          alert(\`تم تصفير البيانات بنجاح!\nالجيل الجديد: \${data.newGeneration}\nتم تفريغ \${purgedCount} جدول\`);
+          const purgedCount = Array.isArray(data.tablesPurged) ? data.tablesPurged.length : (data.totalTables || 31);
+          alert(\`تم تصفير البيانات بنجاح!\nالجيل الجديد: \${data.newGeneration}\nتم تفريغ \${purgedCount} جدولاً.\`);
+          closePurgeModal();
           window.location.reload();
         } else {
           alert(data.message || 'فشلت عملية التصفير');
+          if (execBtn) { execBtn.disabled = false; execBtn.textContent = 'تأكيد التصفير الشامل والنهائي للنظام ⚠️'; }
         }
       } catch (e) {
-        alert('حدث خطأ أثناء تنفيذ التصفير');
+        alert('حدث خطأ أثناء تنفيذ عملية التصفير');
+        if (execBtn) { execBtn.disabled = false; execBtn.textContent = 'تأكيد التصفير الشامل والنهائي للنظام ⚠️'; }
       }
     }
 

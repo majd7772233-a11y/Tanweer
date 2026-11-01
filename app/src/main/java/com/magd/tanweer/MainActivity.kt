@@ -42,6 +42,10 @@ class MainActivity : ComponentActivity() {
             .build()
         coil.Coil.setImageLoader(imageLoader)
 
+        try {
+            com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext)
+        } catch (_: Exception) {}
+
         handleNotificationIntent(intent)
         setContent {
             val fontScale by viewModel.fontSizeScale.collectAsStateWithLifecycle()

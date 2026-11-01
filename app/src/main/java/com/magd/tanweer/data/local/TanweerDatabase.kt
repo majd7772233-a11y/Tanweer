@@ -29,7 +29,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SyncMetaEntity::class,
         OutboxEntity::class,
         CorrectionRequestEntity::class,
-        DailyPlanEntity::class
+        DailyPlanEntity::class,
+        BookExtractedPageEntity::class
     ],
     version = 13,
     exportSchema = false
@@ -62,6 +63,11 @@ abstract class TanweerDatabase : RoomDatabase() {
                 "`id` TEXT NOT NULL, `userId` TEXT NOT NULL, `homeworkId` TEXT, " +
                 "`title` TEXT NOT NULL, `subjectName` TEXT, `planDate` TEXT NOT NULL, " +
                 "`isCompleted` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+            )
+            database.execSQL(
+                "CREATE TABLE IF NOT EXISTS `book_extracted_pages` (" +
+                "`id` TEXT NOT NULL, `bookId` TEXT NOT NULL, `pageIndex` INTEGER NOT NULL, " +
+                "`extractedText` TEXT NOT NULL, `extractionType` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))"
             )
             try {
                 // If legacy table daily_plans exists, migrate rows to cached_daily_plan

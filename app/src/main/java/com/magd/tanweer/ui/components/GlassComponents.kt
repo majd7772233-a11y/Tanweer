@@ -81,11 +81,17 @@ fun GlassCard(
     )
 }
 
+enum class GlassButtonSize {
+    NORMAL,
+    COMPACT
+}
+
 @Composable
 fun GlassButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    size: GlassButtonSize = GlassButtonSize.NORMAL,
     icon: ImageVector? = null,
     color: Color = CyanAccent,
     textColor: Color = TextOnAccent,
@@ -100,6 +106,13 @@ fun GlassButton(
         label = "btnScale"
     )
 
+    val minHeight = if (size == GlassButtonSize.COMPACT) 36.dp else 48.dp
+    val horizontalPadding = if (size == GlassButtonSize.COMPACT) 12.dp else 20.dp
+    val verticalPadding = if (size == GlassButtonSize.COMPACT) 6.dp else 12.dp
+    val fontSize = if (size == GlassButtonSize.COMPACT) 12.sp else 15.sp
+    val iconSize = if (size == GlassButtonSize.COMPACT) 16.dp else 20.dp
+    val shape = if (size == GlassButtonSize.COMPACT) RoundedCornerShape(10.dp) else RoundedCornerShape(16.dp)
+
     Button(
         onClick = onClick,
         enabled = enabled,
@@ -110,12 +123,12 @@ fun GlassButton(
             disabledContainerColor = color.copy(alpha = 0.4f),
             disabledContentColor = textColor.copy(alpha = 0.6f)
         ),
-        shape = RoundedCornerShape(16.dp),
+        shape = shape,
         modifier = modifier
             .scale(scale)
-            .heightIn(min = 48.dp)
+            .defaultMinSize(minHeight = minHeight)
             .testTag(testTag),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+        contentPadding = PaddingValues(horizontal = horizontalPadding, vertical = verticalPadding)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -125,14 +138,16 @@ fun GlassButton(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(iconSize)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(if (size == GlassButtonSize.COMPACT) 4.dp else 8.dp))
             }
             Text(
                 text = text,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = fontSize,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                lineHeight = if (size == GlassButtonSize.COMPACT) 16.sp else 20.sp
             )
         }
     }
@@ -143,16 +158,24 @@ fun GlassOutlinedButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    size: GlassButtonSize = GlassButtonSize.NORMAL,
     icon: ImageVector? = null,
     borderColor: Color = GlassBorder,
     textColor: Color = TextPrimary,
     enabled: Boolean = true,
     testTag: String = "glass_outline_button"
 ) {
+    val minHeight = if (size == GlassButtonSize.COMPACT) 36.dp else 48.dp
+    val horizontalPadding = if (size == GlassButtonSize.COMPACT) 12.dp else 16.dp
+    val verticalPadding = if (size == GlassButtonSize.COMPACT) 6.dp else 10.dp
+    val fontSize = if (size == GlassButtonSize.COMPACT) 12.sp else 14.sp
+    val iconSize = if (size == GlassButtonSize.COMPACT) 16.dp else 18.dp
+    val shape = if (size == GlassButtonSize.COMPACT) RoundedCornerShape(10.dp) else RoundedCornerShape(16.dp)
+
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        shape = RoundedCornerShape(16.dp),
+        shape = shape,
         border = BorderStroke(1.dp, if (enabled) borderColor else borderColor.copy(alpha = 0.3f)),
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = GlassSurfaceLight,
@@ -160,9 +183,9 @@ fun GlassOutlinedButton(
             disabledContentColor = textColor.copy(alpha = 0.4f)
         ),
         modifier = modifier
-            .heightIn(min = 48.dp)
+            .defaultMinSize(minHeight = minHeight)
             .testTag(testTag),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+        contentPadding = PaddingValues(horizontal = horizontalPadding, vertical = verticalPadding)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -172,14 +195,16 @@ fun GlassOutlinedButton(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(iconSize)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(if (size == GlassButtonSize.COMPACT) 4.dp else 6.dp))
             }
             Text(
                 text = text,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
+                fontSize = fontSize,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                lineHeight = if (size == GlassButtonSize.COMPACT) 16.sp else 20.sp
             )
         }
     }

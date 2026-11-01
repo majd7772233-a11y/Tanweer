@@ -37,7 +37,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.ExamItem
+import com.magd.tanweer.data.model.Permission
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.data.model.hasPermission
 import com.magd.tanweer.data.notifications.TanweerNotificationManager
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.SubScreen
@@ -72,10 +74,22 @@ fun ExamsScreen(
     var examToDelete by remember { mutableStateOf<ExamItem?>(null) }
 
     val todayDateStr = remember { TanweerViewModel.getTodayDateString() }
+    val canDeleteExams = remember(currentUser) {
+        currentUser?.hasPermission(Permission.MODERATE_EXAM) == true
+    }
+
+    var selectedTypeFilter by remember { mutableStateOf<String?>(null) }
+    val filteredExams = remember(exams, selectedTypeFilter) {
+        if (selectedTypeFilter != null) {
+            exams.filter { it.examType == selectedTypeFilter }
+        } else {
+            exams
+        }
+    }
 
     // Grouping by Month (Point 17: Monthly structure & organization)
-    val examsByMonth = remember(exams) {
-        exams.groupBy { getMonthKey(it.examDate) }.toSortedMap()
+    val examsByMonth = remember(filteredExams) {
+        filteredExams.groupBy { getMonthKey(it.examDate) }.toSortedMap()
     }
     val allMonthKeys = remember(examsByMonth) { examsByMonth.keys.toList() }
     var selectedMonthFilter by remember { mutableStateOf<String?>(null) } // null = "جميع الأشهر"
@@ -228,6 +242,51 @@ fun ExamsScreen(
                     }
                 }
 
+                // Exam Type Filter Tabs (شهري، شفهي، كويز، نصفي، نهائي)
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            null to "جميع الأنواع",
+                            "MONTHLY" to "شهري 📝",
+                            "ORAL" to "شفهي 🗣️",
+                            "QUIZ" to "كويز ⚡",
+                            "MIDTERM" to "نصفي 📑",
+                            "FINAL" to "نهائي 🏆"
+                        ).forEach { (typeKey, typeLabel) ->
+                            val isTypeSelected = selectedTypeFilter == typeKey
+                            val typeCount = if (typeKey == null) exams.size else exams.count { it.examType == typeKey }
+                            val displayLabel = "$typeLabel ($typeCount)"
+                            val chipColor = when (typeKey) {
+                                "ORAL" -> CyanAccent
+                                "QUIZ" -> WarmAmber
+                                "MIDTERM" -> EmeraldGreen
+                                "FINAL" -> Color(0xFFFFB74D)
+                                else -> RubyRed
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isTypeSelected) chipColor.copy(alpha = 0.25f) else MidnightSurface)
+                                    .border(1.dp, if (isTypeSelected) chipColor else GlassBorderSubtle, RoundedCornerShape(12.dp))
+                                    .clickable { selectedTypeFilter = typeKey }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = displayLabel,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isTypeSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isTypeSelected) chipColor else TextSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Render Monthly Sections (Point 17)
                 val displayedMonths = if (selectedMonthFilter != null) {
                     examsByMonth.filterKeys { it == selectedMonthFilter }
@@ -293,6 +352,7 @@ fun ExamsScreen(
                         CanvasExamsTableBoard(
                             exams = monthExams,
                             todayDateStr = todayDateStr,
+                            canDelete = canDeleteExams,
                             onToggleDone = { examId, currentDone ->
                                 viewModel.toggleExamCompletion(examId, !currentDone)
                             },
@@ -541,6 +601,7 @@ fun ExamsScreen(
 fun CanvasExamsTableBoard(
     exams: List<ExamItem>,
     todayDateStr: String,
+    canDelete: Boolean = false,
     onToggleDone: (examId: String, currentDone: Boolean) -> Unit,
     onRowClick: (ExamItem) -> Unit,
     onDeleteClick: (ExamItem) -> Unit
@@ -573,14 +634,18 @@ fun CanvasExamsTableBoard(
                 Text(text = "الأستاذ / القاعة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(120.dp))
                 Text(text = "الفصول المقررة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(140.dp))
                 Text(text = "المراجعة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, textAlign = TextAlign.Center, modifier = Modifier.width(85.dp))
-                Text(text = "حذف", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, textAlign = TextAlign.Center, modifier = Modifier.width(44.dp))
+                if (canDelete) {
+                    Text(text = "حذف", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, textAlign = TextAlign.Center, modifier = Modifier.width(44.dp))
+                }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
             // Table Rows
             exams.forEachIndexed { index, exam ->
-                val isDone = exam.isCompleted || isExamDatePassed(exam.examDate, todayDateStr)
+                val isReviewed = exam.isCompleted
+                val isPassed = isExamDatePassed(exam.examDate, todayDateStr)
+                val isToday = exam.examDate == todayDateStr
                 val dayName = remember(exam.examDate) { getArabicDayOfWeek(exam.examDate) }
                 val teacherOrHall = remember(exam.notes) {
                     if (!exam.notes.isNullOrBlank()) exam.notes.take(18) else "أستاذ المادة"
@@ -589,7 +654,13 @@ fun CanvasExamsTableBoard(
                     if (!exam.requiredChapters.isNullOrBlank()) exam.requiredChapters.take(22) else "المقرر كامل"
                 }
 
-                val rowColor = if (isDone) Color(0x1500E676) else if (index % 2 == 0) GlassSurface else GlassSurfaceLight
+                val rowColor = when {
+                    isReviewed -> Color(0x1800E676)
+                    isToday -> Color(0x18FFD600)
+                    isPassed -> Color(0x0CFFFFFF)
+                    index % 2 == 0 -> GlassSurface
+                    else -> GlassSurfaceLight
+                }
 
                 Box(
                     modifier = Modifier
@@ -597,7 +668,15 @@ fun CanvasExamsTableBoard(
                         .padding(vertical = 3.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(rowColor)
-                        .border(0.5.dp, if (isDone) EmeraldGreen.copy(alpha = 0.4f) else GlassBorderSubtle, RoundedCornerShape(10.dp))
+                        .border(
+                            0.5.dp,
+                            when {
+                                isReviewed -> EmeraldGreen.copy(alpha = 0.5f)
+                                isToday -> WarmAmber.copy(alpha = 0.5f)
+                                else -> GlassBorderSubtle
+                            },
+                            RoundedCornerShape(10.dp)
+                        )
                         .clickable { onRowClick(exam) }
                         .padding(horizontal = 10.dp, vertical = 9.dp)
                 ) {
@@ -610,7 +689,7 @@ fun CanvasExamsTableBoard(
                             text = "${index + 1}",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isDone) EmeraldGreen else TextSecondary,
+                            color = if (isReviewed) EmeraldGreen else TextSecondary,
                             modifier = Modifier.width(32.dp)
                         )
 
@@ -627,7 +706,7 @@ fun CanvasExamsTableBoard(
                                         text = exam.subjectName,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isDone) EmeraldGreen else TextPrimary,
+                                        color = if (isReviewed) EmeraldGreen else TextPrimary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -644,14 +723,36 @@ fun CanvasExamsTableBoard(
                             }
                         }
 
-                        // Day & Date
+                        // Day & Date with Schedule Status Indicator
                         Column(modifier = Modifier.width(130.dp)) {
-                            Text(
-                                text = dayName,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isDone) TextSecondary else WarmAmber
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = dayName,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = when {
+                                        isToday -> WarmAmber
+                                        isReviewed -> EmeraldGreen
+                                        else -> TextPrimary
+                                    }
+                                )
+                                val statusLabel = when {
+                                    isToday -> "اليوم 📌"
+                                    isPassed -> "منقضي ⌛"
+                                    else -> "قادم ⏳"
+                                }
+                                val statusColor = when {
+                                    isToday -> WarmAmber
+                                    isPassed -> TextMuted
+                                    else -> CyanAccent
+                                }
+                                Text(
+                                    text = statusLabel,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = statusColor
+                                )
+                            }
                             Text(
                                 text = exam.examDate,
                                 fontSize = 10.sp,
@@ -679,28 +780,30 @@ fun CanvasExamsTableBoard(
                             modifier = Modifier.width(140.dp)
                         )
 
-                        // Smart Status Box (Point 19: real toggle)
+                        // Smart Status Box (Personal Review Toggle)
                         Box(
                             modifier = Modifier.width(85.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             CanvasSmartStatusBadge(
-                                isDone = isDone,
-                                onClick = { onToggleDone(exam.id, isDone) }
+                                isDone = isReviewed,
+                                onClick = { onToggleDone(exam.id, isReviewed) }
                             )
                         }
 
-                        // Delete Action
-                        IconButton(
-                            onClick = { onDeleteClick(exam) },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DeleteOutline,
-                                contentDescription = "حذف",
-                                tint = RubyRed.copy(alpha = 0.7f),
-                                modifier = Modifier.size(18.dp)
-                            )
+                        // Delete Action (Only visible for teachers / admins)
+                        if (canDelete) {
+                            IconButton(
+                                onClick = { onDeleteClick(exam) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = "حذف",
+                                    tint = RubyRed.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -712,6 +815,7 @@ fun CanvasExamsTableBoard(
 @Composable
 fun ExamTypePill(examType: String) {
     val (label, color) = when (examType) {
+        "ORAL" -> "شفهي 🗣️" to CyanAccent
         "QUIZ" -> "كويز ⚡" to WarmAmber
         "MIDTERM" -> "نصفي 📑" to EmeraldGreen
         "FINAL" -> "نهائي 🏆" to Color(0xFFFFB74D)
@@ -915,6 +1019,7 @@ fun AddExamSheet(
                 )
                 GlassPill(
                     text = when (examType) {
+                        "ORAL" -> "اختبار شفهي 🗣️"
                         "QUIZ" -> "تسميع / كويز ⚡"
                         "MIDTERM" -> "اختبار نصفي 📑"
                         "FINAL" -> "اختبار نهائي 🏆"
@@ -927,11 +1032,14 @@ fun AddExamSheet(
 
             // Exam Type Selection Chips (Point 18)
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 listOf(
                     "MONTHLY" to "شهري 📝",
+                    "ORAL" to "شفهي 🗣️",
                     "QUIZ" to "كويز ⚡",
                     "MIDTERM" to "نصفي 📑",
                     "FINAL" to "نهائي 🏆"
@@ -939,11 +1047,10 @@ fun AddExamSheet(
                     val isSelected = examType == key
                     Box(
                         modifier = Modifier
-                            .weight(1f)
                             .clip(RoundedCornerShape(10.dp))
                             .background(if (isSelected) RubyRed else GlassSurface)
                             .clickable { examType = key }
-                            .padding(vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(

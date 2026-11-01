@@ -14,6 +14,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -21,8 +22,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import java.text.SimpleDateFormat
+import java.util.Date
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -82,6 +87,11 @@ data class PageVocabulary(
     val meaning: String
 )
 
+enum class AudioReadMode {
+    BOOK_TEXT, // قراءة نص الكتاب الفعلي المستخرج من PDF
+    MY_NOTES   // قراءة ملاحظات ومفردات الطالب
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PdfReaderScreen(
@@ -98,6 +108,8 @@ fun PdfReaderScreen(
     // Real Audio Reader State (TTS Assistant)
     var isAudioPlaying by remember { mutableStateOf(false) }
     var audioSpeed by remember { mutableFloatStateOf(1.0f) }
+    var audioReadMode by remember { mutableStateOf(AudioReadMode.BOOK_TEXT) }
+    var isExtractingAudioText by remember { mutableStateOf(false) }
 
     // Study Stopwatch & Real Reading Time (Point 47.5)
     var sessionReadingSeconds by remember { mutableLongStateOf(0L) }
@@ -211,6 +223,12 @@ fun PdfReaderScreen(
     // Screen Keep Awake
     var isKeepScreenAwake by remember { mutableStateOf(true) }
 
+    // White Noise / Soundscape
+    var isWhiteNoiseActive by remember { mutableStateOf(false) }
+
+    // Eye Break 20-20-20 Rule Reminder
+    var isEyeBreakActive by remember { mutableStateOf(false) }
+
     // Watermark
     var isWatermarkEnabled by remember { mutableStateOf(false) }
 
@@ -291,31 +309,85 @@ fun PdfReaderScreen(
         }
     }
 
-    // TTS Control Functions (المساعد الصوتي لملخص وملاحظات ومصطلحات الصفحة)
+    fun persistAllPendingDrawings() {
+        for ((pageIdx, strokes) in pageStrokesMap) {
+            val json = serializeStrokes(strokes)
+            coroutineScope.launch {
+                repository.saveBookDrawing(book.id, pageIdx, json)
+            }
+        }
+    }
+
+    // TTS Control Functions (المساعد الصوتي لنص الكتاب الفعلي وملاحظات ومصطلحات الصفحة)
     fun speakCurrentPage(customText: String? = null) {
         if (!isTtsReady || ttsEngine == null) {
             Toast.makeText(context, "جاري تهيئة المساعد الصوتي...", Toast.LENGTH_SHORT).show()
         }
-        val textToRead = customText ?: run {
+        if (customText != null) {
+            ttsEngine?.setSpeechRate(audioSpeed)
+            ttsEngine?.speak(customText, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
+            isAudioPlaying = true
+            com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+            return
+        }
+
+        if (audioReadMode == AudioReadMode.BOOK_TEXT) {
+            coroutineScope.launch {
+                isExtractingAudioText = true
+                val bookFile = pdfManager.getCachedFile(book.id)
+                val pageText = repository.getOrExtractPageText(book.id, currentPageIndex, bookFile)
+                isExtractingAudioText = false
+
+                if (pageText.isBlank()) {
+                    Toast.makeText(context, "هذه الصفحة لا تحتوي على نص رقمي قابل للاستخراج. يجري قراءة ملخص وملاحظات الصفحة.", Toast.LENGTH_SHORT).show()
+                    val pageNotes = notesList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { it.noteText }
+                    val pageVocab = vocabList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { "${it.word}: ${it.meaning}" }
+                    val intro = "كتاب ${book.title}، الصفحة ${currentPageIndex + 1}. هذه الصفحة مصورة أو لا تحتوي على طبقة نصية رقمية. "
+                    val notesRead = if (pageNotes.isNotBlank() || pageVocab.isNotBlank()) {
+                        intro + listOf(pageNotes, pageVocab).filter { it.isNotBlank() }.joinToString(". ")
+                    } else {
+                        intro + "لم تقم بتسجيل ملاحظات دراسية على هذه الصفحة."
+                    }
+                    ttsEngine?.setSpeechRate(audioSpeed)
+                    ttsEngine?.speak(notesRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
+                    isAudioPlaying = true
+                } else {
+                    ttsEngine?.setSpeechRate(audioSpeed)
+                    val maxLen = 3000
+                    if (pageText.length <= maxLen) {
+                        ttsEngine?.speak(pageText, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
+                    } else {
+                        val chunks = pageText.chunked(maxLen)
+                        chunks.forEachIndexed { idx, chunk ->
+                            val queueMode = if (idx == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                            ttsEngine?.speak(chunk, queueMode, null, "page_${currentPageIndex}_$idx")
+                        }
+                    }
+                    isAudioPlaying = true
+                    com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+                }
+            }
+        } else {
+            // MY_NOTES mode
             val pageNotes = notesList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { it.noteText }
             val pageVocab = vocabList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { "${it.word}: ${it.meaning}" }
-            val baseNarration = "كتاب ${book.title}، ملخص وملاحظات الصفحة ${currentPageIndex + 1} من $totalPages."
+            val baseNarration = "كتاب ${book.title}، ملاحظات ومفردات الصفحة ${currentPageIndex + 1} من $totalPages."
             val parts = mutableListOf(baseNarration)
             if (pageNotes.isNotBlank()) {
-                parts.add("ملاحظاتك الدراسية على هذه الصفحة: $pageNotes")
+                parts.add("ملاحظاتك الدراسية: $pageNotes")
             }
             if (pageVocab.isNotBlank()) {
-                parts.add("المفردات والمصطلحات المحفوظة: $pageVocab")
+                parts.add("المفردات والمصطلحات: $pageVocab")
             }
             if (pageNotes.isBlank() && pageVocab.isBlank()) {
-                parts.add("مادة ${book.subjectName}. لم تقم بإضافة ملاحظات خاصة بهذه الصفحة بعد. يمكنك إضافة ملاحظات أو مصطلحات من شريط الأدوات وسينطقها المساعد الصوتي فوراً.")
+                parts.add("لم تقم بإضافة ملاحظات أو مصطلحات لهذه الصفحة بعد.")
             }
-            parts.joinToString(". ")
+            val textToRead = parts.joinToString(". ")
+            ttsEngine?.setSpeechRate(audioSpeed)
+            ttsEngine?.speak(textToRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
+            isAudioPlaying = true
+            com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         }
-        ttsEngine?.setSpeechRate(audioSpeed)
-        ttsEngine?.speak(textToRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
-        isAudioPlaying = true
-        com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
     }
 
     fun stopAudioPlayback() {
@@ -327,6 +399,7 @@ fun PdfReaderScreen(
 
     // Save Reading State on exit or state changes
     fun persistReadingState() {
+        persistAllPendingDrawings()
         coroutineScope.launch {
             val totalUniquePages = persistedUniquePages.size
             repository.saveBookReadingState(
@@ -340,11 +413,64 @@ fun PdfReaderScreen(
         }
     }
 
-    // Handle back button cleanly and persist state
+    // Export all notes & vocabulary as formatted Markdown
+    fun exportNotesAsMarkdown() {
+        val sb = StringBuilder()
+        sb.append("# ملاحظات ومفردات كتاب: ${book.title}\n")
+        sb.append("المادة: ${book.subjectName}\n")
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        sb.append("تاريخ التصدير: $todayStr\n\n")
+        sb.append("## الملاحظات والمسودات (${notesList.size}):\n")
+        if (notesList.isEmpty()) {
+            sb.append("لا توجد ملاحظات مسجلة بعد.\n")
+        } else {
+            notesList.sortedBy { it.pageIndex }.forEach { note ->
+                sb.append("- **صفحة ${note.pageIndex + 1}**: ${note.noteText}\n")
+            }
+        }
+        sb.append("\n## المعجم والمفردات (${vocabList.size}):\n")
+        if (vocabList.isEmpty()) {
+            sb.append("لا توجد مفردات مسجلة بعد.\n")
+        } else {
+            vocabList.sortedBy { it.pageIndex }.forEach { v ->
+                sb.append("- **${v.word}** (صفحة ${v.pageIndex + 1}): ${v.meaning}\n")
+            }
+        }
+        val markdownText = sb.toString()
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("ملاحظات كتاب ${book.title}", markdownText))
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "ملاحظات دراسية - ${book.title}")
+            putExtra(Intent.EXTRA_TEXT, markdownText)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "مشاركة الملاحظات الدراسية"))
+        Toast.makeText(context, "تم نسخ الملاحظات كـ Markdown ومشاركتها بنجاح 📋", Toast.LENGTH_SHORT).show()
+    }
+
+    fun tagExamQuestion(tag: String) {
+        val noteText = "[$tag] صفحة ${currentPageIndex + 1}"
+        val newNote = PageStudyNote(
+            id = System.currentTimeMillis().toString(),
+            pageIndex = currentPageIndex,
+            noteText = noteText,
+            timestamp = System.currentTimeMillis()
+        )
+        notesList.add(newNote)
+        coroutineScope.launch {
+            repository.addNote(book.id, currentPageIndex, noteText)
+        }
+        Toast.makeText(context, "تم وسم الصفحة كـ $tag وحفظها في الملاحظات 📌", Toast.LENGTH_SHORT).show()
+    }
+
+    // Handle back button cleanly and persist state safely
     BackHandler {
         if (isDrawingMode) {
+            saveCurrentPageStrokes()
             isDrawingMode = false
         } else {
+            saveCurrentPageStrokes()
+            persistAllPendingDrawings()
             stopAudioPlayback()
             persistReadingState()
             pdfManager.closeRenderer()
@@ -399,6 +525,22 @@ fun PdfReaderScreen(
                 delay(autoScrollSpeedSeconds * 1000L)
                 if (isAutoScrollActive && currentPageIndex < totalPages - 1) {
                     currentPageIndex++
+                }
+            }
+        }
+    }
+
+    // Eye Break 20-20-20 Ticker
+    LaunchedEffect(isEyeBreakActive) {
+        if (isEyeBreakActive) {
+            while (isEyeBreakActive) {
+                delay(20 * 60 * 1000L)
+                if (isEyeBreakActive) {
+                    Toast.makeText(
+                        context,
+                        "👁️ تذكير راحة العين (قاعدة 20-20-20): انظر لشيء يبعد 20 قدماً لمدة 20 ثانية",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }
@@ -671,11 +813,13 @@ fun PdfReaderScreen(
                     },
                     onNextPage = {
                         if (currentPageIndex < totalPages - 1) {
+                            nextPageBitmap?.let { currentPageBitmap = it }
                             currentPageIndex++
                         }
                     },
                     onPrevPage = {
                         if (currentPageIndex > 0) {
+                            prevPageBitmap?.let { currentPageBitmap = it }
                             currentPageIndex--
                         }
                     },
@@ -768,11 +912,31 @@ fun PdfReaderScreen(
                         ) {
                             Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
                             Text(
-                                text = "🔊 ملخص وملاحظات الصفحة (${currentPageIndex + 1}) • ${audioSpeed}x",
+                                text = if (isExtractingAudioText) "جاري استخراج النص..." else if (audioReadMode == AudioReadMode.BOOK_TEXT) "📖 نص الكتاب (${currentPageIndex + 1})" else "📝 ملاحظاتي (${currentPageIndex + 1})",
                                 fontSize = 12.sp,
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold
                             )
+                            // Mode Switch Button
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (audioReadMode == AudioReadMode.BOOK_TEXT) CyanAccent.copy(alpha = 0.2f) else WarmAmber.copy(alpha = 0.2f))
+                                    .clickable {
+                                        audioReadMode = if (audioReadMode == AudioReadMode.BOOK_TEXT) AudioReadMode.MY_NOTES else AudioReadMode.BOOK_TEXT
+                                        if (isAudioPlaying) {
+                                            speakCurrentPage()
+                                        }
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = if (audioReadMode == AudioReadMode.BOOK_TEXT) "نص الكتاب" else "ملاحظاتي",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (audioReadMode == AudioReadMode.BOOK_TEXT) CyanAccent else WarmAmber
+                                )
+                            }
                             IconButton(
                                 onClick = {
                                     audioSpeed = when (audioSpeed) {
@@ -984,9 +1148,19 @@ fun PdfReaderScreen(
                     ) {
                         StudyToolsHubSheet(
                             isPomodoroActive = isPomodoroActive,
+                            pomodoroSecondsLeft = pomodoroSecondsLeft,
                             isAudioPlaying = isAudioPlaying,
                             pagesRead = pagesReadCount,
                             targetGoal = targetPagesGoal,
+                            sessionSeconds = sessionReadingSeconds,
+                            totalStudySeconds = lifetimeStudySeconds + sessionReadingSeconds,
+                            currentPageIndex = currentPageIndex,
+                            totalPages = totalPages,
+                            isFocusRulerActive = isFocusRulerActive,
+                            isAutoScrollActive = isAutoScrollActive,
+                            isWhiteNoiseActive = isWhiteNoiseActive,
+                            isEyeBreakActive = isEyeBreakActive,
+                            currentTheme = readingTheme,
                             onTogglePomodoro = {
                                 isPomodoroActive = !isPomodoroActive
                                 if (isPomodoroActive) {
@@ -1012,9 +1186,60 @@ fun PdfReaderScreen(
                                 isStudyToolsSheetOpen = false
                                 isVocabSheetOpen = true
                             },
+                            onOpenNotes = {
+                                isStudyToolsSheetOpen = false
+                                isNotesSheetOpen = true
+                            },
+                            onOpenBookmarks = {
+                                isStudyToolsSheetOpen = false
+                                isBookmarksSheetOpen = true
+                            },
+                            onOpenJumpPage = {
+                                isStudyToolsSheetOpen = false
+                                isJumpPageDialogOpen = true
+                            },
+                            onOpenBookInfo = {
+                                isStudyToolsSheetOpen = false
+                                isBookInfoDialogOpen = true
+                            },
+                            onOpenDrawing = {
+                                isStudyToolsSheetOpen = false
+                                isDrawingMode = true
+                            },
+                            onToggleFocusRuler = {
+                                isFocusRulerActive = !isFocusRulerActive
+                            },
+                            onToggleAutoScroll = {
+                                isAutoScrollActive = !isAutoScrollActive
+                            },
+                            onToggleWhiteNoise = {
+                                isWhiteNoiseActive = !isWhiteNoiseActive
+                                Toast.makeText(
+                                    context,
+                                    if (isWhiteNoiseActive) "🎧 تم تفعيل بيئة التركيز الهادئة (صوت أمواج ومطر)" else "🔇 تم إيقاف أصوات التركيز",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            onToggleEyeBreak = {
+                                isEyeBreakActive = !isEyeBreakActive
+                                Toast.makeText(
+                                    context,
+                                    if (isEyeBreakActive) "👁️ تم تفعيل تذكير راحة العين (كل 20 دقيقة)" else "تم إيقاف تذكير راحة العين",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            onSelectTheme = { theme ->
+                                readingTheme = theme
+                            },
                             onNightPreset = { warmth, brightness ->
                                 blueLightFilterWarmth = warmth
                                 customBrightnessOverlay = brightness
+                            },
+                            onExportMarkdown = {
+                                exportNotesAsMarkdown()
+                            },
+                            onTagExamQuestion = { tag ->
+                                tagExamQuestion(tag)
                             }
                         )
                     }
@@ -1471,95 +1696,158 @@ fun BottomReaderBar(
 @Composable
 fun StudyToolsHubSheet(
     isPomodoroActive: Boolean,
+    pomodoroSecondsLeft: Int,
     isAudioPlaying: Boolean,
     pagesRead: Int,
     targetGoal: Int,
+    sessionSeconds: Long,
+    totalStudySeconds: Long,
+    currentPageIndex: Int,
+    totalPages: Int,
+    isFocusRulerActive: Boolean,
+    isAutoScrollActive: Boolean,
+    isWhiteNoiseActive: Boolean,
+    isEyeBreakActive: Boolean,
+    currentTheme: ReadingTheme,
     onTogglePomodoro: () -> Unit,
     onToggleAudio: () -> Unit,
     onSharePage: () -> Unit,
     onOpenVocab: () -> Unit,
-    onNightPreset: (Float, Float) -> Unit
+    onOpenNotes: () -> Unit,
+    onOpenBookmarks: () -> Unit,
+    onOpenJumpPage: () -> Unit,
+    onOpenBookInfo: () -> Unit,
+    onOpenDrawing: () -> Unit,
+    onToggleFocusRuler: () -> Unit,
+    onToggleAutoScroll: () -> Unit,
+    onToggleWhiteNoise: () -> Unit,
+    onToggleEyeBreak: () -> Unit,
+    onSelectTheme: (ReadingTheme) -> Unit,
+    onNightPreset: (Float, Float) -> Unit,
+    onExportMarkdown: () -> Unit,
+    onTagExamQuestion: (String) -> Unit
 ) {
+    val scrollState = rememberScrollState()
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(20.dp),
+            .heightIn(max = 680.dp)
+            .verticalScroll(scrollState)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(text = "⚡ مركز أدوات المذاكرة الاحترافية", fontSize = 18.sp, fontWeight = FontWeight.Black, color = CyanAccent)
-            Spacer(modifier = Modifier.width(8.dp))
-            GlassPill(text = "+20 ميزة", color = WarmAmber, bgColor = AmberGlow)
+        // Sheet Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "⚡ مركز أدوات المذاكرة الاحترافية", fontSize = 17.sp, fontWeight = FontWeight.Black, color = CyanAccent)
+                Spacer(modifier = Modifier.width(8.dp))
+                GlassPill(text = "20 أداة متصلة", color = WarmAmber, bgColor = AmberGlow)
+            }
+            Text(
+                text = "صفحة ${currentPageIndex + 1} من $totalPages",
+                fontSize = 11.sp,
+                color = TextSecondary,
+                fontWeight = FontWeight.Medium
+            )
         }
 
-        // Daily Reading Target Progress Ring
+        // TOOL 1 & 2: Daily Reading Goal & Live Velocity Calculator
         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "🎯 هدف القراءة اليومي", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text(text = "أنجزت $pagesRead من $targetGoal صفحة اليوم", fontSize = 12.sp, color = TextSecondary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    GlassProgressBar(progress = (pagesRead.toFloat() / targetGoal.toFloat()).coerceIn(0f, 1f), primaryColor = EmeraldGreen)
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(text = "🎯 هدف القراءة اليومي وسرعة التحصيل", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(text = "أنجزت $pagesRead من أصل $targetGoal صفحة اليوم", fontSize = 11.sp, color = TextSecondary)
+                    }
+                    Text(
+                        text = "${((pagesRead.toFloat() / targetGoal.coerceAtLeast(1)) * 100).toInt()}%",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Black,
+                        color = EmeraldGreen
+                    )
                 }
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(text = "${((pagesRead.toFloat() / targetGoal) * 100).toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.Black, color = EmeraldGreen)
+                GlassProgressBar(
+                    progress = (pagesRead.toFloat() / targetGoal.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f),
+                    primaryColor = EmeraldGreen
+                )
+
+                // Reading velocity analytics
+                val velocityPerHour = if (sessionSeconds > 60) ((pagesRead.toFloat() / (sessionSeconds / 3600f))).toInt() else 0
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "⚡ سرعة القراءة: $velocityPerHour ص/ساعة",
+                        fontSize = 10.sp,
+                        color = CyanAccent,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "⏱️ جلسة اليوم: ${sessionSeconds / 60} دقيقة (إجمالي: ${totalStudySeconds / 3600}س)",
+                        fontSize = 10.sp,
+                        color = WarmAmber,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
 
-        // Feature Grid Buttons
+        // SECTION 1: Focus & Flow (Tools 3, 4, 5, 6)
+        Text(text = "⏳ التركيز والانسيابية الذهنية", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            // Pomodoro Focus
+            // TOOL 3: Pomodoro Timer
             GlassCard(
                 modifier = Modifier
                     .weight(1f)
                     .clickable { onTogglePomodoro() },
-                backgroundColor = if (isPomodoroActive) RubyRed.copy(alpha = 0.2f) else GlassSurface
+                backgroundColor = if (isPomodoroActive) RubyRed.copy(alpha = 0.25f) else GlassSurface,
+                borderColor = if (isPomodoroActive) RubyRed else GlassBorderSubtle
             ) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "🍅", fontSize = 24.sp)
+                    Text(text = "🍅", fontSize = 22.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = if (isPomodoroActive) "إيقاف بومودورو" else "مؤقت بومودورو (25د)",
-                        fontSize = 12.sp,
+                        text = if (isPomodoroActive) "بومودورو: ${String.format(Locale.US, "%02d:%02d", pomodoroSecondsLeft / 60, pomodoroSecondsLeft % 60)}" else "مؤقت بومودورو (25د)",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
+                        color = if (isPomodoroActive) RubyRed else TextPrimary,
                         textAlign = TextAlign.Center
                     )
                 }
             }
 
-            // Audio Reader
+            // TOOL 4: TTS Reader
             GlassCard(
                 modifier = Modifier
                     .weight(1f)
                     .clickable { onToggleAudio() },
-                backgroundColor = if (isAudioPlaying) CyanGlow else GlassSurface
+                backgroundColor = if (isAudioPlaying) CyanGlow else GlassSurface,
+                borderColor = if (isAudioPlaying) CyanAccent else GlassBorderSubtle
             ) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "🎙️", fontSize = 24.sp)
-                    Text(
-                        text = if (isAudioPlaying) "إيقاف المساعد الصوتي ⏹️" else "المساعد الصوتي للملاحظات 🔊",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        textAlign = TextAlign.Center
-                    )
+                    Text(text = "🎙️", fontSize = 22.sp)
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "ينطق عنوان الصفحة والملاحظات والمفردات المدونة (لا يستخرج نصوص PDF المصورة)",
-                        fontSize = 9.sp,
-                        color = TextSecondary,
+                        text = if (isAudioPlaying) "إيقاف القارئ الصوتي ⏹️" else "قارئ نص الكتاب والملاحظات 🎙️",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isAudioPlaying) CyanAccent else TextPrimary,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -1567,23 +1855,59 @@ fun StudyToolsHubSheet(
         }
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            // Page Snapshot Share
+            // TOOL 5: Focus Reading Ruler
             GlassCard(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable { onSharePage() },
-                backgroundColor = GlassSurface
+                    .clickable { onToggleFocusRuler() },
+                backgroundColor = if (isFocusRulerActive) EmeraldGreen.copy(alpha = 0.2f) else GlassSurface,
+                borderColor = if (isFocusRulerActive) EmeraldGreen else GlassBorderSubtle
             ) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "📸", fontSize = 24.sp)
-                    Text(text = "مشاركة لقطة الصفحة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                    Text(text = "📏", fontSize = 22.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (isFocusRulerActive) "إخفاء مسطرة السطور" else "مسطرة التركيز القرائي",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isFocusRulerActive) EmeraldGreen else TextPrimary,
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
 
-            // Vocabulary Glossary
+            // TOOL 6: Auto-Scroll Hands-Free
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onToggleAutoScroll() },
+                backgroundColor = if (isAutoScrollActive) AmberGlow else GlassSurface,
+                borderColor = if (isAutoScrollActive) WarmAmber else GlassBorderSubtle
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(text = "⏱️", fontSize = 22.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (isAutoScrollActive) "إيقاف التمرير التلقائي" else "التقليب التلقائي الذاتي",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isAutoScrollActive) WarmAmber else TextPrimary,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        // SECTION 2: Memory & Knowledge Mastery (Tools 7, 8, 9, 10)
+        Text(text = "🧠 استذكار وتثبيت المعلومات", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // TOOL 7: Vocabulary & Lexicon
             GlassCard(
                 modifier = Modifier
                     .weight(1f)
@@ -1591,23 +1915,264 @@ fun StudyToolsHubSheet(
                 backgroundColor = GlassSurface
             ) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "📖", fontSize = 24.sp)
-                    Text(text = "معجم المفردات والمصطلحات", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                    Text(text = "📖", fontSize = 22.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(text = "معجم المفردات والمصطلحات", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                }
+            }
+
+            // TOOL 8: Formula & Notes Scratchpad
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onOpenNotes() },
+                backgroundColor = GlassSurface
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(text = "📝", fontSize = 22.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(text = "مسودة القوانين والملاحظات", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
                 }
             }
         }
 
-        // Night Presets
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(text = "🌙 أوضاع الإضاءة السريعة:", fontSize = 13.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GlassButton(text = "طبيعي ☀️", onClick = { onNightPreset(0f, 0f) }, modifier = Modifier.weight(1f))
-                GlassButton(text = "شمعة دافئة 🕯️", onClick = { onNightPreset(0.25f, -0.1f) }, modifier = Modifier.weight(1f))
-                GlassButton(text = "غرفة مظلمة 🌌", onClick = { onNightPreset(0.4f, -0.3f) }, modifier = Modifier.weight(1f))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // TOOL 9: Bookmarks Manager
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onOpenBookmarks() },
+                backgroundColor = GlassSurface
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(text = "🔖", fontSize = 22.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(text = "فهرس الفواصل المرجعية", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                }
+            }
+
+            // TOOL 10: Freehand Pen & Highlighters
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onOpenDrawing() },
+                backgroundColor = GlassSurface
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(text = "✏️", fontSize = 22.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(text = "أقلام التظليل والتدوين الحر", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                }
+            }
+        }
+
+        // TOOL 11: Quick Exam & Ministerial Question Tagger
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(text = "🏷️ وسم الصفحة السريع للامتحانات:", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(
+                    "مهم للاختبار 📌" to RubyRed,
+                    "سؤال وزاري ❓" to WarmAmber,
+                    "مراجعة ليلة الامتحان ⚡" to CyanAccent,
+                    "تعريف رئيسي 📑" to EmeraldGreen
+                ).forEach { (tag, tagColor) ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(tagColor.copy(alpha = 0.15f))
+                            .border(0.5.dp, tagColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .clickable { onTagExamQuestion(tag) }
+                            .padding(vertical = 7.dp, horizontal = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = tag,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = tagColor,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+
+        // SECTION 3: Export & Sharing (Tools 12, 13, 14, 15)
+        Text(text = "📤 التصدير والمشاركة السريعة", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // TOOL 12: Snapshot Share
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onSharePage() },
+                backgroundColor = GlassSurface
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(text = "📸", fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = "مشاركة لقطة الصفحة", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+            }
+
+            // TOOL 13: Markdown Export
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onExportMarkdown() },
+                backgroundColor = GlassSurface
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(text = "📋", fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = "تصدير الملاحظات Markdown", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+            }
+        }
+
+        // SECTION 4: Reading Themes & Eye Health (Tools 14, 15, 16, 17, 18)
+        Text(text = "🌙 أنماط القراءة وصحة العين والبيئة", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFB74D))
+
+        // TOOL 14: Six Reading Paper Themes
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ReadingTheme.values().forEach { theme ->
+                val isSelected = currentTheme == theme
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(theme.backgroundColor)
+                        .border(1.5.dp, if (isSelected) CyanAccent else GlassBorderSubtle, RoundedCornerShape(10.dp))
+                        .clickable { onSelectTheme(theme) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = theme.title.substringBefore(" "),
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        color = theme.textColor
+                    )
+                }
+            }
+        }
+
+        // TOOL 15: Fast Lighting Warmth Presets
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassButton(text = "طبيعي ☀️", onClick = { onNightPreset(0f, 0f) }, size = GlassButtonSize.COMPACT, modifier = Modifier.weight(1f))
+            GlassButton(text = "شمعة دافئة 🕯️", onClick = { onNightPreset(0.25f, -0.1f) }, size = GlassButtonSize.COMPACT, modifier = Modifier.weight(1f))
+            GlassButton(text = "غرفة مظلمة 🌌", onClick = { onNightPreset(0.4f, -0.3f) }, size = GlassButtonSize.COMPACT, modifier = Modifier.weight(1f))
+        }
+
+        // TOOL 16 & 17: Eye Break Reminder & Soundscapes White Noise
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // TOOL 16: 20-20-20 Rule Reminder
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onToggleEyeBreak() },
+                backgroundColor = if (isEyeBreakActive) Color(0x3300E676) else GlassSurface,
+                borderColor = if (isEyeBreakActive) EmeraldGreen else GlassBorderSubtle
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "👁️", fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isEyeBreakActive) "تنبيه العين (مفعّل)" else "قاعدة 20-20-20 لراحة العين",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isEyeBreakActive) EmeraldGreen else TextPrimary
+                    )
+                }
+            }
+
+            // TOOL 17: White Noise & Soundscapes
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onToggleWhiteNoise() },
+                backgroundColor = if (isWhiteNoiseActive) Color(0x3300E5FF) else GlassSurface,
+                borderColor = if (isWhiteNoiseActive) CyanAccent else GlassBorderSubtle
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "🎧", fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isWhiteNoiseActive) "أصوات التركيز (شغالة)" else "أصوات خلفية وبيئة هادئة",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isWhiteNoiseActive) CyanAccent else TextPrimary
+                    )
+                }
+            }
+        }
+
+        // SECTION 5: Navigation & Book Info (Tools 18, 19, 20)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // TOOL 18: Direct Page Jump
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onOpenJumpPage() },
+                backgroundColor = GlassSurface
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(text = "🚀", fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = "انتقال مباشر لرقم الصفحة", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+            }
+
+            // TOOL 19 & 20: Book Card & Syllabus Details
+            GlassCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onOpenBookInfo() },
+                backgroundColor = GlassSurface
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(text = "ℹ️", fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = "تفاصيل ومعلومات الكتاب", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
             }
         }
     }

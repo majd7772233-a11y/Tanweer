@@ -9,6 +9,8 @@ import {
   handleUpdateGroupMemberRole,
   handleRemoveGroupMember,
   handleApproveGroupJoinRequest,
+  handleRejectGroupJoinRequest,
+  handleCreatePublicGroup,
 } from './services/groups';
 import {
   handleGetSchedule,
@@ -198,9 +200,12 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path === '/api/v1/groups' && method === 'GET') {
     return handleGetGroups(user, env);
   }
+  if (path === '/api/v1/groups' && method === 'POST') {
+    return handleCreatePublicGroup(request, user, env);
+  }
   if (path.startsWith('/api/v1/groups/') && path.endsWith('/join-request') && method === 'POST') {
     const groupId = path.split('/')[4];
-    return handleJoinGroupRequest(groupId, user, env);
+    return handleJoinGroupRequest(groupId, user, request, env);
   }
   if (path.startsWith('/api/v1/groups/') && path.endsWith('/members') && method === 'GET') {
     const groupId = path.split('/')[4];
@@ -229,6 +234,12 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     const groupId = parts[4];
     const targetUserId = parts[6];
     return handleApproveGroupJoinRequest(groupId, targetUserId, user, env);
+  }
+  if (path.startsWith('/api/v1/groups/') && path.includes('/requests/') && path.endsWith('/reject') && method === 'POST') {
+    const parts = path.split('/');
+    const groupId = parts[4];
+    const targetUserId = parts[6];
+    return handleRejectGroupJoinRequest(groupId, targetUserId, user, env);
   }
 
   // Group Chat Messages

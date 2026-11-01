@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -44,6 +46,8 @@ fun TeacherDashboardScreen(
     }
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Overview & Stats, 1: Official Homeworks, 2: Official Exams
+    var showCreateOfficialHomeworkSheet by remember { mutableStateOf(false) }
+    var showCreateOfficialExamSheet by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -159,14 +163,14 @@ fun TeacherDashboardScreen(
                     text = "إضافة واجب رسمي 📝",
                     color = CyanAccent,
                     textColor = TextOnAccent,
-                    onClick = { viewModel.setTab(NavigationTab.HOMEWORK) },
+                    onClick = { showCreateOfficialHomeworkSheet = true },
                     modifier = Modifier.weight(1f)
                 )
                 GlassButton(
                     text = "إضافة اختبار رسمي 📑",
                     color = WarmAmber,
                     textColor = TextOnAccent,
-                    onClick = { viewModel.setTab(NavigationTab.EXAMS) },
+                    onClick = { showCreateOfficialExamSheet = true },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -318,6 +322,28 @@ fun TeacherDashboardScreen(
                 }
             }
         }
+    }
+
+    if (showCreateOfficialHomeworkSheet) {
+        CreateOfficialHomeworkSheet(
+            onDismiss = { showCreateOfficialHomeworkSheet = false },
+            onCreated = {
+                viewModel.loadTeacherDashboard()
+                showCreateOfficialHomeworkSheet = false
+            },
+            viewModel = viewModel
+        )
+    }
+
+    if (showCreateOfficialExamSheet) {
+        CreateOfficialExamSheet(
+            onDismiss = { showCreateOfficialExamSheet = false },
+            onCreated = {
+                viewModel.loadTeacherDashboard()
+                showCreateOfficialExamSheet = false
+            },
+            viewModel = viewModel
+        )
     }
 }
 
@@ -496,3 +522,343 @@ fun OfficialExamCard(exam: ExamItem) {
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CreateOfficialHomeworkSheet(
+    onDismiss: () -> Unit,
+    onCreated: () -> Unit,
+    viewModel: TanweerViewModel
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val gradeSubjects = remember(currentUser?.gradeId) {
+        com.magd.tanweer.data.model.SchoolHierarchy.getSubjectsForGrade(currentUser?.gradeId ?: 11)
+    }
+
+    var selectedSubjectId by remember { mutableStateOf(gradeSubjects.firstOrNull()?.id ?: "math") }
+    var title by remember { mutableStateOf("") }
+    var details by remember { mutableStateOf("") }
+    var pageNumbers by remember { mutableStateOf("") }
+    var questionNumbers by remember { mutableStateOf("") }
+    val todayStr = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()) }
+    var dueDate by remember { mutableStateOf(todayStr) }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (title.isBlank()) {
+                        android.widget.Toast.makeText(context, "يرجى كتابة عنوان الواجب الرسمي", android.widget.Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    isSubmitting = true
+                    viewModel.addHomework(
+                        subjectId = selectedSubjectId,
+                        title = title.trim(),
+                        details = details.trim().ifEmpty { null },
+                        pageNumbers = pageNumbers.trim().ifEmpty { null },
+                        questionNumbers = questionNumbers.trim().ifEmpty { null },
+                        dueDate = dueDate,
+                        taskType = "HOMEWORK",
+                        onResult = { res ->
+                            isSubmitting = false
+                            if (res.isSuccess) {
+                                android.widget.Toast.makeText(context, "تم نشر الواجب الرسمي المعتمد بنجاح 🎓", android.widget.Toast.LENGTH_LONG).show()
+                                onCreated()
+                            } else {
+                                android.widget.Toast.makeText(context, res.exceptionOrNull()?.message ?: "تعذر حفظ الواجب", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+                enabled = !isSubmitting
+            ) {
+                Text(if (isSubmitting) "جاري النشر..." else "نشر كواجب رسمي ⭐", color = TextOnAccent, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
+                Text("إلغاء", color = TextSecondary)
+            }
+        },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("📝", fontSize = 22.sp)
+                Column {
+                    Text("إضافة واجب رسمي معتمد", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("يُنشر مباشرة باسمك كمعلم للشعبة", fontSize = 11.sp, color = CyanAccent)
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Subject selector chips
+                Text("اختر المادة:", fontSize = 12.sp, color = TextMuted)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    gradeSubjects.forEach { subj ->
+                        val isSelected = subj.id == selectedSubjectId
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) CyanAccent else GlassSurface)
+                                .clickable { selectedSubjectId = subj.id }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "${subj.icon} ${subj.name}",
+                                fontSize = 12.sp,
+                                color = if (isSelected) TextOnAccent else TextSecondary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("عنوان الواجب الرسمي") },
+                    placeholder = { Text("مثال: حل تمارين الوحدة الأولى") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = pageNumbers,
+                        onValueChange = { pageNumbers = it },
+                        label = { Text("الصفحات") },
+                        placeholder = { Text("مثال: ص 24-25") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = questionNumbers,
+                        onValueChange = { questionNumbers = it },
+                        label = { Text("الأسئلة") },
+                        placeholder = { Text("س 1، 3، 5") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = dueDate,
+                    onValueChange = { dueDate = it },
+                    label = { Text("تاريخ التسليم (YYYY-MM-DD)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = details,
+                    onValueChange = { details = it },
+                    label = { Text("توجيهات وملاحظات إضافية للطلاب") },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CreateOfficialExamSheet(
+    onDismiss: () -> Unit,
+    onCreated: () -> Unit,
+    viewModel: TanweerViewModel
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val gradeSubjects = remember(currentUser?.gradeId) {
+        com.magd.tanweer.data.model.SchoolHierarchy.getSubjectsForGrade(currentUser?.gradeId ?: 11)
+    }
+
+    var selectedSubjectId by remember { mutableStateOf(gradeSubjects.firstOrNull()?.id ?: "math") }
+    var title by remember { mutableStateOf("") }
+    var requiredChapters by remember { mutableStateOf("") }
+    var notes by remember { mutableStateOf("") }
+    val todayStr = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()) }
+    var examDate by remember { mutableStateOf(todayStr) }
+    var examType by remember { mutableStateOf("MONTHLY") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    val examTypes = listOf(
+        Pair("MONTHLY", "اختبار شهري 📑"),
+        Pair("QUIZ", "كويز قصير ⚡"),
+        Pair("ORAL", "اختبار شفهي 🗣️"),
+        Pair("MIDTERM", "نصف العام 🏛️"),
+        Pair("FINAL", "نهاية العام 🎓")
+    )
+
+    AlertDialog(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (title.isBlank()) {
+                        android.widget.Toast.makeText(context, "يرجى كتابة عنوان الاختبار الرسمي", android.widget.Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    isSubmitting = true
+                    viewModel.addExam(
+                        subjectId = selectedSubjectId,
+                        title = title.trim(),
+                        requiredChapters = requiredChapters.trim().ifEmpty { null },
+                        notes = notes.trim().ifEmpty { null },
+                        examDate = examDate,
+                        examType = examType,
+                        onResult = { res ->
+                            isSubmitting = false
+                            if (res.isSuccess) {
+                                android.widget.Toast.makeText(context, "تم إدراج الاختبار الرسمي بنجاح 📑", android.widget.Toast.LENGTH_LONG).show()
+                                onCreated()
+                            } else {
+                                android.widget.Toast.makeText(context, res.exceptionOrNull()?.message ?: "تعذر حفظ الاختبار", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = WarmAmber),
+                enabled = !isSubmitting
+            ) {
+                Text(if (isSubmitting) "جاري الإدراج..." else "إدراج كاختبار رسمي 📑", color = TextOnAccent, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
+                Text("إلغاء", color = TextSecondary)
+            }
+        },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("📑", fontSize = 22.sp)
+                Column {
+                    Text("إدراج اختبار رسمي معتمد", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("تثبيت الاختبار في جدول التقييمات للشعبة", fontSize = 11.sp, color = WarmAmber)
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Subject selector
+                Text("اختر المادة:", fontSize = 12.sp, color = TextMuted)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    gradeSubjects.forEach { subj ->
+                        val isSelected = subj.id == selectedSubjectId
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) WarmAmber else GlassSurface)
+                                .clickable { selectedSubjectId = subj.id }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "${subj.icon} ${subj.name}",
+                                fontSize = 12.sp,
+                                color = if (isSelected) TextOnAccent else TextSecondary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+
+                // Exam Type Selector
+                Text("نوع الاختبار:", fontSize = 12.sp, color = TextMuted)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    examTypes.forEach { (typeKey, typeLabel) ->
+                        val isSelected = examType == typeKey
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) RubyRed else GlassSurface)
+                                .clickable { examType = typeKey }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = typeLabel,
+                                fontSize = 11.sp,
+                                color = if (isSelected) TextOnAccent else TextSecondary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("عنوان الاختبار الرسمي") },
+                    placeholder = { Text("مثال: الاختبار الشهري الأول") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = examDate,
+                    onValueChange = { examDate = it },
+                    label = { Text("تاريخ الاختبار (YYYY-MM-DD)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = requiredChapters,
+                    onValueChange = { requiredChapters = it },
+                    label = { Text("المنهج والفصول المطلوبة") },
+                    placeholder = { Text("مثال: الباب الأول كاملاً ص 1-35") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("تعليمات وملاحظات للأستاذ") },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+

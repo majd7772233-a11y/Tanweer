@@ -1140,6 +1140,22 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun rejectGroupJoinRequest(
+        targetUserId: String,
+        groupId: String = getActiveGroupId(),
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val res = repository.rejectGroupJoinRequest(groupId, targetUserId)
+            res.onSuccess { msg ->
+                loadGroupMembers(groupId)
+                onResult(true, msg)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "تعذر رفض طلب الانضمام")
+            }
+        }
+    }
+
     fun canManageSchedule(): Boolean {
         val meta = _scheduleMeta.value
         if (meta?.isInitialSetup == true) return true
@@ -1362,8 +1378,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         val user = currentUser.value
             ?: return Result.failure(Exception("لم يتم تسجيل الدخول"))
         val groupId = getActiveGroupId()
-        val gradeName = SchoolHierarchy.getGradeName(user.gradeId)
-        val secAr = SchoolHierarchy.getSectionArabicName(user.sectionId)
+        val gradeName = user.gradeId?.let { SchoolHierarchy.getGradeName(it) } ?: "الإدارة المدرسية"
+        val secAr = user.sectionId?.let { SchoolHierarchy.getSectionArabicName(it) } ?: ""
         val res = repository.addLessonWithPages(
             groupId = groupId,
             date = date,
@@ -1628,7 +1644,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 processResult("جدول الاختبارات", repository.syncExams(groupId))
                 processResult("استفسارات الشعبة", repository.syncIssues(groupId))
                 processResult("الفعاليات المدرسية", repository.syncEvents(groupId))
-                if (user != null) {
+                if (user != null && user.gradeId != null) {
                     processResult("المناهج والكتب", repository.syncBooks(user.gradeId))
                 }
             } else {
@@ -1731,16 +1747,34 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     fun joinGroup(
         groupId: String,
+        reason: String? = null,
         onResult: (isSuccess: Boolean, status: String, message: String) -> Unit
     ) {
         viewModelScope.launch {
-            val result = repository.joinGroup(groupId)
+            val result = repository.joinGroup(groupId, reason)
             result.onSuccess { response ->
                 val status = response.status ?: "ACTIVE"
                 val msg = response.message ?: if (status == "ACTIVE") "تم الانضمام إلى المجموعة بنجاح" else "تم إرسال طلب الانضمام، بانتظار موافقة المشرف"
                 onResult(true, status, msg)
             }.onFailure {
                 onResult(false, "ERROR", it.message ?: "فشل الانضمام للمجموعة")
+            }
+        }
+    }
+
+    fun createPublicGroup(
+        name: String,
+        description: String? = null,
+        icon: String? = "👥",
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val res = repository.createPublicGroup(name, description, icon)
+            res.onSuccess {
+                syncGroups(isRefresh = true)
+                onResult(true, it.message ?: "تم إنشاء المجموعة بنجاح")
+            }.onFailure {
+                onResult(false, it.message ?: "تعذر إنشاء المجموعة")
             }
         }
     }
@@ -1754,8 +1788,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         val cleanText = text.trim()
         if (cleanText.isBlank() || groupId.isBlank()) return false
         return try {
-            val gradeName = SchoolHierarchy.getGradeName(user.gradeId)
-            val secAr = SchoolHierarchy.getSectionArabicName(user.sectionId)
+            val gradeName = user.gradeId?.let { SchoolHierarchy.getGradeName(it) } ?: "الإدارة المدرسية"
+            val secAr = user.sectionId?.let { SchoolHierarchy.getSectionArabicName(it) } ?: ""
             repository.sendChatMessage(
                 groupId = groupId,
                 senderId = user.id,

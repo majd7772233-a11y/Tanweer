@@ -81,8 +81,8 @@ fun ProfileScreen(
     LaunchedEffect(currentUser) {
         currentUser?.let {
             editFullName = it.fullName
-            editGradeId = it.gradeId
-            editSectionId = it.sectionId
+            editGradeId = it.gradeId ?: 11
+            editSectionId = it.sectionId ?: "A"
         }
     }
 
@@ -179,9 +179,9 @@ fun ProfileScreen(
                                 }
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "$gradeName — شعبة $sectionAr",
+                                    text = if (roleEnum == Role.ADMIN) "الإدارة المدرسية العامة 🏫" else "$gradeName — شعبة $sectionAr",
                                     fontSize = 13.sp,
-                                    color = CyanAccent,
+                                    color = if (roleEnum == Role.ADMIN) WarmAmber else CyanAccent,
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
@@ -705,18 +705,33 @@ fun ProfileScreen(
                                     color = WarmAmber
                                 )
                             }
-                            Text(
-                                text = "$gradeName — شعبة ($sectionAr)",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "الانتقال إلى صف أو شعبة أخرى يتطلب مراجعة إدارة المدرسة أو المشرف المخول لضمان سلامة العزل الدراسي وسجلات الطلاب.",
-                                fontSize = 11.sp,
-                                color = TextMuted,
-                                lineHeight = 16.sp
-                            )
+                            if (currentUser?.getRoleEnum() == Role.ADMIN) {
+                                Text(
+                                    text = "الإدارة المدرسية العامة 🏫",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = WarmAmber
+                                )
+                                Text(
+                                    text = "حساب إدارة المدرسة يملك صلاحيات شاملة على مستوى المدرسة دون الارتباط بصف أو شعبة محددة.",
+                                    fontSize = 11.sp,
+                                    color = TextMuted,
+                                    lineHeight = 16.sp
+                                )
+                            } else {
+                                Text(
+                                    text = "$gradeName — شعبة ($sectionAr)",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = "الانتقال إلى صف أو شعبة أخرى يتطلب مراجعة إدارة المدرسة أو المشرف المخول لضمان سلامة العزل الدراسي وسجلات الطلاب.",
+                                    fontSize = 11.sp,
+                                    color = TextMuted,
+                                    lineHeight = 16.sp
+                                )
+                            }
                         }
                     }
 

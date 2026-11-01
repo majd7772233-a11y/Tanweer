@@ -898,7 +898,7 @@ fun ListViewBookItem(
                 color = if (isDownloaded) EmeraldGreen else primaryColor,
                 textColor = TextOnAccent,
                 onClick = onOpen,
-                modifier = Modifier.height(34.dp)
+                size = GlassButtonSize.COMPACT
             )
         }
     }

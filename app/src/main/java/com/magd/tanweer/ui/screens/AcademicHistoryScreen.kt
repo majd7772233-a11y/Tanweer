@@ -102,6 +102,10 @@ fun AcademicHistoryScreen(
     // Mode: 0 = إنجازاتي الشخصية (الأرشيف الشخصي الشامل عبر كل المجموعات), 1 = أرشيف الشعبة الحالية
     var viewMode by remember { mutableIntStateOf(0) }
 
+    var previewContent by remember { mutableStateOf<com.magd.tanweer.data.model.ContentItem?>(null) }
+    var previewHomework by remember { mutableStateOf<com.magd.tanweer.data.model.HomeworkItem?>(null) }
+    var previewExam by remember { mutableStateOf<com.magd.tanweer.data.model.ExamItem?>(null) }
+
     val allContents = remember(viewMode, activeGroupContents, allHistoricalContents) {
         if (viewMode == 0) allHistoricalContents else activeGroupContents
     }
@@ -488,7 +492,11 @@ fun AcademicHistoryScreen(
                     }
                 } else {
                     items(myPersonalLessons, key = { it.id }) { lesson ->
-                        GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                        GlassCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = GlassSurface,
+                            onClick = { previewContent = lesson }
+                        ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -502,7 +510,7 @@ fun AcademicHistoryScreen(
                                         color = TextPrimary
                                     )
                                     Text(
-                                        text = "تاريخ الحصة: ${lesson.studyDate} • ${lesson.viewsCount} مشاهدة",
+                                        text = "تاريخ الحصة: ${lesson.studyDate} • ${lesson.viewsCount} مشاهدة (انقر للمعاينة 👁️)",
                                         fontSize = 11.sp,
                                         color = TextSecondary
                                     )
@@ -537,7 +545,11 @@ fun AcademicHistoryScreen(
                     }
                 } else {
                     items(myCompletedHomeworks, key = { it.id }) { hw ->
-                        GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                        GlassCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = GlassSurface,
+                            onClick = { previewHomework = hw }
+                        ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -551,7 +563,7 @@ fun AcademicHistoryScreen(
                                         color = TextPrimary
                                     )
                                     Text(
-                                        text = "تاريخ التسليم: ${hw.dueDate}",
+                                        text = "تاريخ التسليم: ${hw.dueDate} (انقر للتفاصيل 👁️)",
                                         fontSize = 11.sp,
                                         color = TextSecondary
                                     )
@@ -639,7 +651,19 @@ fun AcademicHistoryScreen(
                                         Text("لا توجد دروس مسجلة تحت هذا العام", fontSize = 11.sp, color = TextMuted)
                                     } else {
                                         subjContents.take(5).forEach { c ->
-                                            Text("  • ${c.studyDate}: ${c.title} (${c.authorName})", fontSize = 12.sp, color = TextSecondary)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(MidnightBackground.copy(alpha = 0.5f))
+                                                    .clickable { previewContent = c }
+                                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("  • ${c.studyDate}: ${c.title} (${c.authorName})", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.weight(1f))
+                                                Text("👁️", fontSize = 12.sp)
+                                            }
                                         }
                                     }
 
@@ -648,7 +672,19 @@ fun AcademicHistoryScreen(
                                         Text("لا توجد واجبات مسجلة", fontSize = 11.sp, color = TextMuted)
                                     } else {
                                         subjHomeworks.take(5).forEach { hw ->
-                                            Text("  • ${hw.title} (التسليم: ${hw.dueDate})", fontSize = 12.sp, color = TextSecondary)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(MidnightBackground.copy(alpha = 0.5f))
+                                                    .clickable { previewHomework = hw }
+                                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("  • ${hw.title} (التسليم: ${hw.dueDate})", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.weight(1f))
+                                                Text("👁️", fontSize = 12.sp)
+                                            }
                                         }
                                     }
 
@@ -657,7 +693,19 @@ fun AcademicHistoryScreen(
                                         Text("لا توجد اختبارات مسجلة", fontSize = 11.sp, color = TextMuted)
                                     } else {
                                         subjExams.take(5).forEach { ex ->
-                                            Text("  • ${ex.examDate}: ${ex.title}", fontSize = 12.sp, color = TextSecondary)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(MidnightBackground.copy(alpha = 0.5f))
+                                                    .clickable { previewExam = ex }
+                                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("  • ${ex.examDate}: ${ex.title}", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.weight(1f))
+                                                Text("👁️", fontSize = 12.sp)
+                                            }
                                         }
                                     }
 
@@ -679,4 +727,265 @@ fun AcademicHistoryScreen(
             }
         }
     }
+
+    // Modal Previews for Academic Archive Items
+    previewContent?.let { content ->
+        AcademicContentPreviewDialog(
+            content = content,
+            onDismiss = { previewContent = null }
+        )
+    }
+
+    previewHomework?.let { hw ->
+        AcademicHomeworkPreviewDialog(
+            homework = hw,
+            onDismiss = { previewHomework = null }
+        )
+    }
+
+    previewExam?.let { ex ->
+        AcademicExamPreviewDialog(
+            exam = ex,
+            onDismiss = { previewExam = null }
+        )
+    }
+}
+
+@Composable
+fun AcademicContentPreviewDialog(
+    content: com.magd.tanweer.data.model.ContentItem,
+    onDismiss: () -> Unit
+) {
+    val mediaUrls = content.media.map { it.url }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
+            ) {
+                Text("إغلاق المعاينة", color = TextOnAccent)
+            }
+        },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(content.subjectIcon.ifEmpty { "📚" }, fontSize = 22.sp)
+                    Column {
+                        Text(
+                            text = content.subjectName,
+                            fontSize = 13.sp,
+                            color = CyanAccent,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = content.title,
+                            fontSize = 15.sp,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("📅 تاريخ الدرس: ${content.studyDate}", fontSize = 12.sp, color = TextSecondary)
+                    Text("👤 الموثق: ${content.authorName}", fontSize = 12.sp, color = TextSecondary)
+                }
+
+                if (content.authorGradeSection.isNotBlank()) {
+                    Text("🏫 الشعبة: ${content.authorGradeSection}", fontSize = 11.sp, color = TextMuted)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MidnightBackground.copy(alpha = 0.8f))
+                        .padding(12.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("محتوى الدرس والشرح:", fontSize = 11.sp, color = TextMuted)
+                        Text(
+                            text = (content.description ?: "").ifBlank { "لا يوجد وصف إضافي مكتوب لهذا الدرس." },
+                            fontSize = 13.sp,
+                            color = TextPrimary
+                        )
+                    }
+                }
+
+                if (mediaUrls.isNotEmpty()) {
+                    Text("📎 المرفقات والصور (${mediaUrls.size}):", fontSize = 12.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        for ((index, _) in mediaUrls.withIndex()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(GlassSurface)
+                                    .border(1.dp, GlassBorderSubtle, RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Text("📷 مرفق ${index + 1}", fontSize = 11.sp, color = CyanAccent)
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("👁️ المشاهدات: ${content.viewsCount}", fontSize = 11.sp, color = TextMuted)
+                    Text("👍 المفيدة: ${content.usefulCount}", fontSize = 11.sp, color = TextMuted)
+                }
+            }
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+
+@Composable
+fun AcademicHomeworkPreviewDialog(
+    homework: com.magd.tanweer.data.model.HomeworkItem,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = WarmAmber)
+            ) {
+                Text("إغلاق", color = TextOnAccent)
+            }
+        },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("📝", fontSize = 22.sp)
+                Column {
+                    Text(text = "واجب مادة ${homework.subjectName}", fontSize = 13.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Text(text = homework.title, fontSize = 15.sp, color = TextPrimary, fontWeight = FontWeight.Bold)
+                }
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("📅 تاريخ التسليم: ${homework.dueDate}", fontSize = 12.sp, color = TextSecondary)
+                    val isOfficialHw = homework.taskType == "OFFICIAL" || homework.taskType == "HOMEWORK"
+                    GlassPill(
+                        text = if (isOfficialHw) "واجب رسمي معتمد ⭐" else "واجب تشاركي",
+                        color = if (isOfficialHw) WarmAmber else CyanAccent,
+                        bgColor = (if (isOfficialHw) WarmAmber else CyanAccent).copy(alpha = 0.15f)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MidnightBackground.copy(alpha = 0.8f))
+                        .padding(12.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("الأسئلة والصفحات المطلوبة:", fontSize = 11.sp, color = TextMuted)
+                        val hwDesc = homework.details ?: homework.questionNumbers ?: homework.pageNumbers ?: ""
+                        Text(
+                            text = hwDesc.ifBlank { "لا توجد تفاصيل إضافية مسجلة للواجب." },
+                            fontSize = 13.sp,
+                            color = TextPrimary
+                        )
+                    }
+                }
+            }
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+
+@Composable
+fun AcademicExamPreviewDialog(
+    exam: com.magd.tanweer.data.model.ExamItem,
+    onDismiss: () -> Unit
+) {
+    val examTypeAr = when (exam.examType.uppercase()) {
+        "MONTHLY" -> "اختبار شهري"
+        "QUIZ" -> "كويز قصير"
+        "ORAL" -> "اختبار شفهي 🗣️"
+        "MIDTERM" -> "نصف العام"
+        "FINAL" -> "نهاية العام"
+        else -> exam.examType
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = RubyRed)
+            ) {
+                Text("إغلاق", color = TextOnAccent)
+            }
+        },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("📑", fontSize = 22.sp)
+                Column {
+                    Text(text = "اختبار مادة ${exam.subjectName}", fontSize = 13.sp, color = RubyRed, fontWeight = FontWeight.Bold)
+                    Text(text = exam.title, fontSize = 15.sp, color = TextPrimary, fontWeight = FontWeight.Bold)
+                }
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("📅 موعد الاختبار: ${exam.examDate}", fontSize = 12.sp, color = TextSecondary)
+                    GlassPill(
+                        text = examTypeAr,
+                        color = RubyRed,
+                        bgColor = RubyRed.copy(alpha = 0.15f)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MidnightBackground.copy(alpha = 0.8f))
+                        .padding(12.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("المنهج والملاحظات المشمولة في الاختبار:", fontSize = 11.sp, color = TextMuted)
+                        Text(
+                            text = (exam.notes ?: "").ifBlank { "كافة الدروس السابقة مشمولة ضمن الاختبار." },
+                            fontSize = 13.sp,
+                            color = TextPrimary
+                        )
+                    }
+                }
+            }
+        },
+        containerColor = MidnightSurface,
+        shape = RoundedCornerShape(16.dp)
+    )
 }

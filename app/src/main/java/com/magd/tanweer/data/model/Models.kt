@@ -7,8 +7,8 @@ data class User(
     val id: String,
     val fullName: String,
     val phoneNumber: String,
-    val gradeId: Int,
-    val sectionId: String,
+    val gradeId: Int? = null,
+    val sectionId: String? = null,
     val role: String = "MEMBER",
     val defaultGroupId: String = "",
     val gradeName: String = "",
@@ -240,7 +240,20 @@ data class GroupMemberItem(
     val status: String = "ACTIVE", // ACTIVE, PENDING, BANNED
     val joinedAt: Long = 0L,
     val gradeId: Int = 0,
-    val sectionId: String = ""
+    val sectionId: String = "",
+    val requestReason: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class JoinGroupBody(
+    val reason: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class CreateGroupRequest(
+    val name: String,
+    val description: String? = null,
+    val icon: String? = "👥"
 )
 
 @JsonClass(generateAdapter = true)

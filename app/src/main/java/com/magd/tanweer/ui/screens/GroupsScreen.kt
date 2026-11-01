@@ -57,6 +57,10 @@ fun GroupsScreen(
     var activeTab by remember { mutableStateOf(GroupsTab.MY_GROUPS) }
     var activeChatGroup by remember { mutableStateOf<GroupItem?>(null) }
     var managingGroup by remember { mutableStateOf<GroupItem?>(null) }
+    var joinRequestGroup by remember { mutableStateOf<GroupItem?>(null) }
+    var joinReasonText by remember { mutableStateOf("") }
+    var isSubmittingJoin by remember { mutableStateOf(false) }
+    var showCreateGroupDialog by remember { mutableStateOf(false) }
     val chatMessages by viewModel.repository.getChatMessages(activeChatGroup?.id ?: "")
         .collectAsStateWithLifecycle(initialValue = emptyList())
     var chatInputText by remember { mutableStateOf("") }
@@ -621,6 +625,17 @@ fun GroupsScreen(
                 }
             } else {
                 // Tab 2: DISCOVER PUBLIC GROUPS
+                if (canManageMembers) {
+                    item {
+                        GlassButton(
+                            text = "+ إنشاء مجموعة عامة جديدة 👥",
+                            icon = Icons.Default.Add,
+                            onClick = { showCreateGroupDialog = true },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
                 if (discoverGroups.isEmpty()) {
                     item {
                         EmptyStateGlass(
@@ -660,18 +675,24 @@ fun GroupsScreen(
                                                 fontWeight = FontWeight.Bold,
                                                 color = TextPrimary
                                             )
+                                            val groupTypeLabel = when (group.type) {
+                                                "CLASS" -> "شعبة دراسية أخرى"
+                                                "SHARED" -> "شعبة مشتركة"
+                                                else -> "نادي مدرسي عام"
+                                            }
                                             Text(
-                                                text = "${group.memberCount} عضو • ${when (group.type) { "SHARED" -> "شعبة مشتركة"; else -> "نادي مدرسي عام" }}",
+                                                text = "${group.memberCount} عضو • $groupTypeLabel",
                                                 fontSize = 12.sp,
                                                 color = CyanAccent
                                             )
                                         }
                                     }
 
+                                    val isClass = group.type == "CLASS"
                                     GlassPill(
-                                        text = "عامة للجميع",
-                                        color = EmeraldGreen,
-                                        bgColor = EmeraldGreen.copy(alpha = 0.15f)
+                                        text = if (isClass) "تتطلب موافقة ⏳" else "عامة للجميع",
+                                        color = if (isClass) WarmAmber else EmeraldGreen,
+                                        bgColor = if (isClass) AmberGlow else EmeraldGreen.copy(alpha = 0.15f)
                                     )
                                 }
 
@@ -686,25 +707,31 @@ fun GroupsScreen(
 
                                 Spacer(modifier = Modifier.height(10.dp))
 
+                                val isClassGroup = group.type == "CLASS"
                                 GlassButton(
-                                    text = "طلب الانضمام للمجموعة ➕",
+                                    text = if (isClassGroup) "طلب الانضمام للشعبة ➕" else "طلب الانضمام للمجموعة ➕",
                                     icon = Icons.Default.GroupAdd,
                                     onClick = {
-                                        viewModel.joinGroup(
-                                            groupId = group.id,
-                                            onResult = { isSuccess, status, message ->
-                                                if (isSuccess) {
-                                                    if (status == "ACTIVE") {
-                                                        Toast.makeText(context, "تم الانضمام إلى ${group.name} بنجاح! 🎉", Toast.LENGTH_SHORT).show()
-                                                        activeTab = GroupsTab.MY_GROUPS
+                                        if (isClassGroup) {
+                                            joinRequestGroup = group
+                                            joinReasonText = ""
+                                        } else {
+                                            viewModel.joinGroup(
+                                                groupId = group.id,
+                                                onResult = { isSuccess, status, message ->
+                                                    if (isSuccess) {
+                                                        if (status == "ACTIVE") {
+                                                            Toast.makeText(context, "تم الانضمام إلى ${group.name} بنجاح! 🎉", Toast.LENGTH_SHORT).show()
+                                                            activeTab = GroupsTab.MY_GROUPS
+                                                        } else {
+                                                            Toast.makeText(context, "تم إرسال طلب الانضمام إلى ${group.name}، بانتظار موافقة المشرفين ⏳", Toast.LENGTH_LONG).show()
+                                                        }
                                                     } else {
-                                                        Toast.makeText(context, "تم إرسال طلب الانضمام إلى ${group.name}، بانتظار موافقة المشرفين ⏳", Toast.LENGTH_LONG).show()
+                                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                                                     }
-                                                } else {
-                                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                                                 }
-                                            }
-                                        )
+                                            )
+                                        }
                                     },
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -713,6 +740,197 @@ fun GroupsScreen(
                     }
                 }
             }
+        }
+
+        // Join Reason Dialog for CLASS groups
+        joinRequestGroup?.let { targetGroup ->
+            AlertDialog(
+                onDismissRequest = { if (!isSubmittingJoin) joinRequestGroup = null },
+                title = {
+                    Text("طلب الانضمام إلى ${targetGroup.name} 🏫", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "هذه الشعبة تابعة لقسم دراسي آخر، يرجى كتابة سبب طلب الانضمام لعرضه على مشرف الشعبة للموافقة:",
+                            fontSize = 12.sp,
+                            color = TextSecondary
+                        )
+                        OutlinedTextField(
+                            value = joinReasonText,
+                            onValueChange = { joinReasonText = it },
+                            label = { Text("سبب طلب الانضمام (مثلاً: طالب منقول أو متابعة مواد)", fontSize = 11.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyanAccent,
+                                unfocusedBorderColor = GlassBorder,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            ),
+                            maxLines = 3
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (joinReasonText.isBlank()) {
+                                Toast.makeText(context, "يرجى كتابة سبب الانضمام", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            isSubmittingJoin = true
+                            viewModel.joinGroup(
+                                groupId = targetGroup.id,
+                                reason = joinReasonText.trim(),
+                                onResult = { isSuccess, status, message ->
+                                    isSubmittingJoin = false
+                                    joinRequestGroup = null
+                                    if (isSuccess) {
+                                        if (status == "ACTIVE") {
+                                            Toast.makeText(context, "تم الانضمام بنجاح! 🎉", Toast.LENGTH_SHORT).show()
+                                            activeTab = GroupsTab.MY_GROUPS
+                                        } else {
+                                            Toast.makeText(context, "تم إرسال طلب الانضمام ومبرر الطلب بنجاح، بانتظار موافقة مشرف الشعبة ⏳", Toast.LENGTH_LONG).show()
+                                        }
+                                    } else {
+                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+                        },
+                        enabled = !isSubmittingJoin,
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
+                    ) {
+                        if (isSubmittingJoin) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = TextOnAccent, strokeWidth = 2.dp)
+                        } else {
+                            Text("إرسال الطلب 📤", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = { joinRequestGroup = null },
+                        enabled = !isSubmittingJoin
+                    ) {
+                        Text("إلغاء", color = TextSecondary)
+                    }
+                },
+                containerColor = MidnightSurface,
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
+
+        // Create Public Group Dialog
+        if (showCreateGroupDialog) {
+            var newGroupName by remember { mutableStateOf("") }
+            var newGroupDesc by remember { mutableStateOf("") }
+            var newGroupIcon by remember { mutableStateOf("👥") }
+            var isCreating by remember { mutableStateOf(false) }
+            val iconsList = listOf("👥", "🔬", "📖", "🎨", "⚽", "💻", "💡", "🌐")
+
+            AlertDialog(
+                onDismissRequest = { if (!isCreating) showCreateGroupDialog = false },
+                title = {
+                    Text("إنشاء مجموعة عامة جديدة 👥", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("اختر أيقونة للمجموعة:", fontSize = 12.sp, color = TextSecondary)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            iconsList.forEach { ic ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (newGroupIcon == ic) CyanGlow else MidnightBackground)
+                                        .border(1.dp, if (newGroupIcon == ic) CyanAccent else GlassBorderSubtle, RoundedCornerShape(8.dp))
+                                        .clickable { newGroupIcon = ic },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(ic, fontSize = 18.sp)
+                                }
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = newGroupName,
+                            onValueChange = { newGroupName = it },
+                            label = { Text("اسم المجموعة *", fontSize = 11.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyanAccent,
+                                unfocusedBorderColor = GlassBorder,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            ),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = newGroupDesc,
+                            onValueChange = { newGroupDesc = it },
+                            label = { Text("وصف المجموعة وأهدافها", fontSize = 11.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyanAccent,
+                                unfocusedBorderColor = GlassBorder,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            ),
+                            maxLines = 3
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (newGroupName.isBlank()) {
+                                Toast.makeText(context, "يرجى كتابة اسم المجموعة", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            isCreating = true
+                            viewModel.createPublicGroup(
+                                name = newGroupName.trim(),
+                                description = newGroupDesc.trim().ifEmpty { null },
+                                icon = newGroupIcon
+                            ) { success, msg ->
+                                isCreating = false
+                                if (success) {
+                                    showCreateGroupDialog = false
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        enabled = !isCreating,
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
+                    ) {
+                        if (isCreating) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = TextOnAccent, strokeWidth = 2.dp)
+                        } else {
+                            Text("إنشاء المجموعة ✅", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = { showCreateGroupDialog = false },
+                        enabled = !isCreating
+                    ) {
+                        Text("إلغاء", color = TextSecondary)
+                    }
+                },
+                containerColor = MidnightSurface,
+                shape = RoundedCornerShape(16.dp)
+            )
         }
 
         // Group Members Management Dialog
@@ -735,6 +953,11 @@ fun GroupsScreen(
                     viewModel.approveGroupJoinRequest(userId, grp.id) { success, msg ->
                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }
+                },
+                onRejectJoin = { userId ->
+                    viewModel.rejectGroupJoinRequest(userId, grp.id) { success, msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
                 }
             )
         }
@@ -751,7 +974,8 @@ fun GroupMembersManagementDialog(
     onDismiss: () -> Unit,
     onUpdateRole: (userId: String, newRole: String) -> Unit,
     onRemove: (userId: String, isBan: Boolean) -> Unit,
-    onApproveJoin: (userId: String) -> Unit
+    onApproveJoin: (userId: String) -> Unit,
+    onRejectJoin: (userId: String) -> Unit = {}
 ) {
     val members = membersResponse?.members ?: emptyList()
     val canManage = membersResponse?.canManageMembers == true
@@ -832,6 +1056,22 @@ fun GroupMembersManagementDialog(
                                     )
                                 }
 
+                                if (!m.requestReason.isNullOrBlank()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(AmberGlow)
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "سبب الطلب: ${m.requestReason}",
+                                            fontSize = 11.sp,
+                                            color = WarmAmber
+                                        )
+                                    }
+                                }
+
                                 if (canManage) {
                                     HorizontalDivider(color = GlassBorderSubtle, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
                                     Row(
@@ -846,7 +1086,16 @@ fun GroupMembersManagementDialog(
                                                 shape = RoundedCornerShape(6.dp),
                                                 colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
                                             ) {
-                                                Text("قبول الاعتماد ✅", fontSize = 10.sp, color = Color.White)
+                                                Text("قبول ✅", fontSize = 10.sp, color = Color.White)
+                                            }
+                                            Button(
+                                                onClick = { onRejectJoin(m.userId) },
+                                                modifier = Modifier.weight(1f).height(28.dp),
+                                                contentPadding = PaddingValues(0.dp),
+                                                shape = RoundedCornerShape(6.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = RubyRed)
+                                            ) {
+                                                Text("رفض ❌", fontSize = 10.sp, color = Color.White)
                                             }
                                         } else {
                                             if (m.memberRole == "STUDENT") {

@@ -53,7 +53,7 @@ class TanweerRepository(
                 sectionId = it.sectionId,
                 role = it.role,
                 defaultGroupId = it.defaultGroupId,
-                gradeName = SchoolHierarchy.getGradeName(it.gradeId),
+                gradeName = it.gradeId?.let { gid -> SchoolHierarchy.getGradeName(gid) } ?: "الإدارة المدرسية",
                 stats = UserStats(
                     lessonsCount = it.lessonsCount,
                     homeworksCount = it.homeworksCount,
@@ -197,10 +197,10 @@ class TanweerRepository(
         val newFullName = fullName ?: currentUserEntity.fullName
         val newGradeId = gradeId ?: currentUserEntity.gradeId
         val newSectionId = sectionId ?: currentUserEntity.sectionId
-        val newGroupId = "class_${newGradeId}_${newSectionId.uppercase()}"
+        val newGroupId = if (newGradeId != null && newSectionId != null) "class_${newGradeId}_${newSectionId.uppercase()}" else currentUserEntity.defaultGroupId
 
         val gradeToUpdate = if (gradeId != null && gradeId != currentUserEntity.gradeId) gradeId else null
-        val sectionToUpdate = if (sectionId != null && sectionId.uppercase() != currentUserEntity.sectionId.uppercase()) sectionId.uppercase() else null
+        val sectionToUpdate = if (sectionId != null && sectionId.uppercase() != currentUserEntity.sectionId?.uppercase()) sectionId.uppercase() else null
 
         try {
             val res = api.updateProfile(
@@ -271,7 +271,7 @@ class TanweerRepository(
                 results.add(syncIssues(groupId))
                 results.add(syncEvents(groupId))
                 val user = db.userDao().getUserSync()
-                if (user != null) {
+                if (user != null && user.gradeId != null) {
                     results.add(syncBooks(user.gradeId))
                 }
             }
@@ -1119,9 +1119,9 @@ class TanweerRepository(
         }
     }
 
-    suspend fun joinGroup(groupId: String): Result<GenericResponse> = withContext(Dispatchers.IO) {
+    suspend fun joinGroup(groupId: String, reason: String? = null): Result<GenericResponse> = withContext(Dispatchers.IO) {
         try {
-            val res = api.joinGroupRequest(groupId)
+            val res = api.joinGroupRequest(groupId, com.magd.tanweer.data.model.JoinGroupBody(reason = reason))
             if (res.isSuccessful && res.body() != null) {
                 val body = res.body()!!
                 syncGroups()
@@ -1244,6 +1244,26 @@ class TanweerRepository(
 
     suspend fun clearBookDrawing(bookId: String, pageIndex: Int) = withContext(Dispatchers.IO) {
         db.bookReadingDao().clearDrawingForPage(bookId, pageIndex)
+    }
+
+    suspend fun getOrExtractPageText(bookId: String, pageIndex: Int, pdfFile: java.io.File): String = withContext(Dispatchers.IO) {
+        val cached = db.bookReadingDao().getExtractedPage(bookId, pageIndex)
+        if (cached != null && cached.extractedText.isNotBlank()) {
+            return@withContext cached.extractedText
+        }
+        val extracted = com.magd.tanweer.util.PdfTextExtractor.extractPageText(pdfFile, pageIndex)
+        if (extracted.isNotBlank()) {
+            db.bookReadingDao().insertExtractedPage(
+                BookExtractedPageEntity(
+                    id = "${bookId}_${pageIndex}",
+                    bookId = bookId,
+                    pageIndex = pageIndex,
+                    extractedText = extracted,
+                    extractionType = "PDFBOX"
+                )
+            )
+        }
+        extracted
     }
 
     fun getScheduleSlots(groupId: String, dayOfWeek: Int): Flow<List<ScheduleSlot>> {
@@ -1654,6 +1674,34 @@ class TanweerRepository(
                 Result.success(res.body()?.message ?: "تم قبول العضو واعتماده بنجاح")
             } else {
                 Result.failure(Exception(res.body()?.message ?: "تعذر اعتماد طلب الانضمام"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun rejectGroupJoinRequest(groupId: String, targetUserId: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.rejectGroupJoinRequest(groupId, targetUserId)
+            if (res.isSuccessful && res.body()?.success == true) {
+                Result.success(res.body()?.message ?: "تم رفض طلب الانضمام بنجاح")
+            } else {
+                Result.failure(Exception(res.body()?.message ?: "تعذر رفض طلب الانضمام"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createPublicGroup(name: String, description: String? = null, icon: String? = "👥"): Result<GenericResponse> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.createPublicGroup(com.magd.tanweer.data.model.CreateGroupRequest(name, description, icon))
+            if (res.isSuccessful && res.body()?.success == true) {
+                syncGroups()
+                Result.success(res.body()!!)
+            } else {
+                val errorMsg = res.body()?.error?.message ?: res.body()?.message ?: "تعذر إنشاء المجموعة"
+                Result.failure(Exception(errorMsg))
             }
         } catch (e: Exception) {
             Result.failure(e)

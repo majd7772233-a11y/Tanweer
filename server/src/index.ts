@@ -44,6 +44,7 @@ import {
   handleGetDashboardCorrections,
   handleExecuteSql,
   handleGetDashboardContentDetail,
+  handleGetDashboardHomeworkDetail,
   handleGetDashboardMedia,
   handleGetDashboardUserDetail,
   handlePreviewPurge,
@@ -206,6 +207,10 @@ export default {
       if (url.pathname === '/api/dashboard/homeworks' && request.method === 'GET') {
         return handleGetDashboardHomeworks(request, env);
       }
+      if (url.pathname.startsWith('/api/dashboard/homeworks/') && !url.pathname.includes('/delete') && request.method === 'GET') {
+        const hwId = url.pathname.split('/')[4];
+        return handleGetDashboardHomeworkDetail(hwId, env);
+      }
       if (url.pathname.startsWith('/api/dashboard/homeworks/') && request.method === 'DELETE') {
         const hwId = url.pathname.split('/')[4];
         return handleDeleteDashboardHomework(hwId, auth.ownerId, env);
@@ -232,7 +237,7 @@ export default {
         return handleDeleteDashboardIssue(issueId, auth.ownerId, env);
       }
       if (url.pathname === '/api/dashboard/schedules' && request.method === 'GET') {
-        return handleGetDashboardSchedules(env);
+        return handleGetDashboardSchedules(env, request);
       }
       if (url.pathname.startsWith('/api/dashboard/schedules/') && url.pathname.endsWith('/reset') && request.method === 'POST') {
         const groupId = url.pathname.split('/')[4];
@@ -272,7 +277,7 @@ export default {
         return handleGetDashboardMedia(mediaKey, env);
       }
       if (url.pathname === '/api/dashboard/system/purge/preview' && request.method === 'POST') {
-        return handlePreviewPurge(auth.ownerId, env);
+        return handlePreviewPurge(request, auth.ownerId, env);
       }
       if (url.pathname === '/api/dashboard/system/purge' && request.method === 'POST') {
         return handleExecutePurge(request, auth.ownerId, env);

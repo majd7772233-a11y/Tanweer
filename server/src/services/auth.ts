@@ -285,7 +285,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
      VALUES (?, ?, ?, ?, ?, ?)`
   ).bind(sessionId, user.id, deviceId, tokenHash, expiresAt, now).run();
 
-  const classGroupId = `class_${user.grade_id}_${user.section_id}`;
+  const classGroupId = (user.grade_id && user.section_id && user.role !== Role.ADMIN) ? `class_${user.grade_id}_${user.section_id}` : '';
 
   return jsonResponse({
     success: true,
@@ -399,7 +399,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
      VALUES (?, ?, ?, ?, ?, ?)`
   ).bind(sessionId, user.id, deviceId, tokenHash, expiresAt, now).run();
 
-  const classGroupId = `class_${user.grade_id}_${user.section_id}`;
+  const classGroupId = (user.grade_id && user.section_id && user.role !== Role.ADMIN) ? `class_${user.grade_id}_${user.section_id}` : '';
 
   return jsonResponse({
     success: true,

@@ -325,7 +325,15 @@ interface TanweerApiService {
     suspend fun getGroups(): Response<GroupsResponse>
 
     @POST("api/v1/groups/{id}/join-request")
-    suspend fun joinGroupRequest(@Path("id") groupId: String): Response<GenericResponse>
+    suspend fun joinGroupRequest(
+        @Path("id") groupId: String,
+        @Body req: com.magd.tanweer.data.model.JoinGroupBody = com.magd.tanweer.data.model.JoinGroupBody()
+    ): Response<GenericResponse>
+
+    @POST("api/v1/groups")
+    suspend fun createPublicGroup(
+        @Body req: com.magd.tanweer.data.model.CreateGroupRequest
+    ): Response<GenericResponse>
 
     @GET("api/v1/groups/{id}/messages")
     suspend fun getGroupMessages(@Path("id") groupId: String): Response<ChatMessagesResponse>
@@ -403,6 +411,12 @@ interface TanweerApiService {
 
     @POST("api/v1/groups/{groupId}/requests/{userId}/approve")
     suspend fun approveGroupJoinRequest(
+        @Path("groupId") groupId: String,
+        @Path("userId") userId: String
+    ): Response<GenericResponse>
+
+    @POST("api/v1/groups/{groupId}/requests/{userId}/reject")
+    suspend fun rejectGroupJoinRequest(
         @Path("groupId") groupId: String,
         @Path("userId") userId: String
     ): Response<GenericResponse>

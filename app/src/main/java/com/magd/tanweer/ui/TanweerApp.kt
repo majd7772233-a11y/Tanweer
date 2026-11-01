@@ -118,7 +118,7 @@ fun TanweerApp(
                 }
             },
             floatingActionButton = {
-                if (subScreen == SubScreen.NONE) {
+                if (subScreen == SubScreen.NONE && currentTab == NavigationTab.TODAY) {
                     FloatingActionButton(
                         onClick = {
                             viewModel.triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
