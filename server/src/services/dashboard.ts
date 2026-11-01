@@ -52,9 +52,8 @@ export async function verifyOwnerAuth(request: Request, env: Env): Promise<{ isO
     return { isOwner: false, ownerId: '' };
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
-
-  // 1. Direct Secret Header check (for API / automated operations)
+  // 1. Direct Secret Header check (for API / automated operations).
+  // This path validates the configured owner secret directly without creating a session.
   const headerSecret = request.headers.get('X-Owner-Secret');
   if (headerSecret && headerSecret === secretKey) {
     return { isOwner: true, ownerId: 'SYSTEM_OWNER' };
@@ -76,6 +75,11 @@ export async function verifyOwnerAuth(request: Request, env: Env): Promise<{ isO
   }
 
   if (!token) {
+    return { isOwner: false, ownerId: '' };
+  }
+
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
     return { isOwner: false, ownerId: '' };
   }
 
@@ -137,7 +141,10 @@ export async function handleOwnerLogin(request: Request, env: Env): Promise<Resp
     return errorResponse('CONFIGURATION_ERROR', 'لوحة التحكم معطلة: مفتاح المالك TANWEER_OWNER_SECRET غير مهيأ في متغيرات البيئة', 500);
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIGURATION_ERROR', 'جلسات لوحة المالك معطلة: مفتاح الجلسات السري غير مهيأ في الخادم', 500);
+  }
 
   let secret = '';
   const contentType = request.headers.get('Content-Type') || '';
@@ -204,28 +211,47 @@ export async function handleOwnerLogin(request: Request, env: Env): Promise<Resp
  * Handles Owner Logout and server-side session revocation.
  */
 export async function handleOwnerLogout(request?: Request, env?: Env): Promise<Response> {
+  const cookieHeader = `${OWNER_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+
+  const failure = (code: string, message: string) => new Response(JSON.stringify({
+    success: false,
+    error: { code, message },
+  }), {
+    status: 500,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Set-Cookie': cookieHeader,
+    },
+  });
+
   if (request && env) {
-    try {
-      const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
-      let token: string | null = null;
-      const authHeader = request.headers.get('Authorization');
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.substring(7).trim();
-      } else {
-        const cookieHeader = request.headers.get('Cookie');
-        if (cookieHeader) {
-          const match = cookieHeader.match(/(?:^|;\s*)tanweer_owner_token=([^;]+)/);
-          if (match) {
-            token = decodeURIComponent(match[1]).trim();
-          }
-        }
+    let token: string | null = null;
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else {
+      const cookie = request.headers.get('Cookie');
+      if (cookie) {
+        const match = cookie.match(/(?:^|;\\s*)tanweer_owner_token=([^;]+)/);
+        if (match) token = decodeURIComponent(match[1]).trim();
+      }
+    }
+
+    if (token) {
+      const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+      if (!pepper) {
+        return failure('CONFIG_ERROR', 'تعذر إبطال جلسة المالك لأن مفتاح الجلسات السري غير مهيأ في الخادم');
       }
 
-      if (token) {
+      try {
         const tokenHash = await hashString(token, pepper);
-        await env.DB.prepare(`
-          UPDATE owner_sessions SET revoked = 1 WHERE token_hash = ?
-        `).bind(tokenHash).run();
+        const revoke = await env.DB.prepare(
+          `UPDATE owner_sessions SET revoked = 1 WHERE token_hash = ? AND revoked = 0`
+        ).bind(tokenHash).run();
+
+        if (revoke.meta?.changes !== 1) {
+          return failure('OWNER_SESSION_NOT_FOUND', 'جلسة المالك غير موجودة أو تم إبطالها مسبقاً');
+        }
 
         await logRoleAudit(
           env.DB,
@@ -235,13 +261,13 @@ export async function handleOwnerLogout(request?: Request, env?: Env): Promise<R
           null,
           'تم تسجيل خروج مالك النظام وإبطال رمز الجلسة في الخادم'
         );
+      } catch (error) {
+        console.error('Failed to revoke owner session in DB:', error);
+        return failure('LOGOUT_FAILED', 'تعذر إبطال جلسة المالك في قاعدة البيانات. لم يتم تأكيد تسجيل الخروج.');
       }
-    } catch (e) {
-      console.error('Failed to revoke owner session in DB:', e);
     }
   }
 
-  const cookieHeader = `${OWNER_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
   return new Response(JSON.stringify({ success: true, message: 'تم تسجيل الخروج وإبطال الجلسة بنجاح' }), {
     status: 200,
     headers: {
@@ -644,7 +670,10 @@ export async function handleReissueUserCredentials(
   const expiresInHours = Math.max(1, Math.min(Number(body.expiresInHours) || 24, 72));
   const revokeExistingSessions = body.revokeExistingSessions !== false;
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || LEGACY_DEFAULT_PEPPER;
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح إصدار بيانات الاعتماد غير مهيأ في الخادم', 500);
+  }
   const now = Date.now();
   const expiresAt = now + expiresInHours * 3600 * 1000;
 
