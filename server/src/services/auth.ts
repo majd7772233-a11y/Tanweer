@@ -50,13 +50,17 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   }
 
   const existingUser = await env.DB.prepare(
-    `SELECT id, password_hash, grade_id, section_id FROM users WHERE phone_number = ?`
-  ).bind(normalizedPhone).first<{ id: string; password_hash: string; grade_id: number; section_id: string }>();
+    `SELECT id, password_hash, grade_id, section_id, status FROM users WHERE phone_number = ?`
+  ).bind(normalizedPhone).first<{ id: string; password_hash: string; grade_id: number; section_id: string; status?: string }>();
 
   let userId: string;
   let isRepairingIncompleteRegistration = false;
 
   if (existingUser) {
+    if (existingUser.status === 'DISABLED') {
+      return errorResponse('ACCOUNT_DISABLED', 'هذا الحساب موقوف من قِبل إدارة المنظومة، يرجى التواصل مع الإدارة', 403);
+    }
+
     // Check if user has an active membership and a valid session
     const membership = await env.DB.prepare(
       `SELECT group_id FROM group_members WHERE user_id = ? AND status = 'ACTIVE' LIMIT 1`
@@ -223,7 +227,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   const normalizedPhone = phoneVal.isValid ? phoneVal.normalized : body.phoneNumber.trim();
 
   const user = await env.DB.prepare(
-    `SELECT id, phone_number, full_name, grade_id, section_id, role, password_hash
+    `SELECT id, phone_number, full_name, grade_id, section_id, role, password_hash, status
      FROM users WHERE phone_number = ?`
   ).bind(normalizedPhone).first<{
     id: string;
@@ -233,6 +237,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
     section_id: string;
     role: string;
     password_hash: string;
+    status?: string;
   }>();
 
   if (!user) {
@@ -242,6 +247,10 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   const verification = await verifyPasswordWithDetails(body.password, user.password_hash, pepper);
   if (!verification.isValid) {
     return errorResponse('INVALID_CREDENTIALS', 'رقم الهاتف أو كلمة المرور غير صحيحة');
+  }
+
+  if (user.status === 'DISABLED') {
+    return errorResponse('ACCOUNT_DISABLED', 'تم تجميد هذا الحساب من قِبل إدارة المنظومة', 403);
   }
 
   const now = Date.now();
@@ -341,7 +350,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
   const recoveryHash = await hashString(cleanCode, pepper);
 
   let user = await env.DB.prepare(
-    `SELECT id, phone_number, full_name, grade_id, section_id, role
+    `SELECT id, phone_number, full_name, grade_id, section_id, role, status
      FROM users WHERE recovery_code_hash = ?`
   ).bind(recoveryHash).first<{
     id: string;
@@ -350,13 +359,14 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
     grade_id: number;
     section_id: string;
     role: string;
+    status?: string;
   }>();
 
   // Backward compatibility fallback: verify against legacy default pepper if secret changed
   if (!user && pepper !== LEGACY_DEFAULT_PEPPER) {
     const legacyRecoveryHash = await hashString(cleanCode, LEGACY_DEFAULT_PEPPER);
     user = await env.DB.prepare(
-      `SELECT id, phone_number, full_name, grade_id, section_id, role
+      `SELECT id, phone_number, full_name, grade_id, section_id, role, status
        FROM users WHERE recovery_code_hash = ?`
     ).bind(legacyRecoveryHash).first<{
       id: string;
@@ -365,6 +375,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
       grade_id: number;
       section_id: string;
       role: string;
+      status?: string;
     }>();
 
     if (user) {
@@ -375,6 +386,10 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
 
   if (!user) {
     return errorResponse('INVALID_RECOVERY_CODE', 'رمز الاسترداد السري غير صحيح أو غير موجود');
+  }
+
+  if (user.status === 'DISABLED') {
+    return errorResponse('ACCOUNT_DISABLED', 'تم تجميد هذا الحساب من قِبل إدارة المنظومة', 403);
   }
 
   const now = Date.now();
