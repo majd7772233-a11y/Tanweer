@@ -91,7 +91,7 @@ class TestMockDb {
       return this.tables.users.filter(row => row.role !== 'SYSTEM_OWNER');
     }
 
-    if (/FROM contents c/i.test(trimmed) && /WHERE c\\.id = \\?/i.test(trimmed)) {
+    if (trimmed.includes('FROM contents c') && trimmed.includes('WHERE c.id = ?')) {
       const row = this.tables.contents.find(item => item.id === params[0]);
       if (!row) return [];
       const author = this.tables.users.find(item => item.id === row.created_by);
