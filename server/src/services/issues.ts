@@ -77,12 +77,41 @@ export async function handleCreateIssue(user: UserContext, request: Request, env
     description?: string;
   };
 
-  if (!body.groupId || !body.title) {
+  if (!body.groupId || typeof body.title !== 'string' || !body.title.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى كتابة عنوان الاستفسار');
   }
 
   const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
   if (memberCheck) return memberCheck;
+
+  // Linked academic records must belong to the same group as the issue.
+  // Issues has no foreign keys for these optional references, so enforce scope here.
+  if (body.subjectId) {
+    const subject = await env.DB.prepare(
+      `SELECT id FROM subjects WHERE id = ?`
+    ).bind(body.subjectId).first<{ id: string }>();
+    if (!subject) {
+      return errorResponse('SUBJECT_NOT_FOUND', 'المادة المحددة غير موجودة', 404);
+    }
+  }
+
+  if (body.homeworkId) {
+    const homework = await env.DB.prepare(
+      `SELECT id FROM homeworks WHERE id = ? AND group_id = ?`
+    ).bind(body.homeworkId, body.groupId).first<{ id: string }>();
+    if (!homework) {
+      return errorResponse('LINKED_HOMEWORK_NOT_FOUND', 'الواجب المرتبط غير موجود في هذه المجموعة', 404);
+    }
+  }
+
+  if (body.examId) {
+    const exam = await env.DB.prepare(
+      `SELECT id FROM exams WHERE id = ? AND group_id = ?`
+    ).bind(body.examId, body.groupId).first<{ id: string }>();
+    if (!exam) {
+      return errorResponse('LINKED_EXAM_NOT_FOUND', 'الاختبار المرتبط غير موجود في هذه المجموعة', 404);
+    }
+  }
 
   const issueId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
