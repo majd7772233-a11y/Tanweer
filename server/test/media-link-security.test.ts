@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { Env, UserContext } from '../src/env';
 import { Role } from '../src/lib/roles';
 import { handleUploadMedia, validateMediaAttachmentAccess } from '../src/services/media';
+import { handleCreateContent } from '../src/services/content';
+import { handleCreateHomework } from '../src/services/homework';
 
 type BlobRecord = { id: string; uploaded_by: string | null };
 type MediaLink = { media_id?: string; url?: string; object_key?: string; group_id: string };
@@ -12,6 +14,7 @@ class MediaAccessDb {
   homeworkLinks: MediaLink[] = [];
   legacyHomeworkLinks: Array<{ group_id: string; media_urls: string }> = [];
   memberships = new Set<string>();
+  writes: string[] = [];
 
   prepare(sql: string) {
     const db = this;
@@ -61,6 +64,7 @@ class MediaAccessDb {
         return { results: [] };
       },
       async run() {
+        db.writes.push(sql);
         return { success: true, meta: { changes: 1 } };
       },
     };
@@ -159,6 +163,56 @@ describe('Private media attachment authorization', () => {
       ['https://images.example.test/public/photo.jpg'],
       db as any,
     )).resolves.toBeNull();
+  });
+
+
+  it('blocks a lesson from linking another group private image', async () => {
+    const db = new MediaAccessDb();
+    db.blobs.push({ id: 'med_private_lesson', uploaded_by: 'student-a' });
+    db.contentLinks.push({ group_id: 'group-a', url: 'https://tanweer.test/api/v1/media/med_private_lesson' });
+    db.memberships.add('group-b:' + user.userId);
+
+    const response = await handleCreateContent(user, new Request('https://tanweer.test/api/v1/contents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        groupId: 'group-b',
+        studyDate: '2026-11-02',
+        subjectId: 'math',
+        title: 'درس تجريبي',
+        media: [{ url: 'https://tanweer.test/api/v1/media/med_private_lesson' }],
+      }),
+    }), { DB: db as any } as Env);
+
+    expect(response.status).toBe(403);
+    expect((await response.json() as any).error.code).toBe('FORBIDDEN_MEDIA_SOURCE');
+    expect(db.writes.some(sql => sql.includes('INSERT INTO contents'))).toBe(false);
+    expect(db.writes.some(sql => sql.includes('INSERT INTO content_media'))).toBe(false);
+  });
+
+  it('blocks homework from linking another group private image', async () => {
+    const db = new MediaAccessDb();
+    db.blobs.push({ id: 'med_private_homework', uploaded_by: 'student-a' });
+    db.homeworkLinks.push({ group_id: 'group-a', media_id: 'med_private_homework' });
+    db.memberships.add('group-b:' + user.userId);
+
+    const response = await handleCreateHomework(user, new Request('https://tanweer.test/api/v1/homeworks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        groupId: 'group-b',
+        studyDate: '2026-11-02',
+        dueDate: '2026-11-03',
+        subjectId: 'math',
+        title: 'واجب تجريبي',
+        mediaUrls: ['https://tanweer.test/api/v1/media/med_private_homework'],
+      }),
+    }), { DB: db as any } as Env);
+
+    expect(response.status).toBe(403);
+    expect((await response.json() as any).error.code).toBe('FORBIDDEN_MEDIA_SOURCE');
+    expect(db.writes.some(sql => sql.includes('INSERT INTO homeworks'))).toBe(false);
+    expect(db.writes.some(sql => sql.includes('INSERT INTO homework_media'))).toBe(false);
   });
 
   it('records the authenticated uploader on newly stored blobs', async () => {
