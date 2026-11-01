@@ -6,7 +6,7 @@ import { handleCreateContent } from '../src/services/content';
 import { handleCreateHomework } from '../src/services/homework';
 
 type BlobRecord = { id: string; uploaded_by: string | null };
-type MediaLink = { media_id?: string; url?: string; object_key?: string; group_id: string };
+type MediaLink = { id?: string; media_id?: string; url?: string; object_key?: string; group_id: string };
 
 class MediaAccessDb {
   blobs: BlobRecord[] = [];
@@ -42,8 +42,10 @@ class MediaAccessDb {
           const needle = String(params[0]).replaceAll('%', '');
           return {
             results: db.contentLinks.filter(row =>
-              (row.url?.includes(needle) || row.object_key === params[1])
-            ).map(row => ({ group_id: row.group_id })) as T[],
+              (row.url?.includes(needle) || row.object_key === params[2] || row.id === params[1])
+            ).map(row => ({
+              group_id: row.group_id, id: row.id, url: row.url, object_key: row.object_key,
+            })) as T[],
           };
         }
         if (sql.includes('FROM homework_media hm')) {
@@ -51,14 +53,16 @@ class MediaAccessDb {
           return {
             results: db.homeworkLinks.filter(row =>
               row.media_id === params[0] || row.url?.includes(needle)
-            ).map(row => ({ group_id: row.group_id })) as T[],
+            ).map(row => ({
+              group_id: row.group_id, media_id: row.media_id, url: row.url,
+            })) as T[],
           };
         }
         if (sql.includes('FROM homeworks WHERE media_urls LIKE ?')) {
           const needle = String(params[0]).replaceAll('%', '');
           return {
             results: db.legacyHomeworkLinks.filter(row => row.media_urls.includes(needle))
-              .map(row => ({ group_id: row.group_id })) as T[],
+              .map(row => ({ group_id: row.group_id, media_urls: row.media_urls })) as T[],
           };
         }
         return { results: [] };
@@ -106,6 +110,44 @@ describe('Private media attachment authorization', () => {
 
     expect(response?.status).toBe(403);
     expect((await response?.json() as any).error.code).toBe('FORBIDDEN_MEDIA_SOURCE');
+  });
+
+  it('does not treat a longer content media ID as an exact source link', async () => {
+    const db = new MediaAccessDb();
+    db.blobs.push({ id: 'med_private_1', uploaded_by: 'student-a' });
+    db.contentLinks.push({
+      group_id: 'group-a',
+      url: 'https://tanweer.test/api/v1/media/med_private_10',
+    });
+    db.memberships.add('group-a:' + user.userId);
+
+    const response = await validateMediaAttachmentAccess(
+      user,
+      ['https://tanweer.test/api/v1/media/med_private_1'],
+      db as any,
+    );
+
+    expect(response?.status).toBe(403);
+    expect((await response?.json() as any).error.code).toBe('FORBIDDEN_UNLINKED_MEDIA');
+  });
+
+  it('does not treat a longer identifier inside legacy homework JSON as an exact link', async () => {
+    const db = new MediaAccessDb();
+    db.blobs.push({ id: 'med_private_1', uploaded_by: 'student-a' });
+    db.legacyHomeworkLinks.push({
+      group_id: 'group-a',
+      media_urls: JSON.stringify(['https://tanweer.test/api/v1/media/med_private_10']),
+    });
+    db.memberships.add('group-a:' + user.userId);
+
+    const response = await validateMediaAttachmentAccess(
+      user,
+      ['/api/v1/media/med_private_1'],
+      db as any,
+    );
+
+    expect(response?.status).toBe(403);
+    expect((await response?.json() as any).error.code).toBe('FORBIDDEN_UNLINKED_MEDIA');
   });
 
   it('allows reuse when the user is an active member of an original linked group', async () => {
