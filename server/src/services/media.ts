@@ -56,6 +56,132 @@ function detectImageMimeType(buffer: ArrayBuffer): string | null {
   return null;
 }
 
+/**
+ * Extracts the identifier from this server's private media endpoint.
+ * External HTTP(S) image URLs are not subject to local blob ownership checks.
+ */
+function extractInternalMediaId(value: string): string | null {
+  try {
+    const parsed = new URL(value, 'https://tanweer.invalid');
+    const match = parsed.pathname.match(/^\/api\/v1\/media\/([A-Za-z0-9_-]+)(?:\.[A-Za-z0-9]+)?\/?$/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Prevents a user from linking another group's private media blob into a group
+ * they can access. The uploader may reuse their own upload; other users must
+ * already have active access to at least one group where the blob is linked.
+ */
+export async function validateMediaAttachmentAccess(
+  user: UserContext,
+  urls: string[],
+  db: D1Database
+): Promise<Response | null> {
+  const uniqueUrls = Array.from(new Set(urls));
+  for (const value of uniqueUrls) {
+    if (typeof value !== 'string' || !value.trim()) {
+      return errorResponse('INVALID_MEDIA_URL', 'يوجد رابط صورة فارغ أو غير صالح');
+    }
+
+    const mediaId = extractInternalMediaId(value);
+    if (!mediaId) {
+      if (value.includes('/api/v1/media/')) {
+        return errorResponse('INVALID_MEDIA_URL', 'رابط صورة تنوير الداخلي غير صالح');
+      }
+
+      try {
+        const external = new URL(value);
+        if (external.protocol !== 'https:' && external.protocol !== 'http:') {
+          return errorResponse('INVALID_MEDIA_URL', 'يجب أن يكون رابط الصورة من نوع HTTP أو HTTPS');
+        }
+      } catch {
+        return errorResponse('INVALID_MEDIA_URL', 'رابط الصورة غير صالح');
+      }
+      continue;
+    }
+
+    let blob: { id: string; uploaded_by: string | null } | null;
+    try {
+      blob = await db.prepare(
+        `SELECT id, uploaded_by FROM media_blobs WHERE id = ? LIMIT 1`
+      ).bind(mediaId).first<{ id: string; uploaded_by: string | null }>();
+    } catch (error) {
+      console.error('Failed to validate media blob ownership:', error);
+      return errorResponse('MEDIA_VALIDATION_UNAVAILABLE', 'تعذر التحقق من صلاحية الصورة حالياً. حاول مجدداً.', 503);
+    }
+
+    if (!blob) {
+      return errorResponse('MEDIA_NOT_FOUND', 'الصورة المرتبطة غير موجودة على الخادم', 404);
+    }
+
+    if (blob.uploaded_by === user.userId) {
+      continue;
+    }
+
+    try {
+      const [contentLinks, homeworkLinks, legacyHomeworkLinks] = await Promise.all([
+        db.prepare(
+          `SELECT c.group_id
+           FROM content_media cm
+           JOIN contents c ON cm.content_id = c.id
+           WHERE cm.url LIKE ? OR cm.object_key = ?`
+        ).bind(`%${mediaId}%`, mediaId).all<{ group_id: string }>(),
+        db.prepare(
+          `SELECT h.group_id
+           FROM homework_media hm
+           JOIN homeworks h ON hm.homework_id = h.id
+           WHERE hm.media_id = ? OR hm.url LIKE ?`
+        ).bind(mediaId, `%${mediaId}%`).all<{ group_id: string }>(),
+        db.prepare(
+          `SELECT group_id FROM homeworks WHERE media_urls LIKE ?`
+        ).bind(`%${mediaId}%`).all<{ group_id: string }>(),
+      ]);
+
+      const linkedGroupIds = new Set<string>();
+      for (const row of contentLinks.results || []) if (row.group_id) linkedGroupIds.add(row.group_id);
+      for (const row of homeworkLinks.results || []) if (row.group_id) linkedGroupIds.add(row.group_id);
+      for (const row of legacyHomeworkLinks.results || []) if (row.group_id) linkedGroupIds.add(row.group_id);
+
+      if (linkedGroupIds.size === 0) {
+        return errorResponse(
+          'FORBIDDEN_UNLINKED_MEDIA',
+          'لا يمكنك إعادة ربط صورة لا تملكها ولم تُنشر في مجموعة تملك عضوية فعالة فيها',
+          403
+        );
+      }
+
+      let sourceAccess = false;
+      for (const groupId of linkedGroupIds) {
+        const membership = await db.prepare(
+          `SELECT 1 FROM group_members
+           WHERE group_id = ? AND user_id = ? AND status = 'ACTIVE'
+           LIMIT 1`
+        ).bind(groupId, user.userId).first();
+        if (membership) {
+          sourceAccess = true;
+          break;
+        }
+      }
+
+      if (!sourceAccess) {
+        return errorResponse(
+          'FORBIDDEN_MEDIA_SOURCE',
+          'لا يمكنك إعادة استخدام صورة من مجموعة لا تملك عضوية فعالة فيها',
+          403
+        );
+      }
+    } catch (error) {
+      console.error('Failed to validate media source-group access:', error);
+      return errorResponse('MEDIA_VALIDATION_UNAVAILABLE', 'تعذر التحقق من صلاحية الصورة حالياً. حاول مجدداً.', 503);
+    }
+  }
+
+  return null;
+}
+
 export async function handleUploadMedia(user: UserContext, request: Request, env: Env): Promise<Response> {
   const contentType = request.headers.get('content-type') || '';
   let mediaBuffer: ArrayBuffer | null = null;
@@ -113,22 +239,40 @@ export async function handleUploadMedia(user: UserContext, request: Request, env
   const checksum = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
   // Check if identical media already exists to deduplicate
-  const existing = await env.DB.prepare(
-    `SELECT id, mime_type, file_size FROM media_blobs WHERE checksum = ? LIMIT 1`
-  ).bind(checksum).first<{ id: string; mime_type: string; file_size: number }>();
+  let existing = await env.DB.prepare(
+    `SELECT id, mime_type, file_size, uploaded_by
+     FROM media_blobs
+     WHERE checksum = ? AND (uploaded_by = ? OR uploaded_by IS NULL)
+     LIMIT 1`
+  ).bind(checksum, user.userId).first<{
+    id: string;
+    mime_type: string;
+    file_size: number;
+    uploaded_by: string | null;
+  }>();
+
+  // Claim an unowned legacy blob only when this upload proves the caller has
+  // the actual image bytes. If another uploader wins the race, store a private copy.
+  if (existing && !existing.uploaded_by) {
+    const claim = await env.DB.prepare(
+      `UPDATE media_blobs SET uploaded_by = ? WHERE id = ? AND uploaded_by IS NULL`
+    ).bind(user.userId, existing.id).run();
+    if (claim.meta?.changes !== 1) existing = null;
+  }
 
   const targetId = existing ? existing.id : mediaId;
 
   if (!existing) {
     await env.DB.prepare(
-      `INSERT INTO media_blobs (id, mime_type, data, file_size, checksum, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO media_blobs (id, mime_type, data, file_size, checksum, uploaded_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       mediaId,
       mimeType,
       mediaBuffer,
       fileSize,
       checksum,
+      user.userId,
       now
     ).run();
   }
