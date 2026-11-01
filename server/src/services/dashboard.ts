@@ -8,7 +8,7 @@ import { Env } from '../env';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Role, normalizeRole, ROLE_METADATA } from '../lib/roles';
 import { generateId } from '../lib/ids';
-import { hashString, hashPassword, generateRandomToken, generateRecoveryCode, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
+import { hashString, hashPassword, generateRandomToken, generateRecoveryCode } from '../lib/crypto';
 import { isValidIsoDate } from '../lib/validation';
 import { applyDecisionExecution } from './governance';
 import { cleanupOrphanMedia } from './media';
@@ -232,7 +232,7 @@ export async function handleOwnerLogout(request?: Request, env?: Env): Promise<R
     } else {
       const cookie = request.headers.get('Cookie');
       if (cookie) {
-        const match = cookie.match(/(?:^|;\\s*)tanweer_owner_token=([^;]+)/);
+        const match = cookie.match(/(?:^|;\s*)tanweer_owner_token=([^;]+)/);
         if (match) token = decodeURIComponent(match[1]).trim();
       }
     }
@@ -249,10 +249,7 @@ export async function handleOwnerLogout(request?: Request, env?: Env): Promise<R
           `UPDATE owner_sessions SET revoked = 1 WHERE token_hash = ? AND revoked = 0`
         ).bind(tokenHash).run();
 
-        if (revoke.meta?.changes !== 1) {
-          return failure('OWNER_SESSION_NOT_FOUND', 'جلسة المالك غير موجودة أو تم إبطالها مسبقاً');
-        }
-
+        // A missing or already-revoked token is also a completed logout.
         await logRoleAudit(
           env.DB,
           'OWNER_LOGOUT',
