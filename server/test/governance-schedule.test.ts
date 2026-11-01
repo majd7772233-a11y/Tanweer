@@ -115,7 +115,7 @@ class ScheduleDecisionDb {
   }
 
   private query(sql: string, params: unknown[]): any[] {
-    const normalized = sql.trim().replace(/\\s+/g, ' ');
+    const normalized = sql.trim().replace(/\s+/g, ' ');
     this.statements.push(normalized);
 
     if (normalized.includes('FROM schedule_proposals WHERE id = ? AND group_id = ?')) {
@@ -148,7 +148,7 @@ class ScheduleDecisionDb {
   }
 
   private execute(sql: string, params: unknown[]): number {
-    const normalized = sql.trim().replace(/\\s+/g, ' ');
+    const normalized = sql.trim().replace(/\s+/g, ' ');
     this.statements.push(normalized);
 
     if (normalized.startsWith("UPDATE schedule_proposals SET status = 'APPLYING'")) {
