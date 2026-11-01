@@ -1168,7 +1168,7 @@ export async function handleGetDashboardContentDetail(contentId: string, env: En
     if (!linkedMediaId && m.url) {
       try {
         const mediaPath = new URL(String(m.url), 'https://tanweer.invalid').pathname;
-        const match = mediaPath.match(/\\/api\\/v1\\/media\\/([^/]+)$/)
+        const match = mediaPath.match(/\/api\/v1\/media\/([^/]+)$/) || mediaPath.match(/\/api\/dashboard\/media\/([^/]+)$/);
           || mediaPath.match(/\\/api\\/dashboard\\/media\\/([^/]+)$/);
         if (match?.[1]) linkedMediaId = decodeURIComponent(match[1]);
       } catch {
