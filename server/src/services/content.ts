@@ -4,7 +4,7 @@ import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
 import { mapContent } from '../lib/mappers';
-import { cleanupOrphanMedia } from './media';
+import { cleanupOrphanMedia, validateMediaAttachmentAccess } from './media';
 
 interface MediaPayloadItem {
   url: string;
@@ -41,6 +41,16 @@ export async function handleCreateContent(user: UserContext, request: Request, e
 
   const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
   if (memberCheck) return memberCheck;
+
+  if (!Array.isArray(mediaList)) {
+    return errorResponse('INVALID_MEDIA', 'قائمة المرفقات غير صالحة');
+  }
+  const mediaValidation = await validateMediaAttachmentAccess(
+    user,
+    mediaList.map(item => item?.url as string),
+    env.DB
+  );
+  if (mediaValidation) return mediaValidation;
 
   // Check duplicate checksum if media provided
   if (mediaList && mediaList.length > 0 && mediaList[0].checksum) {
