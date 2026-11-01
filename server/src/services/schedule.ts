@@ -170,14 +170,22 @@ export async function handleCreateScheduleSlot(
   // TA-23: Atomicity - if no active version exists yet, add its creation to the SAME atomic batch!
   // This prevents orphaned empty active versions if inserting the slot subsequently fails.
   if (!activeVersion) {
+    const latestVersion = await env.DB.prepare(
+      `SELECT MAX(version_number) as version_number FROM schedule_versions WHERE group_id = ?`
+    ).bind(groupId).first<{ version_number: number | null }>();
+
     targetVersionId = generateId('sch_ver');
-    targetVersionNumber = 1;
+    targetVersionNumber = (latestVersion?.version_number || 0) + 1;
     const today = new Date().toISOString().slice(0, 10);
     slotStatements.push(
       env.DB.prepare(
-        `INSERT INTO schedule_versions (id, group_id, version_number, valid_from, is_active, created_at, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).bind(targetVersionId, groupId, 1, today, 1, Date.now(), user.userId)
+        `INSERT INTO schedule_versions
+           (id, group_id, version_number, valid_from, is_active, created_at, created_by)
+         SELECT ?, ?, ?, ?, 1, ?, ?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM schedule_versions WHERE group_id = ? AND is_active = 1
+         )`
+      ).bind(targetVersionId, groupId, targetVersionNumber, today, Date.now(), user.userId, groupId)
     );
   }
 
@@ -194,22 +202,51 @@ export async function handleCreateScheduleSlot(
   if (body.subjectName) {
     slotStatements.push(
       env.DB.prepare(
-        `INSERT OR IGNORE INTO subjects (id, name_ar, icon, color_hex) VALUES (?, ?, ?, ?)`
-      ).bind(body.subjectId, body.subjectName, body.subjectIcon || '📚', body.colorHex || '#00E5FF')
+        `INSERT OR IGNORE INTO subjects (id, name_ar, icon, color_hex)
+         SELECT ?, ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM schedule_versions WHERE id = ? AND group_id = ? AND is_active = 1
+         )`
+      ).bind(
+        body.subjectId,
+        body.subjectName,
+        body.subjectIcon || '📚',
+        body.colorHex || '#00E5FF',
+        targetVersionId,
+        groupId
+      )
     );
   }
 
-  // Atomic replace: Delete old slot and insert new slot in one transaction
-  slotStatements.push(
-    env.DB.prepare(
-      `DELETE FROM schedule_slots WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
-    ).bind(targetVersionId, body.dayOfWeek, body.slotOrder)
-  );
+  // If replacing an occupied slot, delete only the exact row we read.
+  // A concurrent request that already replaced it must not be overwritten.
+  if (existingSlot) {
+    slotStatements.push(
+      env.DB.prepare(
+        `DELETE FROM schedule_slots
+         WHERE id = ? AND version_id = ? AND day_of_week = ? AND slot_order = ?
+           AND EXISTS (
+             SELECT 1 FROM schedule_versions
+             WHERE id = ? AND group_id = ? AND is_active = 1
+           )`
+      ).bind(existingSlot.id, targetVersionId, body.dayOfWeek, body.slotOrder, targetVersionId, groupId)
+    );
+  }
 
+  // Insert only while the target version remains active and this position remains empty.
   slotStatements.push(
     env.DB.prepare(
-      `INSERT INTO schedule_slots (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO schedule_slots
+         (id, version_id, day_of_week, slot_order, subject_id, start_time, end_time)
+       SELECT ?, ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM schedule_versions
+         WHERE id = ? AND group_id = ? AND is_active = 1
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM schedule_slots
+         WHERE version_id = ? AND day_of_week = ? AND slot_order = ?
+       )`
     ).bind(
       slotId,
       targetVersionId,
@@ -217,16 +254,28 @@ export async function handleCreateScheduleSlot(
       body.slotOrder,
       body.subjectId.trim(),
       finalStartTime,
-      finalEndTime
+      finalEndTime,
+      targetVersionId,
+      groupId,
+      targetVersionId,
+      body.dayOfWeek,
+      body.slotOrder
     )
   );
 
-  if (typeof env.DB.batch === 'function') {
-    await env.DB.batch(slotStatements);
-  } else {
-    for (const stmt of slotStatements) {
-      await stmt.run();
-    }
+  if (typeof env.DB.batch !== 'function') {
+    return errorResponse('SCHEDULE_WRITE_UNAVAILABLE', 'قاعدة البيانات لا تدعم حفظ الجدول الذري حالياً', 503);
+  }
+
+  const writeResults = await env.DB.batch(slotStatements);
+  const versionInsertIndex = activeVersion ? -1 : 0;
+  if (versionInsertIndex >= 0 && writeResults[versionInsertIndex]?.meta?.changes !== 1) {
+    return errorResponse('SCHEDULE_VERSION_CHANGED', 'أنشأ طلب آخر نسخة نشطة للجدول. حدّث الجدول ثم أعد المحاولة.', 409);
+  }
+
+  const slotInsert = writeResults[writeResults.length - 1];
+  if (slotInsert?.meta?.changes !== 1) {
+    return errorResponse('SCHEDULE_SLOT_CHANGED', 'تغيرت النسخة النشطة أو موضع الحصة أثناء الحفظ. حدّث الجدول وحاول مجدداً.', 409);
   }
 
   return jsonResponse({
