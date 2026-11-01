@@ -279,12 +279,12 @@ export async function handleGetDashboardStats(env: Env): Promise<Response> {
       activeSessionsTotal,
       auditLogsTotal
     ] = await Promise.all([
-      env.DB.prepare(`SELECT COUNT(*) as count FROM users`).first<{ count: number }>(),
+      env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role != 'SYSTEM_OWNER'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'STUDENT' OR role = 'MEMBER'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'MODERATOR'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'TEACHER' OR role = 'VERIFIED_TEACHER'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'ADMIN'`).first<{ count: number }>(),
-      env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE status = 'DISABLED'`).first<{ count: number }>().catch(() => ({ count: 0 })),
+      env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role != 'SYSTEM_OWNER' AND status = 'DISABLED'`).first<{ count: number }>().catch(() => ({ count: 0 })),
       env.DB.prepare(`SELECT COUNT(*) as count FROM groups`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM role_requests WHERE status = 'PENDING'`).first<{ count: number }>().catch(() => ({ count: 0 })),
       env.DB.prepare(`SELECT COUNT(*) as count FROM role_requests`).first<{ count: number }>().catch(() => ({ count: 0 })),
@@ -361,7 +361,7 @@ export async function handleGetDashboardUsers(request: Request, env: Env): Promi
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
 
-  let whereClause = ` WHERE 1=1`;
+  let whereClause = ` WHERE role != 'SYSTEM_OWNER'`;
   const binds: any[] = [];
 
   if (search) {
@@ -1011,7 +1011,7 @@ export async function handleRejectRoleRequest(
 export async function handleGetDashboardRoles(env: Env): Promise<Response> {
   try {
     const counts = await env.DB.prepare(
-      `SELECT role, COUNT(*) as count FROM users GROUP BY role`
+      `SELECT role, COUNT(*) as count FROM users WHERE role != 'SYSTEM_OWNER' GROUP BY role`
     ).all<{ role: string; count: number }>();
 
     const countsMap: Record<string, number> = {};
@@ -1142,7 +1142,7 @@ export async function handleGetDashboardContents(request: Request, env: Env): Pr
 export async function handleGetDashboardContentDetail(contentId: string, env: Env): Promise<Response> {
   const content = await env.DB.prepare(`
     SELECT c.*, u.full_name as author_name, u.phone_number as author_phone,
-           g.name as group_name, s.name as subject_name
+           g.name as group_name, COALESCE(s.name_ar, s.id) as subject_name
     FROM contents c
     LEFT JOIN users u ON c.created_by = u.id
     LEFT JOIN groups g ON c.group_id = g.id
@@ -1604,10 +1604,10 @@ export async function handleResetDashboardSchedule(groupId: string, actorId: str
  */
 export async function handleGetDashboardDecisions(env: Env): Promise<Response> {
   const rows = await env.DB.prepare(`
-    SELECT cd.*, g.name as group_name, u.full_name as creator_name
+    SELECT cd.*, g.name as group_name, COALESCE(u.full_name, cd.requester_name) as creator_name
     FROM community_decisions cd
     LEFT JOIN groups g ON cd.group_id = g.id
-    LEFT JOIN users u ON cd.created_by = u.id
+    LEFT JOIN users u ON cd.requested_by = u.id
     ORDER BY cd.created_at DESC LIMIT 100
   `).all();
   return jsonResponse({ success: true, decisions: rows.results || [] });
@@ -4147,11 +4147,6 @@ export function renderDashboardHtml(): Response {
         document.getElementById('statVotes').textContent = s.votes;
         document.getElementById('statSecurity').textContent = s.security.activeSessions;
         document.getElementById('statAudit').textContent = s.auditLog;
-
-        document.getElementById('acadLessons').textContent = s.content;
-        document.getElementById('acadHomeworks').textContent = s.homework;
-        document.getElementById('acadExams').textContent = s.exams;
-        document.getElementById('acadEvents').textContent = s.events;
 
         document.getElementById('sysEnv').textContent = s.system.environment;
 
