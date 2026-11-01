@@ -45,7 +45,7 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
 
   const existingStatusResponse = (status: string): Response => {
     if (status === 'ACTIVE') {
-      return errorResponse('ALREADY_MEMBER', 'أنت عضو مسجل بالفعل في هذه المجموعة', 409);
+      return errorResponse('ALREADY_MEMBER', 'أنت عضو مسجل بالفعل في هذه المجموعة');
     }
     if (status === 'BANNED') {
       return errorResponse('BANNED', 'تم حظر حسابك من هذه المجموعة من قِبل المشرفين', 403);
@@ -53,7 +53,7 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
     if (status === 'REJECTED') {
       return errorResponse('JOIN_REQUEST_REJECTED', 'سبق رفض طلب الانضمام إلى هذه المجموعة. تواصل مع مشرفيها لإعادة النظر.', 409);
     }
-    return errorResponse('ALREADY_REQUESTED', 'طلب الانضمام قيد المراجعة', 409);
+    return errorResponse('ALREADY_REQUESTED', 'طلب الانضمام قيد المراجعة');
   };
 
   if (existing) {
