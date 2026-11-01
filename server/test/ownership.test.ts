@@ -71,6 +71,16 @@ class OwnershipMockDb {
       if (match) {
         const table = match[1];
         const rows = this.tables[table] || [];
+        if (table === 'contents' && trimmed.includes('SET title = COALESCE(?, title)')) {
+          const content = rows.find((row) => row.id === params[4]);
+          if (!content) return [];
+          if (params[0] !== null && params[0] !== undefined) content.title = params[0];
+          if (params[1] !== null && params[1] !== undefined) content.description = params[1];
+          if (params[2] !== null && params[2] !== undefined) content.type = params[2];
+          content.updated_at = params[3];
+          content.version = (content.version || 1) + 1;
+          return [content];
+        }
         if (table === 'contents' && trimmed.includes('WHERE id = ?')) {
           const contentId = params[2];
           const groupId = params[3];
