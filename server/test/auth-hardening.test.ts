@@ -1,12 +1,90 @@
 import { describe, expect, it } from 'vitest';
 import { Env } from '../src/env';
-import { hashPassword, hashString, verifyPassword } from '../src/lib/crypto';
+import { hashPassword, hashString, verifyPassword, LEGACY_DEFAULT_PEPPER } from '../src/lib/crypto';
 import { getUserFromToken } from '../src/middleware/auth';
 import { handleLogin, handleLoginWithRecoveryCode, handleRegister } from '../src/services/auth';
 
 const pepper = 'auth-hardening-test-pepper';
 
 describe('Authentication hardening regressions', () => {
+  it('checks legacy recovery-token revocation using the hash that actually matched', async () => {
+    const recoveryCode = 'A1B2-C3D4-E5F6';
+    const cleanCode = recoveryCode.replace(/[\s\-]/g, '').toUpperCase();
+    const currentHash = await hashString(cleanCode, pepper);
+    const legacyHash = await hashString(cleanCode, LEGACY_DEFAULT_PEPPER);
+    let recoveryHashBurnAttempted = false;
+    let sessionInsertAttempted = false;
+    let tokenLookupHash: string | null = null;
+
+    const env = {
+      SESSION_PEPPER: pepper,
+      PASSWORD_PEPPER: pepper,
+      DB: {
+        prepare(sql: string) {
+          return {
+            bind(...params: unknown[]) {
+              return {
+                async first() {
+                  if (sql.includes('FROM users WHERE recovery_code_hash = ?')) {
+                    if (params[0] === legacyHash) {
+                      return {
+                        id: 'legacy-recovery-user',
+                        phone_number: '771234567',
+                        full_name: 'مستخدم برمز قديم',
+                        grade_id: 10,
+                        section_id: 'A',
+                        role: 'STUDENT',
+                        status: 'ACTIVE',
+                      };
+                    }
+                    return null;
+                  }
+                  if (sql.includes('FROM user_recovery_tokens')) {
+                    tokenLookupHash = String(params[0]);
+                    if (params[0] === legacyHash && params[1] === 'legacy-recovery-user') {
+                      return {
+                        id: 'legacy-token-1',
+                        max_uses: 1,
+                        uses_count: 0,
+                        expires_at: Date.now() + 60_000,
+                        revoked: 1,
+                      };
+                    }
+                    return null;
+                  }
+                  return null;
+                },
+                async run() {
+                  if (sql.includes('UPDATE users') && sql.includes('recovery_code_hash = ?')) {
+                    recoveryHashBurnAttempted = true;
+                  }
+                  if (sql.includes('INSERT INTO sessions')) sessionInsertAttempted = true;
+                  return { success: true, meta: { changes: 1 } };
+                },
+              };
+            },
+          };
+        },
+      },
+    } as unknown as Env;
+
+    const response = await handleLoginWithRecoveryCode(new Request('https://tanweer.test/api/v1/auth/recovery-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recoveryCode }),
+    }), env);
+
+    expect(tokenLookupHash).toBe(legacyHash);
+    expect(tokenLookupHash).not.toBe(currentHash);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      error: { code: 'RECOVERY_CODE_REVOKED' },
+    });
+    expect(recoveryHashBurnAttempted).toBe(false);
+    expect(sessionInsertAttempted).toBe(false);
+  });
+
   it('fails closed when the recovery-token state cannot be read', async () => {
     const recoveryCode = 'A1B2-C3D4-E5F6';
     const recoveryHash = await hashString(recoveryCode.replace(/[\\s\\-]/g, '').toUpperCase(), pepper);
