@@ -4,6 +4,7 @@ import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
 import { Role, normalizeRole } from '../lib/roles';
+import { applyScheduleProposalToActiveSchedule } from './schedule';
 
 /**
  * -------------------------------------------------------------
@@ -210,7 +211,7 @@ export async function applyDecisionExecution(
   groupId: string,
   actorId: string,
   env: Env
-): Promise<{ success: boolean; message: string }> {
+): Promise<{ success: boolean; message: string; conflict?: boolean }> {
   const now = Date.now();
   const normType = requestType.toUpperCase();
 
@@ -250,25 +251,52 @@ export async function applyDecisionExecution(
       }
     } else if (normType === 'SCHEDULE' || normType === 'SCHEDULE_CHANGE') {
       const prop = await env.DB.prepare(
-        `SELECT * FROM schedule_proposals WHERE id = ? AND group_id = ?`
+        `SELECT id, group_id, day_of_week, slot_order, old_subject_id, new_subject_id, status, proposed_by
+         FROM schedule_proposals WHERE id = ? AND group_id = ?`
       ).bind(targetId, groupId).first<{
+        id: string;
         group_id: string;
         day_of_week: number;
         slot_order: number;
+        old_subject_id: string | null;
         new_subject_id: string;
+        status: string;
+        proposed_by: string;
       }>();
-      if (prop) {
-        const activeVer = await env.DB.prepare(
-          `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
-        ).bind(prop.group_id).first<{ id: string; version_number: number }>();
-        if (activeVer) {
+
+      if (!prop) {
+        await env.DB.prepare(
+          `UPDATE community_decisions SET status = 'REJECTED' WHERE id = ? AND group_id = ?`
+        ).bind(decisionId, groupId).run();
+        return { success: false, message: 'مقترح الجدول المرتبط بهذا القرار لم يعد موجوداً' };
+      }
+
+      if (prop.status !== 'PENDING' && prop.status !== 'ACCEPTED') {
+        await env.DB.prepare(
+          `UPDATE community_decisions SET status = 'REJECTED' WHERE id = ? AND group_id = ?`
+        ).bind(decisionId, groupId).run();
+        return { success: false, message: 'مقترح الجدول لم يعد في حالة تسمح باعتماده' };
+      }
+
+      // Reuse the schedule service's versioned, conflict-aware application path.
+      // This avoids writing non-existent review columns and preserves schedule history.
+      const scheduleResult = await applyScheduleProposalToActiveSchedule(
+        prop,
+        actorId || 'COMMUNITY_CONSENSUS',
+        env
+      );
+
+      if (!scheduleResult.success) {
+        if (scheduleResult.conflict) {
           await env.DB.prepare(
-            `UPDATE schedule_slots SET subject_id = ? WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
-          ).bind(prop.new_subject_id, activeVer.id, prop.day_of_week, prop.slot_order).run();
-          await env.DB.prepare(
-            `UPDATE schedule_proposals SET status = 'ACCEPTED', reviewed_by = 'COMMUNITY_CONSENSUS', reviewed_at = ? WHERE id = ? AND group_id = ?`
-          ).bind(now, targetId, groupId).run();
+            `UPDATE community_decisions SET status = 'REJECTED' WHERE id = ? AND group_id = ?`
+          ).bind(decisionId, groupId).run();
         }
+        return {
+          success: false,
+          conflict: scheduleResult.conflict,
+          message: scheduleResult.message,
+        };
       }
     } else if (normType === 'VERIFICATION' || normType === 'OFFICIAL_VERIFICATION') {
       await env.DB.prepare(
@@ -423,7 +451,18 @@ export async function handleCreateCommunityDecision(
 
   // If only 1 voter in the entire group, auto-apply immediately
   if (totalEligible <= 1) {
-    await applyDecisionExecution(decisionId, normType, body.targetId, groupId, user.userId, env);
+    const execution = await applyDecisionExecution(decisionId, normType, body.targetId, groupId, user.userId, env);
+    if (!execution.success) {
+      await env.DB.prepare(
+        `UPDATE community_decisions SET votes_for = 1, votes_against = 0, status = ? WHERE id = ?`
+      ).bind(execution.conflict ? 'REJECTED' : 'PENDING', decisionId).run();
+      return errorResponse(
+        execution.conflict ? 'SCHEDULE_CONFLICT' : 'DECISION_EXECUTION_FAILED',
+        execution.message,
+        execution.conflict ? 409 : 500
+      );
+    }
+
     return jsonResponse({
       success: true,
       decisionId,
@@ -578,7 +617,29 @@ export async function handleVoteCommunityDecision(
 
   if (vFor >= requiredVotes && vFor > vAgainst) {
     // Quorum reached with strict majority -> Execute automated outcome
-    await applyDecisionExecution(decisionId, decision.request_type, decision.target_id, decision.group_id, user.userId, env);
+    const execution = await applyDecisionExecution(
+      decisionId,
+      decision.request_type,
+      decision.target_id,
+      decision.group_id,
+      user.userId,
+      env
+    );
+
+    if (!execution.success) {
+      // The vote is durable even when applying the resulting action fails.
+      // Persist the latest counters but keep the decision pending so it can be retried.
+      await env.DB.prepare(
+        `UPDATE community_decisions SET votes_for = ?, votes_against = ?, status = ? WHERE id = ?`
+      ).bind(vFor, vAgainst, execution.conflict ? 'REJECTED' : 'PENDING', decisionId).run();
+
+      return errorResponse(
+        execution.conflict ? 'SCHEDULE_CONFLICT' : 'DECISION_EXECUTION_FAILED',
+        execution.message,
+        execution.conflict ? 409 : 500
+      );
+    }
+
     newStatus = 'APPLIED';
     appliedMsg = ' — واكتمل النصاب وتم اعتماد وتطبيق القرار تلقائياً بنجاح ✨';
   } else if (vAgainst > (decision.total_eligible_voters - requiredVotes) || (vFor + vAgainst >= decision.total_eligible_voters && vFor <= vAgainst)) {
