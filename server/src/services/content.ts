@@ -362,7 +362,7 @@ export async function handleGetAcademicArchive(
      WHERE c.status = 'PUBLISHED'
        AND (
          c.created_by = ?
-         OR c.group_id IN (SELECT group_id FROM group_members WHERE user_id = ?)
+         OR c.group_id IN (SELECT group_id FROM group_members WHERE user_id = ? AND status = 'ACTIVE')
        )
      ORDER BY c.study_date DESC, c.created_at DESC`
   ).bind(user.userId, user.userId).all();
