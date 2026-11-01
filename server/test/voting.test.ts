@@ -51,7 +51,7 @@ class VotingMockDb {
     }
 
     if (/^DELETE/i.test(trimmed)) {
-      const match = trimmed.match(/DELETE FROM (\\w+)/i);
+      const match = trimmed.match(/DELETE FROM (\w+)/i);
       if (match) {
         const table = match[1];
         const rows = this.tables[table] || [];
