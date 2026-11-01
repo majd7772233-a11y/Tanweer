@@ -112,8 +112,13 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   if (isRepairingIncompleteRegistration) {
     batchStatements.push(
       env.DB.prepare(
-        `UPDATE users SET full_name = ?, grade_id = ?, section_id = ?, email = ?, updated_at = ?, last_seen = ? WHERE id = ?`
+        `UPDATE users
+         SET password_hash = ?, recovery_code_hash = ?, full_name = ?, grade_id = ?,
+             section_id = ?, email = ?, updated_at = ?, last_seen = ?
+         WHERE id = ?`
       ).bind(
+        passwordHash,
+        recoveryCodeHash,
         body.fullName.trim().replace(/\s+/g, ' '),
         body.gradeId,
         body.sectionId.toUpperCase(),
@@ -241,7 +246,8 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
 
   const now = Date.now();
 
-  // TA-21: Check if user logged in using a single-use temporary password (TEMP_PASSWORD)
+  // TA-21: Check and atomically consume a single-use temporary password.
+  // Fail closed: a storage error must never turn an unchecked temporary credential into a login.
   try {
     const tempToken = await env.DB.prepare(
       `SELECT id, expires_at, max_uses, uses_count, revoked FROM user_recovery_tokens
@@ -256,15 +262,29 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
     }>();
 
     if (tempToken) {
-      if (tempToken.revoked || now > tempToken.expires_at || tempToken.uses_count >= tempToken.max_uses) {
+      if (tempToken.revoked || now >= tempToken.expires_at || tempToken.uses_count >= tempToken.max_uses) {
         return errorResponse('CREDENTIALS_EXPIRED', 'انتهت صلاحية كلمة المرور المؤقتة، يرجى طلب إعادة إصدار جديدة من إدارة المنظومة', 401);
       }
-      // Single-use enforcement: burn the temporary password immediately upon successful login
-      await env.DB.prepare(
-        `UPDATE user_recovery_tokens SET uses_count = uses_count + 1, used_at = ?, revoked = 1 WHERE id = ?`
-      ).bind(now, tempToken.id).run();
+
+      // Conditional UPDATE makes consumption safe against concurrent login attempts.
+      const consumeResult = await env.DB.prepare(
+        `UPDATE user_recovery_tokens
+         SET uses_count = uses_count + 1, used_at = ?, revoked = 1
+         WHERE id = ? AND revoked = 0 AND expires_at > ? AND uses_count < max_uses`
+      ).bind(now, tempToken.id, now).run();
+
+      if (consumeResult.meta?.changes !== 1) {
+        return errorResponse('CREDENTIALS_EXPIRED', 'انتهت صلاحية كلمة المرور المؤقتة أو تم استخدامها بالفعل، يرجى طلب إعادة إصدار جديدة من إدارة المنظومة', 401);
+      }
     }
-  } catch {}
+  } catch (err) {
+    console.error('Failed to validate or consume temporary login credential:', err);
+    return errorResponse(
+      'AUTHENTICATION_UNAVAILABLE',
+      'تعذر التحقق من صلاحية بيانات الدخول المؤقتة حالياً. يرجى المحاولة لاحقاً.',
+      503
+    );
+  }
 
   // Transparently upgrade legacy hash or rehash with current configured secret pepper
   if (verification.needsRehash || !user.password_hash.startsWith('pbkdf2$')) {
