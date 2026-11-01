@@ -69,6 +69,7 @@ jobs:
       - name: Validate Wrangler production bundle
         run: |
           ./node_modules/.bin/wrangler deploy --dry-run
+          ./node_modules/.bin/wrangler deploy --dry-run --env staging
 
       - name: Show migration files
         run: |
