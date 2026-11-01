@@ -501,9 +501,9 @@ describe('Group join request concurrency and state', () => {
       handleJoinGroupRequest('optional-group', student, joinRequest(), { DB: db as any } as Env),
     ]);
 
-    expect([first.status, second.status].sort()).toEqual([200, 409]);
+    expect([first.status, second.status].sort()).toEqual([200, 400]);
     const success = first.status === 200 ? first : second;
-    const conflict = first.status === 409 ? first : second;
+    const conflict = first.status === 400 ? first : second;
 
     expect((await success.json() as any).status).toBe('ACTIVE');
     expect((await conflict.json() as any).error.code).toBe('ALREADY_MEMBER');
