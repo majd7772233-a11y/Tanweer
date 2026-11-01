@@ -2,11 +2,177 @@ import { describe, expect, it } from 'vitest';
 import { Env } from '../src/env';
 import { hashPassword, hashString, verifyPassword } from '../src/lib/crypto';
 import { getUserFromToken } from '../src/middleware/auth';
-import { handleLogin, handleRegister } from '../src/services/auth';
+import { handleLogin, handleLoginWithRecoveryCode, handleRegister } from '../src/services/auth';
 
 const pepper = 'auth-hardening-test-pepper';
 
 describe('Authentication hardening regressions', () => {
+  it('fails closed when the recovery-token state cannot be read', async () => {
+    const recoveryCode = 'A1B2-C3D4-E5F6';
+    const recoveryHash = await hashString(recoveryCode.replace(/[\\s\\-]/g, '').toUpperCase(), pepper);
+    const user = {
+      id: 'recovery-user',
+      phone_number: '771234567',
+      full_name: 'مستخدم الاسترداد',
+      grade_id: 10,
+      section_id: 'A',
+      role: 'STUDENT',
+      status: 'ACTIVE',
+      recovery_code_hash: recoveryHash,
+    };
+    let sessionCount = 0;
+    let hashBurnAttempted = false;
+
+    const env = {
+      SESSION_PEPPER: pepper,
+      PASSWORD_PEPPER: pepper,
+      DB: {
+        prepare(sql: string) {
+          return {
+            bind(...params: unknown[]) {
+              return {
+                async first() {
+                  if (sql.includes('FROM users WHERE recovery_code_hash = ?')) {
+                    return user.recovery_code_hash === params[0] ? { ...user } : null;
+                  }
+                  if (sql.includes('FROM user_recovery_tokens')) {
+                    throw new Error('recovery-token table unavailable');
+                  }
+                  return null;
+                },
+                async run() {
+                  if (sql.includes('UPDATE users') && sql.includes('recovery_code_hash = ?')) {
+                    hashBurnAttempted = true;
+                  }
+                  if (sql.includes('INSERT INTO sessions')) sessionCount += 1;
+                  return { success: true, meta: { changes: 1 } };
+                },
+              };
+            },
+          };
+        },
+      },
+    } as unknown as Env;
+
+    const response = await handleLoginWithRecoveryCode(new Request('https://tanweer.test/api/v1/auth/recovery-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recoveryCode }),
+    }), env);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      error: { code: 'AUTHENTICATION_UNAVAILABLE' },
+    });
+    expect(hashBurnAttempted).toBe(false);
+    expect(sessionCount).toBe(0);
+  });
+
+  it('allows only one concurrent redemption of the same recovery code', async () => {
+    const recoveryCode = 'A1B2-C3D4-E5F6';
+    const recoveryHash = await hashString(recoveryCode.replace(/[\\s\\-]/g, '').toUpperCase(), pepper);
+    const user = {
+      id: 'recovery-user',
+      phone_number: '771234567',
+      full_name: 'مستخدم الاسترداد',
+      grade_id: 10,
+      section_id: 'A',
+      role: 'STUDENT',
+      status: 'ACTIVE',
+      recovery_code_hash: recoveryHash,
+    };
+    const recoveryToken = {
+      id: 'recovery-token-1',
+      token_hash: recoveryHash,
+      user_id: user.id,
+      max_uses: 1,
+      uses_count: 0,
+      expires_at: Date.now() + 60_000,
+      revoked: 0,
+    };
+    const sessions: Array<Record<string, unknown>> = [];
+
+    const env = {
+      SESSION_PEPPER: pepper,
+      PASSWORD_PEPPER: pepper,
+      DB: {
+        prepare(sql: string) {
+          return {
+            bind(...params: unknown[]) {
+              return {
+                async first() {
+                  if (sql.includes('FROM users WHERE recovery_code_hash = ?')) {
+                    return user.recovery_code_hash === params[0] ? { ...user } : null;
+                  }
+                  if (sql.includes('FROM user_recovery_tokens')) {
+                    return recoveryToken.token_hash === params[0] && recoveryToken.user_id === params[1]
+                      ? { ...recoveryToken }
+                      : null;
+                  }
+                  return null;
+                },
+                async run() {
+                  if (sql.includes('UPDATE users') && sql.includes('recovery_code_hash = ?')) {
+                    const validUserHash = user.recovery_code_hash === params[3];
+                    const tokenId = params[5];
+                    const tokenStillValid = tokenId == null || (
+                      recoveryToken.id === tokenId &&
+                      recoveryToken.user_id === params[6] &&
+                      recoveryToken.revoked === 0 &&
+                      recoveryToken.expires_at > Number(params[7]) &&
+                      recoveryToken.uses_count < recoveryToken.max_uses
+                    );
+                    if (!validUserHash || !tokenStillValid) {
+                      return { success: true, meta: { changes: 0 } };
+                    }
+                    user.recovery_code_hash = String(params[0]);
+                    return { success: true, meta: { changes: 1 } };
+                  }
+
+                  if (sql.includes('UPDATE user_recovery_tokens') && sql.includes('uses_count = uses_count + 1')) {
+                    const valid = recoveryToken.id === params[1] &&
+                      recoveryToken.user_id === params[2] &&
+                      recoveryToken.revoked === 0 &&
+                      recoveryToken.expires_at > Number(params[3]) &&
+                      recoveryToken.uses_count < recoveryToken.max_uses;
+                    if (!valid) return { success: true, meta: { changes: 0 } };
+                    recoveryToken.uses_count += 1;
+                    recoveryToken.used_at = Number(params[0]);
+                    return { success: true, meta: { changes: 1 } };
+                  }
+
+                  if (sql.includes('INSERT INTO sessions')) {
+                    sessions.push({ id: params[0], user_id: params[1] });
+                    return { success: true, meta: { changes: 1 } };
+                  }
+
+                  return { success: true, meta: { changes: 0 } };
+                },
+              };
+            },
+          };
+        },
+      },
+    } as unknown as Env;
+
+    const createRequest = () => new Request('https://tanweer.test/api/v1/auth/recovery-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recoveryCode }),
+    });
+
+    const responses = await Promise.all([
+      handleLoginWithRecoveryCode(createRequest(), env),
+      handleLoginWithRecoveryCode(createRequest(), env),
+    ]);
+
+    expect(responses.map(response => response.status).sort()).toEqual([200, 409]);
+    expect(sessions).toHaveLength(1);
+    expect(recoveryToken.uses_count).toBe(1);
+    expect(String(user.recovery_code_hash)).toMatch(/^USED_/);
+  });
+
   it('fails closed when the temporary-credential store cannot be checked', async () => {
     const password = 'Tmp#ABCD2345';
     const passwordHash = (await hashPassword(password, pepper)).hash;
