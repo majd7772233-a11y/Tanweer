@@ -5690,17 +5690,17 @@ export function renderDashboardHtml(): Response {
 
     function openPurgeModal() {
       currentPurgeSecret = '';
-      const secretInput = document.getElementById('purgeModalSecretInput');
+      const secretInput = document.getElementById('purgeStage1Secret');
       if (secretInput) secretInput.value = '';
       const errBox = document.getElementById('purgeStage1Error');
       if (errBox) { errBox.style.display = 'none'; errBox.textContent = ''; }
-      const stage1 = document.getElementById('purgeModalStage1');
+      const stage1 = document.getElementById('purgeStage1Section');
       if (stage1) stage1.style.display = 'block';
-      const stage2 = document.getElementById('purgeModalStage2');
+      const stage2 = document.getElementById('purgeStage2Section');
       if (stage2) stage2.style.display = 'none';
-      const confirmInput = document.getElementById('purgeConfirmInput');
+      const confirmInput = document.getElementById('purgeConfirmYesInput');
       if (confirmInput) confirmInput.value = '';
-      const execBtn = document.getElementById('executePurgeBtn');
+      const execBtn = document.getElementById('executePurgeFinalBtn');
       if (execBtn) {
         execBtn.disabled = true;
         execBtn.style.opacity = '0.5';
@@ -5711,15 +5711,15 @@ export function renderDashboardHtml(): Response {
 
     function closePurgeModal() {
       currentPurgeSecret = '';
-      const secretInput = document.getElementById('purgeModalSecretInput');
+      const secretInput = document.getElementById('purgeStage1Secret');
       if (secretInput) secretInput.value = '';
-      const confirmInput = document.getElementById('purgeConfirmInput');
+      const confirmInput = document.getElementById('purgeConfirmYesInput');
       if (confirmInput) confirmInput.value = '';
       document.getElementById('purgeModal').style.display = 'none';
     }
 
     async function submitPurgeStage1() {
-      const secretInput = document.getElementById('purgeModalSecretInput');
+      const secretInput = document.getElementById('purgeStage1Secret');
       const errBox = document.getElementById('purgeStage1Error');
       const secret = (secretInput?.value || '').trim();
 
@@ -5734,7 +5734,7 @@ export function renderDashboardHtml(): Response {
       }
 
       if (errBox) { errBox.style.display = 'none'; errBox.textContent = ''; }
-      const submitBtn = document.getElementById('submitPurgeStage1Btn');
+      const submitBtn = document.getElementById('purgeStage1Btn');
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'جاري التحقق من السر وفحص الجداول...'; }
 
       try {
@@ -5763,69 +5763,41 @@ export function renderDashboardHtml(): Response {
         if (secretInput) secretInput.value = '';
 
         // Transition from Stage 1 to Stage 2
-        document.getElementById('purgeModalStage1').style.display = 'none';
-        document.getElementById('purgeModalStage2').style.display = 'block';
+        document.getElementById('purgeStage1Section').style.display = 'none';
+        document.getElementById('purgeStage2Section').style.display = 'block';
 
         const counts = data.counts || data.preview || {};
-        const fullyPurged = data.fullyPurgedTables || [
-          'contents', 'content_media', 'homeworks', 'homework_media', 'exams',
-          'events', 'schedule_slots', 'chat_messages', 'notifications', 'school_holidays',
-          'decisions', 'decision_votes', 'reports', 'attendance', 'badges',
-          'user_badges', 'correction_suggestions', 'rate_limits', 'sync_mutations',
-          'outbox_mutations', 'groups', 'subjects', 'content_reads', 'content_views',
-          'content_useful', 'teacher_assistants', 'admin_audit_logs', 'system_audit_logs',
-          'role_audit_logs', 'sync_generation_history', 'audit_logs'
-        ];
+        const fullyPurged = Array.isArray(data.fullyPurgedTables) ? data.fullyPurgedTables : [];
+        const partiallyPurged = Array.isArray(data.partiallyPurgedTables) ? data.partiallyPurgedTables : [];
+        const preserved = Array.isArray(data.preservedTables) ? data.preservedTables : [];
 
-        let summaryHtml = \`
-          <div style="background:rgba(0,229,255,0.05); border:1px solid rgba(0,229,255,0.3); border-radius:8px; padding:0.8rem; margin-bottom:1rem;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-size:0.85rem; color:var(--text-sec);">جيل البيانات الحالي: <code>\${escapeHtml(String(data.currentGeneration || 'غير محدد'))}</code></span>
-              <span style="font-size:0.85rem; color:var(--cyan); font-weight:bold;">جيل البيانات الجديد: <code>\${escapeHtml(String(data.nextGeneration || ''))}</code></span>
-            </div>
-          </div>
+        document.getElementById('purgeTotalRecordsDisplay').textContent = Number(data.totalRecords || 0).toLocaleString();
+        document.getElementById('purgeNextGenDisplay').textContent = data.nextGeneration || '-';
 
-          <div style="margin-bottom:0.8rem;">
-            <div style="font-size:0.85rem; font-weight:bold; color:var(--ruby); margin-bottom:0.4rem;">
-              🗑️ جداول سيتم تصفيرها وحذفها بالكامل (31 جدولاً):
-            </div>
-            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:0.4rem; font-size:0.75rem; max-height:160px; overflow-y:auto; padding:0.4rem; background:rgba(0,0,0,0.3); border-radius:6px; border:1px solid var(--border);">
-        \`;
+        document.getElementById('purgeFullyPurgedGrid').innerHTML = fullyPurged.map(entry => {
+          const table = typeof entry === 'string' ? entry : (entry.table || '');
+          const count = typeof entry === 'string' ? (counts[table] ?? 0) : (entry.count ?? counts[table] ?? 0);
+          return '<div style="display:flex; justify-content:space-between; gap:0.5rem; padding:0.25rem 0.4rem; background:rgba(255,255,255,0.02); border-radius:4px;">' +
+            '<span>' + escapeHtml(table) + '</span>' +
+            '<strong style="color:var(--ruby);">' + escapeHtml(String(count)) + '</strong>' +
+            '</div>';
+        }).join('') || '<div style="color:var(--text-muted);">لا توجد جداول للتصفير.</div>';
 
-        for (const tbl of fullyPurged) {
-          const count = counts[tbl] !== undefined ? counts[tbl] : (counts[tbl] ?? 0);
-          summaryHtml += \`
-            <div style="display:flex; justify-content:space-between; padding:0.25rem 0.4rem; background:rgba(255,255,255,0.02); border-radius:4px;">
-              <span>\${escapeHtml(tbl)}</span>
-              <strong style="color:var(--ruby);">\${escapeHtml(String(count))}</strong>
-            </div>
-          \`;
-        }
+        document.getElementById('purgePartiallyPurgedBox').innerHTML = partiallyPurged.map(entry => {
+          return '<div style="padding:0.35rem 0; border-bottom:1px solid var(--border);">' +
+            '<strong>' + escapeHtml(entry.table || '') + '</strong>' +
+            '<div>سيتم حذف: ' + escapeHtml(String(entry.purgedCount ?? 0)) + ' — سيبقى: ' + escapeHtml(String(entry.retainedCount ?? 0)) + '</div>' +
+            '<div style="color:var(--text-muted);">' + escapeHtml(entry.policy || '') + '</div>' +
+            '</div>';
+        }).join('') || '<div style="color:var(--text-muted);">لا توجد جداول ذات تصفير جزئي.</div>';
 
-        summaryHtml += \`
-            </div>
-          </div>
-
-          <div style="margin-bottom:0.8rem;">
-            <div style="font-size:0.85rem; font-weight:bold; color:var(--amber); margin-bottom:0.4rem;">
-              ⚠️ جداول سيتم تصفيرها جزئياً (جدولان):
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem; font-size:0.75rem;">
-              <div style="background:rgba(255,160,0,0.05); border:1px solid rgba(255,160,0,0.2); padding:0.4rem; border-radius:4px;">
-                <strong>users</strong>: يتم الإبقاء على حساب المالك وحذف باقي الحسابات
-              </div>
-              <div style="background:rgba(255,160,0,0.05); border:1px solid rgba(255,160,0,0.2); padding:0.4rem; border-radius:4px;">
-                <strong>device_sync_tokens</strong>: يتم إلغاء وإبطال جميع رموز الأجهزة القديمة
-              </div>
-            </div>
-          </div>
-
-          <div style="background:rgba(0,230,118,0.05); border:1px solid rgba(0,230,118,0.2); border-radius:6px; padding:0.5rem 0.8rem; font-size:0.75rem; color:var(--emerald);">
-            🛡️ جداول محفوظة بالكامل دون مساس: <strong>schema_migrations</strong> (لحماية بنية وتاريخ مخطط قاعدة البيانات)
-          </div>
-        \`;
-
-        document.getElementById('purgeStage2Summary').innerHTML = summaryHtml;
+        document.getElementById('purgePreservedBox').innerHTML = preserved.map(entry => {
+          return '<div style="padding:0.35rem 0; border-bottom:1px solid var(--border);">' +
+            '<strong>' + escapeHtml(entry.table || '') + '</strong>' +
+            '<div>' + escapeHtml(entry.action || '') + '</div>' +
+            '<div style="color:var(--text-muted);">السجلات الحالية: ' + escapeHtml(String(entry.totalRecords ?? 0)) + '</div>' +
+            '</div>';
+        }).join('') || '<div style="color:var(--text-muted);">لا توجد جداول محفوظة.</div>';
       } catch (e) {
         if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'التحقق والمتابعة للمعاينة 🔒'; }
         if (errBox) {
@@ -5838,8 +5810,8 @@ export function renderDashboardHtml(): Response {
     }
 
     function checkPurgeConfirmMatch() {
-      const txt = (document.getElementById('purgeConfirmInput')?.value || '').trim();
-      const btn = document.getElementById('executePurgeBtn');
+      const txt = (document.getElementById('purgeConfirmYesInput')?.value || '').trim();
+      const btn = document.getElementById('executePurgeFinalBtn');
       if (!btn) return;
       if (txt === 'YES') {
         btn.disabled = false;
@@ -5853,7 +5825,7 @@ export function renderDashboardHtml(): Response {
     }
 
     async function executePurgeFinal() {
-      const confirmation = (document.getElementById('purgeConfirmInput')?.value || '').trim();
+      const confirmation = (document.getElementById('purgeConfirmYesInput')?.value || '').trim();
       if (confirmation !== 'YES' || !currentPurgeSecret) {
         alert('يجب كتابة كلمة YES بالحروف الإنجليزية الكبيرة للتأكيد.');
         return;
@@ -5863,12 +5835,10 @@ export function renderDashboardHtml(): Response {
         return;
       }
 
-      const execBtn = document.getElementById('executePurgeBtn');
+      const execBtn = document.getElementById('executePurgeFinalBtn');
       if (execBtn) { execBtn.disabled = true; execBtn.textContent = 'جاري تصفير قاعدة البيانات وتوليد الجيل الجديد...'; }
 
       const secretToSend = currentPurgeSecret;
-      // Wipe from in-memory variable immediately
-      currentPurgeSecret = '';
 
       try {
         const res = await fetch('/api/dashboard/system/purge', {
@@ -5882,6 +5852,7 @@ export function renderDashboardHtml(): Response {
         });
         const data = await res.json();
         if (data.success) {
+          currentPurgeSecret = '';
           const purgedCount = Array.isArray(data.tablesPurged) ? data.tablesPurged.length : (data.totalTables || 31);
           alert(\`تم تصفير البيانات بنجاح!\nالجيل الجديد: \${data.newGeneration}\nتم تفريغ \${purgedCount} جدولاً.\`);
           closePurgeModal();
