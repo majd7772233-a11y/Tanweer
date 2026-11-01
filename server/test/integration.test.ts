@@ -190,8 +190,14 @@ class MockD1Database {
             }
           } else if (normalized.includes('WHERE version_id = ? AND day_of_week = ? AND slot_order = ?')) {
             const [versionId, day, slot] = params;
-
-            this.tables[table] = this.tables[table].filter(
+            const before = this.tables[table];
+            const removed = before.filter(
+              (r) =>
+                r.version_id === versionId &&
+                r.day_of_week === day &&
+                r.slot_order === slot
+            );
+            this.tables[table] = before.filter(
               (r) =>
                 !(
                   r.version_id === versionId &&
@@ -199,6 +205,7 @@ class MockD1Database {
                   r.slot_order === slot
                 )
             );
+            return removed;
           } else if (
             normalized.includes('WHERE group_id = ? AND day_of_week = ? AND slot_order = ?')
           ) {
