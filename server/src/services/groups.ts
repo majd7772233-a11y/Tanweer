@@ -165,20 +165,40 @@ export async function handleUpdateGroupMemberRole(
   }
 
   const body = await request.json() as { newRole?: string };
-  if (!body.newRole) {
+  if (typeof body.newRole !== 'string' || !body.newRole.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد الرتبة الجديدة');
   }
 
-  const norm = normalizeRole(body.newRole);
+  const requestedRole = body.newRole.trim().toUpperCase();
+  const allowedGroupRoles = new Set(['STUDENT', 'MEMBER', 'MODERATOR', 'TEACHER', 'VERIFIED_TEACHER']);
+  if (!allowedGroupRoles.has(requestedRole)) {
+    return errorResponse('INVALID_ROLE', 'الرتبة المحددة غير معروفة. الرتب المتاحة داخل المجموعة هي طالب أو مشرف أو أستاذ معتمد.');
+  }
+
+  const norm = normalizeRole(requestedRole);
   if (norm === Role.SYSTEM_OWNER || norm === Role.ADMIN) {
     return errorResponse('FORBIDDEN', 'رتبتا مالك المنظومة والمدير العام (ADMIN) تُداران حصراً عبر الإدارة العليا ولا يمكن تعيينهما كأدوار فرعية داخل المجموعات', 403);
   }
 
-  const targetUser = await env.DB.prepare(
-    `SELECT role FROM users WHERE id = ?`
-  ).bind(targetUserId).first<{ role: string }>();
+  const targetMember = await env.DB.prepare(
+    `SELECT gm.role AS member_role, gm.status, u.role AS global_role
+     FROM group_members gm
+     JOIN users u ON u.id = gm.user_id
+     WHERE gm.group_id = ? AND gm.user_id = ?`
+  ).bind(groupId, targetUserId).first<{
+    member_role: string;
+    status: string;
+    global_role: string;
+  }>();
 
-  const targetGlobalRole = normalizeRole(targetUser?.role);
+  if (!targetMember) {
+    return errorResponse('MEMBER_NOT_FOUND', 'العضو غير موجود في هذه المجموعة', 404);
+  }
+  if (targetMember.status !== 'ACTIVE') {
+    return errorResponse('MEMBER_NOT_ACTIVE', 'لا يمكن تغيير رتبة عضو غير نشط أو طلب انضمام معلّق', 409);
+  }
+
+  const targetGlobalRole = normalizeRole(targetMember.global_role);
   const actorRole = normalizeRole(user.role);
 
   if (norm === Role.TEACHER && targetGlobalRole !== Role.TEACHER && actorRole !== Role.SYSTEM_OWNER) {
@@ -189,9 +209,14 @@ export async function handleUpdateGroupMemberRole(
     );
   }
 
-  await env.DB.prepare(
-    `UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?`
+  const updateResult = await env.DB.prepare(
+    `UPDATE group_members SET role = ?
+     WHERE group_id = ? AND user_id = ? AND status = 'ACTIVE'`
   ).bind(norm, groupId, targetUserId).run();
+
+  if (updateResult.meta?.changes !== 1) {
+    return errorResponse('MEMBER_NOT_ACTIVE', 'تغيرت حالة العضو قبل تحديث رتبته. حدّث القائمة وحاول مجدداً.', 409);
+  }
 
   return jsonResponse({
     success: true,
@@ -251,9 +276,14 @@ export async function handleApproveGroupJoinRequest(
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية اعتماد طلبات الانضمام', 403);
   }
 
-  await env.DB.prepare(
-    `UPDATE group_members SET status = 'ACTIVE' WHERE group_id = ? AND user_id = ? AND status = 'PENDING'`
+  const approval = await env.DB.prepare(
+    `UPDATE group_members SET status = 'ACTIVE'
+     WHERE group_id = ? AND user_id = ? AND status = 'PENDING'`
   ).bind(groupId, targetUserId).run();
+
+  if (approval.meta?.changes !== 1) {
+    return errorResponse('JOIN_REQUEST_NOT_FOUND', 'طلب الانضمام غير موجود أو تم البت فيه مسبقاً', 404);
+  }
 
   // A-11d: Post system event in group chat
   try {
@@ -290,9 +320,14 @@ export async function handleRejectGroupJoinRequest(
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية رفض طلبات الانضمام', 403);
   }
 
-  await env.DB.prepare(
-    `DELETE FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'PENDING'`
+  const rejection = await env.DB.prepare(
+    `DELETE FROM group_members
+     WHERE group_id = ? AND user_id = ? AND status = 'PENDING'`
   ).bind(groupId, targetUserId).run();
+
+  if (rejection.meta?.changes !== 1) {
+    return errorResponse('JOIN_REQUEST_NOT_FOUND', 'طلب الانضمام غير موجود أو تم البت فيه مسبقاً', 404);
+  }
 
   return jsonResponse({
     success: true,
