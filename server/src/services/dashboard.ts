@@ -907,8 +907,16 @@ export async function handleApproveRoleRequest(
     return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح التحقق السري غير مهيأ في الخادم', 500);
+  }
+
   const targetRole = normalizeRole(req.requested_role);
+  if (targetRole !== Role.MODERATOR && targetRole !== Role.TEACHER) {
+    return errorResponse('INVALID_ROLE', 'الرتبة المطلوبة غير مسموح بتفعيلها عبر رمز التحقق', 400);
+  }
+
   const now = Date.now();
   const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
 
@@ -922,23 +930,52 @@ export async function handleApproveRoleRequest(
   const codeHash = await hashString(codeRaw, pepper);
   const codeId = generateId('code');
 
-  // Insert verification code record storing only code_hash (no plain text in DB)
-  await env.DB.prepare(
-    `INSERT INTO role_verification_codes (id, request_id, user_id, role, code_hash, code_display, attempts, max_attempts, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?, NULL, 0, 5, ?, ?)`
-  ).bind(
-    codeId,
-    requestId,
-    req.user_id,
-    targetRole,
-    codeHash,
-    expiresAt,
-    now
-  ).run();
+  // Claim the pending request first. Concurrent approvals cannot both issue a code.
+  const claim = await env.DB.prepare(
+    `UPDATE role_requests
+     SET status = 'APPROVED', reviewed_by = ?, review_notes = ?, reviewed_at = ?
+     WHERE id = ? AND status = 'PENDING'`
+  ).bind(actorId, 'تم اعتماد الطلب وجارٍ إصدار رمز تفعيل مشفر', now, requestId).run();
+
+  if (claim.meta?.changes !== 1) {
+    return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
+  }
+
+  // Insert verification code record storing only code_hash (no plain text in DB).
+  // Restore PENDING if the insert fails so the request can be safely retried.
+  try {
+    await env.DB.prepare(
+      `INSERT INTO role_verification_codes (id, request_id, user_id, role, code_hash, code_display, attempts, max_attempts, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, 0, 5, ?, ?)`
+    ).bind(
+      codeId,
+      requestId,
+      req.user_id,
+      targetRole,
+      codeHash,
+      expiresAt,
+      now
+    ).run();
+  } catch (error) {
+    try {
+      await env.DB.prepare(
+        `UPDATE role_requests
+         SET status = 'PENDING', reviewed_by = NULL, review_notes = NULL, reviewed_at = NULL
+         WHERE id = ? AND status = 'APPROVED' AND reviewed_by = ?
+           AND NOT EXISTS (SELECT 1 FROM role_verification_codes WHERE request_id = ?)`
+      ).bind(requestId, actorId, requestId).run();
+    } catch (rollbackError) {
+      console.error('Failed to restore role request after code issuance error:', rollbackError);
+    }
+    console.error('Failed to issue role verification code:', error);
+    return errorResponse('ROLE_CODE_CREATION_FAILED', 'تعذر إصدار رمز التفعيل حالياً. بقي الطلب متاحاً لإعادة المحاولة.', 500);
+  }
 
   await env.DB.prepare(
-    `UPDATE role_requests SET status = 'APPROVED', reviewed_by = ?, review_notes = ?, reviewed_at = ? WHERE id = ?`
-  ).bind(actorId, 'تم اعتماد الطلب وتوليد رمز تفعيل مشفر بنجاح', now, requestId).run();
+    `UPDATE role_requests
+     SET review_notes = ?
+     WHERE id = ? AND status = 'APPROVED' AND reviewed_by = ?`
+  ).bind('تم اعتماد الطلب وتوليد رمز تفعيل مشفر بنجاح', requestId, actorId).run();
 
   await logRoleAudit(
     env.DB,
@@ -984,10 +1021,26 @@ export async function handleRejectRoleRequest(
     return errorResponse('REQUEST_NOT_FOUND', 'طلب الترقية غير موجود', 404);
   }
 
+  if (req.status !== 'PENDING') {
+    return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
+  }
+
   const now = Date.now();
+  const rejection = await env.DB.prepare(
+    `UPDATE role_requests
+     SET status = 'REJECTED', reviewed_by = ?, review_notes = ?, reviewed_at = ?
+     WHERE id = ? AND status = 'PENDING'`
+  ).bind(actorId, body.reason?.trim() || 'لم يستوفِ الشروط المطلوبة', now, requestId).run();
+
+  if (rejection.meta?.changes !== 1) {
+    return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
+  }
+
+  // Revoke any orphaned, still-unused code linked to this request.
   await env.DB.prepare(
-    `UPDATE role_requests SET status = 'REJECTED', reviewed_by = ?, review_notes = ?, reviewed_at = ? WHERE id = ?`
-  ).bind(actorId, body.reason || 'لم يستوفِ الشروط المطلوبة', now, requestId).run();
+    `UPDATE role_verification_codes SET used_at = ?
+     WHERE request_id = ? AND used_at IS NULL`
+  ).bind(now, requestId).run();
 
   await logRoleAudit(
     env.DB,
