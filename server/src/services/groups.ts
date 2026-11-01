@@ -43,35 +43,47 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
     `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
   ).bind(groupId, user.userId).first<{ status: string }>();
 
-  if (existing) {
-    if (existing.status === 'ACTIVE') {
-      return errorResponse('ALREADY_MEMBER', 'أنت عضو مسجل بالفعل في هذه المجموعة');
+  const existingStatusResponse = (status: string): Response => {
+    if (status === 'ACTIVE') {
+      return errorResponse('ALREADY_MEMBER', 'أنت عضو مسجل بالفعل في هذه المجموعة', 409);
     }
-    if (existing.status === 'BANNED') {
+    if (status === 'BANNED') {
       return errorResponse('BANNED', 'تم حظر حسابك من هذه المجموعة من قِبل المشرفين', 403);
     }
-    return errorResponse('ALREADY_REQUESTED', 'طلب الانضمام قيد المراجعة');
+    if (status === 'REJECTED') {
+      return errorResponse('JOIN_REQUEST_REJECTED', 'سبق رفض طلب الانضمام إلى هذه المجموعة. تواصل مع مشرفيها لإعادة النظر.', 409);
+    }
+    return errorResponse('ALREADY_REQUESTED', 'طلب الانضمام قيد المراجعة', 409);
+  };
+
+  if (existing) {
+    return existingStatusResponse(existing.status);
   }
 
   let requestReason: string | null = null;
   try {
-    const body = await request.json() as any;
-    if (body?.reason && typeof body.reason === 'string') {
-      requestReason = body.reason.trim();
+    const body = await request.json() as { reason?: unknown };
+    if (typeof body?.reason === 'string') {
+      requestReason = body.reason.trim() || null;
     }
   } catch {}
 
   const initialStatus = group.type === 'OPTIONAL' ? 'ACTIVE' : 'PENDING';
-  try {
-    await env.DB.prepare(
-      `INSERT INTO group_members (group_id, user_id, role, status, joined_at, request_reason)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(groupId, user.userId, Role.STUDENT, initialStatus, Date.now(), requestReason).run();
-  } catch {
-    await env.DB.prepare(
-      `INSERT INTO group_members (group_id, user_id, role, status, joined_at)
-       VALUES (?, ?, ?, ?, ?)`
-    ).bind(groupId, user.userId, Role.STUDENT, initialStatus, Date.now()).run();
+  const insertResult = await env.DB.prepare(
+    `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at, request_reason)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(groupId, user.userId, Role.STUDENT, initialStatus, Date.now(), requestReason).run();
+
+  if (insertResult.meta?.changes !== 1) {
+    // Another request may have created or changed the membership after our first read.
+    const latest = await env.DB.prepare(
+      `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
+    ).bind(groupId, user.userId).first<{ status: string }>();
+
+    if (latest) {
+      return existingStatusResponse(latest.status);
+    }
+    return errorResponse('JOIN_REQUEST_CONFLICT', 'تعذر إنشاء طلب الانضمام بسبب تغيير متزامن. حدّث القائمة وحاول مجدداً.', 409);
   }
 
   // A-11d: Post system event in chat upon confirmed membership
