@@ -1163,17 +1163,27 @@ export async function handleGetDashboardContentDetail(contentId: string, env: En
 
   const mediaList = (mediaRows.results || []).map((m: any) => {
     // Older content_media rows may have an empty object_key while url stores
-    // the actual media_blobs ID in its final path segment.
-    const linkedMediaId = String(m.object_key || '').trim()
-      || String(m.url || '').split('/').filter(Boolean).pop()
-      || m.id;
+    // the media_blobs ID in the legacy public media route.
+    let linkedMediaId = String(m.object_key || '').trim();
+    if (!linkedMediaId && m.url) {
+      try {
+        const mediaPath = new URL(String(m.url), 'https://tanweer.invalid').pathname;
+        const match = mediaPath.match(/\\/api\\/v1\\/media\\/([^/]+)$/)
+          || mediaPath.match(/\\/api\\/dashboard\\/media\\/([^/]+)$/);
+        if (match?.[1]) linkedMediaId = decodeURIComponent(match[1]);
+      } catch {
+        // Keep the original URL below when it is not a recognized internal media route.
+      }
+    }
 
     return {
       id: m.id,
       pageOrder: m.page_order,
-      objectKey: linkedMediaId,
+      objectKey: linkedMediaId || m.object_key,
       url: m.url,
-      previewUrl: `/api/dashboard/media/${encodeURIComponent(linkedMediaId)}`,
+      previewUrl: linkedMediaId
+        ? `/api/dashboard/media/${encodeURIComponent(linkedMediaId)}`
+        : (m.url || ''),
       mimeType: m.mime_type,
       fileSize: m.file_size,
       isPrimary: m.is_primary === 1,
