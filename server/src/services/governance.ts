@@ -109,7 +109,7 @@ async function applyContentCorrection(
           WHERE id = ? AND group_id = ? AND status = 'PENDING'
         )`;
     updateParams = [
-      `\\n[أرقام الصفحات المصوبة: ${value}]`,
+      `\n[أرقام الصفحات المصوبة: ${value}]`,
       now,
       correction.content_id,
       correction.group_id,
