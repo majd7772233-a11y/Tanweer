@@ -158,7 +158,7 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       });
       const res = await handlePreviewPurge(reqWrong, 'owner1', env);
       expect(res.status).toBe(403);
-      const data = await res.json();
+      const data = (await res.json()) as any;
       expect(data.error.code).toBe('INVALID_SECRET');
     });
 
@@ -170,7 +170,7 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       });
       const res = await handlePreviewPurge(reqCorrect, 'owner1', env);
       expect(res.status).toBe(200);
-      const data = await res.json();
+      const data = (await res.json()) as any;
       expect(data.success).toBe(true);
       expect(data.preview).toBeDefined();
       expect(data.fullyPurgedTables).toBeDefined();
@@ -182,14 +182,14 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       db.tables.contents.push({ id: 'c1', title: 'درس العلوم', is_pinned: 0 });
       const res = await handleTogglePinDashboardContent('c1', 'owner1', env);
       expect(res.status).toBe(200);
-      const data = await res.json();
+      const data = (await res.json()) as any;
       expect(data.success).toBe(true);
       expect(data.isPinned).toBe(1);
       expect(db.tables.contents[0].is_pinned).toBe(1);
 
       // Toggle back to 0
       const res2 = await handleTogglePinDashboardContent('c1', 'owner1', env);
-      const data2 = await res2.json();
+      const data2 = (await res2.json()) as any;
       expect(data2.isPinned).toBe(0);
       expect(db.tables.contents[0].is_pinned).toBe(0);
     });
@@ -209,7 +209,7 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       const req = new Request('http://localhost/api/dashboard/chat-messages?groupId=g1&order=DESC');
       const res = await handleGetDashboardChatMessages(req, env);
       expect(res.status).toBe(200);
-      const data = await res.json();
+      const data = (await res.json()) as any;
       expect(data.success).toBe(true);
       expect(data.messages.length).toBe(1);
       expect(data.messages[0].message).toBe('السلام عليكم ورحمة الله');
@@ -234,7 +234,7 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       const req = new Request('http://localhost/api/dashboard/exams?q=الرياضيات');
       const res = await handleGetDashboardExams(req, env);
       expect(res.status).toBe(200);
-      const data = await res.json();
+      const data = (await res.json()) as any;
       expect(data.success).toBe(true);
       expect(data.exams.length).toBe(1);
       expect(data.exams[0].title).toBe('امتحان الرياضيات النهائي');
@@ -262,7 +262,7 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
 
       const res = await handleGetDashboardHomeworkDetail('hw1', env);
       expect(res.status).toBe(200);
-      const data = await res.json();
+      const data = (await res.json()) as any;
       expect(data.success).toBe(true);
       expect(data.homework.title).toBe('واجب الفيزياء 1');
       expect(data.media.length).toBe(1);

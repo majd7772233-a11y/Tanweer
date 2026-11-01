@@ -160,20 +160,24 @@ abstract class TanweerDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE `cached_contents` ADD COLUMN `createdBy` TEXT NOT NULL DEFAULT ''")
             } catch (_: Exception) {}
 
-            // 5. Ensure cached_user matches UserEntity (remove recoveryCode for security)
+            // 5. Ensure cached_user matches UserEntity (allow nullable gradeId/sectionId, remove recoveryCode for security)
             try {
                 val userPragma = database.query("PRAGMA table_info(`cached_user`)")
-                val userCols = mutableSetOf<String>()
+                var needsUserRebuild = false
+                var hasRecoveryCode = false
                 while (userPragma.moveToNext()) {
-                    userCols.add(userPragma.getString(1))
+                    val name = userPragma.getString(1)
+                    val notNull = userPragma.getInt(3) == 1
+                    if (name == "recoveryCode") hasRecoveryCode = true
+                    if ((name == "gradeId" || name == "sectionId") && notNull) needsUserRebuild = true
                 }
                 userPragma.close()
 
-                if (userCols.contains("recoveryCode")) {
+                if (hasRecoveryCode || needsUserRebuild) {
                     database.execSQL(
                         "CREATE TABLE `cached_user_v13_temp` (" +
                         "`id` TEXT NOT NULL, `fullName` TEXT NOT NULL, `phoneNumber` TEXT NOT NULL, " +
-                        "`gradeId` INTEGER NOT NULL, `sectionId` TEXT NOT NULL, `role` TEXT NOT NULL, " +
+                        "`gradeId` INTEGER, `sectionId` TEXT, `role` TEXT NOT NULL, " +
                         "`defaultGroupId` TEXT NOT NULL, `token` TEXT NOT NULL, `lessonsCount` INTEGER NOT NULL, " +
                         "`homeworksCount` INTEGER NOT NULL, `issuesCount` INTEGER NOT NULL, `photosCount` INTEGER NOT NULL, PRIMARY KEY(`id`))"
                     )
@@ -193,7 +197,7 @@ abstract class TanweerDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS_FROM_LEGACY_VERSIONS: Array<Migration> = (2..11).map { fromVer ->
+        val MIGRATIONS_FROM_LEGACY_VERSIONS: Array<Migration> = (2..12).map { fromVer ->
             object : Migration(fromVer, 13) {
                 override fun migrate(database: SupportSQLiteDatabase) {
                     applyUniversalSchemaUpgrades(database)
