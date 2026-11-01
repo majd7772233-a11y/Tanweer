@@ -28,9 +28,9 @@ class MockD1PreparedStatement {
     return { results: results as T[] };
   }
 
-  async run(): Promise<{ success: boolean }> {
-    this.db.executeSql(this.sql, this.params);
-    return { success: true };
+  async run(): Promise<{ success: boolean; meta: { changes: number } }> {
+    const changes = this.db.executeSql(this.sql, this.params);
+    return { success: true, meta: { changes: changes.length } };
   }
 }
 
@@ -60,9 +60,63 @@ class MockD1Database {
     return new MockD1PreparedStatement(this, sql);
   }
 
+  async batch(statements: MockD1PreparedStatement[]): Promise<Array<{ success: boolean; meta: { changes: number } }>> {
+    const results = [];
+    for (const statement of statements) {
+      results.push(await statement.run());
+    }
+    return results;
+  }
+
   executeSql(sql: string, params: any[]): any[] {
     const trimmed = sql.trim();
     const normalized = trimmed.replace(/\s+/g, ' ');
+
+    // Guarded schedule-version creation used by the atomic first-slot setup path.
+    if (
+      /^INSERT INTO schedule_versions/i.test(normalized) &&
+      normalized.includes('SELECT ?') &&
+      normalized.includes('NOT EXISTS')
+    ) {
+      const [id, groupId, versionNumber, validFrom, createdAt, createdBy, guardGroupId] = params;
+      const hasActive = (this.tables.schedule_versions || []).some(
+        (row) => row.group_id === guardGroupId && row.is_active === 1
+      );
+      if (hasActive) return [];
+      const row = {
+        id, group_id: groupId, version_number: versionNumber,
+        valid_from: validFrom, valid_until: null, is_active: 1,
+        created_at: createdAt, created_by: createdBy,
+      };
+      this.tables.schedule_versions.push(row);
+      return [row];
+    }
+
+    // Guarded schedule-slot creation. Check both active version and slot-position uniqueness.
+    if (
+      /^INSERT INTO schedule_slots/i.test(normalized) &&
+      normalized.includes('SELECT ?') &&
+      normalized.includes('NOT EXISTS')
+    ) {
+      const [
+        id, versionId, dayOfWeek, slotOrder, subjectId, startTime, endTime,
+        activeVersionId, groupId, positionVersionId, positionDay, positionOrder,
+      ] = params;
+      const activeVersion = (this.tables.schedule_versions || []).some(
+        (row) => row.id === activeVersionId && row.group_id === groupId && row.is_active === 1
+      );
+      const occupied = (this.tables.schedule_slots || []).some(
+        (row) => row.version_id === positionVersionId &&
+          row.day_of_week === positionDay && row.slot_order === positionOrder
+      );
+      if (!activeVersion || occupied) return [];
+      const row = {
+        id, version_id: versionId, day_of_week: dayOfWeek, slot_order: slotOrder,
+        subject_id: subjectId, start_time: startTime, end_time: endTime,
+      };
+      this.tables.schedule_slots.push(row);
+      return [row];
+    }
 
     // INSERT INTO
     if (/^INSERT INTO/i.test(normalized)) {
