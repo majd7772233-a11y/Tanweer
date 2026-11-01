@@ -174,7 +174,21 @@ class MockD1Database {
         const table = match[1];
 
         if (this.tables[table]) {
-          if (normalized.includes('WHERE version_id = ? AND day_of_week = ? AND slot_order = ?')) {
+          if (
+            normalized.includes('WHERE id = ? AND version_id = ? AND day_of_week = ? AND slot_order = ?') &&
+            normalized.includes('schedule_versions')
+          ) {
+            const [slotId, versionId, day, slot, activeVersionId, groupId] = params;
+            const activeVersion = (this.tables.schedule_versions || []).some(
+              (v) => v.id === activeVersionId && v.group_id === groupId && v.is_active === 1
+            );
+            if (activeVersion) {
+              this.tables[table] = this.tables[table].filter(
+                (r) => !(r.id === slotId && r.version_id === versionId &&
+                  r.day_of_week === day && r.slot_order === slot)
+              );
+            }
+          } else if (normalized.includes('WHERE version_id = ? AND day_of_week = ? AND slot_order = ?')) {
             const [versionId, day, slot] = params;
 
             this.tables[table] = this.tables[table].filter(
