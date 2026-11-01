@@ -528,7 +528,7 @@ export async function handleDeleteScheduleSlot(
   ).bind(groupId).first<{ id: string }>();
 
   if (!activeVersion) {
-    return errorResponse('SCHEDULE_NOT_FOUND', 'لا يوجد جدول فعال لهذه المجموعة');
+    return errorResponse('SCHEDULE_NOT_FOUND', 'لا يوجد جدول فعال لهذه المجموعة', 404);
   }
 
   const deletion = await env.DB.prepare(
