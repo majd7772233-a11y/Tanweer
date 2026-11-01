@@ -3,6 +3,7 @@ import { Env, UserContext } from '../src/env';
 import { Role } from '../src/lib/roles';
 import {
   handleApproveGroupJoinRequest,
+  handleCreatePublicGroup,
   handleRejectGroupJoinRequest,
   handleRemoveGroupMember,
   handleUpdateGroupMemberRole,
@@ -308,5 +309,116 @@ describe('Group member management state and scope', () => {
     expect(response.status).toBe(200);
     expect(db.members.some((row) => row.user_id === 'pending-1')).toBe(false);
     expect(db.members.find((row) => row.user_id === 'student-1')?.status).toBe('ACTIVE');
+  });
+});
+
+class PublicGroupCreateDb {
+  groups: Array<Record<string, unknown>> = [];
+  members: Array<Record<string, unknown>> = [];
+  failMemberInsert = false;
+  batchCalls = 0;
+
+  prepare(sql: string) {
+    const db = this;
+    let params: unknown[] = [];
+    const statement = {
+      sql,
+      bind(...values: unknown[]) {
+        params = values;
+        return statement;
+      },
+      async run() {
+        if (sql.includes('INSERT INTO groups')) {
+          db.groups.push({
+            id: params[0],
+            name: params[1],
+            type: 'OPTIONAL',
+            description: params[2],
+            icon: params[3],
+            created_by: params[4],
+          });
+          return { success: true, meta: { changes: 1 } };
+        }
+        if (sql.includes('INSERT INTO group_members')) {
+          if (db.failMemberInsert) throw new Error('simulated membership insert failure');
+          db.members.push({
+            group_id: params[0],
+            user_id: params[1],
+            role: params[2],
+            status: 'ACTIVE',
+          });
+          return { success: true, meta: { changes: 1 } };
+        }
+        return { success: true, meta: { changes: 0 } };
+      },
+    };
+    return statement;
+  }
+
+  async batch(statements: Array<{ run: () => Promise<{ success: boolean; meta: { changes: number } }> }>) {
+    this.batchCalls += 1;
+    const groupSnapshot = [...this.groups];
+    const memberSnapshot = [...this.members];
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
+    } catch (error) {
+      this.groups = groupSnapshot;
+      this.members = memberSnapshot;
+      throw error;
+    }
+  }
+}
+
+describe('Public group creation consistency', () => {
+  const creator: UserContext = {
+    userId: 'global-moderator',
+    phoneNumber: '777000099',
+    fullName: 'مشرف عام',
+    gradeId: 10,
+    sectionId: 'A',
+    role: Role.MODERATOR,
+  };
+
+  const createRequest = () => new Request('https://tanweer.test/api/v1/groups/public', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: 'مجموعة البرمجة',
+      description: 'مجموعة لمشاركة الدروس والمشاريع',
+      icon: '💻',
+    }),
+  });
+
+  it('creates the discoverable group and its creator moderator membership in one D1 batch', async () => {
+    const db = new PublicGroupCreateDb();
+    const response = await handleCreatePublicGroup(createRequest(), creator, { DB: db as any } as Env);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.success).toBe(true);
+    expect(db.batchCalls).toBe(1);
+    expect(db.groups).toHaveLength(1);
+    expect(db.members).toHaveLength(1);
+    expect(db.members[0]).toMatchObject({
+      group_id: body.groupId,
+      user_id: creator.userId,
+      role: 'MODERATOR',
+      status: 'ACTIVE',
+    });
+  });
+
+  it('does not leave a published group behind if creator membership insertion fails', async () => {
+    const db = new PublicGroupCreateDb();
+    db.failMemberInsert = true;
+
+    const response = await handleCreatePublicGroup(createRequest(), creator, { DB: db as any } as Env);
+
+    expect(response.status).toBe(500);
+    expect((await response.json() as any).error.code).toBe('GROUP_CREATION_FAILED');
+    expect(db.batchCalls).toBe(1);
+    expect(db.groups).toHaveLength(0);
+    expect(db.members).toHaveLength(0);
   });
 });
