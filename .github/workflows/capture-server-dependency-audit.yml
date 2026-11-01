@@ -1,4 +1,5 @@
 name: Capture Server Dependency Audit
+# Refresh lockfile and audit snapshot after dependency updates.
 
 on:
   push:
