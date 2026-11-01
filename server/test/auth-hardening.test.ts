@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Env } from '../src/env';
 import { hashPassword, hashString, verifyPassword } from '../src/lib/crypto';
+import { getUserFromToken } from '../src/middleware/auth';
 import { handleLogin, handleRegister } from '../src/services/auth';
 
 const pepper = 'auth-hardening-test-pepper';
@@ -126,6 +127,103 @@ describe('Authentication hardening regressions', () => {
       error: { code: 'CREDENTIALS_EXPIRED' },
     });
     expect(sessionInsertAttempted).toBe(false);
+  });
+
+
+  it('rejects disabled users before creating a login session', async () => {
+    const password = 'School#Secure2026';
+    const passwordHash = (await hashPassword(password, pepper)).hash;
+    let sessionInsertAttempted = false;
+
+    const env = {
+      SESSION_PEPPER: pepper,
+      PASSWORD_PEPPER: pepper,
+      DB: {
+        prepare(sql: string) {
+          return {
+            bind(..._params: unknown[]) {
+              return {
+                async first() {
+                  if (sql.includes('FROM users WHERE phone_number = ?')) {
+                    return {
+                      id: 'disabled-user',
+                      phone_number: '771234567',
+                      full_name: 'مجد أنور عبدالرحمن',
+                      grade_id: 10,
+                      section_id: 'A',
+                      role: 'STUDENT',
+                      password_hash: passwordHash,
+                      status: 'DISABLED',
+                    };
+                  }
+                  return null;
+                },
+                async run() {
+                  if (sql.includes('INSERT INTO sessions')) sessionInsertAttempted = true;
+                  return { success: true, meta: { changes: 1 } };
+                },
+              };
+            },
+          };
+        },
+      },
+    } as unknown as Env;
+
+    const response = await handleLogin(new Request('https://tanweer.test/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber: '771234567', password }),
+    }), env);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      error: { code: 'ACCOUNT_DISABLED' },
+    });
+    expect(sessionInsertAttempted).toBe(false);
+  });
+
+  it('does not convert an internal SYSTEM_OWNER principal into an Android ADMIN session', async () => {
+    const token = 'owner-session-token-for-test';
+    const tokenHash = await hashString(token, pepper);
+
+    const env = {
+      SESSION_PEPPER: pepper,
+      PASSWORD_PEPPER: pepper,
+      DB: {
+        prepare(sql: string) {
+          return {
+            bind(..._params: unknown[]) {
+              return {
+                async first() {
+                  if (sql.includes('FROM sessions s') && sql.includes('JOIN users u')) {
+                    return {
+                      id: 'session-owner',
+                      user_id: 'SYSTEM_OWNER',
+                      device_id: 'device-owner',
+                      expires_at: Date.now() + 60_000,
+                      phone_number: '__TANWEER_INTERNAL_SYSTEM_ACTOR__',
+                      full_name: 'مستخدم النظام الداخلي',
+                      grade_id: 0,
+                      section_id: 'SYSTEM',
+                      role: 'SYSTEM_OWNER',
+                      status: 'ACTIVE',
+                    };
+                  }
+                  return null;
+                },
+                async run() {
+                  return { success: true, meta: { changes: 1 } };
+                },
+              };
+            },
+          };
+        },
+      },
+    } as unknown as Env;
+
+    expect(tokenHash).toMatch(/^[a-f0-9]+$/);
+    await expect(getUserFromToken(token, env)).resolves.toBeNull();
   });
 
   it('stores the new password and recovery-code hashes when repairing an incomplete registration', async () => {
