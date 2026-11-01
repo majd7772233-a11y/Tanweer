@@ -71,6 +71,80 @@ function extractInternalMediaId(value: string): string | null {
 }
 
 /**
+ * Resolves source groups using exact media identifiers. SQL LIKE is used only
+ * to shortlist candidate rows; it is never treated as proof of linkage because
+ * an ID may be a substring of another blob's ID or URL.
+ */
+async function getMediaLinkedGroupIds(mediaId: string, db: D1Database): Promise<Set<string>> {
+  const [contentLinks, homeworkLinks, legacyHomeworkLinks] = await Promise.all([
+    db.prepare(
+      \`SELECT c.group_id, cm.id, cm.url, cm.object_key
+       FROM content_media cm
+       JOIN contents c ON cm.content_id = c.id
+       WHERE cm.url LIKE ? OR cm.id = ? OR cm.object_key = ?\`
+    ).bind('%' + mediaId + '%', mediaId, mediaId).all<{
+      group_id: string;
+      id: string;
+      url: string | null;
+      object_key: string | null;
+    }>(),
+    db.prepare(
+      \`SELECT h.group_id, hm.media_id, hm.url
+       FROM homework_media hm
+       JOIN homeworks h ON hm.homework_id = h.id
+       WHERE hm.media_id = ? OR hm.url LIKE ?\`
+    ).bind(mediaId, '%' + mediaId + '%').all<{
+      group_id: string;
+      media_id: string;
+      url: string | null;
+    }>(),
+    db.prepare(
+      \`SELECT group_id, media_urls
+       FROM homeworks
+       WHERE media_urls LIKE ?\`
+    ).bind('%' + mediaId + '%').all<{
+      group_id: string;
+      media_urls: string | null;
+    }>(),
+  ]);
+
+  const linkedGroupIds = new Set<string>();
+
+  for (const row of contentLinks.results || []) {
+    const exactMatch =
+      row.id === mediaId ||
+      row.object_key === mediaId ||
+      (!!row.url && extractInternalMediaId(row.url) === mediaId);
+    if (exactMatch && row.group_id) linkedGroupIds.add(row.group_id);
+  }
+
+  for (const row of homeworkLinks.results || []) {
+    const exactMatch =
+      row.media_id === mediaId ||
+      (!!row.url && extractInternalMediaId(row.url) === mediaId);
+    if (exactMatch && row.group_id) linkedGroupIds.add(row.group_id);
+  }
+
+  for (const row of legacyHomeworkLinks.results || []) {
+    if (!row.group_id || !row.media_urls) continue;
+    let references: unknown;
+    try {
+      references = JSON.parse(row.media_urls);
+    } catch {
+      references = [row.media_urls];
+    }
+
+    const values = Array.isArray(references) ? references : [references];
+    const exactMatch = values.some(value =>
+      typeof value === 'string' && extractInternalMediaId(value) === mediaId
+    );
+    if (exactMatch) linkedGroupIds.add(row.group_id);
+  }
+
+  return linkedGroupIds;
+}
+
+/**
  * Prevents a user from linking another group's private media blob into a group
  * they can access. The uploader may reuse their own upload; other users must
  * already have active access to at least one group where the blob is linked.
@@ -122,28 +196,7 @@ export async function validateMediaAttachmentAccess(
     }
 
     try {
-      const [contentLinks, homeworkLinks, legacyHomeworkLinks] = await Promise.all([
-        db.prepare(
-          `SELECT c.group_id
-           FROM content_media cm
-           JOIN contents c ON cm.content_id = c.id
-           WHERE cm.url LIKE ? OR cm.object_key = ?`
-        ).bind(`%${mediaId}%`, mediaId).all<{ group_id: string }>(),
-        db.prepare(
-          `SELECT h.group_id
-           FROM homework_media hm
-           JOIN homeworks h ON hm.homework_id = h.id
-           WHERE hm.media_id = ? OR hm.url LIKE ?`
-        ).bind(mediaId, `%${mediaId}%`).all<{ group_id: string }>(),
-        db.prepare(
-          `SELECT group_id FROM homeworks WHERE media_urls LIKE ?`
-        ).bind(`%${mediaId}%`).all<{ group_id: string }>(),
-      ]);
-
-      const linkedGroupIds = new Set<string>();
-      for (const row of contentLinks.results || []) if (row.group_id) linkedGroupIds.add(row.group_id);
-      for (const row of homeworkLinks.results || []) if (row.group_id) linkedGroupIds.add(row.group_id);
-      for (const row of legacyHomeworkLinks.results || []) if (row.group_id) linkedGroupIds.add(row.group_id);
+      const linkedGroupIds = await getMediaLinkedGroupIds(mediaId, db);
 
       if (linkedGroupIds.size === 0) {
         return errorResponse(
@@ -328,41 +381,16 @@ export async function handleGetMedia(mediaId: string, request: Request, env: Env
   const isPrivileged = userRole === Role.ADMIN || userRole === Role.SYSTEM_OWNER;
 
   if (!isPrivileged) {
-    // Check if this media is linked to a lesson/content in content_media
-    const contentRows = await env.DB.prepare(
-      `SELECT c.group_id
-       FROM content_media cm
-       JOIN contents c ON cm.content_id = c.id
-       WHERE cm.url LIKE ? OR cm.id = ? OR cm.object_key = ?`
-    ).bind(`%${cleanId}%`, cleanId, cleanId).all<{ group_id: string }>();
-
-    // Check if this media is linked to homework in homework_media or homeworks
-    let hwMediaRows: any[] = [];
+    let linkedGroupIds: Set<string>;
     try {
-      const res = await env.DB.prepare(
-        `SELECT h.group_id
-         FROM homework_media hm
-         JOIN homeworks h ON hm.homework_id = h.id
-         WHERE hm.media_id = ? OR hm.url LIKE ?`
-      ).bind(cleanId, `%${cleanId}%`).all<{ group_id: string }>();
-      hwMediaRows = res.results || [];
-    } catch {}
-
-    const homeworkRows = await env.DB.prepare(
-      `SELECT group_id
-       FROM homeworks
-       WHERE media_urls LIKE ?`
-    ).bind(`%${cleanId}%`).all<{ group_id: string }>();
-
-    const linkedGroupIds = new Set<string>();
-    for (const r of contentRows.results || []) {
-      if (r.group_id) linkedGroupIds.add(r.group_id);
-    }
-    for (const r of hwMediaRows) {
-      if (r.group_id) linkedGroupIds.add(r.group_id);
-    }
-    for (const r of homeworkRows.results || []) {
-      if (r.group_id) linkedGroupIds.add(r.group_id);
+      linkedGroupIds = await getMediaLinkedGroupIds(cleanId, env.DB);
+    } catch (error) {
+      console.error('Failed to verify exact media linkage:', error);
+      return errorResponse(
+        'MEDIA_ACCESS_CHECK_UNAVAILABLE',
+        'تعذر التحقق من صلاحية الوصول إلى الصورة حالياً. حاول مجدداً.',
+        503
+      );
     }
 
     // Reject unlinked media: media must be connected to an authenticated classroom context
