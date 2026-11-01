@@ -128,7 +128,10 @@ export async function handleRedeemRoleCode(
     return errorResponse('INVALID_INPUT', 'يرجى إدخال رمز التحقق المكون من 8 أرقام');
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح التحقق السري غير مهيأ في الخادم', 500);
+  }
   const cleanCode = body.code.replace(/[\s\-]/g, '').trim();
 
   if (cleanCode.length !== 8 || !/^\d{8}$/.test(cleanCode)) {
