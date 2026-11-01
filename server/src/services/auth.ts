@@ -408,34 +408,119 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
 
   const now = Date.now();
 
-  // Enforce single-use and expiration check if issued via user_recovery_tokens (TA-16)
+  // Read the token's revocation/expiry state. A storage failure must never bypass
+  // the single-use policy, so do not catch-and-ignore D1 errors here.
+  let recoveryToken: {
+    id: string;
+    max_uses: number;
+    uses_count: number;
+    expires_at: number;
+    revoked: number;
+  } | null;
+
   try {
-    const recoveryToken = await env.DB.prepare(`
+    recoveryToken = await env.DB.prepare(`
       SELECT id, max_uses, uses_count, expires_at, revoked
       FROM user_recovery_tokens
       WHERE token_hash = ? AND user_id = ?
       ORDER BY created_at DESC LIMIT 1
-    `).bind(recoveryHash, user.id).first<{ id: string; max_uses: number; uses_count: number; expires_at: number; revoked: number }>();
+    `).bind(recoveryHash, user.id).first<{
+      id: string;
+      max_uses: number;
+      uses_count: number;
+      expires_at: number;
+      revoked: number;
+    }>();
+  } catch (error) {
+    console.error('Failed to validate recovery-token state:', error);
+    return errorResponse(
+      'AUTHENTICATION_UNAVAILABLE',
+      'تعذر التحقق من صلاحية رمز الاسترداد حالياً. يرجى المحاولة لاحقاً.',
+      503
+    );
+  }
 
-    if (recoveryToken) {
-      if (recoveryToken.revoked === 1) {
-        return errorResponse('RECOVERY_CODE_REVOKED', 'تم إبطال رمز الاسترداد هذا، يرجى طلب رمز جديد', 400);
-      }
-      if (recoveryToken.expires_at < now) {
-        return errorResponse('RECOVERY_CODE_EXPIRED', 'رمز الاسترداد منتهي الصلاحية، يرجى طلب رمز جديد', 400);
-      }
-      if (recoveryToken.uses_count >= recoveryToken.max_uses) {
-        return errorResponse('RECOVERY_CODE_USED', 'تم استخدام رمز الاسترداد هذا مسبقاً، ولا يمكن استخدامه أكثر من مرة واحدة', 400);
-      }
-      await env.DB.prepare(`
-        UPDATE user_recovery_tokens SET uses_count = uses_count + 1, used_at = ? WHERE id = ?
-      `).bind(now, recoveryToken.id).run();
+  if (recoveryToken) {
+    if (recoveryToken.revoked === 1) {
+      return errorResponse('RECOVERY_CODE_REVOKED', 'تم إبطال رمز الاسترداد هذا، يرجى طلب رمز جديد', 400);
     }
-  } catch {}
+    if (recoveryToken.expires_at <= now) {
+      return errorResponse('RECOVERY_CODE_EXPIRED', 'رمز الاسترداد منتهي الصلاحية، يرجى طلب رمز جديد', 400);
+    }
+    if (recoveryToken.uses_count >= recoveryToken.max_uses) {
+      return errorResponse('RECOVERY_CODE_USED', 'تم استخدام رمز الاسترداد هذا مسبقاً، ولا يمكن استخدامه أكثر من مرة واحدة', 400);
+    }
+  }
 
-  // Single-use enforcement: burn recovery_code_hash on users table so it cannot be used again
+  // Compare-and-swap on the verified hash. Concurrent requests can read the
+  // same code, but only one can replace this exact hash with the burned marker.
   const burnedHash = 'USED_' + now + '_' + generateRandomToken().slice(0, 12);
-  await env.DB.prepare(`UPDATE users SET recovery_code_hash = ?, last_seen = ? WHERE id = ?`).bind(burnedHash, now, user.id).run();
+  let burnResult;
+  try {
+    burnResult = await env.DB.prepare(`
+      UPDATE users
+      SET recovery_code_hash = ?, last_seen = ?
+      WHERE id = ? AND recovery_code_hash = ?
+        AND (? IS NULL OR EXISTS (
+          SELECT 1 FROM user_recovery_tokens
+          WHERE id = ? AND user_id = ? AND revoked = 0
+            AND expires_at > ? AND uses_count < max_uses
+        ))
+    `).bind(
+      burnedHash,
+      now,
+      user.id,
+      recoveryHash,
+      recoveryToken?.id ?? null,
+      recoveryToken?.id ?? null,
+      user.id,
+      now
+    ).run();
+  } catch (error) {
+    console.error('Failed to consume recovery code:', error);
+    return errorResponse(
+      'AUTHENTICATION_UNAVAILABLE',
+      'تعذر استهلاك رمز الاسترداد بأمان حالياً. يرجى المحاولة لاحقاً.',
+      503
+    );
+  }
+
+  if (burnResult.meta?.changes !== 1) {
+    return errorResponse(
+      'RECOVERY_CODE_USED',
+      'تم استخدام رمز الاسترداد أو إبطاله بالفعل. يرجى طلب رمز جديد من الإدارة.',
+      409
+    );
+  }
+
+  // Update the auxiliary issuance counter only after winning the user-hash CAS.
+  // The user hash is the authoritative one-use guard against concurrent redemptions.
+  if (recoveryToken) {
+    try {
+      const tokenUse = await env.DB.prepare(`
+        UPDATE user_recovery_tokens
+        SET uses_count = uses_count + 1, used_at = ?
+        WHERE id = ? AND user_id = ? AND revoked = 0
+          AND expires_at > ? AND uses_count < max_uses
+      `).bind(now, recoveryToken.id, user.id, now).run();
+
+      if (tokenUse.meta?.changes !== 1) {
+        console.error('Recovery code user hash was burned but its issuance counter was not updated:', recoveryToken.id);
+        return errorResponse(
+          'AUTHENTICATION_UNAVAILABLE',
+          'تم إيقاف رمز الاسترداد أثناء التحقق. تواصل مع إدارة المنظومة لإصدار رمز جديد.',
+          503
+        );
+      }
+    } catch (error) {
+      console.error('Failed to update recovery-token usage counter:', error);
+      return errorResponse(
+        'AUTHENTICATION_UNAVAILABLE',
+        'تعذر إكمال التحقق من رمز الاسترداد. تواصل مع إدارة المنظومة لإصدار رمز جديد.',
+        503
+      );
+    }
+  }
 
   const token = generateRandomToken();
   const tokenHash = await hashString(token, pepper);
