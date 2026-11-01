@@ -3,7 +3,9 @@
   "name": "tanweer",
   "main": "src/index.ts",
   "compatibility_date": "2025-07-18",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -23,10 +25,44 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["GroupChatDO"]
+      "new_sqlite_classes": [
+        "GroupChatDO"
+      ]
     }
   ],
   "observability": {
     "enabled": true
+  },
+  "env": {
+    "staging": {
+      "name": "tanweer-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "tanweer-staging-db",
+          "database_id": "603edee6-c5f7-4158-8256-24b109110ec0",
+          "migrations_dir": "src/db/migrations"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CHAT",
+            "class_name": "GroupChatDO"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "GroupChatDO"
+          ]
+        }
+      ],
+      "observability": {
+        "enabled": true
+      }
+    }
   }
 }
