@@ -4944,56 +4944,89 @@ export function renderDashboardHtml(): Response {
     }
 
     async function openHomeworkDetailModal(hwId) {
-      document.getElementById('homeworkDetailModal').style.display = 'flex';
-      document.getElementById('hwModalTitle').textContent = 'جاري التحميل...';
-      document.getElementById('hwModalGroupSubject').textContent = '';
-      document.getElementById('hwModalDueDate').textContent = '-';
-      document.getElementById('hwModalAuthor').textContent = '-';
-      document.getElementById('hwModalDetails').textContent = '';
-      document.getElementById('hwModalMediaCount').textContent = '0';
-      document.getElementById('hwModalMediaGrid').innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">جاري جلب المرفقات...</div>';
+      const modal = document.getElementById('homeworkDetailModal');
+      if (!modal) return;
+
+      const titleElement = document.getElementById('hdTitle');
+      const subjectGroupElement = document.getElementById('hdSubjectGroup');
+      const studyDateElement = document.getElementById('hdStudyDate');
+      const dueDateElement = document.getElementById('hdDueDate');
+      const taskTypeElement = document.getElementById('hdTaskType');
+      const authorElement = document.getElementById('hdAuthor');
+      const pagesElement = document.getElementById('hdPages');
+      const questionsElement = document.getElementById('hdQuestions');
+      const detailsElement = document.getElementById('hdDetails');
+      const mediaCountElement = document.getElementById('hdMediaCount');
+      const grid = document.getElementById('hdMediaGrid');
+      const deleteButton = document.getElementById('hdDeleteBtn');
+
+      modal.style.display = 'flex';
+      if (titleElement) titleElement.textContent = 'جاري تحميل تفاصيل الواجب...';
+      if (subjectGroupElement) subjectGroupElement.textContent = '';
+      if (studyDateElement) studyDateElement.textContent = '-';
+      if (dueDateElement) dueDateElement.textContent = '-';
+      if (taskTypeElement) taskTypeElement.textContent = '-';
+      if (authorElement) authorElement.textContent = '-';
+      if (pagesElement) pagesElement.textContent = '-';
+      if (questionsElement) questionsElement.textContent = '-';
+      if (detailsElement) detailsElement.textContent = '';
+      if (mediaCountElement) mediaCountElement.textContent = '0';
+      if (grid) grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">جاري جلب المرفقات...</div>';
+      if (deleteButton) { deleteButton.disabled = true; deleteButton.onclick = null; }
 
       try {
         const res = await fetch('/api/dashboard/homeworks/' + encodeURIComponent(hwId));
         const data = await res.json();
-        if (!data.success) {
-          alert(data.message || 'فشل جلب تفاصيل الواجب');
-          closeHomeworkDetailModal();
+        if (!res.ok || !data.success) {
+          const message = data.message || 'فشل جلب تفاصيل الواجب';
+          if (titleElement) titleElement.textContent = 'تعذر تحميل تفاصيل الواجب';
+          if (detailsElement) detailsElement.textContent = message;
+          if (grid) grid.innerHTML = '<div style="color:var(--ruby); font-size:0.8rem; grid-column:1/-1;">' + escapeHtml(message) + '</div>';
           return;
         }
 
         const hw = data.homework || {};
-        const media = data.media || [];
+        const media = Array.isArray(hw.media) ? hw.media : (Array.isArray(data.media) ? data.media : []);
         const subjectName = hw.subject_name || hw.subject_id || '';
         const groupName = hw.group_name || hw.group_id || '';
+        const taskType = String(hw.task_type || 'HOMEWORK').toUpperCase();
 
-        document.getElementById('hwModalTitle').textContent = (hw.title || '') + ' 📝';
-        document.getElementById('hwModalGroupSubject').textContent = \`الشعبة: \${groupName} | المادة: \${subjectName}\`;
-        document.getElementById('hwModalDueDate').textContent = hw.due_date || '-';
-        document.getElementById('hwModalAuthor').textContent = hw.author_name || '-';
-        document.getElementById('hwModalDetails').textContent = hw.details || 'لا يوجد شرح تفصيلي إضافي';
-        document.getElementById('hwModalMediaCount').textContent = media.length;
+        if (titleElement) titleElement.textContent = (hw.title || 'واجب دراسي') + ' 📝';
+        if (subjectGroupElement) subjectGroupElement.textContent = 'الشعبة: ' + groupName + ' | المادة: ' + subjectName;
+        if (studyDateElement) studyDateElement.textContent = hw.study_date || '-';
+        if (dueDateElement) dueDateElement.textContent = hw.due_date || '-';
+        if (taskTypeElement) taskTypeElement.textContent = taskType === 'TASK' ? 'مهمة دراسية' : 'واجب منزلي';
+        if (authorElement) authorElement.textContent = hw.author_name || '-';
+        if (pagesElement) pagesElement.textContent = hw.page_numbers || '-';
+        if (questionsElement) questionsElement.textContent = hw.question_numbers || '-';
+        if (detailsElement) detailsElement.textContent = hw.details || 'لا توجد تعليمات إضافية لهذا الواجب';
+        if (mediaCountElement) mediaCountElement.textContent = String(media.length);
 
-        const grid = document.getElementById('hwModalMediaGrid');
-        if (media.length) {
-          grid.innerHTML = media.map(m => {
-            const safeUrl = encodeURI(m.media_url || m.url || '');
-            const safeMime = escapeHtml(m.mime_type || 'صورة');
-            return \`
-              <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.4); text-align:center; cursor:pointer;" data-url="\${escapeHtml(safeUrl)}" onclick="openMediaLightbox(this.getAttribute('data-url'))">
-                <img src="\${escapeHtml(safeUrl)}" alt="مرفق الواجب" style="width:100%; height:90px; object-fit:cover; display:block;">
-                <div style="padding:0.3rem; font-size:0.7rem; color:var(--text-muted); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
-                  \${safeMime}
-                </div>
-              </div>
-            \`;
-          }).join('');
-        } else {
-          grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">لا توجد صور أو مرفقات مرفوعة مع هذا الواجب</div>';
+        if (grid) {
+          if (media.length) {
+            grid.innerHTML = media.map(m => {
+              const rawUrl = m.previewUrl || m.media_url || m.url || '';
+              const safeUrl = escapeHtml(encodeURI(String(rawUrl)));
+              const safeMime = escapeHtml(m.mime_type || m.mimeType || 'مرفق');
+              return '<div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.4); text-align:center; cursor:pointer;" data-url="' + safeUrl + '" onclick="openMediaLightbox(this.getAttribute(\'data-url\'))">' +
+                '<img src="' + safeUrl + '" alt="مرفق الواجب" style="width:100%; height:90px; object-fit:cover; display:block;">' +
+                '<div style="padding:0.3rem; font-size:0.7rem; color:var(--text-muted); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">' + safeMime + '</div>' +
+                '</div>';
+            }).join('');
+          } else {
+            grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">لا توجد صور أو مرفقات مرفوعة مع هذا الواجب</div>';
+          }
         }
-      } catch (e) {
-        alert('حدث خطأ أثناء تحميل بيانات الواجب');
-        closeHomeworkDetailModal();
+
+        if (deleteButton && hw.id) {
+          deleteButton.disabled = false;
+          deleteButton.onclick = () => deleteHomework(hw.id, hw.title || 'الواجب');
+        }
+      } catch (error) {
+        console.error('Failed to load homework details:', error);
+        if (titleElement) titleElement.textContent = 'تعذر تحميل تفاصيل الواجب';
+        if (detailsElement) detailsElement.textContent = 'حدث خطأ أثناء الاتصال بالخادم. حاول تحديث القائمة ثم إعادة المحاولة.';
+        if (grid) grid.innerHTML = '<div style="color:var(--ruby); font-size:0.8rem; grid-column:1/-1;">تعذر تحميل المرفقات</div>';
       }
     }
 
