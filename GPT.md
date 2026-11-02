@@ -1605,6 +1605,23 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **Workflow trigger safety:** The temporary push trigger used to start #80 was removed after it entered the Actions queue. Current Android workflow push trigger is main-only with `workflow_dispatch` retained. The per-commit concurrency grouping remains, so distinct commits do not cancel each other's build runs.
 - **Delivery restriction:** Do not hand out the earlier Production-targeted build #76 for this test session. Do not claim a Staging APK exists until a Staging run succeeds through APK verification and artifact upload and its SHA-256 file has been checked.
 
+
+### 2026-11-02 — Staging APK delivered and backend test environment ready
+
+- **Successful Staging Release:** Android GitHub Actions run #79, ID `41447916533`, commit `44e60d633c5a3a466bac0d3b48bc130d2cac85e1`, completed with `success`. Unit tests, release-keystore preparation, alias validation, signed Staging Release assembly, APK verification, rename, and artifact upload all succeeded.
+- **Artifact:** ID `13143271835`, name `Tanweer-Staging-release-44e60d633c5a3a466bac0d3b48bc130d2cac85e1`, ZIP size 22,615,358 bytes. Artifact expiry: 2026-12-02.
+- **APK extracted name:** `Tanweer-44e60d6-staging-release.apk`; size 23,181,624 bytes. Its embedded SHA-256 file reports `4846e276420eb09a678e8d895b59db4ecf30026cf841517d54dae3e6fd8a1b67`; the extracted APK was independently hashed and matched exactly. `jarsigner -verify` also reported `jar verified`.
+- **Install identity:** Package is configured as `com.magd.tanweer.staging`, label `تنوير (تجريبي)`, version `1.2.0-staging`. It is a separate app from Production `com.magd.tanweer`, so install side-by-side and keep its local storage separate.
+- **Backend target:** The Staging flavor uses `https://tanweer-staging.magd.workers.dev/` for REST, derives realtime WebSocket URLs from the same selected API origin, and resolves server-relative media URLs against that origin. Production flavor remains pointed at `https://tanweer.magd.workers.dev/`.
+- **Staging Worker current deployment:** Worker `tanweer-staging`, deployment `ce0a7e7a-4244-44f6-8778-1982cfba5add`, active version `dd8c9b67-c63a-4c46-ab64-d5a7e13737ce` at 100%. Cloudflare Worker settings confirm `ENVIRONMENT=staging`.
+- **Dashboard smoke tests:** Staging deploy workflow run #7, ID `41447780840`, completed successfully. The workflow verifies API health, Owner Dashboard login HTTP 200 with expected HTML, and unauthenticated `/dashboard` redirect HTTP 302.
+- **Staging D1:** Database `tanweer-staging-db` UUID `603edee6-c5f7-4158-8256-24b109110ec0`. Read-only counts: one reserved `SYSTEM_OWNER` user, zero content rows, one seeded global group. No test users or content were seeded automatically.
+- **Staging-only secrets:** `JWT_SECRET`, `SESSION_PEPPER`, `PASSWORD_PEPPER`, `TANWEER_OWNER_SECRET` exist on the staging Worker. The Owner Dashboard should be accessed using the separate GitHub Actions secret `TANWEER_OWNER_SECRET_STAGING`; never use the Production Owner secret for Staging testing.
+- **Second build attempt:** Run #80, ID `41448942136`, was started as an independent backup using per-commit concurrency after run #79's build step had appeared stalled. At the time of this notebook update, #80 remained in progress at unit tests; run #79 is the confirmed successful artifact and is the one intended for testing.
+- **Production boundary:** `main` remains unchanged at `64143994070bcdc410cf044379fe2801da8f9a3c`. No Production Worker deployment, Production D1 migration/write, or Production secret modification was performed.
+- **Manual workflow safeguards:** Android push remains main-only with manual `workflow_dispatch`; Staging deployment remains manual-only with `workflow_dispatch`. The temporary branch push triggers used to start CI were removed. Android build concurrency is scoped by both ref and commit SHA.
+- **Remaining work:** User must install and test the Staging APK on real devices. Focus on registration/login, profile and role dashboards, offline queue/sync, media uploads/retries/previews, realtime chat, and Owner Dashboard operations. Confirm the Dashboard labels the environment as `staging`; keep all created test records in Staging. No physical-device testing has yet occurred.
+
 ---
 
 # END OF GPT.md
