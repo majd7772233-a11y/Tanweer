@@ -706,6 +706,7 @@ export async function handleReissueUserCredentials(
     full_name: string;
     phone_number: string;
     role: string;
+    status: string;
   }>();
 
   if (!user) {
