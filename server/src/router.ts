@@ -55,6 +55,7 @@ import {
 import { handleGetGroupMessages, handlePostGroupMessage, handleDeleteGroupMessage } from './services/chat';
 import { handleGetProfile, handleUpdateProfile } from './services/users';
 import { handleGetMedia, handleUploadMedia } from './services/media';
+import { handleGetMyDevices, handleRevokeMyDevice, handleLogoutCurrentDevice } from './services/devices';
 import { handleCreateRoleRequest, handleGetMyRoleRequests, handleGetRoleMetadata, handleRedeemRoleCode } from './services/roleRequests';
 
 export async function handleApiRoute(request: Request, env: Env): Promise<Response> {
@@ -176,6 +177,18 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   // Authenticated routes
   const { user, error } = await authenticateRequest(request, env);
   if (error || !user) return error!;
+
+  // Account-owned active device management. These endpoints never use the Owner Dashboard.
+  if (path === '/api/v1/auth/devices' && method === 'GET') {
+    return handleGetMyDevices(user, env);
+  }
+  if (path.startsWith('/api/v1/auth/devices/') && method === 'DELETE') {
+    const deviceId = decodeURIComponent(path.substring('/api/v1/auth/devices/'.length));
+    return handleRevokeMyDevice(deviceId, user, env);
+  }
+  if (path === '/api/v1/auth/logout' && method === 'POST') {
+    return handleLogoutCurrentDevice(user, env);
+  }
 
   // Role Upgrade Requests
   if (path === '/api/v1/role-requests' && method === 'POST') {
