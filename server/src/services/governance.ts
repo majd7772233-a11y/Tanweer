@@ -716,6 +716,23 @@ export async function handleGetCommunityDecisions(
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
 
+  const now = Date.now();
+  await env.DB.prepare(
+    `UPDATE community_decisions
+     SET status = 'EXPIRED'
+     WHERE group_id = ? AND status = 'PENDING'
+       AND expires_at IS NOT NULL AND expires_at < ?`
+  ).bind(groupId, now).run();
+  await env.DB.prepare(
+    `UPDATE schedule_proposals
+     SET status = 'EXPIRED'
+     WHERE group_id = ? AND status = 'PENDING'
+       AND id IN (
+         SELECT target_id FROM community_decisions
+         WHERE group_id = ? AND request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE') AND status = 'EXPIRED'
+       )`
+  ).bind(groupId, groupId).run();
+
   const decisions = await env.DB.prepare(
     `SELECT cd.*,
             (SELECT vote_choice FROM community_votes cv WHERE cv.decision_id = cd.id AND cv.user_id = ?) as my_vote
