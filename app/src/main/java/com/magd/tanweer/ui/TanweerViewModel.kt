@@ -1218,10 +1218,17 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val res = repository.voteCommunityDecision(decisionId, voteChoice)
             res.onSuccess { msg ->
+                // A unified decision may have just changed the active schedule.
+                // Refresh both sources so the schedule and governance screens cannot drift.
                 loadCommunityDecisions()
                 loadModeratorDashboard()
+                loadScheduleData()
                 onResult(true, msg)
             }.onFailure { err ->
+                // The server may have closed an expired decision while rejecting this vote.
+                // Refresh to display its authoritative terminal state immediately.
+                loadCommunityDecisions()
+                loadScheduleData()
                 onResult(false, err.message ?: "تعذر تسجيل التصويت")
             }
         }
