@@ -10,6 +10,9 @@ export function mapGroup(r: any, defaultRole = 'MEMBER') {
     icon: r.icon ?? null,
     role: sanitizePublicRole(rawRole),
     memberCount: Number(r.member_count ?? r.memberCount ?? 1),
+    visibility: (r.visibility || 'PUBLIC').toUpperCase(),
+    chatPolicy: (r.chat_policy || r.chatPolicy || 'MEMBERS').toUpperCase(),
+    membershipStatus: r.membership_status ?? r.membershipStatus ?? null,
   };
 }
 
@@ -81,15 +84,18 @@ export function mapExam(r: any) {
 }
 
 export function mapSchoolEvent(r: any) {
+  const groupId = r.group_id ?? r.groupId;
   return {
     id: r.id,
-    groupId: r.group_id ?? r.groupId,
+    groupId,
     eventDate: r.event_date ?? r.eventDate,
     timeStr: r.time_str ?? r.timeStr ?? null,
     title: r.title,
     description: r.description ?? null,
     category: r.category ?? 'ACTIVITY',
     location: r.location ?? null,
+    sourceName: r.source_name ?? r.created_by_name ?? (groupId === 'all' ? 'إدارة المدرسة' : null),
+    isOfficial: Boolean(r.is_official ?? r.isOfficial ?? false),
     createdAt: Number(r.created_at ?? r.createdAt ?? Date.now()),
   };
 }
