@@ -91,7 +91,10 @@ class TanweerRepository(
                 phoneNumber = phone,
                 password = pass,
                 gradeId = gradeId,
-                sectionId = sectionId.uppercase()
+                sectionId = sectionId.uppercase(),
+                deviceId = NetworkModule.deviceId,
+                platform = "Android",
+                appVersion = com.magd.tanweer.BuildConfig.VERSION_NAME
             )
             val res = api.register(req)
             val body = res.body()
@@ -135,7 +138,15 @@ class TanweerRepository(
 
     suspend fun login(phone: String, pass: String): Result<User> = withContext(Dispatchers.IO) {
         try {
-            val res = api.login(LoginRequest(phoneNumber = phone, password = pass))
+            val res = api.login(
+                LoginRequest(
+                    phoneNumber = phone,
+                    password = pass,
+                    deviceId = NetworkModule.deviceId,
+                    platform = "Android",
+                    appVersion = com.magd.tanweer.BuildConfig.VERSION_NAME
+                )
+            )
             val body = res.body()
             if (res.isSuccessful && body?.success == true && body.user != null && body.token != null) {
                 NetworkModule.setAuthToken(body.token)
@@ -164,7 +175,14 @@ class TanweerRepository(
 
     suspend fun loginWithRecoveryCode(code: String): Result<User> = withContext(Dispatchers.IO) {
         try {
-            val res = api.loginWithRecoveryCode(RecoveryLoginRequest(recoveryCode = code))
+            val res = api.loginWithRecoveryCode(
+                RecoveryLoginRequest(
+                    recoveryCode = code,
+                    deviceId = NetworkModule.deviceId,
+                    platform = "Android",
+                    appVersion = com.magd.tanweer.BuildConfig.VERSION_NAME
+                )
+            )
             val body = res.body()
             if (res.isSuccessful && body?.success == true && body.user != null && body.token != null) {
                 NetworkModule.setAuthToken(body.token)
@@ -244,7 +262,49 @@ class TanweerRepository(
         }
     }
 
+    suspend fun getRegisteredDevices(): Result<com.magd.tanweer.data.remote.RegisteredDevicesResponse> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.getRegisteredDevices()
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true) {
+                Result.success(body)
+            } else {
+                val message = body?.error?.message ?: response.errorBody()?.string()?.takeIf { it.isNotBlank() }
+                    ?: body?.message ?: "تعذر تحميل قائمة الأجهزة"
+                Result.failure(Exception(message))
+            }
+        } catch (e: Exception) {
+            Log.e("TanweerRepository", "Load registered devices failed", e)
+            Result.failure(Exception("تعذر الاتصال بالخادم لتحميل الأجهزة المسجلة"))
+        }
+    }
+
+    suspend fun revokeRegisteredDevice(deviceId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.revokeRegisteredDevice(deviceId)
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true) {
+                Result.success(Unit)
+            } else {
+                val message = body?.message ?: body?.error?.message
+                    ?: response.errorBody()?.string()?.takeIf { it.isNotBlank() }
+                    ?: "تعذر إزالة الجهاز"
+                Result.failure(Exception(message))
+            }
+        } catch (e: Exception) {
+            Log.e("TanweerRepository", "Revoke registered device failed", e)
+            Result.failure(Exception("تعذر الاتصال بالخادم لإزالة الجهاز"))
+        }
+    }
+
     suspend fun logout(context: android.content.Context? = null) = withContext(Dispatchers.IO) {
+        // Revoke the server-side session before removing the local token.
+        // A failed network request must not prevent local logout.
+        try {
+            api.logoutCurrentDevice()
+        } catch (e: Exception) {
+            Log.w("TanweerRepository", "Could not revoke server session during offline logout: ${e.message}")
+        }
         mutationQueue.stop()
         chatManager.disconnect()
         NetworkModule.setAuthToken(null)
