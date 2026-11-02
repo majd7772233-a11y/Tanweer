@@ -126,8 +126,11 @@ interface ContentDao {
     @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND studyDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
     suspend fun clearSyncedContentsForDate(groupId: String, date: String)
 
-    @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedContents(groupId: String)
+
+    @Query("SELECT * FROM cached_contents WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getPendingContents(groupId: String): List<ContentEntity>
 
     @Query("SELECT COUNT(*) FROM cached_contents WHERE authorName = :authorName AND studyDate BETWEEN :startDate AND :endDate")
     fun countContentsForAuthorBetween(authorName: String, startDate: String, endDate: String): Flow<Int>
@@ -162,8 +165,11 @@ interface HomeworkDao {
     @Query("DELETE FROM cached_homeworks WHERE id = :id")
     suspend fun deleteHomeworkById(id: String)
 
-    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedHomeworks(groupId: String)
+
+    @Query("SELECT * FROM cached_homeworks WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getPendingHomeworks(groupId: String): List<HomeworkEntity>
 
     @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND (studyDate = :date OR dueDate = :date) AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
     suspend fun clearSyncedHomeworksForDate(groupId: String, date: String)
@@ -235,6 +241,9 @@ interface ExamDao {
     @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExams(groupId: String)
 
+    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getPendingExams(groupId: String): List<ExamEntity>
+
     @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExamsForDate(groupId: String, date: String)
 
@@ -274,8 +283,11 @@ interface EventDao {
         insertEvent(newEntity)
     }
 
-    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedEvents(groupId: String)
+
+    @Query("SELECT * FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getPendingEvents(groupId: String): List<EventEntity>
 
     @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
     suspend fun clearSyncedEventsForDate(groupId: String, date: String)
@@ -326,8 +338,11 @@ interface IssueDao {
     @Query("UPDATE cached_issues SET syncStatus = :status WHERE id = :id")
     suspend fun updateSyncStatus(id: String, status: String)
 
-    @Query("DELETE FROM cached_issues WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_issues WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedIssues(groupId: String)
+
+    @Query("SELECT * FROM cached_issues WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getPendingIssues(groupId: String): List<IssueEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertComments(comments: List<IssueCommentEntity>)
