@@ -45,16 +45,8 @@ fun AdminDashboardScreen(
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Operations & Governance, 1: Teachers, 2: Moderators & Users, 3: Analytics
 
     var showBroadcastDialog by remember { mutableStateOf(false) }
-    var showCreateGroupDialog by remember { mutableStateOf(false) }
-    var showUserRoleDialog by remember { mutableStateOf<UserBrief?>(null) }
-    var showTeacherCodeDialog by remember { mutableStateOf(false) }
-
     var broadcastTitle by remember { mutableStateOf("") }
     var broadcastContent by remember { mutableStateOf("") }
-    var newGroupName by remember { mutableStateOf("") }
-    var newGroupDesc by remember { mutableStateOf("") }
-    var newGroupGradeId by remember { mutableIntStateOf(10) }
-    var newGroupIsClass by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         viewModel.loadAdminDashboard()
@@ -147,26 +139,11 @@ fun AdminDashboardScreen(
                     Spacer(modifier = Modifier.height(14.dp))
 
                     // Quick Actions Row for Director
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        GlassButton(
-                            text = "تعميم رسمي 📢",
-                            onClick = { showBroadcastDialog = true },
-                            modifier = Modifier.weight(1f)
-                        )
-                        GlassOutlinedButton(
-                            text = "إنشاء شعبة 🏫",
-                            onClick = { showCreateGroupDialog = true },
-                            modifier = Modifier.weight(1f)
-                        )
-                        GlassOutlinedButton(
-                            text = "رمز أستاذ 🔑",
-                            onClick = { showTeacherCodeDialog = true },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    GlassButton(
+                        text = "تعميم رسمي 📢",
+                        onClick = { showBroadcastDialog = true },
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
                     Spacer(modifier = Modifier.height(14.dp))
 
@@ -179,8 +156,8 @@ fun AdminDashboardScreen(
                         ) {
                             TeacherStatCard(
                                 title = "إجمالي الطلاب",
-                                count = "${stats?.totalUsers ?: 0}",
-                                icon = "👥",
+                                count = "${stats?.totalStudents ?: 0}",
+                                icon = "🎒",
                                 color = CyanAccent,
                                 modifier = Modifier.weight(1f)
                             )
@@ -205,6 +182,13 @@ fun AdminDashboardScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             TeacherStatCard(
+                                title = "الحسابات المسجلة",
+                                count = "${stats?.totalUsers ?: 0}",
+                                icon = "👥",
+                                color = TextPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TeacherStatCard(
                                 title = "الشعب الدراسية",
                                 count = "${stats?.totalGroups ?: 0}",
                                 icon = "🏫",
@@ -218,13 +202,27 @@ fun AdminDashboardScreen(
                                 color = CyanAccent,
                                 modifier = Modifier.weight(1f)
                             )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             TeacherStatCard(
-                                title = "الواجبات والاختبارات",
-                                count = "${(stats?.totalHomeworks ?: 0) + (stats?.totalExams ?: 0)}",
+                                title = "الواجبات",
+                                count = "${stats?.totalHomeworks ?: 0}",
                                 icon = "📝",
-                                color = Color(0xFFFFD700),
+                                color = WarmAmber,
                                 modifier = Modifier.weight(1f)
                             )
+                            TeacherStatCard(
+                                title = "الاختبارات",
+                                count = "${stats?.totalExams ?: 0}",
+                                icon = "📋",
+                                color = EmeraldGreen,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
                         }
                     }
                 }
@@ -242,10 +240,11 @@ fun AdminDashboardScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 listOf(
-                    "العمليات والقرارات ⚡",
-                    "كادر المعلمين 🎓",
-                    "هيئة الإشراف 🛡️",
-                    "السياسات العامة 🏛️"
+                    "العمليات ⚡",
+                    "المعلمون 🎓",
+                    "المشرفون 🛡️",
+                    "الطلاب 🎒",
+                    "السياسات 🏛️"
                 ).forEachIndexed { index, title ->
                     val isSelected = selectedTab == index
                     Box(
@@ -433,15 +432,10 @@ fun AdminDashboardScreen(
                                     color = TextPrimary
                                 )
                                 Text(
-                                    text = "يمكنك منح المعلمين رمز التحقق المكون من 8 أرقام للاعتماد الفوري.",
+                                    text = "يُصدر رمز الاعتماد الفعلي من مسار طلبات الترقية الرسمي في Dashboard، ثم يفعّله الأستاذ من خيار «تفعيل رمز» في ملفه الشخصي.",
                                     fontSize = 12.sp,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                GlassButton(
-                                    text = "توليد رمز أستاذ 🔑",
-                                    onClick = { showTeacherCodeDialog = true }
                                 )
                             }
                         }
@@ -451,8 +445,7 @@ fun AdminDashboardScreen(
                         AdminUserManageCard(
                             user = teacher,
                             roleBadge = "أستاذ معتمد 🎓",
-                            roleColor = EmeraldGreen,
-                            onEditRole = { showUserRoleDialog = teacher }
+                            roleColor = EmeraldGreen
                         )
                     }
                 }
@@ -477,7 +470,7 @@ fun AdminDashboardScreen(
                                     color = TextPrimary
                                 )
                                 Text(
-                                    text = "يمكن تعيين مشرفين لكل شعبة من داخل قائمة الأعضاء أو عبر تعديل الرتبة.",
+                                    text = "ستظهر هنا الحسابات التي لديها عضوية إشراف نشطة في شعبة واحدة أو أكثر، دون تكرار الحساب.",
                                     fontSize = 12.sp,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
@@ -490,15 +483,43 @@ fun AdminDashboardScreen(
                         AdminUserManageCard(
                             user = mod,
                             roleBadge = "مشرف الشعبة 🛡️",
-                            roleColor = WarmAmber,
-                            onEditRole = { showUserRoleDialog = mod }
+                            roleColor = WarmAmber
                         )
                     }
                 }
             }
 
             3 -> {
-                // Tab 3: School Policies & Guidelines
+                val students = dashboardData?.students ?: emptyList()
+                if (students.isEmpty()) {
+                    item {
+                        EmptyStateGlass(
+                            title = "لا يوجد طلاب مسجلون",
+                            subtitle = "ستظهر هنا حسابات الطلاب الفريدة مع صفوفهم وشعبهم وعضوياتهم النشطة.",
+                            icon = "🎒"
+                        )
+                    }
+                } else {
+                    item {
+                        Text(
+                            "الطلاب المسجلون (${dashboardData?.stats?.totalStudents ?: students.size})",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextSecondary
+                        )
+                    }
+                    items(students, key = { it.id }) { student ->
+                        AdminUserManageCard(
+                            user = student,
+                            roleBadge = "طالب 🎒",
+                            roleColor = CyanAccent
+                        )
+                    }
+                }
+            }
+
+            4 -> {
+                // Tab 4: School Policies & Guidelines
                 item {
                     GlassCard(
                         modifier = Modifier.fillMaxWidth(),
@@ -582,142 +603,14 @@ fun AdminDashboardScreen(
         )
     }
 
-    // Teacher 8-Digit Code Dialog
-    if (showTeacherCodeDialog) {
-        AlertDialog(
-            onDismissRequest = { showTeacherCodeDialog = false },
-            title = {
-                Text("رمز تفعيل الأستاذ المعتمد 🔑", color = EmeraldGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("رمز الاعتماد الرسمي للأستاذ عبر المنظومة:", fontSize = 12.sp, color = TextSecondary)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(EmeraldGreen.copy(alpha = 0.15f))
-                            .border(1.dp, EmeraldGreen, RoundedCornerShape(12.dp))
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("TNW-8829-2026", fontSize = 20.sp, fontWeight = FontWeight.Black, color = EmeraldGreen)
-                    }
-                    Text("يمكن للأستاذ إدخال هذا الرمز في الملف الشخصي لتفعيل رتبة TEACHER فوراً.", fontSize = 11.sp, color = TextMuted)
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showTeacherCodeDialog = false
-                        Toast.makeText(context, "تم نسخ الرمز للمشاركة ✓", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
-                ) {
-                    Text("حسناً")
-                }
-            },
-            containerColor = MidnightSurface
-        )
-    }
 
-    // Create Group Dialog
-    if (showCreateGroupDialog) {
-        AlertDialog(
-            onDismissRequest = { showCreateGroupDialog = false },
-            title = {
-                Text("إنشاء شعبة أو مجموعة جديدة 🏫", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = newGroupName,
-                        onValueChange = { newGroupName = it },
-                        label = { Text("اسم الشعبة (مثال: العاشر - شعبة ج)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = newGroupDesc,
-                        onValueChange = { newGroupDesc = it },
-                        label = { Text("الوصف أو التخصص") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (newGroupName.isNotBlank()) {
-                            showCreateGroupDialog = false
-                            Toast.makeText(context, "تم إنشاء الشعبة وإضافتها للنظام 🏫", Toast.LENGTH_SHORT).show()
-                            newGroupName = ""
-                            newGroupDesc = ""
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = MidnightBackground)
-                ) {
-                    Text("إنشاء الشعبة", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateGroupDialog = false }) {
-                    Text("إلغاء", color = TextSecondary)
-                }
-            },
-            containerColor = MidnightSurface
-        )
-    }
-
-    // User Role Edit Dialog
-    if (showUserRoleDialog != null) {
-        val targetUser = showUserRoleDialog!!
-        AlertDialog(
-            onDismissRequest = { showUserRoleDialog = null },
-            title = {
-                Text("تعديل رتبة: ${targetUser.full_name}", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("اختر الرتبة الجديدة للمستخدم داخل المنظومة:", fontSize = 12.sp, color = TextSecondary)
-                    listOf(
-                        "TEACHER" to "أستاذ معتمد 🎓",
-                        "MODERATOR" to "مشرف الشعبة 🛡️",
-                        "STUDENT" to "طالب في الشعبة 🎒"
-                    ).forEach { (roleKey, roleName) ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(GlassSurface)
-                                .clickable {
-                                    showUserRoleDialog = null
-                                    Toast.makeText(context, "تم تحديث رتبة ${targetUser.full_name} إلى $roleName ✓", Toast.LENGTH_SHORT).show()
-                                    viewModel.loadAdminDashboard()
-                                }
-                                .padding(12.dp)
-                        ) {
-                            Text(roleName, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showUserRoleDialog = null }) {
-                    Text("إلغاء", color = TextSecondary)
-                }
-            },
-            containerColor = MidnightSurface
-        )
-    }
 }
 
 @Composable
 fun AdminUserManageCard(
     user: UserBrief,
     roleBadge: String,
-    roleColor: Color,
-    onEditRole: () -> Unit
+    roleColor: Color
 ) {
     GlassCard(
         modifier = Modifier.fillMaxWidth(),
@@ -756,22 +649,24 @@ fun AdminUserManageCard(
                         fontSize = 11.sp,
                         color = TextMuted
                     )
+                    Text(
+                        text = if (user.grade_id > 0) "الصف ${user.grade_id} • شعبة ${user.section_id}" else "البيانات الدراسية غير محددة",
+                        fontSize = 10.sp,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = "عضويات نشطة: ${user.active_group_count}",
+                        fontSize = 10.sp,
+                        color = TextMuted
+                    )
                 }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                GlassPill(
-                    text = roleBadge,
-                    color = roleColor,
-                    bgColor = roleColor.copy(alpha = 0.15f)
-                )
-                IconButton(
-                    onClick = onEditRole,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(Icons.Default.ManageAccounts, contentDescription = "تعديل الرتبة", tint = CyanAccent, modifier = Modifier.size(20.dp))
-                }
-            }
+            GlassPill(
+                text = roleBadge,
+                color = roleColor,
+                bgColor = roleColor.copy(alpha = 0.15f)
+            )
         }
     }
 }

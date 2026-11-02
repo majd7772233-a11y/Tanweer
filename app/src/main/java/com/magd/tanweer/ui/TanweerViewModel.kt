@@ -1070,6 +1070,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _adminDashboard = MutableStateFlow<AdminDashboardResponse?>(null)
     val adminDashboard: StateFlow<AdminDashboardResponse?> = _adminDashboard.asStateFlow()
 
+    private val _myNotifications = MutableStateFlow<List<AppNotification>>(emptyList())
+    val myNotifications: StateFlow<List<AppNotification>> = _myNotifications.asStateFlow()
+
     private val _groupCorrections = MutableStateFlow<List<ContentCorrectionItem>>(emptyList())
     val groupCorrections: StateFlow<List<ContentCorrectionItem>> = _groupCorrections.asStateFlow()
 
@@ -1108,6 +1111,26 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             _isDashboardLoading.value = false
             res.onSuccess { data ->
                 _adminDashboard.value = data
+            }
+        }
+    }
+
+    fun loadMyNotifications() {
+        viewModelScope.launch {
+            repository.getMyNotifications().onSuccess { notifications ->
+                _myNotifications.value = notifications
+            }
+        }
+    }
+
+    fun generateMyRecoveryCode(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = repository.generateMyRecoveryCode()
+            result.onSuccess { code ->
+                loadMyNotifications()
+                onResult(true, code)
+            }.onFailure { error ->
+                onResult(false, error.message ?: "تعذر تغيير رمز الاسترداد")
             }
         }
     }

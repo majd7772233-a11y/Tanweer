@@ -395,6 +395,12 @@ interface TanweerApiService {
     @POST("api/v1/profile")
     suspend fun updateProfile(@Body req: UpdateProfileRequest): Response<ProfileResponse>
 
+    @POST("api/v1/me/recovery-code")
+    suspend fun generateMyRecoveryCode(): Response<RecoveryCodeResponse>
+
+    @GET("api/v1/notifications")
+    suspend fun getMyNotifications(): Response<NotificationsResponse>
+
     @GET("api/v1/groups")
     suspend fun getGroups(): Response<GroupsResponse>
 

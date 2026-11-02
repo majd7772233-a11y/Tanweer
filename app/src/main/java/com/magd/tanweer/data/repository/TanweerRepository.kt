@@ -2024,6 +2024,34 @@ class TanweerRepository(
             Result.failure(e)
         }
     }
+ 
+    suspend fun getMyNotifications(): Result<List<com.magd.tanweer.data.model.AppNotification>> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getMyNotifications()
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true) {
+                Result.success(body.notifications)
+            } else {
+                Result.failure(Exception("تعذر جلب إشعارات الحساب"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun generateMyRecoveryCode(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.generateMyRecoveryCode()
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true && !body.recoveryCode.isNullOrBlank()) {
+                Result.success(body.recoveryCode)
+            } else {
+                Result.failure(Exception(body?.error?.message ?: body?.message ?: "تعذر تغيير رمز الاسترداد"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 
     private val recentMessageIds = java.util.Collections.synchronizedSet(java.util.LinkedHashSet<String>())
 

@@ -375,12 +375,37 @@ data class ModeratorStats(
 )
 
 @JsonClass(generateAdapter = true)
+data class AppNotification(
+    val id: String,
+    val type: String,
+    val title: String,
+    val body: String,
+    val createdAt: Long = 0L,
+    val recoveryCode: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class NotificationsResponse(
+    val success: Boolean = true,
+    val notifications: List<AppNotification> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class RecoveryCodeResponse(
+    val success: Boolean = false,
+    val recoveryCode: String? = null,
+    val message: String? = null,
+    val error: ApiError? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class AdminDashboardResponse(
     val success: Boolean = true,
     val school: SchoolAdminInfo? = null,
     val stats: SchoolStats? = null,
     val teachers: List<UserBrief> = emptyList(),
-    val moderators: List<UserBrief> = emptyList()
+    val moderators: List<UserBrief> = emptyList(),
+    val students: List<UserBrief> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)
@@ -393,8 +418,10 @@ data class SchoolAdminInfo(
 @JsonClass(generateAdapter = true)
 data class SchoolStats(
     val totalUsers: Int = 0,
+    val totalStudents: Int = 0,
     val totalTeachers: Int = 0,
     val totalModerators: Int = 0,
+    val totalAdmins: Int = 0,
     val totalGroups: Int = 0,
     val totalLessons: Int = 0,
     val totalHomeworks: Int = 0,
@@ -408,7 +435,8 @@ data class UserBrief(
     val phone_number: String,
     val role: String,
     val grade_id: Int = 0,
-    val section_id: String = ""
+    val section_id: String = "",
+    val active_group_count: Int = 0
 )
 
 @JsonClass(generateAdapter = true)

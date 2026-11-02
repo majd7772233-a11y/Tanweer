@@ -68,6 +68,10 @@ fun ProfileScreen(
     var isSavingProfile by remember { mutableStateOf(false) }
 
     val myRoleRequests by viewModel.myRoleRequests.collectAsStateWithLifecycle()
+    val myNotifications by viewModel.myNotifications.collectAsStateWithLifecycle()
+    var isRecoveryCodeVisible by remember { mutableStateOf(false) }
+    var isGeneratingRecoveryCode by remember { mutableStateOf(false) }
+    var generatedRecoveryCode by remember { mutableStateOf<String?>(null) }
     var isRoleUpgradeDialogOpen by remember { mutableStateOf(false) }
     var isRedeemCodeDialogOpen by remember { mutableStateOf(false) }
     var requestSuccessInfo by remember { mutableStateOf<SubmitRoleUpgradeResponse?>(null) }
@@ -76,6 +80,7 @@ fun ProfileScreen(
     LaunchedEffect(Unit) {
         viewModel.repository.syncProfile()
         viewModel.loadMyRoleRequests()
+        viewModel.loadMyNotifications()
     }
 
     LaunchedEffect(currentUser) {
@@ -334,6 +339,104 @@ fun ProfileScreen(
                             textColor = TextOnAccent,
                             onClick = { viewModel.setSubScreen(targetSubScreen) },
                             modifier = Modifier.fillMaxWidth().height(42.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Permanent recovery credential and the encrypted private delivery notification.
+        item {
+            val recoveryNotification = myNotifications.firstOrNull { it.type == "RECOVERY_CODE_RESET" }
+            val activeRecoveryCode = generatedRecoveryCode ?: recoveryNotification?.recoveryCode
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = MidnightSurface,
+                borderColor = CyanAccent.copy(alpha = 0.35f)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("🔐 رمز استرداد الحساب", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                            Text(
+                                "رمز دائم لا تنتهي صلاحيته إلا عند تغييره أو إلغائه من الإدارة",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+                        GlassPill(text = "دائم", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.14f))
+                    }
+
+                    if (recoveryNotification != null) {
+                        Text(recoveryNotification.title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(recoveryNotification.body, fontSize = 11.sp, color = TextSecondary, lineHeight = 16.sp)
+                    } else {
+                        Text(
+                            "لا توجد رسالة رمز استرداد محفوظة لهذا الحساب بعد. أنشئ رمزاً جديداً ليُحفظ مشفراً ويمكنك استعادته من ملفك الشخصي.",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            lineHeight = 16.sp
+                        )
+                    }
+
+                    if (!activeRecoveryCode.isNullOrBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MidnightBackground.copy(alpha = 0.7f))
+                                .border(1.dp, GlassBorderSubtle, RoundedCornerShape(10.dp))
+                                .padding(12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                if (isRecoveryCodeVisible) activeRecoveryCode else "••••-••••-••••-••••",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Black,
+                                color = EmeraldGreen
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GlassOutlinedButton(
+                            text = if (isRecoveryCodeVisible) "إخفاء الرمز" else "عرض الرمز",
+                            onClick = {
+                                isRecoveryCodeVisible = !isRecoveryCodeVisible
+                                if (myNotifications.isEmpty()) viewModel.loadMyNotifications()
+                            },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            enabled = !activeRecoveryCode.isNullOrBlank()
+                        )
+                        GlassButton(
+                            text = if (isGeneratingRecoveryCode) "جارٍ التغيير..." else "تغيير الرمز",
+                            onClick = {
+                                if (!isGeneratingRecoveryCode) {
+                                    isGeneratingRecoveryCode = true
+                                    viewModel.generateMyRecoveryCode { success, value ->
+                                        isGeneratingRecoveryCode = false
+                                        if (success) {
+                                            generatedRecoveryCode = value
+                                            isRecoveryCodeVisible = true
+                                            Toast.makeText(context, "تم تغيير رمز الاسترداد وحفظ نسخة آمنة في إشعارات الحساب", Toast.LENGTH_LONG).show()
+                                        } else {
+                                            Toast.makeText(context, value, Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            enabled = !isGeneratingRecoveryCode
                         )
                     }
                 }
