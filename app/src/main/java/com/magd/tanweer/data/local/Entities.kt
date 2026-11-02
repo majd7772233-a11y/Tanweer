@@ -29,7 +29,9 @@ data class GroupEntity(
     val role: String,
     val memberCount: Int,
     val isDiscoverable: Boolean = false,
-    val isOfficial: Boolean = false
+    val isOfficial: Boolean = false,
+    val visibility: String = "PUBLIC",
+    val chatPolicy: String = "MEMBERS"
 )
 
 @Entity(tableName = "cached_schedule_slots")
@@ -138,7 +140,9 @@ data class EventEntity(
     val category: String,
     val location: String?,
     val createdAt: Long,
-    val syncStatus: String = "SYNCED"
+    val syncStatus: String = "SYNCED",
+    val sourceName: String? = null,
+    val isOfficial: Boolean = false
 )
 
 @Entity(tableName = "cached_issues")
