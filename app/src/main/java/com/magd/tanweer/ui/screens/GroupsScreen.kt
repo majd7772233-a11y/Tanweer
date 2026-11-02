@@ -61,6 +61,13 @@ fun GroupsScreen(
     var joinReasonText by remember { mutableStateOf("") }
     var isSubmittingJoin by remember { mutableStateOf(false) }
     var showCreateGroupDialog by remember { mutableStateOf(false) }
+    val activeChatGroupCanSend = activeChatGroup?.let { group ->
+        group.chatPolicy != "STAFF_ONLY" ||
+            userRole == Role.TEACHER ||
+            userRole == Role.ADMIN ||
+            group.role == "TEACHER" ||
+            group.role == "ADMIN"
+    } ?: false
     val chatMessages by viewModel.repository.getChatMessages(activeChatGroup?.id ?: "")
         .collectAsStateWithLifecycle(initialValue = emptyList())
     var chatInputText by remember { mutableStateOf("") }
@@ -297,55 +304,63 @@ fun GroupsScreen(
                     }
                 }
 
-                // Chat Input Field
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    GlassTextField(
-                        value = chatInputText,
-                        onValueChange = { chatInputText = it },
-                        label = "",
-                        placeholder = "اكتب رسالة نقاش للشعبة...",
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = {
-                            val text = chatInputText.trim()
-                            val gId = activeChatGroup?.id
-                            if (text.isNotBlank() && gId != null && !isSendingChat) {
-                                isSendingChat = true
-                                val sentText = text
-                                chatInputText = ""
-                                viewModel.sendChatMessage(sentText, targetGroupId = gId) { success ->
-                                    isSendingChat = false
-                                    if (!success) {
-                                        // restore input text if failed
-                                        chatInputText = sentText
-                                        android.widget.Toast.makeText(context, "تعذر إرسال الرسالة، تم استعادة النص في حقل الكتابة", android.widget.Toast.LENGTH_SHORT).show()
+                if (activeChatGroupCanSend) {
+                    // Server enforces this same permission on REST and WebSocket.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GlassTextField(
+                            value = chatInputText,
+                            onValueChange = { chatInputText = it },
+                            label = "",
+                            placeholder = "اكتب رسالة نقاش للمجموعة...",
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                val text = chatInputText.trim()
+                                val gId = activeChatGroup?.id
+                                if (text.isNotBlank() && gId != null && !isSendingChat) {
+                                    isSendingChat = true
+                                    val sentText = text
+                                    chatInputText = ""
+                                    viewModel.sendChatMessage(sentText, targetGroupId = gId) { success ->
+                                        isSendingChat = false
+                                        if (!success) {
+                                            chatInputText = sentText
+                                            android.widget.Toast.makeText(context, "تعذر إرسال الرسالة، تم استعادة النص في حقل الكتابة", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
                                     }
                                 }
+                            },
+                            enabled = !isSendingChat && chatInputText.isNotBlank(),
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(if (chatInputText.isNotBlank() && !isSendingChat) CyanAccent else CyanAccent.copy(alpha = 0.5f))
+                        ) {
+                            if (isSendingChat) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = TextOnAccent,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Default.Send, contentDescription = "إرسال", tint = TextOnAccent)
                             }
-                        },
-                        enabled = !isSendingChat && chatInputText.isNotBlank(),
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
-                            .background(if (chatInputText.isNotBlank() && !isSendingChat) CyanAccent else CyanAccent.copy(alpha = 0.5f))
-                    ) {
-                        if (isSendingChat) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = TextOnAccent,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(Icons.Default.Send, contentDescription = "إرسال", tint = TextOnAccent)
                         }
                     }
+                } else {
+                    Text(
+                        text = "🔒 هذه المجموعة للقراءة فقط للطلاب. الإرسال متاح للأساتذة وإدارة المدرسة.",
+                        color = WarmAmber,
+                        fontSize = 11.sp,
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                    )
                 }
             }
         }
@@ -675,10 +690,9 @@ fun GroupsScreen(
                                                 fontWeight = FontWeight.Bold,
                                                 color = TextPrimary
                                             )
-                                            val groupTypeLabel = when (group.type) {
-                                                "CLASS" -> "شعبة دراسية أخرى"
-                                                "SHARED" -> "شعبة مشتركة"
-                                                else -> "نادي مدرسي عام"
+                                            val groupTypeLabel = when (group.visibility) {
+                                                "PRIVATE" -> "مجموعة خاصة • تتطلب موافقة"
+                                                else -> if (group.chatPolicy == "STAFF_ONLY") "مجموعة الهيئة التعليمية • قراءة للطلاب" else "مجموعة عامة • دخول مباشر"
                                             }
                                             Text(
                                                 text = "${group.memberCount} عضو • $groupTypeLabel",
@@ -688,11 +702,15 @@ fun GroupsScreen(
                                         }
                                     }
 
-                                    val isClass = group.type == "CLASS"
+                                    val pendingRequest = group.membershipStatus == "PENDING"
                                     GlassPill(
-                                        text = if (isClass) "تتطلب موافقة ⏳" else "عامة للجميع",
-                                        color = if (isClass) WarmAmber else EmeraldGreen,
-                                        bgColor = if (isClass) AmberGlow else EmeraldGreen.copy(alpha = 0.15f)
+                                        text = when {
+                                            pendingRequest -> "بانتظار الموافقة ⏳"
+                                            group.visibility == "PRIVATE" -> "خاصة 🔐"
+                                            else -> "عامة 🌐"
+                                        },
+                                        color = if (pendingRequest || group.visibility == "PRIVATE") WarmAmber else EmeraldGreen,
+                                        bgColor = if (pendingRequest || group.visibility == "PRIVATE") AmberGlow else EmeraldGreen.copy(alpha = 0.15f)
                                     )
                                 }
 
@@ -707,12 +725,18 @@ fun GroupsScreen(
 
                                 Spacer(modifier = Modifier.height(10.dp))
 
-                                val isClassGroup = group.type == "CLASS"
+                                val requiresApproval = group.visibility == "PRIVATE" || group.type == "CLASS"
+                                val pendingRequest = group.membershipStatus == "PENDING"
                                 GlassButton(
-                                    text = if (isClassGroup) "طلب الانضمام للشعبة ➕" else "طلب الانضمام للمجموعة ➕",
+                                    text = when {
+                                        pendingRequest -> "طلبك قيد المراجعة"
+                                        requiresApproval -> "طلب الانضمام إلى المجموعة 🔐"
+                                        else -> "انضمام مباشر ➕"
+                                    },
                                     icon = Icons.Default.GroupAdd,
+                                    enabled = !pendingRequest,
                                     onClick = {
-                                        if (isClassGroup) {
+                                        if (requiresApproval) {
                                             joinRequestGroup = group
                                             joinReasonText = ""
                                         } else {
@@ -747,12 +771,12 @@ fun GroupsScreen(
             AlertDialog(
                 onDismissRequest = { if (!isSubmittingJoin) joinRequestGroup = null },
                 title = {
-                    Text("طلب الانضمام إلى ${targetGroup.name} 🏫", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("طلب الانضمام إلى ${targetGroup.name}", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            "هذه الشعبة تابعة لقسم دراسي آخر، يرجى كتابة سبب طلب الانضمام لعرضه على مشرف الشعبة للموافقة:",
+                            "هذه مجموعة خاصة أو شعبة تتطلب موافقة. اكتب سبب الانضمام ليتمكن مشرفو وأساتذة المجموعة من مراجعة طلبك:",
                             fontSize = 12.sp,
                             color = TextSecondary
                         )
@@ -827,13 +851,14 @@ fun GroupsScreen(
             var newGroupName by remember { mutableStateOf("") }
             var newGroupDesc by remember { mutableStateOf("") }
             var newGroupIcon by remember { mutableStateOf("👥") }
+            var newGroupVisibility by remember { mutableStateOf("PUBLIC") }
             var isCreating by remember { mutableStateOf(false) }
             val iconsList = listOf("👥", "🔬", "📖", "🎨", "⚽", "💻", "💡", "🌐")
 
             AlertDialog(
                 onDismissRequest = { if (!isCreating) showCreateGroupDialog = false },
                 title = {
-                    Text("إنشاء مجموعة عامة جديدة 👥", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("إنشاء مجموعة جديدة 👥", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -872,6 +897,29 @@ fun GroupsScreen(
                             singleLine = true
                         )
 
+                        Text("نوع المجموعة:", fontSize = 12.sp, color = TextSecondary)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            listOf(
+                                "PUBLIC" to "عامة • دخول مباشر",
+                                "PRIVATE" to "خاصة • طلب موافقة"
+                            ).forEach { (value, label) ->
+                                Row(
+                                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
+                                        .background(if (newGroupVisibility == value) CyanGlow else MidnightBackground)
+                                        .border(1.dp, if (newGroupVisibility == value) CyanAccent else GlassBorderSubtle, RoundedCornerShape(10.dp))
+                                        .clickable { newGroupVisibility = value }.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = newGroupVisibility == value,
+                                        onClick = { newGroupVisibility = value },
+                                        colors = RadioButtonDefaults.colors(selectedColor = CyanAccent)
+                                    )
+                                    Text(label, fontSize = 10.sp, color = TextPrimary)
+                                }
+                            }
+                        }
+
                         OutlinedTextField(
                             value = newGroupDesc,
                             onValueChange = { newGroupDesc = it },
@@ -899,7 +947,8 @@ fun GroupsScreen(
                             viewModel.createPublicGroup(
                                 name = newGroupName.trim(),
                                 description = newGroupDesc.trim().ifEmpty { null },
-                                icon = newGroupIcon
+                                icon = newGroupIcon,
+                                visibility = newGroupVisibility
                             ) { success, msg ->
                                 isCreating = false
                                 if (success) {
