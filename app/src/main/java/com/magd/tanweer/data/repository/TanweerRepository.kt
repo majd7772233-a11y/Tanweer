@@ -2338,6 +2338,44 @@ class TanweerRepository(
         }
     }
 
+    /**
+     * Fetches the most recent server-persisted chat messages without opening a WebSocket.
+     * The server enforces active group membership and currently returns the latest 100 rows.
+     * Existing local messages are not cleared because older cached history may predate that window.
+     */
+    suspend fun syncGroupChatHistory(groupId: String): SyncResult = withContext(Dispatchers.IO) {
+        if (groupId.isBlank()) return@withContext SyncResult.Offline()
+        try {
+            val res = api.getGroupMessages(groupId)
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true) {
+                if (body.messages.any { it.groupId != groupId }) {
+                    return@withContext SyncResult.Error(
+                        "رد الخادم للمحادثة لا يطابق المجموعة المطلوبة؛ احتُفظ بالرسائل المحلية"
+                    )
+                }
+                val messages = body.messages.map {
+                    ChatMessageEntity(
+                        id = it.id,
+                        groupId = it.groupId,
+                        senderId = it.senderId,
+                        senderName = it.senderName,
+                        senderGradeSection = it.senderGradeSection,
+                        text = it.text,
+                        timestamp = it.timestamp,
+                        status = "SENT"
+                    )
+                }
+                if (messages.isNotEmpty()) db.chatDao().insertMessages(messages)
+                SyncResult.Success(messages.size)
+            } else {
+                resolveHttpError(res, "تعذر جلب سجل المحادثة")
+            }
+        } catch (e: Exception) {
+            resolveException(e, "تعذر جلب سجل المحادثة")
+        }
+    }
+
     suspend fun connectToGroupChat(groupId: String, myUserId: String) = withContext(Dispatchers.IO) {
         try {
             val res = api.getGroupMessages(groupId)
