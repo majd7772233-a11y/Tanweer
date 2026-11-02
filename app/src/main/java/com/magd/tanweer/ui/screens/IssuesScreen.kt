@@ -347,6 +347,10 @@ fun IssueDetailView(
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val currentRole = currentUser?.role?.trim()?.uppercase().orEmpty()
+    val canApproveBestAnswer =
+        issue?.authorName == currentUser?.fullName ||
+            currentRole in setOf("TEACHER", "VERIFIED_TEACHER", "ADMIN", "ADMINISTRATOR", "SYSTEM_OWNER", "OWNER")
     val context = LocalContext.current
     var replyText by remember { mutableStateOf("") }
 
@@ -567,7 +571,7 @@ fun IssueDetailView(
                                     )
 
                                     // Mark as Best Answer button if issue not solved or if this can be chosen
-                                    if (bestComment == null) {
+                                    if (bestComment == null && canApproveBestAnswer) {
                                         OutlinedButton(
                                             onClick = {
                                                 viewModel.markBestAnswer(issueId, comment.id) { res ->

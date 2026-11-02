@@ -631,9 +631,9 @@ export async function handleRevokeUserSessions(
 }
 
 /**
- * God Mode: Reissues temporary recovery credentials for a user from User Details Modal (TA-16).
- * Single-use, hash-only stored, attempt-limited, expiration-enforced, session-revocable, audit-logged.
- * NEVER returns the old password or old hash.
+ * God Mode: rotates a user's permanent recovery code and delivers it only through
+ * the user's encrypted, account-scoped in-app notification. Temporary passwords
+ * remain a separate, expiring, single-use credential.
  */
 /**
  * Revokes a user's permanent recovery credential without issuing a replacement.
@@ -731,7 +731,9 @@ export async function handleReissueUserCredentials(
 
   const credentialType = body.type === 'TEMP_PASSWORD' ? 'TEMP_PASSWORD' : 'RECOVERY_CODE';
   const expiresInHours = Math.max(1, Math.min(Number(body.expiresInHours) || 24, 72));
-  const revokeExistingSessions = body.revokeExistingSessions !== false;
+  const revokeExistingSessions = credentialType === 'RECOVERY_CODE'
+    ? body.revokeExistingSessions === true
+    : body.revokeExistingSessions !== false;
 
   const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
   if (!pepper) {
@@ -3924,7 +3926,7 @@ export function renderDashboardHtml(): Response {
         </div>
         <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; margin-bottom:0.5rem;">
           <label style="font-size:0.8rem; color:var(--text-sec); display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
-            <input type="checkbox" id="udReissueRevokeSessions" checked style="cursor:pointer;">
+            <input type="checkbox" id="udReissueRevokeSessions" style="cursor:pointer;">
             إبطال الجلسات الحالية النشطة فوراً لضمان الأمان
           </label>
           <button class="action-btn" onclick="reissueUserCredentialsFromModal()" style="background:var(--cyan); color:#000; font-weight:700; padding:0.4rem 0.8rem; font-size:0.8rem;">
@@ -4612,7 +4614,7 @@ export function renderDashboardHtml(): Response {
                   '<td>' + escapeHtml(s.ip_address) + '</td>' +
                   '<td>' + escapeHtml(s.device_info) + '</td>' +
                   '<td>' + new Date(s.created_at).toLocaleString('ar-EG') + '</td>' +
-                  '<td><button class="action-btn reject" data-user="' + escapeHtml(activeUserId) + '" data-session="' + sId + '" onclick="revokeSingleSession(this.getAttribute(\'data-user\'), this.getAttribute(\'data-session\'))" style="font-size:0.7rem; padding:0.2rem 0.5rem;">طرد</button></td>' +
+                  '<td><button class="action-btn reject" data-user="' + escapeHtml(activeUserId) + '" data-session="' + sId + '" onclick="revokeSingleSession(this.getAttribute(\\'data-user\\'), this.getAttribute(\\'data-session\\'))" style="font-size:0.7rem; padding:0.2rem 0.5rem;">طرد</button></td>' +
                   '</tr>';
               }).join('');
             } else {

@@ -344,6 +344,13 @@ class MockD1Database {
 
       let rows = [...(this.tables[table] || [])];
 
+      if (normalized.includes("type = 'TEMP_PASSWORD'")) {
+        rows = rows.filter((row) => row.type === 'TEMP_PASSWORD');
+      }
+      if (normalized.includes("type = 'RECOVERY_CODE'")) {
+        rows = rows.filter((row) => row.type === 'RECOVERY_CODE');
+      }
+
       // Device management: return only active per-installation sessions.
       if (table.toLowerCase() === 'sessions' && normalized.includes('LEFT JOIN devices')) {
         const [userId, now] = params;

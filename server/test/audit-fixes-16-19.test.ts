@@ -102,15 +102,21 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
     expect(data.content.likes_count).toBe(15);
   });
 
-  it('TA-16: handleReissueUserCredentials reissues single-use recovery code and revokes existing sessions without revealing old password', async () => {
+  it('TA-16: handleReissueUserCredentials rotates a permanent recovery code and queues encrypted private delivery', async () => {
     let deletedSessionsUserId: string | null = null;
     let insertedTokenRecord: any = null;
+    let insertedNotification: any = null;
     let updatedUserRecoveryHash: string | null = null;
 
     const mockEnv = {
       DB: {
-        prepare: (sql: string) => ({
-          bind: (...params: any[]) => ({
+        prepare: (sql: string) => {
+          let params: any[] = [];
+          const statement: any = {
+            bind: (...values: any[]) => {
+              params = values;
+              return statement;
+            },
             first: async () => {
               if (sql.includes('FROM users')) {
                 return {
@@ -118,25 +124,26 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
                   full_name: 'طالب مجد',
                   phone_number: '771234567',
                   role: 'STUDENT',
+                  status: 'ACTIVE',
                 };
               }
               return null;
             },
             run: async () => {
-              if (sql.includes('DELETE FROM sessions')) {
-                deletedSessionsUserId = params[0];
-              }
-              if (sql.includes('INSERT INTO user_recovery_tokens')) {
-                insertedTokenRecord = params;
-              }
-              if (sql.includes('UPDATE users SET recovery_code_hash')) {
-                updatedUserRecoveryHash = params[0];
-              }
-              return { success: true };
+              if (sql.includes('DELETE FROM sessions')) deletedSessionsUserId = params[0];
+              if (sql.includes('INSERT INTO user_recovery_tokens')) insertedTokenRecord = params;
+              if (sql.includes('INSERT INTO user_notifications')) insertedNotification = params;
+              if (sql.includes('UPDATE users SET recovery_code_hash')) updatedUserRecoveryHash = params[0];
+              return { success: true, meta: { changes: 1 } };
             },
-          }),
-          run: async () => ({ success: true }),
-        }),
+          };
+          return statement;
+        },
+        batch: async (statements: any[]) => {
+          const results = [];
+          for (const statement of statements) results.push(await statement.run());
+          return results;
+        },
       },
       SESSION_PEPPER: 'test-pepper-123',
     } as unknown as Env;
@@ -146,7 +153,6 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         type: 'RECOVERY_CODE',
-        expiresInHours: 24,
         revokeExistingSessions: true,
       }),
     });
@@ -156,98 +162,100 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
     const data = await res.json() as any;
     expect(data.success).toBe(true);
     expect(data.credentialType).toBe('RECOVERY_CODE');
-    expect(data.temporarySecret).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
-    expect(data.singleUse).toBe(true);
+    expect(data.delivery).toBe('PRIVATE_IN_APP_NOTIFICATION');
+    expect(data.temporarySecret).toBeUndefined();
+    expect(data.expiresAt).toBeUndefined();
     expect(data.sessionsRevoked).toBe(true);
 
-    // Old passwords and hashes are NOT exposed
     expect(data.password).toBeUndefined();
     expect(data.passwordHash).toBeUndefined();
     expect(data.oldPassword).toBeUndefined();
 
-    // Verified database side-effects
     expect(deletedSessionsUserId).toBe('usr_target');
     expect(insertedTokenRecord).not.toBeNull();
-    expect(updatedUserRecoveryHash).not.toBeNull();
+    expect(insertedTokenRecord[3]).toBe(2147483647);
+    expect(insertedTokenRecord[4]).toBe(Number.MAX_SAFE_INTEGER);
+    expect(updatedUserRecoveryHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(insertedNotification).not.toBeNull();
+    expect(insertedNotification[5]).not.toBe(updatedUserRecoveryHash);
+    expect(String(insertedNotification[5])).toMatch(/^v1\./);
   });
 
-  it('TA-16: handleLoginWithRecoveryCode enforces single-use and burns code', async () => {
-    let burnedRecoveryHash: string | null = null;
-    let tokenIncremented = false;
-    let recoveryHashAvailable = true;
-    let tokenUsesCount = 0;
+  it('TA-16: recovery login remains valid after prior use and after the legacy expiry timestamp', async () => {
     const pepper = 'test-pepper-123';
-    const cleanCode = 'ABCDEFGHJKLMNPQR';
-    const recoveryHash = await hashString(cleanCode, pepper);
+    const recoveryCode = 'ABCD-EFGH-JKLM-NPQR';
+    const recoveryHash = await hashString(recoveryCode.replace(/[\s\-]/g, '').toUpperCase(), pepper);
+    const user = {
+      id: 'usr_target',
+      phone_number: '771234567',
+      full_name: 'طالب مجد',
+      grade_id: 10,
+      section_id: 'A',
+      role: 'STUDENT',
+      status: 'ACTIVE',
+      recovery_code_hash: recoveryHash,
+    };
+    const recoveryToken = {
+      id: 'tok_1',
+      type: 'RECOVERY_CODE',
+      revoked: 0,
+      max_uses: 1,
+      uses_count: 1,
+      expires_at: 0,
+    };
+    let hashBurnAttempted = false;
+    let sessionInsertCount = 0;
+    let finalCredentialCheckCount = 0;
 
     const mockEnv = {
       DB: {
-        prepare: (sql: string) => ({
-          bind: (...params: any[]) => ({
+        prepare: (sql: string) => {
+          let params: any[] = [];
+          const statement: any = {
+            bind: (...values: any[]) => {
+              params = values;
+              return statement;
+            },
             first: async () => {
               if (sql.includes('FROM users WHERE recovery_code_hash = ?')) {
-                if (params[0] === recoveryHash) {
-                  return {
-                    id: 'usr_target',
-                    phone_number: '771234567',
-                    full_name: 'طالب مجد',
-                    grade_id: 1,
-                    section_id: 'A',
-                    role: 'STUDENT',
-                  };
-                }
+                return params[0] === recoveryHash ? { ...user } : null;
               }
-              if (sql.includes('FROM user_recovery_tokens')) {
-                return {
-                  id: 'tok_1',
-                  max_uses: 1,
-                  uses_count: 0,
-                  expires_at: Date.now() + 3600000,
-                  revoked: 0,
-                };
-              }
+              if (sql.includes('FROM user_recovery_tokens')) return { ...recoveryToken };
               return null;
             },
             run: async () => {
-              if (sql.includes('UPDATE users') && sql.includes('recovery_code_hash = ?')) {
-                const casMatches = recoveryHashAvailable && params[3] === recoveryHash;
-                if (!casMatches) return { success: true, meta: { changes: 0 } };
-                recoveryHashAvailable = false;
-                burnedRecoveryHash = String(params[0]);
+              if (sql.includes('SET recovery_code_hash =')) {
+                hashBurnAttempted = true;
+                return { success: true, meta: { changes: 0 } };
+              }
+              if (sql.includes('SET last_seen = ?') && sql.includes('recovery_code_hash = ?')) {
+                finalCredentialCheckCount += 1;
                 return { success: true, meta: { changes: 1 } };
               }
-
-              if (sql.includes('UPDATE user_recovery_tokens') && sql.includes('uses_count = uses_count + 1')) {
-                const valid = params[1] === 'tok_1' &&
-                  tokenUsesCount < 1;
-                if (!valid) return { success: true, meta: { changes: 0 } };
-                tokenIncremented = true;
-                tokenUsesCount += 1;
-                return { success: true, meta: { changes: 1 } };
-              }
-
+              if (sql.includes('INSERT INTO sessions')) sessionInsertCount += 1;
               return { success: true, meta: { changes: 1 } };
             },
-          }),
-        }),
+          };
+          return statement;
+        },
       },
       SESSION_PEPPER: pepper,
     } as unknown as Env;
 
-    const req = new Request('http://localhost/api/auth/login/recovery-code', {
+    const makeRequest = () => new Request('http://localhost/api/v1/auth/recovery-login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recoveryCode: 'ABCD-EFGH-JKLM-NPQR',
-      }),
+      body: JSON.stringify({ recoveryCode, deviceId: 'device-recovery-01' }),
     });
 
-    const res = await handleLoginWithRecoveryCode(req, mockEnv);
-    expect(res.status).toBe(200);
-    const data = await res.json() as any;
-    expect(data.success).toBe(true);
-    expect(tokenIncremented).toBe(true);
-    expect(burnedRecoveryHash).toMatch(/^USED_\d+_/);
+    const first = await handleLoginWithRecoveryCode(makeRequest(), mockEnv);
+    const second = await handleLoginWithRecoveryCode(makeRequest(), mockEnv);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(hashBurnAttempted).toBe(false);
+    expect(finalCredentialCheckCount).toBe(2);
+    expect(sessionInsertCount).toBeGreaterThanOrEqual(2);
+    expect(user.recovery_code_hash).toBe(recoveryHash);
   });
 
   it('TA-19: handleProposeScheduleChange derives old_subject_id from server truth', async () => {

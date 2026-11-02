@@ -27,6 +27,7 @@ describe('Audit Fixes 20-28 (Server verification)', () => {
                   full_name: 'طالب تنوير',
                   phone_number: '771234567',
                   role: 'STUDENT',
+                  status: 'ACTIVE',
                 };
               }
               if (sql.includes('FROM users WHERE phone_number = ?')) {

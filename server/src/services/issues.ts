@@ -323,7 +323,7 @@ export async function handleMarkBestAnswer(issueId: string, commentId: string, u
   ).bind(commentId, issueId).first();
 
   if (!comment) {
-    return errorResponse('COMMENT_NOT_FOUND', 'التعليق غير موجود أو لا ينتمي لهذا الاستفسار');
+    return errorResponse('COMMENT_NOT_FOUND', 'التعليق غير موجود أو لا ينتمي لهذا الاستفسار', 404);
   }
 
   await env.DB.prepare(`UPDATE issue_comments SET is_best_answer = 0 WHERE issue_id = ?`).bind(issueId).run();

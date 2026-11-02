@@ -548,7 +548,40 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
   if (!reservedSession) {
     return errorResponse('DEVICE_LIMIT_REACHED', 'وصلت إلى الحد الأقصى وهو 3 أجهزة نشطة للحساب. أزل جهازاً قديماً من الإعدادات قبل استخدام رمز الاسترداد.', 403);
   }
-  await env.DB.prepare(`UPDATE users SET last_seen = ? WHERE id = ?`).bind(now, user.id).run();
+  let credentialStillCurrent;
+  try {
+    credentialStillCurrent = await env.DB.prepare(`
+      UPDATE users
+      SET last_seen = ?
+      WHERE id = ? AND recovery_code_hash = ?
+        AND (? IS NULL OR EXISTS (
+          SELECT 1 FROM user_recovery_tokens
+          WHERE id = ? AND user_id = ? AND token_hash = ?
+            AND type = 'RECOVERY_CODE' AND revoked = 0
+        ))
+    `).bind(
+      now,
+      user.id,
+      matchedRecoveryHash,
+      recoveryToken?.id ?? null,
+      recoveryToken?.id ?? null,
+      user.id,
+      matchedRecoveryHash
+    ).run();
+  } catch (error) {
+    await revokeCreatedDeviceSession(env, user.id, deviceIdentity.deviceId, sessionId).catch(cleanupError =>
+      console.error('Failed to clean up recovery session after credential revalidation error:', cleanupError)
+    );
+    console.error('Failed to revalidate permanent recovery credential:', error);
+    return errorResponse('AUTHENTICATION_UNAVAILABLE', 'تعذر إكمال التحقق من رمز الاسترداد بأمان. يرجى المحاولة لاحقاً.', 503);
+  }
+
+  if (credentialStillCurrent.meta?.changes !== 1) {
+    await revokeCreatedDeviceSession(env, user.id, deviceIdentity.deviceId, sessionId).catch(cleanupError =>
+      console.error('Failed to clean up recovery session after credential rotation:', cleanupError)
+    );
+    return errorResponse('RECOVERY_CODE_REVOKED', 'تم تغيير أو إلغاء رمز الاسترداد أثناء تسجيل الدخول. استخدم الرمز الأحدث.', 409);
+  }
 
   const classGroupId = (user.grade_id && user.section_id && user.role !== Role.ADMIN) ? `class_${user.grade_id}_${user.section_id}` : '';
 
