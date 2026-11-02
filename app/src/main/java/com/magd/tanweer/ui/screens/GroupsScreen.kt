@@ -633,6 +633,21 @@ fun GroupsScreen(
                                             modifier = Modifier.weight(1f)
                                         )
                                     }
+                                    GlassOutlinedButton(
+                                        text = "مغادرة",
+                                        onClick = {
+                                            viewModel.leaveGroup(group.id) { success, message ->
+                                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                                if (success) {
+                                                    if (activeChatGroup?.id == group.id) activeChatGroup = null
+                                                    if (selectedGroupId == group.id) {
+                                                        activeTab = GroupsTab.MY_GROUPS
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                             }
                         }
@@ -643,7 +658,7 @@ fun GroupsScreen(
                 if (canManageMembers) {
                     item {
                         GlassButton(
-                            text = "+ إنشاء مجموعة عامة جديدة 👥",
+                            text = "+ إنشاء مجموعة عامة أو خاصة 👥",
                             icon = Icons.Default.Add,
                             onClick = { showCreateGroupDialog = true },
                             modifier = Modifier.fillMaxWidth()
@@ -654,8 +669,8 @@ fun GroupsScreen(
                 if (discoverGroups.isEmpty()) {
                     item {
                         EmptyStateGlass(
-                            title = "لا توجد مجموعات عامة جديدة",
-                            subtitle = "أنت منضم بالفعل إلى كافة المجموعات المتاحة لمدرستك وشعبتك!",
+                            title = "لا توجد مجموعات جديدة",
+                            subtitle = "أنت منضم بالفعل إلى كل المجموعات المتاحة لك حالياً.",
                             icon = "🔍"
                         )
                     }
