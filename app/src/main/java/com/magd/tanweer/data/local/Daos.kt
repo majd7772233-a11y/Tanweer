@@ -132,6 +132,9 @@ interface ContentDao {
     @Query("SELECT * FROM cached_contents WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun getPendingContents(groupId: String): List<ContentEntity>
 
+    @Query("SELECT * FROM cached_contents WHERE syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getAllPendingContents(): List<ContentEntity>
+
     @Query("SELECT COUNT(*) FROM cached_contents WHERE authorName = :authorName AND studyDate BETWEEN :startDate AND :endDate")
     fun countContentsForAuthorBetween(authorName: String, startDate: String, endDate: String): Flow<Int>
 
