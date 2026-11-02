@@ -344,6 +344,38 @@ class MockD1Database {
 
       let rows = [...(this.tables[table] || [])];
 
+      // Device management: return only active per-installation sessions.
+      if (table.toLowerCase() === 'sessions' && normalized.includes('LEFT JOIN devices')) {
+        const [userId, now] = params;
+        const activeSessions = (this.tables.sessions || []).filter(
+          row => row.user_id === userId && Number(row.expires_at) > Number(now)
+        );
+        const deviceIds = [...new Set(activeSessions.map(row => row.device_id))];
+        return deviceIds.map(deviceId => {
+          const latest = activeSessions
+            .filter(row => row.device_id === deviceId)
+            .reduce((a, b) => Number(a.created_at) > Number(b.created_at) ? a : b);
+          const device = (this.tables.devices || []).find(
+            row => row.user_id === userId && row.device_id === deviceId
+          ) || {};
+          return {
+            deviceId,
+            platform: device.platform || 'Android',
+            appVersion: device.app_version || '',
+            lastSeen: latest.created_at,
+            connectedAt: latest.created_at,
+          };
+        });
+      }
+
+      if (table.toLowerCase() === 'sessions' && /^SELECT 1 FROM sessions WHERE user_id = \\? AND device_id = \\? AND expires_at > \\?/i.test(normalized)) {
+        const [userId, deviceId, now] = params;
+        const active = (this.tables.sessions || []).some(row =>
+          row.user_id === userId && row.device_id === deviceId && Number(row.expires_at) > Number(now)
+        );
+        return active ? [{ 1: 1 }] : [];
+      }
+
       // Handle JOIN query for sessions and users
       if (table.toLowerCase() === 'sessions' && normalized.includes('JOIN users')) {
         const tokenHash = params[0];
@@ -554,6 +586,77 @@ describe('End-to-End System Integration Flow', () => {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     };
+
+    // Verify the account can register exactly three distinct installations.
+    for (const deviceId of ['device-test-002', 'device-test-003']) {
+      const additionalLogin = await app.fetch(new Request('http://localhost/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phoneNumber: '771234567',
+          password: 'Password@123',
+          deviceId,
+          platform: 'Android',
+          appVersion: '1.2.0-staging',
+        }),
+      }), env, {} as any);
+      expect(additionalLogin.status).toBe(200);
+    }
+
+    const fourthDeviceLogin = await app.fetch(new Request('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phoneNumber: '771234567',
+        password: 'Password@123',
+        deviceId: 'device-test-004',
+        platform: 'Android',
+        appVersion: '1.2.0-staging',
+      }),
+    }), env, {} as any);
+    expect(fourthDeviceLogin.status).toBe(403);
+    expect(await fourthDeviceLogin.json()).toMatchObject({
+      success: false,
+      error: { code: 'DEVICE_LIMIT_REACHED' },
+    });
+
+    const devicesResponse = await app.fetch(new Request('http://localhost/api/v1/auth/devices', {
+      method: 'GET',
+      headers: authHeaders,
+    }), env, {} as any);
+    const devicesBody = await devicesResponse.json() as any;
+    expect(devicesResponse.status).toBe(200);
+    expect(devicesBody.activeDevicesCount).toBe(3);
+    expect(devicesBody.maxActiveDevices).toBe(3);
+
+    const revokeOldDevice = await app.fetch(new Request(
+      'http://localhost/api/v1/auth/devices/device-test-002',
+      { method: 'DELETE', headers: authHeaders }
+    ), env, {} as any);
+    expect(revokeOldDevice.status).toBe(200);
+
+    const replacementLogin = await app.fetch(new Request('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phoneNumber: '771234567',
+        password: 'Password@123',
+        deviceId: 'device-test-004',
+        platform: 'Android',
+        appVersion: '1.2.0-staging',
+      }),
+    }), env, {} as any);
+    expect(replacementLogin.status).toBe(200);
+
+    const devicesAfterReplacement = await app.fetch(new Request('http://localhost/api/v1/auth/devices', {
+      method: 'GET',
+      headers: authHeaders,
+    }), env, {} as any);
+    const devicesAfterBody = await devicesAfterReplacement.json() as any;
+    expect(devicesAfterReplacement.status).toBe(200);
+    expect(devicesAfterBody.activeDevicesCount).toBe(3);
+    expect(devicesAfterBody.devices.some((device: any) => device.deviceId === 'device-test-004')).toBe(true);
+    expect(devicesAfterBody.devices.some((device: any) => device.deviceId === 'device-test-002')).toBe(false);
 
     // 3. Get User Profile & Groups
     const profileReq = new Request('http://localhost/api/v1/me', {
