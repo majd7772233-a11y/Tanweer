@@ -597,9 +597,9 @@ fun CommunityDecisionModeratorCard(
     onVote: (Int) -> Unit
 ) {
     val reqTypeLabel = when (decision.requestType) {
-        "DELETION" -> "طلب حذف محتوى 🗑️"
+        "DELETION", "CONTENT_DELETION" -> "طلب حذف محتوى 🗑️"
         "CORRECTION" -> "تصويب جماعي ✍️"
-        "SCHEDULE" -> "تعديل جدول 📅"
+        "SCHEDULE", "SCHEDULE_CHANGE" -> "مقترح تعديل الجدول 📅"
         else -> "قرار جماعي 🗳️"
     }
 
@@ -627,13 +627,15 @@ fun CommunityDecisionModeratorCard(
                 val statusColor = when (decision.status) {
                     "APPLIED", "APPROVED" -> EmeraldGreen
                     "REJECTED" -> RubyRed
+                    "EXPIRED" -> TextMuted
                     else -> WarmAmber
                 }
                 val statusText = when (decision.status) {
-                    "APPLIED" -> "تم التنفيذ تلقائياً ✅"
-                    "APPROVED" -> "معتمد بالأغلبية ✨"
+                    "APPLIED" -> "مقبول وتم التنفيذ ✅"
+                    "APPROVED" -> "مقبول بالأغلبية ✅"
                     "REJECTED" -> "مرفوض ❌"
-                    else -> "تصويت جاري ⏳"
+                    "EXPIRED" -> "انتهت مهلة التصويت ⌛"
+                    else -> "قيد التصويت ⏳"
                 }
                 GlassPill(text = statusText, color = statusColor, bgColor = statusColor.copy(alpha = 0.15f))
             }
@@ -654,14 +656,36 @@ fun CommunityDecisionModeratorCard(
                 )
             }
 
-            // Voting Progress Bar
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Unified voting totals and quorum progress
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "الأصوات المؤيدة: ${decision.votesFor} من أصل $requiredVotes مطلوبة",
+                        text = "مؤيد 👍 ${decision.votesFor}",
+                        fontSize = 10.sp,
+                        color = EmeraldGreen,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "معارض 👎 ${decision.votesAgainst}",
+                        fontSize = 10.sp,
+                        color = RubyRed,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "الإجمالي $totalVotes / ${decision.totalEligibleVoters}",
+                        fontSize = 10.sp,
+                        color = TextMuted
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "النصاب المطلوب: $requiredVotes صوت موافق",
                         fontSize = 10.sp,
                         color = CyanAccent
                     )
