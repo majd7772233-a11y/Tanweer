@@ -128,4 +128,21 @@ class ExamDeleteOutboxTest {
         assertEquals("delete_op", database.outboxDao().getPendingMutation(examId, "EXAM_DELETE")?.id)
     }
 
+    @Test
+    fun `unclaimed create cancellation is atomic and does not touch syncing create`() = runBlocking {
+        val pendingId = "pending_exam"
+        val syncingId = "syncing_exam"
+        database.outboxDao().insertOutbox(
+            OutboxEntity("pending_create", "EXAM_CREATE", pendingId, "CREATE", "{}")
+        )
+        database.outboxDao().insertOutbox(
+            OutboxEntity("syncing_create", "EXAM_CREATE", syncingId, "CREATE", "{}", status = "SYNCING")
+        )
+
+        assertEquals(1, database.outboxDao().deleteUnclaimedMutation(pendingId, "EXAM_CREATE"))
+        assertNull(database.outboxDao().getPendingMutation(pendingId, "EXAM_CREATE"))
+        assertEquals(0, database.outboxDao().deleteUnclaimedMutation(syncingId, "EXAM_CREATE"))
+        assertNotNull(database.outboxDao().getPendingMutation(syncingId, "EXAM_CREATE"))
+    }
+
 }

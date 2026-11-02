@@ -498,6 +498,7 @@ class UnifiedMutationQueue private constructor(
                 }
                 "EXAM_DELETE" -> {
                     val pendingCreate = outboxDao.getPendingMutation(item.entityId, "EXAM_CREATE")
+                    val pendingToggle = outboxDao.getPendingMutation(item.entityId, "EXAM_TOGGLE")
                     val localExam = db.examDao().getExamById(item.entityId)
 
                     when {
@@ -510,6 +511,10 @@ class UnifiedMutationQueue private constructor(
                             handleMutationFailure(item, "تأجيل حذف الاختبار حتى يكتمل رفعه إلى الخادم")
                             false
                         }
+                        pendingToggle?.status == "SYNCING" -> {
+                            handleMutationFailure(item, "تأجيل حذف الاختبار حتى تكتمل مزامنة حالة المراجعة")
+                            false
+                        }
                         localExam != null && localExam.syncStatus in listOf("PENDING", "FAILED") -> {
                             // The create operation was rejected or cancelled before reaching the server.
                             db.examDao().deleteExamById(item.entityId)
@@ -517,6 +522,9 @@ class UnifiedMutationQueue private constructor(
                             true
                         }
                         else -> {
+                            if (pendingToggle != null) {
+                                outboxDao.deleteOutbox(pendingToggle.id)
+                            }
                             val res = api.deleteExam(item.entityId)
                             when {
                                 res.isSuccessful || res.code() == 404 -> {

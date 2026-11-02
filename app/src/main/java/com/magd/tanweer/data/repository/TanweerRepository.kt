@@ -3697,17 +3697,26 @@ class TanweerRepository(
                 return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }
 
-            // A local-only exam whose create operation has not been claimed can be cancelled safely.
+            // Atomically cancel only a create that has not been claimed by the sync worker.
             if (exam.syncStatus in listOf("PENDING", "FAILED") &&
                 (pendingCreate == null || pendingCreate.status != "SYNCING")
             ) {
-                db.outboxDao().deleteByEntityId(examId)
-                db.examDao().deleteExamById(examId)
-                return@withContext Result.success(ExamDeleteResult.LocalOnly())
+                val cancelledCreate = if (pendingCreate != null) {
+                    db.outboxDao().deleteUnclaimedMutation(examId, "EXAM_CREATE")
+                } else {
+                    0
+                }
+                val remainingCreate = db.outboxDao().getPendingMutation(examId, "EXAM_CREATE")
+                if (remainingCreate == null && (pendingCreate == null || cancelledCreate > 0)) {
+                    db.outboxDao().deleteByEntityId(examId)
+                    db.examDao().deleteExamById(examId)
+                    return@withContext Result.success(ExamDeleteResult.LocalOnly())
+                }
             }
 
-            // Do not race an in-flight create. Queue the delete behind it; the queue enforces order.
-            if (pendingCreate != null) {
+            // A running create or review mutation must settle before the delete is sent.
+            val pendingToggle = db.outboxDao().getPendingMutation(examId, "EXAM_TOGGLE")
+            if (pendingCreate != null || pendingToggle != null) {
                 queueExamDeletion(examId)
                 return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }
