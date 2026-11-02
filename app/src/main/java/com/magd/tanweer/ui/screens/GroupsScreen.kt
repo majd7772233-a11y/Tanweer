@@ -3,6 +3,7 @@ package com.magd.tanweer.ui.screens
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -51,8 +52,14 @@ fun GroupsScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val chatStatus by viewModel.chatConnectionStatus.collectAsStateWithLifecycle()
     val groupMembersState by viewModel.groupMembersState.collectAsStateWithLifecycle()
+    val isGroupMembersLoading by viewModel.isGroupMembersLoading.collectAsStateWithLifecycle()
+    val groupMembersError by viewModel.groupMembersError.collectAsStateWithLifecycle()
     val userRole = currentUser?.getRoleEnum() ?: Role.STUDENT
-    val canManageMembers = userRole == Role.ADMIN || userRole == Role.TEACHER || userRole == Role.MODERATOR
+    val canManageMembers = userRole == Role.ADMIN || userRole == Role.TEACHER || userRole == Role.MODERATOR ||
+        currentUser?.role == "SYSTEM_OWNER"
+    val canManageGroupMembers: (GroupItem) -> Boolean = { group ->
+        canManageMembers || group.role in setOf("MODERATOR", "TEACHER", "ADMIN")
+    }
 
     var activeTab by remember { mutableStateOf(GroupsTab.MY_GROUPS) }
     var activeChatGroup by remember { mutableStateOf<GroupItem?>(null) }
@@ -519,7 +526,7 @@ fun GroupsScreen(
                                             onClick = { activeChatGroup = officialClassGroup },
                                             modifier = Modifier.weight(1f)
                                         )
-                                        if (canManageMembers) {
+                                        if (canManageGroupMembers(officialClassGroup)) {
                                             GlassOutlinedButton(
                                                 text = "إدارة الأعضاء 👥",
                                                 onClick = {
@@ -628,6 +635,16 @@ fun GroupsScreen(
                                         onClick = { activeChatGroup = group },
                                         modifier = Modifier.weight(1f)
                                     )
+                                    if (canManageGroupMembers(group)) {
+                                        GlassOutlinedButton(
+                                            text = "إدارة الأعضاء",
+                                            onClick = {
+                                                managingGroup = group
+                                                viewModel.loadGroupMembers(group.id)
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
                                     if (!isSelected) {
                                         GlassOutlinedButton(
                                             text = "تفعيل المجموعة",
@@ -1006,6 +1023,9 @@ fun GroupsScreen(
             GroupMembersManagementDialog(
                 group = grp,
                 membersResponse = groupMembersState,
+                isLoading = isGroupMembersLoading,
+                errorMessage = groupMembersError,
+                onRetry = { viewModel.loadGroupMembers(grp.id) },
                 onDismiss = { managingGroup = null },
                 onUpdateRole = { userId, newRole ->
                     viewModel.updateGroupMemberRole(userId, newRole, grp.id) { success, msg ->
@@ -1039,6 +1059,9 @@ fun GroupsScreen(
 fun GroupMembersManagementDialog(
     group: GroupItem,
     membersResponse: com.magd.tanweer.data.model.GroupMembersResponse?,
+    isLoading: Boolean = membersResponse == null,
+    errorMessage: String? = null,
+    onRetry: () -> Unit = {},
     onDismiss: () -> Unit,
     onUpdateRole: (userId: String, newRole: String) -> Unit,
     onRemove: (userId: String, isBan: Boolean) -> Unit,
@@ -1076,7 +1099,7 @@ fun GroupMembersManagementDialog(
         },
         text = {
             when {
-                membersResponse == null -> {
+                isLoading -> {
                     Box(
                         modifier = Modifier.fillMaxWidth().padding(24.dp),
                         contentAlignment = Alignment.Center
@@ -1087,6 +1110,24 @@ fun GroupMembersManagementDialog(
                             strokeWidth = 2.dp
                         )
                     }
+                }
+                errorMessage != null -> {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(9.dp)
+                    ) {
+                        Text(errorMessage, color = RubyRed, fontSize = 12.sp)
+                        GlassButton(text = "إعادة المحاولة", onClick = onRetry)
+                    }
+                }
+                membersResponse == null -> {
+                    Text(
+                        "لم تُحمّل قائمة الأعضاء بعد.",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(18.dp)
+                    )
                 }
                 members.isEmpty() -> {
                     Box(
