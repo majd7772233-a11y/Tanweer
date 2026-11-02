@@ -9,6 +9,7 @@ import com.magd.tanweer.data.sync.UnifiedMutationQueue
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
 import com.magd.tanweer.util.DataGenerationPolicy
+import com.magd.tanweer.util.ServerSnapshotReconciliation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -354,9 +355,13 @@ class TanweerRepository(
                     )
                 }
 
+                val reconciledContents = ServerSnapshotReconciliation.preservePending(
+                    serverRows = entities,
+                    localPendingRows = db.contentDao().getPendingContents(groupId)
+                ) { it.id }
                 db.withTransaction {
                     db.contentDao().clearSyncedContents(groupId)
-                    if (entities.isNotEmpty()) db.contentDao().insertContents(entities)
+                    if (reconciledContents.isNotEmpty()) db.contentDao().insertContents(reconciledContents)
                 }
                 SyncResult.Success(entities.size)
             } else {
@@ -403,7 +408,11 @@ class TanweerRepository(
                             syncStatus = "SYNCED"
                         )
                     }
-                    if (entities.isNotEmpty()) db.contentDao().insertContents(entities)
+                    val safeArchiveContents = ServerSnapshotReconciliation.preservePending(
+                        serverRows = entities,
+                        localPendingRows = db.contentDao().getAllPendingContents()
+                    ) { it.id }
+                    if (safeArchiveContents.isNotEmpty()) db.contentDao().insertContents(safeArchiveContents)
                     subResults.add(SyncResult.Success(entities.size))
                 } else {
                     subResults.add(resolveHttpError(archiveRes, "تعذر جلب الأرشيف الأكاديمي"))
@@ -628,9 +637,13 @@ class TanweerRepository(
                             syncStatus = "SYNCED"
                         )
                     }
+                    val reconciledDayContents = ServerSnapshotReconciliation.preservePending(
+                        serverRows = contents,
+                        localPendingRows = db.contentDao().getPendingContents(groupId)
+                    ) { it.id }
                     db.contentDao().clearSyncedContentsForDate(groupId, date)
-                    if (contents.isNotEmpty()) {
-                        db.contentDao().insertContents(contents)
+                    if (reconciledDayContents.isNotEmpty()) {
+                        db.contentDao().insertContents(reconciledDayContents)
                     }
 
                     // Reconcile Homeworks for this date
@@ -664,7 +677,11 @@ class TanweerRepository(
                                 createdAt = it.createdAt
                             )
                         }
-                        db.homeworkDao().insertHomeworks(homeworks)
+                        val reconciledDayHomeworks = ServerSnapshotReconciliation.preservePending(
+                            serverRows = homeworks,
+                            localPendingRows = db.homeworkDao().getPendingHomeworks(groupId)
+                        ) { it.id }
+                        db.homeworkDao().insertHomeworks(reconciledDayHomeworks)
                     }
 
                     // Reconcile Exams for this date
@@ -699,7 +716,11 @@ class TanweerRepository(
                                 examType = finalExamType
                             )
                         }
-                        db.examDao().insertExams(exams)
+                        val reconciledDayExams = ServerSnapshotReconciliation.preservePending(
+                            serverRows = exams,
+                            localPendingRows = db.examDao().getPendingExams(groupId)
+                        ) { it.id }
+                        db.examDao().insertExams(reconciledDayExams)
                     }
 
                     // Reconcile Events for this date
@@ -718,7 +739,11 @@ class TanweerRepository(
                                 createdAt = it.createdAt
                             )
                         }
-                        db.eventDao().insertEvents(events)
+                        val reconciledDayEvents = ServerSnapshotReconciliation.preservePending(
+                            serverRows = events,
+                            localPendingRows = db.eventDao().getPendingEvents(groupId)
+                        ) { it.id }
+                        db.eventDao().insertEvents(reconciledDayEvents)
                     }
 
                 }
@@ -768,9 +793,13 @@ class TanweerRepository(
                         createdAt = item.createdAt
                     )
                 }
+                val reconciledHomeworks = ServerSnapshotReconciliation.preservePending(
+                    serverRows = hwList,
+                    localPendingRows = db.homeworkDao().getPendingHomeworks(groupId)
+                ) { it.id }
                 db.withTransaction {
                     db.homeworkDao().clearSyncedHomeworks(groupId)
-                    if (hwList.isNotEmpty()) db.homeworkDao().insertHomeworks(hwList)
+                    if (reconciledHomeworks.isNotEmpty()) db.homeworkDao().insertHomeworks(reconciledHomeworks)
                     completedIds.forEach { db.homeworkDao().insertCompletion(HomeworkCompletionEntity(homeworkId = it, userId = currentUserId)) }
                     incompleteIds.forEach { db.homeworkDao().deleteCompletion(it, currentUserId) }
                 }
@@ -822,9 +851,13 @@ class TanweerRepository(
                         syncStatus = "SYNCED"
                     )
                 }
+                val reconciledExams = ServerSnapshotReconciliation.preservePending(
+                    serverRows = exams,
+                    localPendingRows = db.examDao().getPendingExams(groupId)
+                ) { it.id }
                 db.withTransaction {
                     db.examDao().clearSyncedExams(groupId)
-                    if (exams.isNotEmpty()) db.examDao().insertExams(exams)
+                    if (reconciledExams.isNotEmpty()) db.examDao().insertExams(reconciledExams)
                 }
                 SyncResult.Success(exams.size)
             } else {
@@ -857,9 +890,13 @@ class TanweerRepository(
                         createdAt = it.createdAt
                     )
                 }
+                val reconciledEvents = ServerSnapshotReconciliation.preservePending(
+                    serverRows = events,
+                    localPendingRows = db.eventDao().getPendingEvents(groupId)
+                ) { it.id }
                 db.withTransaction {
                     db.eventDao().clearSyncedEvents(groupId)
-                    if (events.isNotEmpty()) db.eventDao().insertEvents(events)
+                    if (reconciledEvents.isNotEmpty()) db.eventDao().insertEvents(reconciledEvents)
                 }
                 SyncResult.Success(events.size)
             } else {
@@ -921,7 +958,11 @@ class TanweerRepository(
                                 examType = finalExamType
                             )
                         }
-                        db.examDao().insertExams(exams)
+                        val reconciledMonthExams = ServerSnapshotReconciliation.preservePending(
+                            serverRows = exams,
+                            localPendingRows = db.examDao().getPendingExams(groupId)
+                        ) { it.id }
+                        db.examDao().insertExams(reconciledMonthExams)
                         count += exams.size
                     }
 
@@ -940,7 +981,11 @@ class TanweerRepository(
                                 createdAt = it.createdAt
                             )
                         }
-                        db.eventDao().insertEvents(events)
+                        val reconciledMonthEvents = ServerSnapshotReconciliation.preservePending(
+                            serverRows = events,
+                            localPendingRows = db.eventDao().getPendingEvents(groupId)
+                        ) { it.id }
+                        db.eventDao().insertEvents(reconciledMonthEvents)
                         count += events.size
                     }
 
@@ -974,7 +1019,11 @@ class TanweerRepository(
                                 createdAt = it.createdAt
                             )
                         }
-                        db.homeworkDao().insertHomeworks(hws)
+                        val reconciledMonthHomeworks = ServerSnapshotReconciliation.preservePending(
+                            serverRows = hws,
+                            localPendingRows = db.homeworkDao().getPendingHomeworks(groupId)
+                        ) { it.id }
+                        db.homeworkDao().insertHomeworks(reconciledMonthHomeworks)
                         count += hws.size
                     }
 
@@ -1016,9 +1065,13 @@ class TanweerRepository(
                         createdAt = it.createdAt
                     )
                 }
+                val reconciledIssues = ServerSnapshotReconciliation.preservePending(
+                    serverRows = issues,
+                    localPendingRows = db.issueDao().getPendingIssues(groupId)
+                ) { it.id }
                 db.withTransaction {
                     db.issueDao().clearSyncedIssues(groupId)
-                    if (issues.isNotEmpty()) db.issueDao().insertIssues(issues)
+                    if (reconciledIssues.isNotEmpty()) db.issueDao().insertIssues(reconciledIssues)
                 }
                 SyncResult.Success(issues.size)
             } else {
