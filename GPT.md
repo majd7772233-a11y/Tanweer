@@ -1523,6 +1523,26 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **Important limitation:** Daily Plan and book annotations/reading data are local-only in the inspected architecture. Several privileged details (dashboards, members, corrections, decisions, role requests) and chat still use on-demand/realtime flows rather than one complete Room startup snapshot. Do not claim every app feature is cross-device synchronized yet.
 - **Next step:** Review the final diffs, add/fix tests, run Android unit tests and debug APK CI on the current HEAD, then update this log with the verified result.
 
+
+### 2026-11-02 — Pending-mutation-safe reconciliation and strict outbox gate
+
+- **Branch:** work/release-readiness. Main remains untouched.
+- **Inspected:** Content, homework, exam, event, issue DAOs; the full/date/month Room reconciliation code; outbox queue callers; server data-generation guard.
+- **Found:** A server row with the same ID as an unacknowledged local row could overwrite it through Room's REPLACE behavior. DELETE_PENDING rows also needed explicit protection in date/month cleanup. In addition, a force-drain API could bypass the generation gate from the manual sync path, and startup could reopen the queue after an unverified version check.
+- **DAO changes, commit ea31047389de1670e09d6e25a45209723be8e2fa:** Added pending-row lookups for contents, homework, exams, events, and issues; retained DELETE_PENDING rows during full snapshot cleanup.
+- **Generic merge helper, commit 085b5999843201bb1ec2641f44c908ccc3a2e830:** Added ServerSnapshotReconciliation.preservePending so an unacknowledged local row wins an ID collision and survives if absent from the server response.
+- **Helper tests, commit b9e07ef463304c317e57c59675b8ca392b5eb993:** Tested collision precedence, retention of local-only pending rows, and server replacement of non-pending rows.
+- **Archive query, commit ddb7f7729783740cc4f00005dbf3b87b58ad6178:** Added all-groups pending contents lookup for the account-scoped archive merge.
+- **Snapshot integrations, commit fbbd9167784d2c1eac66e2ad3e27918cb525cefe:** Applied pending-row preservation to group contents, archive contents, homework, exams, events, issues, daily snapshots, and monthly calendar snapshots.
+- **Atomicity follow-up, commit 5428a531384980cf0bf23dfe70c3226064e3c430:** Moved full-snapshot pending reads inside the corresponding Room transactions, so pending read + server replacement is atomic.
+- **Queue gate correction, commits 80a1533484af99b10880a74e7e43f9edc629a717, 141cb14b8bf599fe53921a1306920ce310ab18a7, and f0ec3da5f45d2d4a670897c018bcbe9d7a820357:** Removed the force bypass from drainQueue, made repository outbox processing respect the shared gate, and kept the gate closed unless data_generation was verified.
+- **Date/month deletion fix, commit ea168eb9e803503f2bad7dbc1cdd6e8feb2b193c:** Extended DELETE_PENDING retention to contents, homework, and event date/month cleanup queries.
+- **Database integration tests, commit 9faa3fbd3302b2457c19c560222a751cc297dcd7:** Added in-memory Room tests for pending state lookups and DELETE_PENDING retention across full/date/month cleanup.
+- **Login-time verification retry, commit 4846400c5f659a3ab5eb0fb2f8edba57c07d99e3:** Retries a previously unavailable data-generation check after authentication, before any queued local write can be submitted.
+- **Tests/CI:** The current branch has not yet passed a CI run for these newest commits. The earlier successful CI run is not evidence for this code. The temporary validation PR is PR #4 and must be closed without merging after the final result.
+- **Cloudflare:** No D1 writes, migrations, secrets changes, or Worker deployment.
+- **Next step:** Verify the Android build and unit tests plus server tests on the latest HEAD; inspect all current-head logs and close the validation-only PR unmerged.
+
 ---
 
 # END OF GPT.md
