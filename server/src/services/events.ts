@@ -11,10 +11,14 @@ export async function handleGetEvents(groupId: string, user: UserContext, env: E
   if (memberCheck) return memberCheck;
 
   const events = await env.DB.prepare(
-    `SELECT id, group_id, event_date, time_str, title, description, category, location, is_official, created_by, created_at
-     FROM events
-     WHERE group_id = ? OR group_id = 'all'
-     ORDER BY is_official DESC, event_date ASC`
+    `SELECT e.id, e.group_id, e.event_date, e.time_str, e.title, e.description,
+            e.category, e.location, e.is_official, e.created_by, e.created_at,
+            u.full_name AS source_name
+     FROM events e
+     LEFT JOIN users u ON u.id = e.created_by
+     WHERE e.group_id = ? OR e.group_id = 'all'
+     ORDER BY CASE WHEN e.group_id = 'all' AND e.category = 'ANNOUNCEMENT' THEN 0 ELSE 1 END,
+              e.is_official DESC, e.event_date ASC`
   ).bind(groupId).all();
 
   return jsonResponse({
@@ -57,8 +61,13 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
   const isPrivilegedRole = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER' || user.role === 'TEACHER' || user.role === 'VERIFIED_TEACHER';
 
   if (isSchoolWide) {
+    const isAnnouncement = body.category?.toUpperCase() === 'ANNOUNCEMENT';
+    const isSchoolAdmin = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER';
+    if (isAnnouncement && !isSchoolAdmin) {
+      return errorResponse('FORBIDDEN', 'نشر التعاميم المدرسية الرسمية محصور بمدير المدرسة', 403);
+    }
     if (!isPrivilegedRole) {
-      return errorResponse('FORBIDDEN', 'صلاحية الإجازات أو الفعاليات العامة على مستوى المدرسة محصورة بالمعلمين وإدارة المدرسة', 403);
+      return errorResponse('FORBIDDEN', 'صلاحية الفعاليات العامة على مستوى المدرسة محصورة بالمعلمين وإدارة المدرسة', 403);
     }
     // Ensure school-wide group 'all' exists in groups table for foreign key constraint
     await env.DB.prepare(
