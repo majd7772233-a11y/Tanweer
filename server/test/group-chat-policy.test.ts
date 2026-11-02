@@ -11,7 +11,8 @@ class GroupChatPolicyDb {
   constructor(
     readonly chatPolicy: string,
     readonly memberRole: string,
-    readonly globalRole: string
+    readonly globalRole: string,
+    readonly memberActive: boolean = true
   ) {}
 
   prepare(sql: string) {
@@ -28,6 +29,7 @@ class GroupChatPolicyDb {
           return { role: db.memberRole, status: 'ACTIVE' } as T;
         }
         if (normalized.includes("SELECT g.chat_policy, gm.role AS member_role")) {
+          if (!db.memberActive) return null;
           return {
             chat_policy: db.chatPolicy,
             member_role: db.memberRole,
@@ -149,6 +151,13 @@ describe('Group chat policy is enforced by server routes', () => {
     const db = new GroupChatPolicyDb('STAFF_ONLY', 'ADMIN', 'ADMIN');
     const permission = await getGroupChatSendPermission('staff_official', 'admin-1', 'ADMIN', makeEnv(db));
     expect(permission.allowed).toBe(true);
+  });
+
+  it('revokes send permission immediately when the active group membership disappears', async () => {
+    const db = new GroupChatPolicyDb('MEMBERS', 'STUDENT', 'STUDENT', false);
+    const permission = await getGroupChatSendPermission('all', 'student-1', 'STUDENT', makeEnv(db));
+    expect(permission.allowed).toBe(false);
+    expect(permission.chatPolicy).toBe('UNKNOWN');
   });
 
   it('does not grant send permission to a student who is only a group moderator', async () => {
