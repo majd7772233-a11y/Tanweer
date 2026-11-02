@@ -34,6 +34,8 @@ class DatabaseMigrationTest {
                     db.execSQL("CREATE TABLE `cached_schedule_slots` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `dayOfWeek` INTEGER NOT NULL, `slotOrder` INTEGER NOT NULL, `subjectId` TEXT NOT NULL, `subjectName` TEXT NOT NULL, `subjectIcon` TEXT NOT NULL, `colorHex` TEXT, `startTime` TEXT, `endTime` TEXT, PRIMARY KEY(`id`))")
                     db.execSQL("CREATE TABLE `cached_contents` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `studyDate` TEXT NOT NULL, `subjectId` TEXT NOT NULL, `type` TEXT NOT NULL, `title` TEXT NOT NULL, `description` TEXT, `authorName` TEXT NOT NULL, `authorGradeSection` TEXT NOT NULL, `viewsCount` INTEGER NOT NULL, `usefulCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `subjectName` TEXT NOT NULL, `subjectIcon` TEXT NOT NULL, `colorHex` TEXT NOT NULL, `mediaUrlsJson` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))")
                     db.execSQL("CREATE TABLE `cached_homeworks` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `studyDate` TEXT NOT NULL, `dueDate` TEXT NOT NULL, `subjectId` TEXT NOT NULL, `title` TEXT NOT NULL, `details` TEXT, `pageNumbers` TEXT, `questionNumbers` TEXT, `taskType` TEXT NOT NULL, `subjectName` TEXT NOT NULL, `subjectIcon` TEXT NOT NULL, `colorHex` TEXT NOT NULL, `mediaUrlsJson` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))")
+                    db.execSQL("CREATE TABLE `cached_exams` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `examDate` TEXT NOT NULL, `subjectId` TEXT NOT NULL, `title` TEXT NOT NULL, `requiredChapters` TEXT, `notes` TEXT, `subjectName` TEXT NOT NULL, `subjectIcon` TEXT NOT NULL, `colorHex` TEXT NOT NULL, `isCompleted` INTEGER NOT NULL, `examType` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))")
+                    db.execSQL("INSERT INTO `cached_exams` VALUES ('legacy_exam_1', 'class_10_A', '2026-10-25', 'math', 'اختبار محفوظ قبل التحديث', NULL, NULL, 'الرياضيات', '📐', '#00E5FF', 0, 'QUIZ', 'SYNCED')")
                     db.execSQL("INSERT INTO `cached_homeworks` VALUES ('legacy_hw_1', 'class_10_A', '2026-10-20', '2026-10-22', 'math', 'واجب محفوظ قبل التحديث', NULL, '10', '1-2', 'HOMEWORK', 'الرياضيات', '📐', '#00E5FF', '[]', 1700000000000, 'SYNCED')")
                     db.execSQL("CREATE TABLE `cached_homework_completions` (`homeworkId` TEXT NOT NULL, `userId` TEXT NOT NULL, `completedAt` INTEGER NOT NULL, PRIMARY KEY(`homeworkId`, `userId`))")
                     db.execSQL("CREATE TABLE `cached_exams` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `examDate` TEXT NOT NULL, `subjectId` TEXT NOT NULL, `title` TEXT NOT NULL, `requiredChapters` TEXT, `notes` TEXT, `subjectName` TEXT NOT NULL, `subjectIcon` TEXT NOT NULL, `colorHex` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))")
@@ -81,7 +83,8 @@ class DatabaseMigrationTest {
                 TanweerDatabase.MIGRATION_10_12,
                 TanweerDatabase.MIGRATION_11_12,
                 TanweerDatabase.MIGRATION_12_13,
-                TanweerDatabase.MIGRATION_13_14
+                TanweerDatabase.MIGRATION_13_14,
+                TanweerDatabase.MIGRATION_14_15
             )
             .build()
 
@@ -98,6 +101,15 @@ class DatabaseMigrationTest {
         assertEquals("واجب محفوظ قبل التحديث", legacyHomeworkCursor.getString(0))
         assertEquals(0, legacyHomeworkCursor.getInt(1))
         legacyHomeworkCursor.close()
+
+        val legacyExamCursor = roomDb.openHelper.readableDatabase.query(
+            "SELECT title, isOfficial, examType FROM cached_exams WHERE id = 'legacy_exam_1'"
+        )
+        assertTrue(legacyExamCursor.moveToFirst())
+        assertEquals("اختبار محفوظ قبل التحديث", legacyExamCursor.getString(0))
+        assertEquals(0, legacyExamCursor.getInt(1))
+        assertEquals("QUIZ", legacyExamCursor.getString(2))
+        legacyExamCursor.close()
 
         // 3. Verify that legacy outbox data was non-destructively migrated to OutboxEntity schema
         val pendingItems = outboxDao.getPendingItemsSync()
