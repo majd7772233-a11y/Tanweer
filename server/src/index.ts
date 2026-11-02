@@ -18,6 +18,7 @@ import {
   handleEnableUser,
   handleRevokeUserSessions,
   handleReissueUserCredentials,
+  handleRevokeUserRecoveryCode,
   handleGetRoleRequests,
   handleApproveRoleRequest,
   handleRejectRoleRequest,
@@ -171,6 +172,10 @@ export default {
       if (url.pathname.startsWith('/api/dashboard/users/') && url.pathname.endsWith('/revoke-sessions') && request.method === 'POST') {
         const userId = url.pathname.split('/')[4];
         return handleRevokeUserSessions(userId, auth.ownerId, request, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/users/') && url.pathname.endsWith('/revoke-recovery-code') && request.method === 'POST') {
+        const userId = url.pathname.split('/')[4];
+        return handleRevokeUserRecoveryCode(userId, auth.ownerId, request, env);
       }
       if (url.pathname.startsWith('/api/dashboard/users/') && url.pathname.endsWith('/reissue-credentials') && request.method === 'POST') {
         const userId = url.pathname.split('/')[4];

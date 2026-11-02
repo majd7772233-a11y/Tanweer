@@ -147,7 +147,7 @@ describe('Authentication hardening regressions', () => {
     expect(sessionCount).toBe(0);
   });
 
-  it('allows only one concurrent redemption of the same recovery code', async () => {
+  it('allows repeated concurrent logins with a permanent recovery code', async () => {
     const recoveryCode = 'A1B2-C3D4-E5F6';
     const recoveryHash = await hashString(recoveryCode.replace(/[\\s\\-]/g, '').toUpperCase(), pepper);
     const user = {
@@ -164,9 +164,10 @@ describe('Authentication hardening regressions', () => {
       id: 'recovery-token-1',
       token_hash: recoveryHash,
       user_id: user.id,
+      type: 'RECOVERY_CODE',
       max_uses: 1,
-      uses_count: 0,
-      expires_at: Date.now() + 60_000,
+      uses_count: 1,
+      expires_at: 0,
       revoked: 0,
       used_at: null as number | null,
     };
@@ -271,10 +272,10 @@ describe('Authentication hardening regressions', () => {
       handleLoginWithRecoveryCode(createRequest(), env),
     ]);
 
-    expect(responses.map(response => response.status).sort()).toEqual([200, 409]);
-    expect(sessions).toHaveLength(1);
+    expect(responses.map(response => response.status).sort()).toEqual([200, 200]);
+    expect(sessions).toHaveLength(2);
     expect(recoveryToken.uses_count).toBe(1);
-    expect(String(user.recovery_code_hash)).toMatch(/^USED_/);
+    expect(user.recovery_code_hash).toBe(recoveryHash);
   });
 
   it('fails closed when the temporary-credential store cannot be checked', async () => {

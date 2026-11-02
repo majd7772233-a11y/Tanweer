@@ -463,6 +463,7 @@ export async function handleChangeUserRole(
     id: string;
     full_name: string;
     role: string;
+    status: string;
   }>();
 
   if (!user) {
@@ -634,13 +635,73 @@ export async function handleRevokeUserSessions(
  * Single-use, hash-only stored, attempt-limited, expiration-enforced, session-revocable, audit-logged.
  * NEVER returns the old password or old hash.
  */
+/**
+ * Revokes a user's permanent recovery credential without issuing a replacement.
+ * The historical schema marks recovery_code_hash NOT NULL, so a random non-hash marker
+ * is stored; future reissue always replaces it with a real keyed hash.
+ */
+export async function handleRevokeUserRecoveryCode(
+  userId: string,
+  actorId: string,
+  request: Request,
+  env: Env
+): Promise<Response> {
+  const user = await env.DB.prepare(
+    `SELECT id, full_name, role FROM users WHERE id = ?`
+  ).bind(userId).first<{ id: string; full_name: string; role: string }>();
+
+  if (!user) return errorResponse('USER_NOT_FOUND', 'المستخدم غير موجود', 404);
+  if (normalizeRole(user.role) === Role.SYSTEM_OWNER) {
+    return errorResponse('FORBIDDEN', 'لا يمكن إلغاء رمز استرداد مالك المنظومة من هذا المسار', 403);
+  }
+  if (typeof env.DB.batch !== 'function') {
+    return errorResponse('RECOVERY_REVOCATION_UNAVAILABLE', 'قاعدة البيانات لا تدعم الإلغاء الآمن بصورة ذرية حالياً', 503);
+  }
+
+  const now = Date.now();
+  const revokedMarker = `REVOKED_${generateRandomToken()}`;
+  const statements = [
+    env.DB.prepare(`UPDATE users SET recovery_code_hash = ?, updated_at = ? WHERE id = ?`)
+      .bind(revokedMarker, now, userId),
+    env.DB.prepare(`UPDATE user_recovery_tokens SET revoked = 1
+      WHERE user_id = ? AND type = 'RECOVERY_CODE' AND revoked = 0`).bind(userId),
+    env.DB.prepare(`DELETE FROM user_notifications WHERE user_id = ? AND type = 'RECOVERY_CODE_RESET'`).bind(userId),
+  ];
+
+  try {
+    const results = await env.DB.batch(statements);
+    if (results.length !== statements.length || results[0]?.meta?.changes !== 1) {
+      return errorResponse('RECOVERY_REVOCATION_FAILED', 'تعذر إلغاء رمز الاسترداد بصورة مكتملة', 500);
+    }
+  } catch (error) {
+    console.error('Failed to revoke permanent recovery code:', error);
+    return errorResponse('RECOVERY_REVOCATION_FAILED', 'تعذر إلغاء رمز الاسترداد حالياً. لم يتم تأكيد العملية.', 503);
+  }
+
+  await logRoleAudit(
+    env.DB,
+    'REVOKE_RECOVERY_CODE',
+    actorId,
+    'SYSTEM_OWNER',
+    userId,
+    `تم إلغاء رمز الاسترداد الدائم للمستخدم ${user.full_name}`,
+    request.headers.get('CF-Connecting-IP')
+  );
+
+  return jsonResponse({
+    success: true,
+    revoked: true,
+    message: 'تم إلغاء رمز الاسترداد. لن يعمل الرمز السابق، ويمكن إصدار رمز بديل لاحقاً.',
+  });
+}
+
 export async function handleReissueUserCredentials(
   userId: string,
   actorId: string,
   request: Request,
   env: Env
 ): Promise<Response> {
-  const user = await env.DB.prepare(`SELECT id, full_name, phone_number, role FROM users WHERE id = ?`).bind(userId).first<{
+  const user = await env.DB.prepare(`SELECT id, full_name, phone_number, role, COALESCE(status, 'ACTIVE') AS status FROM users WHERE id = ?`).bind(userId).first<{
     id: string;
     full_name: string;
     phone_number: string;
@@ -653,6 +714,9 @@ export async function handleReissueUserCredentials(
 
   if (normalizeRole(user.role) === Role.SYSTEM_OWNER) {
     return errorResponse('FORBIDDEN', 'لا يمكن إعادة تعيين بيانات اعتماد مالك المنظومة من هذا المسار', 403);
+  }
+  if (user.status !== 'ACTIVE') {
+    return errorResponse('ACCOUNT_NOT_ACTIVE', 'لا يمكن إصدار بيانات استرداد لحساب غير نشط. أعد تفعيل الحساب أولاً.', 409);
   }
 
   let body: {
@@ -3855,7 +3919,7 @@ export function renderDashboardHtml(): Response {
       <div style="margin-top:1.25rem; padding:1rem; border-radius:10px; background:rgba(0, 229, 255, 0.03); border:1px solid rgba(0, 229, 255, 0.2);">
         <h4 style="font-size:0.9rem; color:var(--cyan); margin:0 0 0.5rem 0;">🔑 إدارة بيانات الدخول ورمز الاسترداد البديل</h4>
         <div style="font-size:0.8rem; color:var(--text-sec); margin-bottom:0.75rem;">
-          يمكن لمالك المنظومة توليد رمز استرداد جديد أحادي الاستخدام (صالح لـ 24 ساعة) لمساعدة الطالب أو المعلم عند فقدان وسيلة دخوله. يتم حفظ التجزئة المشفرة فقط دون إظهار أي كلمة مرور سابقة.
+          يمكن لمالك المنظومة إصدار رمز استرداد دائم جديد. تُحفظ بصمة للتحقق ونسخة مشفرة للتسليم الخاص داخل إشعارات حساب المستخدم، ولا يظهر الرمز في لوحة الإدارة.
         </div>
         <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; margin-bottom:0.5rem;">
           <label style="font-size:0.8rem; color:var(--text-sec); display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
@@ -3864,6 +3928,9 @@ export function renderDashboardHtml(): Response {
           </label>
           <button class="action-btn" onclick="reissueUserCredentialsFromModal()" style="background:var(--cyan); color:#000; font-weight:700; padding:0.4rem 0.8rem; font-size:0.8rem;">
             ⚡ إصدار رمز استرداد جديد
+          </button>
+          <button class="action-btn reject" onclick="revokeUserRecoveryCodeFromModal()" style="padding:0.4rem 0.8rem; font-size:0.8rem;">
+            إلغاء رمز الاسترداد الحالي
           </button>
         </div>
         <div id="udReissueResult" style="display:none; margin-top:0.5rem; padding:0.75rem; border-radius:8px; background:rgba(0,0,0,0.5); border:1px solid var(--border);"></div>
@@ -4563,6 +4630,30 @@ export function renderDashboardHtml(): Response {
           resContainer.innerHTML = \`<div style="color:var(--ruby); font-size:0.85rem;">\${escapeHtml(data.message || 'فشلت عملية إصدار الرمز')}</div>\`;
         }
       } catch (e) {
+        resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
+      }
+    }
+
+    async function revokeUserRecoveryCodeFromModal() {
+      if (!activeUserId) return;
+      if (!confirm('هل تريد إلغاء رمز الاسترداد الحالي لهذا الحساب؟ لن يعمل الرمز بعد ذلك، ولن يتم إنشاء بديل تلقائياً.')) return;
+      const resContainer = document.getElementById('udReissueResult');
+      resContainer.style.display = 'block';
+      resContainer.innerHTML = '<div style="color:var(--text-sec); font-size:0.8rem;">جارٍ إلغاء رمز الاسترداد...</div>';
+      try {
+        const res = await fetch(`/api/dashboard/users/${activeUserId}/revoke-recovery-code`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (data.success) {
+          resContainer.innerHTML = `<div style="color:var(--amber); font-size:0.85rem; font-weight:bold;">✓ ${escapeHtml(data.message || 'تم إلغاء رمز الاسترداد')}</div>`;
+          showToast('تم إلغاء رمز الاسترداد السابق');
+        } else {
+          resContainer.innerHTML = `<div style="color:var(--ruby); font-size:0.85rem;">${escapeHtml(data.message || 'فشل إلغاء رمز الاسترداد')}</div>`;
+        }
+      } catch (error) {
         resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
       }
     }
