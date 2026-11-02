@@ -604,7 +604,16 @@ fun CommunityDecisionModeratorCard(
     }
 
     val totalVotes = decision.votesFor + decision.votesAgainst
-    val requiredVotes = maxOf(1, kotlin.math.ceil((decision.totalEligibleVoters * decision.thresholdPercent) / 100.0).toInt())
+    val calculatedThreshold = kotlin.math.ceil(
+        (decision.totalEligibleVoters * decision.thresholdPercent) / 100.0
+    ).toInt()
+    // Keep the UI identical to the server quorum rule: at least two approvals
+    // whenever more than one eligible voter exists.
+    val requiredVotes = if (decision.totalEligibleVoters > 1) {
+        maxOf(2, calculatedThreshold)
+    } else {
+        1
+    }
     val progress = if (requiredVotes > 0) (decision.votesFor.toFloat() / requiredVotes.toFloat()).coerceIn(0f, 1f) else 0f
 
     GlassCard(
