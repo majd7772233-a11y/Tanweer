@@ -185,6 +185,15 @@ export async function handleLogoutCurrentDevice(user: UserContext, env: Env): Pr
     `DELETE FROM sessions WHERE user_id = ? AND device_id = ?`
   ).bind(user.userId, user.deviceId).run();
 
+  await env.DB.prepare(
+    `DELETE FROM devices
+     WHERE user_id = ? AND device_id = ?
+       AND NOT EXISTS (
+         SELECT 1 FROM sessions
+         WHERE user_id = ? AND device_id = ? AND expires_at > ?
+       )`
+  ).bind(user.userId, user.deviceId, user.userId, user.deviceId, Date.now()).run();
+
   return jsonResponse({
     success: true,
     message: 'تم تسجيل الخروج وإنهاء جلسة هذا الجهاز',
