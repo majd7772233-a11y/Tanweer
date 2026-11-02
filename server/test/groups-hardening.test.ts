@@ -349,6 +349,8 @@ class PublicGroupCreateDb {
             type: 'OPTIONAL',
             description: params[2],
             icon: params[3],
+            is_official: 0,
+            is_discoverable: 1,
             created_at: params[4],
             created_by: params[5],
             updated_at: params[6],
