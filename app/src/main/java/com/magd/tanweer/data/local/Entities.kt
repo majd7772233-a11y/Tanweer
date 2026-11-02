@@ -304,7 +304,6 @@ sealed class HomeworkToggleResult(val isCompleted: Boolean) {
 
 sealed class ExamDeleteResult(val message: String) {
     class Synced(message: String = "✅ تم حذف الاختبار من السيرفر والجدول بنجاح") : ExamDeleteResult(message)
-    class LocalOnly(message: String = "✅ تم حذف الاختبار المحلي الذي لم يُرفع إلى السيرفر") : ExamDeleteResult(message)
     class QueuedOffline(message: String = "🟡 حُفظ طلب الحذف؛ سيبقى الاختبار ظاهراً حتى يؤكد السيرفر حذفه عند عودة الاتصال") : ExamDeleteResult(message)
     class Failed(message: String = "❌ تعذر حذف نسخة السيرفر، يرجى المحاولة لاحقاً") : ExamDeleteResult(message)
 }

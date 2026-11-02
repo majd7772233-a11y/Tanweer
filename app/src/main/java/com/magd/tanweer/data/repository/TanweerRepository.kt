@@ -3698,25 +3698,18 @@ class TanweerRepository(
                 return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }
 
-            // Atomically cancel a create that has never been attempted; once attempted,
-            // a lost response may still mean the server committed it, so verify by DELETE.
+            // Cancel any unclaimed create entry, but still confirm deletion on the server:
+            // even a failed/uncertain POST may have committed before its response was lost.
             if (pendingCreate != null && pendingCreate.status != "SYNCING") {
-                val cancelledCreate = db.outboxDao().deleteUnclaimedMutation(examId, "EXAM_CREATE")
-                val remainingCreate = db.outboxDao().getPendingMutation(examId, "EXAM_CREATE")
-                if (cancelledCreate > 0 && remainingCreate == null &&
-                    pendingCreate.attempts == 0 &&
-                    pendingToggle?.status != "SYNCING"
-                ) {
-                    db.outboxDao().deleteByEntityId(examId)
-                    db.examDao().deleteExamById(examId)
-                    return@withContext Result.success(ExamDeleteResult.LocalOnly())
+                db.outboxDao().deleteUnclaimedMutation(examId, "EXAM_CREATE")
+                if (db.outboxDao().getPendingMutation(examId, "EXAM_CREATE") != null) {
+                    queueExamDeletion(examId)
+                    return@withContext Result.success(ExamDeleteResult.QueuedOffline())
                 }
-                queueExamDeletion(examId)
-                return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }
 
-            // Never race an in-flight create or review mutation.
-            if (pendingCreate != null || pendingToggle != null) {
+            // A running create or review mutation must settle before the delete is sent.
+            if (pendingCreate?.status == "SYNCING" || pendingToggle != null) {
                 queueExamDeletion(examId)
                 return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }

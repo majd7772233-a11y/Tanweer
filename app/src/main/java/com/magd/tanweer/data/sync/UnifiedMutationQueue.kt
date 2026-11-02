@@ -532,7 +532,7 @@ class UnifiedMutationQueue private constructor(
                                 res.code() in 400..499 && res.code() !in listOf(408, 429) -> {
                                     db.examDao().updateSyncStatus(item.entityId, "SYNCED")
                                     val message = if (res.code() == 401 || res.code() == 403) {
-                                        "لا تملك صلاحية حذف الاختبار من الخادم (${res.code()})"
+                                        "لا تملك صلاحية حذف هذا الاختبار من الخادم (${res.code()})"
                                     } else {
                                         "رفض الخادم حذف الاختبار (${res.code()})"
                                     }
