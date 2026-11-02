@@ -431,7 +431,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 .distinctUntilChangedBy { it?.id }
                 .collect { user ->
                     if (user == null) {
-                        repository.mutationQueue.isDrainAllowed = true
+                        repository.mutationQueue.isDrainAllowed = dataGenerationVerified
                         _isCheckingAuth.value = false
                     } else {
                         _isCheckingAuth.value = true
@@ -441,6 +441,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                             // server snapshot. This happens on every app launch/login, independent
                             // of the optional background auto-sync preference.
                             if (dataGenerationVerified) {
+                                // The gate is opened only after the server generation check succeeded.
+                                repository.mutationQueue.isDrainAllowed = true
                                 val outboxResult = repository.processOutboxQueue()
                                 outboxResult.exceptionOrNull()?.let {
                                     android.util.Log.w("TanweerViewModel", "Startup outbox drain was incomplete", it)
@@ -472,9 +474,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                             android.util.Log.e("TanweerViewModel", "Startup server reconciliation failed", e)
                             applyStartupSyncResult(SyncResult.Offline("تعذر الاتصال بالخادم؛ يتم عرض النسخة المحفوظة محليًا"))
                         } finally {
-                            repository.mutationQueue.isDrainAllowed = true
+                            repository.mutationQueue.isDrainAllowed = dataGenerationVerified
                             _isCheckingAuth.value = false
-                            if (_autoSyncEnabled.value) {
+                            if (_autoSyncEnabled.value && dataGenerationVerified) {
                                 repository.mutationQueue.triggerDrain()
                             }
                         }
