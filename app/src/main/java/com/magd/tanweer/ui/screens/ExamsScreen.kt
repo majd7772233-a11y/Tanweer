@@ -718,6 +718,16 @@ fun CanvasExamsTableBoard(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                if (exam.isOfficial) {
+                                    Text(
+                                        text = "اختبار رسمي • صادر من الأستاذ 🎓",
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = CyanAccent,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                                 if (exam.syncStatus == "DELETE_PENDING") {
                                     Text(
                                         text = "طلب الحذف بانتظار الاتصال",
