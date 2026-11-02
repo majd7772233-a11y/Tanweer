@@ -47,6 +47,7 @@ fun AdminDashboardScreen(
     var showBroadcastDialog by remember { mutableStateOf(false) }
     var broadcastTitle by remember { mutableStateOf("") }
     var broadcastContent by remember { mutableStateOf("") }
+    var isPublishingBroadcast by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.loadAdminDashboard()
@@ -582,16 +583,35 @@ fun AdminDashboardScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (broadcastTitle.isNotBlank()) {
-                            showBroadcastDialog = false
-                            Toast.makeText(context, "تم نشر التعميم المدرسي بنجاح 📢", Toast.LENGTH_SHORT).show()
-                            broadcastTitle = ""
-                            broadcastContent = ""
+                        val title = broadcastTitle.trim()
+                        val body = broadcastContent.trim()
+                        if (title.isBlank() || body.isBlank() || isPublishingBroadcast) {
+                            Toast.makeText(context, "أدخل عنوان التعميم ونصه بالكامل", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        isPublishingBroadcast = true
+                        viewModel.publishSchoolAnnouncement(title, body) { success, message ->
+                            isPublishingBroadcast = false
+                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            if (success) {
+                                showBroadcastDialog = false
+                                broadcastTitle = ""
+                                broadcastContent = ""
+                            }
                         }
                     },
+                    enabled = !isPublishingBroadcast && broadcastTitle.isNotBlank() && broadcastContent.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = MidnightBackground)
                 ) {
-                    Text("نشر التعميم", fontWeight = FontWeight.Bold)
+                    if (isPublishingBroadcast) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MidnightBackground
+                        )
+                    } else {
+                        Text("نشر التعميم", fontWeight = FontWeight.Bold)
+                    }
                 }
             },
             dismissButton = {
