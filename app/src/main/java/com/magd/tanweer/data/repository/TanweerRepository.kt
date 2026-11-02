@@ -564,131 +564,142 @@ class TanweerRepository(
         if (groupId.isBlank() || date.isBlank()) return@withContext SyncResult.Offline()
         try {
             val res = api.getDayDetail(date, groupId)
-            if (res.isSuccessful && res.body() != null) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val body = res.body()!!
-
-                // Reconcile Lessons for this date
-                val contents = body.contents.map {
-                    val existing = db.contentDao().getContentById(it.id)
-                    val mediaJson = if (it.media.isNotEmpty()) {
-                        try {
-                            org.json.JSONArray(it.media.map { m -> m.url }).toString()
-                        } catch (_: Exception) { existing?.mediaUrlsJson ?: "[]" }
-                    } else {
-                        existing?.mediaUrlsJson ?: "[]"
-                    }
-                    ContentEntity(
-                        id = it.id,
-                        groupId = it.groupId,
-                        studyDate = it.studyDate,
-                        subjectId = it.subjectId,
-                        type = it.type,
-                        title = it.title,
-                        description = it.description,
-                        createdBy = it.createdBy,
-                        authorName = it.authorName,
-                        authorGradeSection = it.authorGradeSection,
-                        viewsCount = it.viewsCount,
-                        usefulCount = it.usefulCount,
-                        createdAt = it.createdAt,
-                        subjectName = it.subjectName,
-                        subjectIcon = it.subjectIcon,
-                        colorHex = it.colorHex,
-                        mediaUrlsJson = mediaJson,
-                        syncStatus = "SYNCED"
-                    )
-                }
-                db.contentDao().clearSyncedContentsForDate(groupId, date)
-                if (contents.isNotEmpty()) {
-                    db.contentDao().insertContents(contents)
+                if (body.date != date ||
+                    body.contents.any { it.groupId != groupId } ||
+                    body.homeworks.any { it.groupId != groupId } ||
+                    body.exams.any { it.groupId != groupId } ||
+                    body.events.any { it.groupId != groupId && it.groupId != "all" }
+                ) {
+                    return@withContext SyncResult.Error("رد الخادم لليوم لا يطابق التاريخ أو المجموعة المطلوبة؛ احتُفظ بالبيانات المحلية")
                 }
 
-                // Reconcile Homeworks for this date
-                db.homeworkDao().clearSyncedHomeworksForDate(groupId, date)
-                if (body.homeworks.isNotEmpty()) {
-                    val currentUserId = db.userDao().getUserSync()?.id ?: "local_user"
-                    val homeworks = body.homeworks.map {
-                        val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
-                        if (pendingToggle == null || pendingToggle.entityType != "HOMEWORK_TOGGLE") {
-                            if (it.isCompleted) {
-                                db.homeworkDao().insertCompletion(HomeworkCompletionEntity(homeworkId = it.id, userId = currentUserId))
-                            } else {
-                                db.homeworkDao().deleteCompletion(it.id, currentUserId)
-                            }
+                db.withTransaction {
+                    // Reconcile Lessons for this date
+                    val contents = body.contents.map {
+                        val existing = db.contentDao().getContentById(it.id)
+                        val mediaJson = if (it.media.isNotEmpty()) {
+                            try {
+                                org.json.JSONArray(it.media.map { m -> m.url }).toString()
+                            } catch (_: Exception) { existing?.mediaUrlsJson ?: "[]" }
+                        } else {
+                            existing?.mediaUrlsJson ?: "[]"
                         }
-                        HomeworkEntity(
+                        ContentEntity(
                             id = it.id,
                             groupId = it.groupId,
                             studyDate = it.studyDate,
-                            dueDate = it.dueDate,
                             subjectId = it.subjectId,
-                            title = it.title,
-                            details = it.details,
-                            pageNumbers = it.pageNumbers,
-                            questionNumbers = it.questionNumbers,
-                            taskType = it.taskType,
-                            subjectName = it.subjectName,
-                            subjectIcon = it.subjectIcon,
-                            colorHex = it.colorHex,
-                            mediaUrlsJson = serializeStringList(it.mediaUrls),
-                            createdAt = it.createdAt
-                        )
-                    }
-                    db.homeworkDao().insertHomeworks(homeworks)
-                }
-
-                // Reconcile Exams for this date
-                db.examDao().clearSyncedExamsForDate(groupId, date)
-                if (body.exams.isNotEmpty()) {
-                    val exams = body.exams.mapNotNull {
-                        if (db.outboxDao().getPendingMutation(it.id, "EXAM_DELETE") != null) {
-                            return@mapNotNull null
-                        }
-                        val local = db.examDao().getExamById(it.id)
-                        val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
-                        val isDone = if (pendingToggle != null && pendingToggle.entityType == "EXAM_TOGGLE") {
-                            local?.isCompleted ?: it.isCompleted
-                        } else if (local != null && local.syncStatus == "PENDING") {
-                            local.isCompleted
-                        } else {
-                            it.isCompleted
-                        }
-                        val finalExamType = if (it.examType.isNotBlank()) it.examType else (local?.examType ?: "MONTHLY")
-                        ExamEntity(
-                            id = it.id,
-                            groupId = it.groupId,
-                            examDate = it.examDate,
-                            subjectId = it.subjectId,
-                            title = it.title,
-                            requiredChapters = it.requiredChapters,
-                            notes = it.notes,
-                            subjectName = it.subjectName,
-                            subjectIcon = it.subjectIcon,
-                            colorHex = it.colorHex,
-                            isCompleted = isDone,
-                            examType = finalExamType
-                        )
-                    }
-                    db.examDao().insertExams(exams)
-                }
-
-                // Reconcile Events for this date
-                db.eventDao().clearSyncedEventsForDate(groupId, date)
-                if (body.events.isNotEmpty()) {
-                    val events = body.events.map {
-                        EventEntity(
-                            id = it.id,
-                            groupId = it.groupId,
-                            eventDate = it.eventDate,
-                            timeStr = it.timeStr,
+                            type = it.type,
                             title = it.title,
                             description = it.description,
-                            category = it.category,
-                            location = it.location,
-                            createdAt = it.createdAt
+                            createdBy = it.createdBy,
+                            authorName = it.authorName,
+                            authorGradeSection = it.authorGradeSection,
+                            viewsCount = it.viewsCount,
+                            usefulCount = it.usefulCount,
+                            createdAt = it.createdAt,
+                            subjectName = it.subjectName,
+                            subjectIcon = it.subjectIcon,
+                            colorHex = it.colorHex,
+                            mediaUrlsJson = mediaJson,
+                            syncStatus = "SYNCED"
                         )
                     }
-                    db.eventDao().insertEvents(events)
+                    db.contentDao().clearSyncedContentsForDate(groupId, date)
+                    if (contents.isNotEmpty()) {
+                        db.contentDao().insertContents(contents)
+                    }
+
+                    // Reconcile Homeworks for this date
+                    db.homeworkDao().clearSyncedHomeworksForDate(groupId, date)
+                    if (body.homeworks.isNotEmpty()) {
+                        val currentUserId = db.userDao().getUserSync()?.id ?: "local_user"
+                        val homeworks = body.homeworks.map {
+                            val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
+                            if (pendingToggle == null || pendingToggle.entityType != "HOMEWORK_TOGGLE") {
+                                if (it.isCompleted) {
+                                    db.homeworkDao().insertCompletion(HomeworkCompletionEntity(homeworkId = it.id, userId = currentUserId))
+                                } else {
+                                    db.homeworkDao().deleteCompletion(it.id, currentUserId)
+                                }
+                            }
+                            HomeworkEntity(
+                                id = it.id,
+                                groupId = it.groupId,
+                                studyDate = it.studyDate,
+                                dueDate = it.dueDate,
+                                subjectId = it.subjectId,
+                                title = it.title,
+                                details = it.details,
+                                pageNumbers = it.pageNumbers,
+                                questionNumbers = it.questionNumbers,
+                                taskType = it.taskType,
+                                subjectName = it.subjectName,
+                                subjectIcon = it.subjectIcon,
+                                colorHex = it.colorHex,
+                                mediaUrlsJson = serializeStringList(it.mediaUrls),
+                                createdAt = it.createdAt
+                            )
+                        }
+                        db.homeworkDao().insertHomeworks(homeworks)
+                    }
+
+                    // Reconcile Exams for this date
+                    db.examDao().clearSyncedExamsForDate(groupId, date)
+                    if (body.exams.isNotEmpty()) {
+                        val exams = body.exams.mapNotNull {
+                            if (db.outboxDao().getPendingMutation(it.id, "EXAM_DELETE") != null) {
+                                return@mapNotNull null
+                            }
+                            val local = db.examDao().getExamById(it.id)
+                            val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
+                            val isDone = if (pendingToggle != null && pendingToggle.entityType == "EXAM_TOGGLE") {
+                                local?.isCompleted ?: it.isCompleted
+                            } else if (local != null && local.syncStatus == "PENDING") {
+                                local.isCompleted
+                            } else {
+                                it.isCompleted
+                            }
+                            val finalExamType = if (it.examType.isNotBlank()) it.examType else (local?.examType ?: "MONTHLY")
+                            ExamEntity(
+                                id = it.id,
+                                groupId = it.groupId,
+                                examDate = it.examDate,
+                                subjectId = it.subjectId,
+                                title = it.title,
+                                requiredChapters = it.requiredChapters,
+                                notes = it.notes,
+                                subjectName = it.subjectName,
+                                subjectIcon = it.subjectIcon,
+                                colorHex = it.colorHex,
+                                isCompleted = isDone,
+                                examType = finalExamType
+                            )
+                        }
+                        db.examDao().insertExams(exams)
+                    }
+
+                    // Reconcile Events for this date
+                    db.eventDao().clearSyncedEventsForDate(groupId, date)
+                    if (body.events.isNotEmpty()) {
+                        val events = body.events.map {
+                            EventEntity(
+                                id = it.id,
+                                groupId = it.groupId,
+                                eventDate = it.eventDate,
+                                timeStr = it.timeStr,
+                                title = it.title,
+                                description = it.description,
+                                category = it.category,
+                                location = it.location,
+                                createdAt = it.createdAt
+                            )
+                        }
+                        db.eventDao().insertEvents(events)
+                    }
+
                 }
 
                 mutationQueue.triggerDrain()
@@ -842,101 +853,110 @@ class TanweerRepository(
         if (groupId.isBlank()) return@withContext SyncResult.Offline()
         try {
             val res = api.getCalendar(groupId, month)
-            if (res.isSuccessful && res.body() != null) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val body = res.body()!!
+                if (body.exams.any { it.groupId != groupId } ||
+                    body.homeworks.any { it.groupId != groupId } ||
+                    body.events.any { it.groupId != groupId && it.groupId != "all" }
+                ) {
+                    return@withContext SyncResult.Error("رد الخادم للشهر لا يطابق المجموعة المطلوبة؛ احتُفظ بالبيانات المحلية")
+                }
                 var count = 0
 
-                // Point 16: Full reconciliation of old month data on server deletion
-                db.examDao().clearSyncedExamsForMonth(groupId, month)
-                db.eventDao().clearSyncedEventsForMonth(groupId, month)
-                db.homeworkDao().clearSyncedHomeworksForMonth(groupId, month)
+                db.withTransaction {
+                    // Point 16: Full reconciliation of old month data on server deletion
+                    db.examDao().clearSyncedExamsForMonth(groupId, month)
+                    db.eventDao().clearSyncedEventsForMonth(groupId, month)
+                    db.homeworkDao().clearSyncedHomeworksForMonth(groupId, month)
 
-                // 1. Process and cache exams
-                if (body.exams.isNotEmpty()) {
-                    val exams = body.exams.mapNotNull {
-                        if (db.outboxDao().getPendingMutation(it.id, "EXAM_DELETE") != null) {
-                            return@mapNotNull null
-                        }
-                        val local = db.examDao().getExamById(it.id)
-                        val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
-                        val isDone = if (pendingToggle != null && pendingToggle.entityType == "EXAM_TOGGLE") {
-                            local?.isCompleted ?: it.isCompleted
-                        } else if (local != null && local.syncStatus == "PENDING") {
-                            local.isCompleted
-                        } else {
-                            it.isCompleted
-                        }
-                        val finalExamType = if (it.examType.isNotBlank()) it.examType else (local?.examType ?: "MONTHLY")
-                        ExamEntity(
-                            id = it.id,
-                            groupId = it.groupId,
-                            examDate = it.examDate,
-                            subjectId = it.subjectId,
-                            title = it.title,
-                            requiredChapters = it.requiredChapters,
-                            notes = it.notes,
-                            subjectName = it.subjectName,
-                            subjectIcon = it.subjectIcon,
-                            colorHex = it.colorHex,
-                            isCompleted = isDone,
-                            examType = finalExamType
-                        )
-                    }
-                    db.examDao().insertExams(exams)
-                    count += exams.size
-                }
-
-                // 2. Process and cache events
-                if (body.events.isNotEmpty()) {
-                    val events = body.events.map {
-                        EventEntity(
-                            id = it.id,
-                            groupId = it.groupId,
-                            eventDate = it.eventDate,
-                            timeStr = it.timeStr,
-                            title = it.title,
-                            description = it.description,
-                            category = it.category,
-                            location = it.location,
-                            createdAt = it.createdAt
-                        )
-                    }
-                    db.eventDao().insertEvents(events)
-                    count += events.size
-                }
-
-                // 3. Process and cache homeworks
-                if (body.homeworks.isNotEmpty()) {
-                    val currentUserId = db.userDao().getUserSync()?.id ?: "local_user"
-                    val hws = body.homeworks.map {
-                        val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
-                        if (pendingToggle == null || pendingToggle.entityType != "HOMEWORK_TOGGLE") {
-                            if (it.isCompleted) {
-                                db.homeworkDao().insertCompletion(HomeworkCompletionEntity(homeworkId = it.id, userId = currentUserId))
-                            } else {
-                                db.homeworkDao().deleteCompletion(it.id, currentUserId)
+                    // 1. Process and cache exams
+                    if (body.exams.isNotEmpty()) {
+                        val exams = body.exams.mapNotNull {
+                            if (db.outboxDao().getPendingMutation(it.id, "EXAM_DELETE") != null) {
+                                return@mapNotNull null
                             }
+                            val local = db.examDao().getExamById(it.id)
+                            val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
+                            val isDone = if (pendingToggle != null && pendingToggle.entityType == "EXAM_TOGGLE") {
+                                local?.isCompleted ?: it.isCompleted
+                            } else if (local != null && local.syncStatus == "PENDING") {
+                                local.isCompleted
+                            } else {
+                                it.isCompleted
+                            }
+                            val finalExamType = if (it.examType.isNotBlank()) it.examType else (local?.examType ?: "MONTHLY")
+                            ExamEntity(
+                                id = it.id,
+                                groupId = it.groupId,
+                                examDate = it.examDate,
+                                subjectId = it.subjectId,
+                                title = it.title,
+                                requiredChapters = it.requiredChapters,
+                                notes = it.notes,
+                                subjectName = it.subjectName,
+                                subjectIcon = it.subjectIcon,
+                                colorHex = it.colorHex,
+                                isCompleted = isDone,
+                                examType = finalExamType
+                            )
                         }
-                        HomeworkEntity(
-                            id = it.id,
-                            groupId = it.groupId,
-                            studyDate = it.studyDate,
-                            dueDate = it.dueDate,
-                            subjectId = it.subjectId,
-                            title = it.title,
-                            details = it.details,
-                            pageNumbers = it.pageNumbers,
-                            questionNumbers = it.questionNumbers,
-                            taskType = it.taskType,
-                            subjectName = it.subjectName,
-                            subjectIcon = it.subjectIcon,
-                            colorHex = it.colorHex,
-                            mediaUrlsJson = org.json.JSONArray(it.mediaUrls).toString(),
-                            createdAt = it.createdAt
-                        )
+                        db.examDao().insertExams(exams)
+                        count += exams.size
                     }
-                    db.homeworkDao().insertHomeworks(hws)
-                    count += hws.size
+
+                    // 2. Process and cache events
+                    if (body.events.isNotEmpty()) {
+                        val events = body.events.map {
+                            EventEntity(
+                                id = it.id,
+                                groupId = it.groupId,
+                                eventDate = it.eventDate,
+                                timeStr = it.timeStr,
+                                title = it.title,
+                                description = it.description,
+                                category = it.category,
+                                location = it.location,
+                                createdAt = it.createdAt
+                            )
+                        }
+                        db.eventDao().insertEvents(events)
+                        count += events.size
+                    }
+
+                    // 3. Process and cache homeworks
+                    if (body.homeworks.isNotEmpty()) {
+                        val currentUserId = db.userDao().getUserSync()?.id ?: "local_user"
+                        val hws = body.homeworks.map {
+                            val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
+                            if (pendingToggle == null || pendingToggle.entityType != "HOMEWORK_TOGGLE") {
+                                if (it.isCompleted) {
+                                    db.homeworkDao().insertCompletion(HomeworkCompletionEntity(homeworkId = it.id, userId = currentUserId))
+                                } else {
+                                    db.homeworkDao().deleteCompletion(it.id, currentUserId)
+                                }
+                            }
+                            HomeworkEntity(
+                                id = it.id,
+                                groupId = it.groupId,
+                                studyDate = it.studyDate,
+                                dueDate = it.dueDate,
+                                subjectId = it.subjectId,
+                                title = it.title,
+                                details = it.details,
+                                pageNumbers = it.pageNumbers,
+                                questionNumbers = it.questionNumbers,
+                                taskType = it.taskType,
+                                subjectName = it.subjectName,
+                                subjectIcon = it.subjectIcon,
+                                colorHex = it.colorHex,
+                                mediaUrlsJson = org.json.JSONArray(it.mediaUrls).toString(),
+                                createdAt = it.createdAt
+                            )
+                        }
+                        db.homeworkDao().insertHomeworks(hws)
+                        count += hws.size
+                    }
+
                 }
 
                 SyncResult.Success(count)
