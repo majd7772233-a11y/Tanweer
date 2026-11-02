@@ -3684,7 +3684,11 @@ class TanweerRepository(
                     Result.success(EventAddResult.Synced(id))
                 }
             } else if (!isRetryableHttpStatus(res.code())) {
-                db.eventDao().updateSyncStatus(id, "FAILED")
+                if (groupId == "all" && category.equals("ANNOUNCEMENT", ignoreCase = true)) {
+                    db.eventDao().deleteEventById(id)
+                } else {
+                    db.eventDao().updateSyncStatus(id, "FAILED")
+                }
                 val message = if (res.code() in listOf(401, 403)) {
                     "لا تملك صلاحية نشر هذه الفعالية (HTTP ${res.code()})"
                 } else {
@@ -3692,7 +3696,7 @@ class TanweerRepository(
                 }
                 Result.failure(Exception(message))
             } else if (groupId == "all" && category.equals("ANNOUNCEMENT", ignoreCase = true)) {
-                db.eventDao().updateSyncStatus(id, "FAILED")
+                db.eventDao().deleteEventById(id)
                 Result.failure(Exception("يلزم الاتصال بالإنترنت لنشر التعميم الرسمي. لم يتم تسجيله كمنشور ناجح."))
             } else {
                 val outboxItem = OutboxEntity(
@@ -3708,8 +3712,8 @@ class TanweerRepository(
             }
         } catch (e: Exception) {
             if (groupId == "all" && category.equals("ANNOUNCEMENT", ignoreCase = true)) {
-                db.eventDao().updateSyncStatus(id, "FAILED")
-                Result.failure(Exception("تعذر نشر التعميم دون الاتصال بالخادم. تحقق من الإنترنت وحاول مجدداً."))
+                db.eventDao().deleteEventById(id)
+                Result.failure(Exception("تعذر نشر التعميم دون الاتصال بالخادم. لم يُحفظ محلياً كمنشور ناجح. تحقق من الإنترنت وحاول مجدداً."))
             } else {
                 // Queue ordinary local events for later synchronization.
                 val outboxItem = OutboxEntity(
