@@ -8,6 +8,7 @@ interface ClientSession {
   gradeSection: string;
   role: string;
   groupId: string;
+  canSend: boolean;
 }
 
 export class GroupChatDO {
@@ -65,6 +66,7 @@ export class GroupChatDO {
         gradeSection,
         role: verifiedRole,
         groupId,
+        canSend: request.headers.get('X-Can-Send') === '1',
       };
 
       this.sessions.set(server, session);
@@ -73,6 +75,17 @@ export class GroupChatDO {
         try {
           const raw = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
           const data = JSON.parse(raw);
+
+          if (!session.canSend) {
+            try {
+              server.send(JSON.stringify({
+                type: 'error',
+                code: 'READ_ONLY_GROUP',
+                message: 'هذه المجموعة للقراءة فقط بالنسبة لحسابك.',
+              }));
+            } catch {}
+            return;
+          }
 
           // Handle message deletion action by sender or moderator/teacher/admin
           if (data.type === 'delete_message' || data.action === 'delete_message') {
