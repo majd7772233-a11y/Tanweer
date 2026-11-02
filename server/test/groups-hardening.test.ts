@@ -6,6 +6,7 @@ import {
   handleCreatePublicGroup,
   handleJoinGroupRequest,
   handleRejectGroupJoinRequest,
+  handleGetGroupMembers,
   handleRemoveGroupMember,
   handleUpdateGroupMemberRole,
 } from '../src/services/groups';
@@ -348,7 +349,10 @@ class PublicGroupCreateDb {
             type: 'OPTIONAL',
             description: params[2],
             icon: params[3],
-            created_by: params[4],
+            created_at: params[4],
+            created_by: params[5],
+            updated_at: params[6],
+            visibility: params[7],
           });
           return { success: true, meta: { changes: 1 } };
         }
@@ -394,13 +398,14 @@ describe('Public group creation consistency', () => {
     role: Role.MODERATOR,
   };
 
-  const createRequest = () => new Request('https://tanweer.test/api/v1/groups/public', {
+  const createRequest = (visibility: 'PUBLIC' | 'PRIVATE' = 'PUBLIC') => new Request('https://tanweer.test/api/v1/groups/public', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name: 'مجموعة البرمجة',
       description: 'مجموعة لمشاركة الدروس والمشاريع',
       icon: '💻',
+      visibility,
     }),
   });
 
@@ -416,6 +421,29 @@ describe('Public group creation consistency', () => {
     expect(db.members).toHaveLength(1);
     expect(db.members[0]).toMatchObject({
       group_id: body.groupId,
+      user_id: creator.userId,
+      role: 'MODERATOR',
+      status: 'ACTIVE',
+    });
+  });
+
+  it('persists private visibility while keeping the group discoverable and creator as moderator', async () => {
+    const db = new PublicGroupCreateDb();
+    const response = await handleCreatePublicGroup(
+      createRequest('PRIVATE'),
+      creator,
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.visibility).toBe('PRIVATE');
+    expect(db.groups[0]).toMatchObject({
+      visibility: 'PRIVATE',
+      is_discoverable: 1,
+      created_by: creator.userId,
+    });
+    expect(db.members[0]).toMatchObject({
       user_id: creator.userId,
       role: 'MODERATOR',
       status: 'ACTIVE',
@@ -654,5 +682,59 @@ describe('Group join request concurrency and state', () => {
     expect((await response.json() as any).error.code).toBe('BANNED');
     expect(db.members).toHaveLength(1);
     expect(db.members[0].status).toBe('BANNED');
+  });
+});
+
+
+class GroupMemberVisibilityDb {
+  statements: string[] = [];
+  readonly rows = [
+    { user_id: 'active-1', member_role: 'STUDENT', status: 'ACTIVE', joined_at: 1, request_reason: null, full_name: 'طالب نشط', phone_number: '777000001', global_role: 'STUDENT', grade_id: 10, section_id: 'A' },
+    { user_id: 'pending-1', member_role: 'STUDENT', status: 'PENDING', joined_at: 2, request_reason: 'أريد الانضمام', full_name: 'طالب ينتظر', phone_number: '777000002', global_role: 'STUDENT', grade_id: 10, section_id: 'B' },
+    { user_id: 'banned-1', member_role: 'STUDENT', status: 'BANNED', joined_at: 3, request_reason: null, full_name: 'طالب محظور', phone_number: '777000003', global_role: 'STUDENT', grade_id: 10, section_id: 'C' },
+  ];
+
+  prepare(sql: string) {
+    const db = this;
+    const normalized = sql.trim().replace(/\\s+/g, ' ');
+    const statement = {
+      bind() { return statement; },
+      async all<T = unknown>(): Promise<{ results: T[] }> {
+        db.statements.push(normalized);
+        return { results: db.rows as T[] };
+      },
+      async first<T = unknown>(): Promise<T | null> {
+        db.statements.push(normalized);
+        return null;
+      },
+    };
+    return statement;
+  }
+}
+
+describe('Group manager request list visibility', () => {
+  it('returns active members and pending requests to a global admin without exposing rejected requests as members', async () => {
+    const db = new GroupMemberVisibilityDb();
+    const admin: UserContext = {
+      userId: 'admin-1',
+      phoneNumber: '777000099',
+      fullName: 'مدير المدرسة',
+      gradeId: 0,
+      sectionId: 'SYSTEM',
+      role: Role.ADMIN,
+    };
+
+    const response = await handleGetGroupMembers(
+      'private-group',
+      admin,
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.canManageMembers).toBe(true);
+    expect(body.members.map((m: any) => m.status)).toEqual(['ACTIVE', 'PENDING', 'BANNED']);
+    expect(body.members.find((m: any) => m.status === 'PENDING')?.requestReason).toBe('أريد الانضمام');
+    expect(db.statements.some(sql => sql.includes("gm.status IN ('ACTIVE', 'PENDING', 'BANNED')"))).toBe(true);
   });
 });
