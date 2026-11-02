@@ -1059,6 +1059,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _groupMembersState = MutableStateFlow<com.magd.tanweer.data.model.GroupMembersResponse?>(null)
     val groupMembersState: StateFlow<com.magd.tanweer.data.model.GroupMembersResponse?> = _groupMembersState.asStateFlow()
+    private val _isGroupMembersLoading = MutableStateFlow(false)
+    val isGroupMembersLoading: StateFlow<Boolean> = _isGroupMembersLoading.asStateFlow()
+    private val _groupMembersError = MutableStateFlow<String?>(null)
+    val groupMembersError: StateFlow<String?> = _groupMembersError.asStateFlow()
 
     // Dashboard State Flows
     private val _teacherDashboard = MutableStateFlow<TeacherDashboardResponse?>(null)
@@ -1323,9 +1327,23 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun loadGroupMembers(groupId: String = getActiveGroupId()) {
         if (groupId.isBlank()) return
         viewModelScope.launch {
-            val res = repository.getGroupMembers(groupId)
-            res.onSuccess { data ->
-                _groupMembersState.value = data
+            _groupMembersState.value = null
+            _groupMembersError.value = null
+            _isGroupMembersLoading.value = true
+            try {
+                repository.getGroupMembers(groupId)
+                    .onSuccess { data ->
+                        if (data.success) {
+                            _groupMembersState.value = data
+                        } else {
+                            _groupMembersError.value = "تعذر تحميل قائمة أعضاء المجموعة من الخادم."
+                        }
+                    }
+                    .onFailure { error ->
+                        _groupMembersError.value = error.message ?: "تعذر تحميل أعضاء المجموعة. تحقق من الاتصال ثم أعد المحاولة."
+                    }
+            } finally {
+                _isGroupMembersLoading.value = false
             }
         }
     }
