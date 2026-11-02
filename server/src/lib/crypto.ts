@@ -115,6 +115,39 @@ export async function hashString(input: string, salt: string = ''): Promise<stri
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map(value => value.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBytes(value: string): Uint8Array {
+  if (!/^(?:[0-9a-f]{2})+$/i.test(value)) throw new Error('Invalid encrypted payload encoding');
+  const bytes = new Uint8Array(value.length / 2);
+  for (let index = 0; index < bytes.length; index++) bytes[index] = parseInt(value.slice(index * 2, index * 2 + 2), 16);
+  return bytes;
+}
+
+async function deriveDeliveryKey(secretPepper: string): Promise<CryptoKey> {
+  if (!secretPepper) throw new Error('A server secret is required to protect private notification data');
+  const material = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`tanweer:private-notification-delivery:v1:${secretPepper}`));
+  return crypto.subtle.importKey('raw', material, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+export async function encryptSensitivePayload(plaintext: string, secretPepper: string): Promise<string> {
+  const key = await deriveDeliveryKey(secretPepper);
+  const iv = new Uint8Array(12);
+  crypto.getRandomValues(iv);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
+  return `v1.${bytesToHex(iv)}.${bytesToHex(new Uint8Array(ciphertext))}`;
+}
+
+export async function decryptSensitivePayload(payload: string, secretPepper: string): Promise<string> {
+  const [version, ivHex, ciphertextHex, ...extra] = payload.split('.');
+  if (version !== 'v1' || !ivHex || !ciphertextHex || extra.length) throw new Error('Unsupported encrypted notification payload');
+  const key = await deriveDeliveryKey(secretPepper);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: hexToBytes(ivHex) }, key, hexToBytes(ciphertextHex));
+  return new TextDecoder().decode(plaintext);
+}
+
 export function generateRecoveryCode(): string {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
   let result = '';

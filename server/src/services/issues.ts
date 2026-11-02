@@ -4,6 +4,15 @@ import { mapIssue, mapIssueComment } from '../lib/mappers';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
+import { Role, normalizeRole } from '../lib/roles';
+
+async function isApprovedTeacherForGroup(user: UserContext, groupId: string, env: Env): Promise<boolean> {
+  if (normalizeRole(user.role) === Role.TEACHER) return true;
+  const membership = await env.DB.prepare(
+    `SELECT role FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'ACTIVE'`
+  ).bind(groupId, user.userId).first<{ role: string }>();
+  return !!membership && normalizeRole(membership.role) === Role.TEACHER;
+}
 
 export async function handleGetIssues(groupId: string, user: UserContext, env: Env): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
@@ -173,10 +182,8 @@ export async function handleAddIssueComment(issueId: string, user: UserContext, 
     return errorResponse('INVALID_INPUT', 'يرجى كتابة نص الإجابة أو التعليق');
   }
 
-  const isTeacher = user.role === 'TEACHER' || user.role === 'ADMIN' || await hasPermission(user, Permission.ANSWER_AS_TEACHER, {
-    db: env.DB,
-    groupId: issue.group_id,
-  });
+  // The teacher marker is reserved for a globally or group-approved TEACHER.
+  const isTeacher = await isApprovedTeacherForGroup(user, issue.group_id, env);
 
   const commentId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
@@ -302,13 +309,12 @@ export async function handleMarkBestAnswer(issueId: string, commentId: string, u
   const memberCheck = await requireGroupMember(user, issue.group_id, env.DB);
   if (memberCheck) return memberCheck;
 
-  const canVerify = await hasPermission(user, Permission.VERIFY_BEST_ANSWER, {
-    db: env.DB,
-    groupId: issue.group_id,
-    resourceOwnerId: issue.created_by,
-  });
-  if (!canVerify) {
-    return errorResponse('FORBIDDEN', 'صاحب الاستفسار أو الأستاذ أو المشرف فقط يستطيع تحديد واعتماد أفضل إجابة', 403);
+  const actorRole = normalizeRole(user.role);
+  const isIssueAuthor = issue.created_by === user.userId;
+  const isSchoolAdmin = actorRole === Role.ADMIN || actorRole === Role.SYSTEM_OWNER;
+  const isApprovedTeacher = isSchoolAdmin ? false : await isApprovedTeacherForGroup(user, issue.group_id, env);
+  if (!isIssueAuthor && !isSchoolAdmin && !isApprovedTeacher) {
+    return errorResponse('FORBIDDEN', 'اعتماد الحل متاح لصاحب الاستفسار أو الأستاذ المعتمد أو المدير فقط', 403);
   }
 
   // Verify that the comment belongs to this issue

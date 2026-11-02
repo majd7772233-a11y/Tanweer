@@ -2,6 +2,7 @@ import { Env } from './env';
 import { authenticateRequest } from './middleware/auth';
 import { errorResponse, jsonResponse } from './lib/response';
 import { handleLogin, handleRegister, handleLoginWithRecoveryCode } from './services/auth';
+import { handleGenerateMyRecoveryCode, handleGetMyNotifications } from './services/notifications';
 import {
   handleGetGroups,
   handleJoinGroupRequest,
@@ -503,6 +504,14 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path.startsWith('/api/v1/decisions/') && path.endsWith('/vote') && method === 'POST') {
     const decisionId = path.split('/')[4];
     return handleVoteCommunityDecision(decisionId, user, request, env);
+  }
+
+  // Private account notifications and self-service recovery-code rotation.
+  if (path === '/api/v1/notifications' && method === 'GET') {
+    return handleGetMyNotifications(user, env);
+  }
+  if (path === '/api/v1/me/recovery-code' && method === 'POST') {
+    return handleGenerateMyRecoveryCode(user, env);
   }
 
   // In-App Role Dashboards

@@ -1,11 +1,12 @@
 import { Env } from '../env';
-import { hashPassword, verifyPassword, verifyPasswordWithDetails, hashString, generateRecoveryCode, generateRandomToken, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
+import { hashPassword, verifyPassword, verifyPasswordWithDetails, hashString, generateRecoveryCode, generateRandomToken, LEGACY_DEFAULT_PEPPER, encryptSensitivePayload } from '../lib/crypto';
 import { generateId } from '../lib/ids';
 import { validateArabicFullName, validateYemenPhoneNumber, evaluatePasswordStrength, isValidGradeSection } from '../lib/validation';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { getCurrentAcademicYearId } from '../lib/school';
 import { Role, normalizeRole, sanitizePublicRole } from '../lib/roles';
 import { buildNewDeviceSessionStatements, createDeviceSession, revokeCreatedDeviceSession } from './devices';
+import { buildRecoveryCodeRotationStatements } from './notifications';
 
 function resolveDeviceIdentity(request: Request, requestedId?: string, requestedPlatform?: string, requestedVersion?: string) {
   const rawDeviceId = (requestedId || request.headers.get('X-Device-Id') || generateId('dev')).trim();
@@ -159,6 +160,10 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   const deviceId = body.deviceId || generateId('dev');
   const expiresAt = now + 90 * 24 * 3600 * 1000;
 
+  // Registration also stores a durable credential record and encrypted private notification.
+  const recoveryTokenId = generateId('rec_tok');
+  const recoveryPayload = await encryptSensitivePayload(JSON.stringify({ recoveryCode }), pepper);
+
   // Single atomic batch execution for all registration entities
   const batchStatements = [];
 
@@ -202,6 +207,10 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
       )
     );
   }
+
+  batchStatements.push(...buildRecoveryCodeRotationStatements(
+    env.DB, userId, recoveryTokenId, recoveryCodeHash, recoveryPayload, userId, now
+  ));
 
   batchStatements.push(
     env.DB.prepare(
@@ -503,161 +512,43 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
     );
   }
 
-  // Read the token's revocation/expiry state. A storage failure must never bypass
-  // the single-use policy, so do not catch-and-ignore D1 errors here.
-  let recoveryToken: {
-    id: string;
-    max_uses: number;
-    uses_count: number;
-    expires_at: number;
-    revoked: number;
-  } | null;
-
+  // Recovery codes are permanent and reusable until changed or revoked. A legacy hash without
+  // an issuance row remains valid because users.recovery_code_hash is the authoritative match.
+  let recoveryToken: { id: string; type: string; revoked: number } | null;
   try {
     recoveryToken = await env.DB.prepare(`
-      SELECT id, max_uses, uses_count, expires_at, revoked
-      FROM user_recovery_tokens
-      WHERE token_hash = ? AND user_id = ?
-      ORDER BY created_at DESC LIMIT 1
-    `).bind(matchedRecoveryHash, user.id).first<{
-      id: string;
-      max_uses: number;
-      uses_count: number;
-      expires_at: number;
-      revoked: number;
-    }>();
+      SELECT id, type, revoked FROM user_recovery_tokens
+      WHERE token_hash = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1
+    `).bind(matchedRecoveryHash, user.id).first<{ id: string; type: string; revoked: number }>();
   } catch (error) {
     console.error('Failed to validate recovery-token state:', error);
-    return errorResponse(
-      'AUTHENTICATION_UNAVAILABLE',
-      'تعذر التحقق من صلاحية رمز الاسترداد حالياً. يرجى المحاولة لاحقاً.',
-      503
-    );
+    return errorResponse('AUTHENTICATION_UNAVAILABLE', 'تعذر التحقق من صلاحية رمز الاسترداد حالياً. يرجى المحاولة لاحقاً.', 503);
   }
-
-  if (recoveryToken) {
-    if (recoveryToken.revoked === 1) {
-      return errorResponse('RECOVERY_CODE_REVOKED', 'تم إبطال رمز الاسترداد هذا، يرجى طلب رمز جديد', 400);
-    }
-    if (recoveryToken.expires_at <= now) {
-      return errorResponse('RECOVERY_CODE_EXPIRED', 'رمز الاسترداد منتهي الصلاحية، يرجى طلب رمز جديد', 400);
-    }
-    if (recoveryToken.uses_count >= recoveryToken.max_uses) {
-      return errorResponse('RECOVERY_CODE_USED', 'تم استخدام رمز الاسترداد هذا مسبقاً، ولا يمكن استخدامه أكثر من مرة واحدة', 400);
-    }
+  if (recoveryToken && recoveryToken.revoked === 1) {
+    return errorResponse('RECOVERY_CODE_REVOKED', 'تم إلغاء رمز الاسترداد هذا. استخدم الرمز الأحدث أو اطلب رمزاً جديداً.', 400);
+  }
+  if (recoveryToken && recoveryToken.type !== 'RECOVERY_CODE') {
+    return errorResponse('INVALID_RECOVERY_CODE', 'بيانات الاعتماد المقدمة ليست رمز استرداد صالحاً', 400);
   }
 
   const token = generateRandomToken();
   const tokenHash = await hashString(token, pepper);
   const sessionId = generateId('sess');
   const expiresAt = now + 90 * 24 * 3600 * 1000;
-
   let reservedSession = false;
   try {
     reservedSession = await createDeviceSession(env, {
-      userId: user.id,
-      deviceId: deviceIdentity.deviceId,
-      sessionId,
-      tokenHash,
-      expiresAt,
-      platform: deviceIdentity.platform,
-      appVersion: deviceIdentity.appVersion,
-      now,
+      userId: user.id, deviceId: deviceIdentity.deviceId, sessionId, tokenHash, expiresAt,
+      platform: deviceIdentity.platform, appVersion: deviceIdentity.appVersion, now,
     });
   } catch (error) {
     console.error('Failed to reserve a device slot for recovery login:', error);
     return errorResponse('SESSION_STORE_UNAVAILABLE', 'تعذر إنشاء جلسة الجهاز حالياً. يرجى المحاولة لاحقاً.', 503);
   }
-
   if (!reservedSession) {
-    return errorResponse(
-      'DEVICE_LIMIT_REACHED',
-      'وصلت إلى الحد الأقصى وهو 3 أجهزة نشطة للحساب. أزل جهازاً قديماً من الإعدادات قبل استخدام رمز الاسترداد.',
-      403
-    );
+    return errorResponse('DEVICE_LIMIT_REACHED', 'وصلت إلى الحد الأقصى وهو 3 أجهزة نشطة للحساب. أزل جهازاً قديماً من الإعدادات قبل استخدام رمز الاسترداد.', 403);
   }
-
-  // Compare-and-swap on the verified hash. Concurrent requests can read the
-  // same code, but only one can replace this exact hash with the burned marker.
-  const burnedHash = 'USED_' + now + '_' + generateRandomToken().slice(0, 12);
-  let burnResult;
-  try {
-    burnResult = await env.DB.prepare(`
-      UPDATE users
-      SET recovery_code_hash = ?, last_seen = ?
-      WHERE id = ? AND recovery_code_hash = ?
-        AND (? IS NULL OR EXISTS (
-          SELECT 1 FROM user_recovery_tokens
-          WHERE id = ? AND user_id = ? AND revoked = 0
-            AND expires_at > ? AND uses_count < max_uses
-        ))
-    `).bind(
-      burnedHash,
-      now,
-      user.id,
-      matchedRecoveryHash,
-      recoveryToken?.id ?? null,
-      recoveryToken?.id ?? null,
-      user.id,
-      now
-    ).run();
-  } catch (error) {
-    console.error('Failed to consume recovery code:', error);
-    await revokeCreatedDeviceSession(env, user.id, deviceIdentity.deviceId, sessionId).catch(cleanupError =>
-      console.error('Failed to clean up reserved recovery session after storage error:', cleanupError)
-    );
-    return errorResponse(
-      'AUTHENTICATION_UNAVAILABLE',
-      'تعذر استهلاك رمز الاسترداد بأمان حالياً. يرجى المحاولة لاحقاً.',
-      503
-    );
-  }
-
-  if (burnResult.meta?.changes !== 1) {
-    await revokeCreatedDeviceSession(env, user.id, deviceIdentity.deviceId, sessionId).catch(error =>
-      console.error('Failed to clean up recovery session after a lost race:', error)
-    );
-    return errorResponse(
-      'RECOVERY_CODE_USED',
-      'تم استخدام رمز الاسترداد أو إبطاله بالفعل. يرجى طلب رمز جديد من الإدارة.',
-      409
-    );
-  }
-
-  // Update the auxiliary issuance counter only after winning the user-hash CAS.
-  // The user hash is the authoritative one-use guard against concurrent redemptions.
-  if (recoveryToken) {
-    try {
-      const tokenUse = await env.DB.prepare(`
-        UPDATE user_recovery_tokens
-        SET uses_count = uses_count + 1, used_at = ?
-        WHERE id = ? AND user_id = ? AND revoked = 0
-          AND expires_at > ? AND uses_count < max_uses
-      `).bind(now, recoveryToken.id, user.id, now).run();
-
-      if (tokenUse.meta?.changes !== 1) {
-        console.error('Recovery code user hash was burned but its issuance counter was not updated:', recoveryToken.id);
-        await revokeCreatedDeviceSession(env, user.id, deviceIdentity.deviceId, sessionId).catch(error =>
-          console.error('Failed to clean up recovery session after token counter failure:', error)
-        );
-        return errorResponse(
-          'AUTHENTICATION_UNAVAILABLE',
-          'تم إيقاف رمز الاسترداد أثناء التحقق. تواصل مع إدارة المنظومة لإصدار رمز جديد.',
-          503
-        );
-      }
-    } catch (error) {
-      console.error('Failed to update recovery-token usage counter:', error);
-      await revokeCreatedDeviceSession(env, user.id, deviceIdentity.deviceId, sessionId).catch(cleanupError =>
-        console.error('Failed to clean up recovery session after token usage error:', cleanupError)
-      );
-      return errorResponse(
-        'AUTHENTICATION_UNAVAILABLE',
-        'تعذر إكمال التحقق من رمز الاسترداد. تواصل مع إدارة المنظومة لإصدار رمز جديد.',
-        503
-      );
-    }
-  }
+  await env.DB.prepare(`UPDATE users SET last_seen = ? WHERE id = ?`).bind(now, user.id).run();
 
   const classGroupId = (user.grade_id && user.section_id && user.role !== Role.ADMIN) ? `class_${user.grade_id}_${user.section_id}` : '';
 

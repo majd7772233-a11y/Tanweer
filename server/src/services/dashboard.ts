@@ -8,7 +8,8 @@ import { Env } from '../env';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Role, normalizeRole, ROLE_METADATA } from '../lib/roles';
 import { generateId } from '../lib/ids';
-import { hashString, hashPassword, generateRandomToken, generateRecoveryCode } from '../lib/crypto';
+import { hashString, hashPassword, generateRandomToken, generateRecoveryCode, encryptSensitivePayload } from '../lib/crypto';
+import { buildRecoveryCodeRotationStatements } from './notifications';
 import { isValidIsoDate } from '../lib/validation';
 import { applyDecisionExecution } from './governance';
 import { cleanupOrphanMedia } from './media';
@@ -712,32 +713,34 @@ export async function handleReissueUserCredentials(
     `).run();
   } catch {}
 
-  // Invalidate any existing active recovery tokens for this user
-  await env.DB.prepare(
-    `UPDATE user_recovery_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0`
-  ).bind(userId).run();
-
-  // Insert single-use recovery token record with expiration
-  await env.DB.prepare(`
-    INSERT INTO user_recovery_tokens (id, user_id, token_hash, type, max_uses, uses_count, expires_at, revoked, created_by, created_at)
-    VALUES (?, ?, ?, ?, 1, 0, ?, 0, ?, ?)
-  `).bind(tokenId, userId, tokenHash, credentialType, expiresAt, actorId, now).run();
-
-  // Update appropriate column on users table
   if (credentialType === 'RECOVERY_CODE') {
-    await env.DB.prepare(
-      `UPDATE users SET recovery_code_hash = ?, updated_at = ? WHERE id = ?`
-    ).bind(tokenHash, now, userId).run();
+    if (typeof env.DB.batch !== 'function') {
+      return errorResponse('RECOVERY_ROTATION_UNAVAILABLE', 'قاعدة البيانات لا تدعم تسليم رمز الاسترداد بصورة ذرية وآمنة حالياً', 503);
+    }
+    const encryptedPayload = await encryptSensitivePayload(JSON.stringify({ recoveryCode: plainSecret }), pepper);
+    const statements = buildRecoveryCodeRotationStatements(env.DB, userId, tokenId, tokenHash, encryptedPayload, actorId, now);
+    if (revokeExistingSessions) statements.push(env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId));
+    try {
+      const results = await env.DB.batch(statements);
+      if (results.length !== statements.length || results[0]?.meta?.changes !== 1 ||
+          results[3]?.meta?.changes !== 1 || results[4]?.meta?.changes !== 1) {
+        return errorResponse('RECOVERY_ROTATION_FAILED', 'تعذر حفظ رمز الاسترداد ورسالة التسليم بصورة مكتملة', 500);
+      }
+    } catch (error) {
+      console.error('Failed to issue and privately deliver a recovery code:', error);
+      return errorResponse('RECOVERY_ROTATION_FAILED', 'تعذر إصدار رمز الاسترداد وتسليمه حالياً. لم يتم تأكيد العملية.', 503);
+    }
   } else {
-    // TA-21: Update password_hash so normal login with phone + password works seamlessly
-    await env.DB.prepare(
-      `UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`
-    ).bind(tokenHash, now, userId).run();
-  }
-
-  // Optionally revoke existing sessions to immediately protect the account
-  if (revokeExistingSessions) {
-    await env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
+    // Temporary passwords remain short-lived and single-use.
+    await env.DB.prepare(`UPDATE user_recovery_tokens SET revoked = 1
+      WHERE user_id = ? AND type = 'TEMP_PASSWORD' AND revoked = 0`).bind(userId).run();
+    await env.DB.prepare(`INSERT INTO user_recovery_tokens
+      (id, user_id, token_hash, type, max_uses, uses_count, expires_at, revoked, created_by, created_at)
+      VALUES (?, ?, ?, 'TEMP_PASSWORD', 1, 0, ?, 0, ?, ?)`)
+      .bind(tokenId, userId, tokenHash, expiresAt, actorId, now).run();
+    await env.DB.prepare(`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`)
+      .bind(tokenHash, now, userId).run();
+    if (revokeExistingSessions) await env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
   }
 
   await logRoleAudit(
@@ -746,19 +749,22 @@ export async function handleReissueUserCredentials(
     actorId,
     'SYSTEM_OWNER',
     userId,
-    `تم إصدار ${credentialType === 'RECOVERY_CODE' ? 'رمز استرداد' : 'بيانات اعتماد مؤقتة'} للمستخدم ${user.full_name} صالح لمرة واحدة لمدة (${expiresInHours}) ساعة${revokeExistingSessions ? ' مع إنهاء كافة جلساته السابقة' : ''}`,
+    credentialType === 'RECOVERY_CODE'
+      ? `تم تدوير رمز الاسترداد الدائم للمستخدم ${user.full_name} وتسليم نسخة مشفرة إلى صندوق إشعارات حسابه${revokeExistingSessions ? ' مع إنهاء جلساته الحالية' : ''}`
+      : `تم إصدار كلمة مرور مؤقتة للمستخدم ${user.full_name} صالحة لمرة واحدة لمدة (${expiresInHours}) ساعة${revokeExistingSessions ? ' مع إنهاء كافة جلساته السابقة' : ''}`,
     request.headers.get('CF-Connecting-IP')
   );
 
+  if (credentialType === 'RECOVERY_CODE') {
+    return jsonResponse({
+      success: true, credentialType, delivery: 'PRIVATE_IN_APP_NOTIFICATION', sessionsRevoked: revokeExistingSessions,
+      message: 'تم إصدار رمز استرداد دائم وتسليم نسخة مشفرة إلى إشعارات حساب المستخدم. سيظهر له داخل التطبيق عند تسجيل الدخول.',
+    });
+  }
   return jsonResponse({
-    success: true,
-    credentialType,
-    temporarySecret: plainSecret,
-    expiresAt,
-    expiresInHours,
-    singleUse: true,
-    sessionsRevoked: revokeExistingSessions,
-    message: `تم إصدار ${credentialType === 'RECOVERY_CODE' ? 'رمز استرداد مؤقت' : 'كلمة مرور مؤقتة'} بنجاح. أبلغه للمستخدم، حيث يمكن استخدامه لمرة واحدة فقط خلال ${expiresInHours} ساعة.`,
+    success: true, credentialType, temporarySecret: plainSecret, expiresAt, expiresInHours,
+    singleUse: true, sessionsRevoked: revokeExistingSessions,
+    message: `تم إصدار كلمة مرور مؤقتة بنجاح. يمكن استخدامها لمرة واحدة فقط خلال ${expiresInHours} ساعة.`,
   });
 }
 
@@ -4518,20 +4524,19 @@ export function renderDashboardHtml(): Response {
         const res = await fetch(\`/api/dashboard/users/\${activeUserId}/reissue-credentials\`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ revokeExistingSessions, expiresInHours: 24 })
+          body: JSON.stringify({ type: 'RECOVERY_CODE', revokeExistingSessions })
         });
         const data = await res.json();
         if (data.success) {
-          const secret = escapeHtml(data.temporarySecret);
-          resContainer.innerHTML = \`
-            <div style="color:var(--emerald); font-weight:bold; font-size:0.85rem; margin-bottom:0.4rem;">✓ تم إنشاء رمز استرداد بديل بنجاح:</div>
-            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem;">
-              <code style="font-size:1.1rem; color:var(--cyan); font-weight:800; background:rgba(0,229,255,0.1); padding:0.4rem 0.8rem; border-radius:6px; letter-spacing:1px;" id="reissuedCodeText">\${secret}</code>
-              <button class="action-btn" onclick="navigator.clipboard.writeText(document.getElementById('reissuedCodeText').innerText); showToast('تم نسخ رمز الاسترداد بنجاح');" style="padding:0.4rem 0.8rem; font-size:0.8rem;">📋 نسخ</button>
+          resContainer.innerHTML = `
+            <div style="color:var(--emerald); font-weight:bold; font-size:0.85rem; margin-bottom:0.4rem;">✓ تم إنشاء رمز استرداد دائم بنجاح.</div>
+            <div style="color:var(--text-sec); font-size:0.78rem; line-height:1.8;">
+              حُفظت الرسالة التي تحتوي الرمز مشفرة داخل إشعارات حساب المستخدم.
+              لن يظهر الرمز في لوحة الإدارة أو في استجابة الخادم؛ يستطيع صاحب الحساب فقط عرضه من ملفه الشخصي بعد تسجيل الدخول.
             </div>
-            <div style="color:var(--amber); font-size:0.75rem;">⚠️ هذا الرمز أحادي الاستخدام وصالح لـ 24 ساعة فقط. لن يظهر هذا الرمز مرة أخرى، يرجى نسخه وتزويده للمستخدم فوراً.</div>
-          \`;
-          showToast('تم إصدار رمز الاسترداد بنجاح');
+            <div style="color:var(--amber); font-size:0.75rem; margin-top:0.35rem;">يبقى الرمز صالحاً حتى تغييره من المستخدم أو إلغائه بإصدار رمز بديل.</div>
+          `;
+          showToast('تم تسليم رمز الاسترداد إلى إشعارات حساب المستخدم');
           const resRefresh = await fetch('/api/dashboard/users/' + activeUserId);
           const dataRefresh = await resRefresh.json();
           if (dataRefresh.success) {
