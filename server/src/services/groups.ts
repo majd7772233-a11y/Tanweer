@@ -129,12 +129,15 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
  * Scopes phone number visibility and pending status visibility strictly to group managers.
  */
 export async function handleGetGroupMembers(groupId: string, user: UserContext, env: Env): Promise<Response> {
-  const memberCheck = await requireGroupMember(user, groupId, env.DB);
-  if (memberCheck) return memberCheck;
-
   const normRole = normalizeRole(user.role);
   const isGlobalAdmin = normRole === Role.ADMIN || normRole === Role.SYSTEM_OWNER;
   const canManage = isGlobalAdmin || await hasPermission(user, Permission.MANAGE_GROUP_MEMBERS, { db: env.DB, groupId });
+
+  // Authorized school/group managers may review requests without first joining the group.
+  if (!canManage) {
+    const memberCheck = await requireGroupMember(user, groupId, env.DB);
+    if (memberCheck) return memberCheck;
+  }
 
   // Managers see active members, pending requests and banned users.
   // Rejected requests remain visible to the applicant in discovery, not as fake members here.
@@ -443,7 +446,7 @@ async function notifyGroupManagers(
        WHERE u.id != ?
          AND (
            UPPER(gm.role) IN ('MODERATOR', 'TEACHER', 'ADMIN')
-           OR UPPER(u.role) IN ('TEACHER', 'VERIFIED_TEACHER', 'ADMIN', 'SYSTEM_OWNER')
+           OR UPPER(u.role) IN ('MODERATOR', 'TEACHER', 'VERIFIED_TEACHER', 'ADMIN', 'SYSTEM_OWNER')
          )`
     ).bind(groupId, excludeUserId).all<{ user_id: string }>();
     const rows = managers.results || [];
@@ -493,6 +496,9 @@ export async function handleLeaveGroup(groupId: string, user: UserContext, env: 
     `SELECT id, name, type FROM groups WHERE id = ?`
   ).bind(groupId).first<{ id: string; name: string; type: string }>();
   if (!group) return errorResponse('GROUP_NOT_FOUND', 'المجموعة غير موجودة', 404);
+  if (group.type === 'CLASS') {
+    return errorResponse('CLASS_GROUP_REQUIRED', 'لا يمكن مغادرة الشعبة الدراسية الأساسية من هذا القسم. تواصل مع إدارة المدرسة عند الحاجة إلى تغيير شعبتك.', 403);
+  }
   const current = await env.DB.prepare(
     `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
   ).bind(groupId, user.userId).first<{ status: string }>();
