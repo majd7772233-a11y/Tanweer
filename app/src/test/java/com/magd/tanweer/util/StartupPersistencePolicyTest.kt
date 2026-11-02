@@ -29,6 +29,54 @@ class StartupPersistencePolicyTest {
     }
 
     @Test
+    fun savedGroupIsKeptOnlyWhenServerConfirmsMembership() {
+        assertEquals(
+            "class_10_C",
+            AcademicSessionSelection.resolveAuthorizedGroupId(
+                "class_10_C",
+                "class_10_B",
+                listOf("class_10_B", "class_10_C")
+            )
+        )
+    }
+
+    @Test
+    fun removedSavedGroupFallsBackToAuthorizedDefault() {
+        assertEquals(
+            "class_10_B",
+            AcademicSessionSelection.resolveAuthorizedGroupId(
+                "class_10_C",
+                "class_10_B",
+                listOf("class_10_B")
+            )
+        )
+    }
+
+    @Test
+    fun unavailableDefaultFallsBackToFirstActiveMembership() {
+        assertEquals(
+            "class_10_A",
+            AcademicSessionSelection.resolveAuthorizedGroupId(
+                "class_10_C",
+                "class_10_B",
+                listOf("class_10_A", "class_10_D")
+            )
+        )
+    }
+
+    @Test
+    fun noActiveMembershipResolvesToEmptyGroup() {
+        assertEquals(
+            "",
+            AcademicSessionSelection.resolveAuthorizedGroupId(
+                "class_10_C",
+                "class_10_B",
+                emptyList()
+            )
+        )
+    }
+
+    @Test
     fun validSavedStudyDateSurvivesRestart() {
         assertEquals(
             "2026-10-31",
