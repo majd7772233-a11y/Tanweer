@@ -25,8 +25,14 @@ export async function getGroupChatSendPermission(
     global_role: string;
   }>();
 
-  const chatPolicy = (row?.chat_policy || 'MEMBERS').toUpperCase();
-  const effectiveGlobalRole = normalizeRole(row?.global_role || globalRole);
+  if (!row) {
+    // Membership can be revoked while a WebSocket is still open.
+    // Missing an active membership must never fall back to public send access.
+    return { allowed: false, chatPolicy: 'UNKNOWN', memberRole: Role.STUDENT };
+  }
+
+  const chatPolicy = (row.chat_policy || 'MEMBERS').toUpperCase();
+  const effectiveGlobalRole = normalizeRole(row.global_role || globalRole);
   const groupRole = normalizeRole(row?.member_role || Role.STUDENT);
   if (chatPolicy !== 'STAFF_ONLY') {
     return { allowed: true, chatPolicy, memberRole: groupRole };
