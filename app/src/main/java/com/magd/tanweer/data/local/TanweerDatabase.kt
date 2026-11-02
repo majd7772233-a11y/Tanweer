@@ -32,7 +32,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DailyPlanEntity::class,
         BookExtractedPageEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = false
 )
 abstract class TanweerDatabase : RoomDatabase() {
@@ -72,6 +72,9 @@ abstract class TanweerDatabase : RoomDatabase() {
             // Preserve all existing homework rows while adding the official-publication flag.
             try {
                 database.execSQL("ALTER TABLE `cached_homeworks` ADD COLUMN `isOfficial` INTEGER NOT NULL DEFAULT 0")
+            } catch (_: Exception) {}
+            try {
+                database.execSQL("ALTER TABLE `cached_exams` ADD COLUMN `isOfficial` INTEGER NOT NULL DEFAULT 0")
             } catch (_: Exception) {}
             try {
                 // If legacy table daily_plans exists, migrate rows to cached_daily_plan
@@ -246,6 +249,12 @@ abstract class TanweerDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                applyUniversalSchemaUpgrades(database)
+            }
+        }
+
         fun getInstance(context: Context): TanweerDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -260,7 +269,8 @@ abstract class TanweerDatabase : RoomDatabase() {
                         MIGRATION_10_12,
                         MIGRATION_11_12,
                         MIGRATION_12_13,
-                        MIGRATION_13_14
+                        MIGRATION_13_14,
+                        MIGRATION_14_15
                     )
                     // Never silently erase a user's academic cache on an app downgrade.
                     // Unsupported schema transitions must fail visibly until a preserving
