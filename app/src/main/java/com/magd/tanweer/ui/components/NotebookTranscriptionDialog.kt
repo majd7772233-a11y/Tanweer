@@ -35,6 +35,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.magd.tanweer.data.model.ContentItem
+import com.magd.tanweer.data.remote.NetworkModule
 import com.magd.tanweer.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -192,7 +193,11 @@ fun NotebookTranscriptionDialog(
                             )
                         } else null
 
-                        val imageModel = if (localBoardFile.exists() && localBoardFile.length() > 0) localBoardFile else currentMedia.url
+                        val imageModel = if (localBoardFile.exists() && localBoardFile.length() > 0) {
+                            localBoardFile
+                        } else {
+                            NetworkModule.resolveApiUrl(currentMedia.url)
+                        }
 
                         AsyncImage(
                             model = imageModel,
@@ -245,7 +250,8 @@ fun NotebookTranscriptionDialog(
                                             context = context,
                                             imageSource = sourcePath,
                                             title = content.title,
-                                            pageIndex = currentPageIndex
+                                            pageIndex = currentPageIndex,
+                                            groupId = content.groupId
                                         )
                                         saveResult.fold(
                                             onSuccess = {
