@@ -3350,7 +3350,8 @@ class TanweerRepository(
             subjectIcon = subject?.icon ?: "🔴",
             colorHex = subject?.colorHex ?: "#FF3366",
             examType = examType,
-            syncStatus = "SYNCING"
+            syncStatus = "SYNCING",
+            isOfficial = isOfficial
         )
         db.examDao().insertExam(entity)
 
