@@ -1,6 +1,9 @@
 name: Deploy Tanweer Staging
 
 on:
+  push:
+    branches:
+      - work/release-readiness
   workflow_dispatch:
 
 permissions:
@@ -87,6 +90,9 @@ jobs:
           fi
 
       - name: Deploy staging Worker only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: ./node_modules/.bin/wrangler deploy --env staging
 
       - name: Staging health check
