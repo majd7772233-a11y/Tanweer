@@ -146,12 +146,12 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private fun persistSelectedGroup(groupId: String) {
         val userId = currentUser.value?.id ?: currentActiveUserId ?: return
-        prefs.edit().putString("selected_group_id_${userId}", groupId).apply()
+        prefs.edit().putString("selected_group_id_${userId}", groupId).commit()
     }
 
     private fun persistSelectedStudyDate(date: String) {
         val userId = currentUser.value?.id ?: currentActiveUserId ?: return
-        prefs.edit().putString("selected_study_date_${userId}", date).apply()
+        prefs.edit().putString("selected_study_date_${userId}", date).commit()
     }
 
     fun dismissCatchUpCard() {
