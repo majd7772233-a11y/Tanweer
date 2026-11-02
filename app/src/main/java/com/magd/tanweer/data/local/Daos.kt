@@ -64,6 +64,19 @@ interface ScheduleDao {
 
     @Query("SELECT * FROM cached_schedule_slots WHERE groupId = :groupId")
     suspend fun getSlotsSync(groupId: String): List<ScheduleSlotEntity>
+
+    /**
+     * Atomically replaces a server snapshot while retaining local slot mutations.
+     * If the app process is killed during sync, Room rolls back the whole replacement
+     * instead of leaving the schedule table empty after the DELETE.
+     */
+    @Transaction
+    suspend fun reconcileGroupSchedule(groupId: String, serverSlots: List<ScheduleSlotEntity>) {
+        val localMutations = getSlotsSync(groupId).filter { it.syncStatus != "SYNCED" }
+        clearSlots(groupId)
+        if (serverSlots.isNotEmpty()) insertSlots(serverSlots)
+        if (localMutations.isNotEmpty()) insertSlots(localMutations)
+    }
 }
 
 @Dao
