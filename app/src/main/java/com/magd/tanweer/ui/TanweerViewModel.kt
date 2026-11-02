@@ -437,6 +437,24 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                         _isCheckingAuth.value = true
                         restoreAcademicSelection(user)
                         try {
+                            // Retry the generation check when the first app-level probe happened
+                            // before login or while the network was temporarily unavailable.
+                            if (!dataGenerationVerified) {
+                                val retryVersion = repository.getSystemVersion()
+                                val retryGeneration = retryVersion.getOrNull()?.dataGeneration
+                                if (retryVersion.isSuccess && !retryGeneration.isNullOrBlank()) {
+                                    val purged = repository.checkAndApplyDataGeneration(
+                                        getApplication(),
+                                        retryGeneration
+                                    )
+                                    dataGenerationVerified = true
+                                    if (purged) {
+                                        logout()
+                                        return@collect
+                                    }
+                                }
+                            }
+
                             // Push acknowledged local mutations first, then pull the authoritative
                             // server snapshot. This happens on every app launch/login, independent
                             // of the optional background auto-sync preference.
