@@ -1360,9 +1360,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         onError: (String) -> Unit
     ) {
         viewModelScope.launch {
+            val previousDefaultGroupId = currentUser.value?.defaultGroupId
             val result = repository.updateProfile(fullName, gradeId, sectionId)
             result.onSuccess { user ->
-                restoreAcademicSelection(user, resetGroup = gradeId != null || sectionId != null)
+                restoreAcademicSelection(user, resetGroup = previousDefaultGroupId != user.defaultGroupId)
                 syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
                 syncBooks(user.gradeId, isRefresh = true)
                 onSuccess()
