@@ -70,6 +70,7 @@ fun EventsScreen(
         "CELEBRATION" to "مناسبات واحتفالات 🎉",
         "HOLIDAY" to "عطل وإجازات 🏖️",
         "WORKSHOP" to "ورش ومراجعات 💡",
+        "ANNOUNCEMENT" to "تعاميم رسمية 📢",
         "GENERAL" to "عام 📌"
     )
 
@@ -270,6 +271,7 @@ fun EventsScreen(
                                             "CELEBRATION" -> "🎉"
                                             "HOLIDAY" -> "🏖️"
                                             "WORKSHOP" -> "💡"
+                                            "ANNOUNCEMENT" -> "📢"
                                             else -> "📌"
                                         },
                                         fontSize = 20.sp
@@ -296,11 +298,32 @@ fun EventsScreen(
                                         "CELEBRATION" -> "مناسبة 🎉"
                                         "HOLIDAY" -> "إجازة 🏖️"
                                         "WORKSHOP" -> "ورشة 💡"
+                                        "ANNOUNCEMENT" -> "تعميم رسمي 📢"
                                         else -> "فعالية 📌"
                                     },
                                     color = if (isToday) EmeraldGreen else PurpleAccent,
                                     bgColor = if (isToday) EmeraldGreen.copy(alpha = 0.15f) else PurpleAccent.copy(alpha = 0.15f)
                                 )
+                            }
+
+                            if (event.isOfficial || event.category.equals("ANNOUNCEMENT", ignoreCase = true)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    GlassPill(
+                                        text = "صادر عن ${event.sourceName ?: "إدارة المدرسة"}",
+                                        color = WarmAmber,
+                                        bgColor = AmberGlow
+                                    )
+                                    Text(
+                                        text = "رسمي ✓",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldGreen
+                                    )
+                                }
                             }
 
                             if (!event.description.isNullOrBlank()) {
