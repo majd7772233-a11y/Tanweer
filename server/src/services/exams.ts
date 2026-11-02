@@ -48,7 +48,11 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
   const examDate = body.examDate || body.date;
   const chapters = body.requiredChapters || body.topics;
   const rawType = (body.examType || 'MONTHLY').trim().toUpperCase();
-  const examType = ['MONTHLY', 'ORAL', 'QUIZ', 'MIDTERM', 'FINAL'].includes(rawType) ? rawType : 'MONTHLY';
+  const allowedExamTypes = ['MONTHLY', 'ORAL', 'MIDTERM', 'FINAL'];
+  if (!allowedExamTypes.includes(rawType)) {
+    return errorResponse('INVALID_EXAM_TYPE', 'أنواع الاختبارات المتاحة هي: شهري، شفهي، نصفي، نهائي فقط');
+  }
+  const examType = rawType;
 
   if (!body.groupId || !examDate || !body.subjectId || !body.title) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد تفاصيل الاختبار والمادة وتاريخه');
@@ -66,7 +70,7 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
     groupId: body.groupId,
   });
 
-  const isOfficial = (body.isOfficial && canPublishOfficial) || canPublishOfficial ? 1 : 0;
+  const isOfficial = body.isOfficial === true && canPublishOfficial ? 1 : 0;
   const examId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
     : generateId('exm');
@@ -178,7 +182,10 @@ export async function handleUpdateExam(
   }
 
   const rawType = body.examType ? body.examType.trim().toUpperCase() : null;
-  const examTypeVal = rawType && ['MONTHLY', 'ORAL', 'QUIZ', 'MIDTERM', 'FINAL'].includes(rawType) ? rawType : null;
+  const examTypeVal = rawType && ['MONTHLY', 'ORAL', 'MIDTERM', 'FINAL'].includes(rawType) ? rawType : null;
+  if (rawType && examTypeVal === null) {
+    return errorResponse('INVALID_EXAM_TYPE', 'أنواع الاختبارات المتاحة هي: شهري، شفهي، نصفي، نهائي فقط');
+  }
 
   await env.DB.prepare(
     `UPDATE exams
