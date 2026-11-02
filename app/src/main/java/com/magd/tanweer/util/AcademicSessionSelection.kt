@@ -15,6 +15,21 @@ internal object AcademicSessionSelection {
             ?: ""
     }
 
+    /**
+     * Keeps a saved selection only while it is still an active server-confirmed membership.
+     * The default group is preferred next; otherwise the first server-returned membership is used.
+     */
+    fun resolveAuthorizedGroupId(
+        savedGroupId: String?,
+        defaultGroupId: String?,
+        availableGroupIds: Collection<String>
+    ): String {
+        val available = availableGroupIds.toSet()
+        return savedGroupId?.takeIf { it.isNotBlank() && it in available }
+            ?: defaultGroupId?.takeIf { it.isNotBlank() && it in available }
+            ?: availableGroupIds.firstOrNull().orEmpty()
+    }
+
     fun resolveStudyDate(savedDate: String?, today: String): String {
         return savedDate?.takeIf(::isValidIsoDate) ?: today
     }
