@@ -145,6 +145,11 @@ export async function handleDeleteGroupMessage(
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
 
+  const sendPermission = await getGroupChatSendPermission(groupId, user.userId, user.role, env);
+  if (!sendPermission.allowed) {
+    return errorResponse('READ_ONLY_GROUP', 'لا تملك صلاحية حذف الرسائل في مجموعة الهيئة التعليمية؛ يمكنك القراءة فقط.', 403);
+  }
+
   const message = await env.DB.prepare(
     `SELECT sender_id FROM chat_messages WHERE id = ? AND group_id = ?`
   ).bind(messageId, groupId).first<{ sender_id: string }>();
