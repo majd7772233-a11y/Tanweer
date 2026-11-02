@@ -74,6 +74,13 @@ fun HomeScreen(
 
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val schoolAnnouncements = remember(events) {
+        events.asSequence()
+            .filter { it.groupId == "all" && it.category.equals("ANNOUNCEMENT", ignoreCase = true) }
+            .sortedByDescending { it.createdAt }
+            .take(3)
+            .toList()
+    }
 
     val dailyPlanItems by viewModel.getDailyPlanForDate(todayDate)
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -431,6 +438,77 @@ fun HomeScreen(
                             color = CyanAccent
                         )
                         Text(text = "التوثيق", fontSize = 10.sp, color = TextMuted)
+                    }
+                }
+            }
+        }
+
+        // Official school announcements are published by the school admin to group "all".
+        if (schoolAnnouncements.isNotEmpty()) {
+            item {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        viewModel.setSubScreen(SubScreen.EVENTS)
+                    },
+                    borderColor = WarmAmber.copy(alpha = 0.7f),
+                    backgroundColor = GlassSurface
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("📢", fontSize = 20.sp)
+                                Column {
+                                    Text(
+                                        text = "تعاميم المدرسة الرسمية",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = WarmAmber
+                                    )
+                                    Text(
+                                        text = "إعلانات صادرة عن إدارة المدرسة",
+                                        fontSize = 10.sp,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+                            GlassPill(text = "رسمي", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.12f))
+                        }
+                        schoolAnnouncements.forEachIndexed { index, announcement ->
+                            if (index > 0) HorizontalDivider(color = GlassBorderSubtle, thickness = 0.5.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(
+                                    text = announcement.title,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                if (!announcement.description.isNullOrBlank()) {
+                                    Text(
+                                        text = announcement.description,
+                                        fontSize = 11.sp,
+                                        color = TextSecondary,
+                                        lineHeight = 16.sp,
+                                        maxLines = 3
+                                    )
+                                }
+                                Text(
+                                    text = "${announcement.sourceName ?: "إدارة المدرسة"} • ${announcement.eventDate}",
+                                    fontSize = 9.sp,
+                                    color = TextMuted
+                                )
+                            }
+                        }
+                        Text(
+                            text = "عرض جميع التعاميم والفعاليات ←",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CyanAccent,
+                            modifier = Modifier.align(Alignment.End)
+                        )
                     }
                 }
             }
