@@ -736,15 +736,15 @@ fun GroupsScreen(
                                         }
                                     }
 
-                                    val pendingRequest = group.membershipStatus == "PENDING"
+                                    val hasPendingRequest = group.membershipStatus == "PENDING"
                                     GlassPill(
                                         text = when {
-                                            pendingRequest -> "بانتظار الموافقة ⏳"
+                                            hasPendingRequest -> "بانتظار الموافقة ⏳"
                                             group.visibility == "PRIVATE" -> "خاصة 🔐"
                                             else -> "عامة 🌐"
                                         },
-                                        color = if (pendingRequest || group.visibility == "PRIVATE") WarmAmber else EmeraldGreen,
-                                        bgColor = if (pendingRequest || group.visibility == "PRIVATE") AmberGlow else EmeraldGreen.copy(alpha = 0.15f)
+                                        color = if (hasPendingRequest || group.visibility == "PRIVATE") WarmAmber else EmeraldGreen,
+                                        bgColor = if (hasPendingRequest || group.visibility == "PRIVATE") AmberGlow else EmeraldGreen.copy(alpha = 0.15f)
                                     )
                                 }
 
@@ -760,41 +760,55 @@ fun GroupsScreen(
                                 Spacer(modifier = Modifier.height(10.dp))
 
                                 val requiresApproval = group.visibility == "PRIVATE" || group.type == "CLASS"
-                                val pendingRequest = group.membershipStatus == "PENDING"
                                 val rejectedRequest = group.membershipStatus == "REJECTED"
-                                GlassButton(
-                                    text = when {
-                                        pendingRequest -> "طلبك قيد المراجعة"
-                                        rejectedRequest -> "إعادة طلب الانضمام"
-                                        requiresApproval -> "طلب الانضمام إلى المجموعة 🔐"
-                                        else -> "انضمام مباشر ➕"
-                                    },
-                                    icon = Icons.Default.GroupAdd,
-                                    enabled = !pendingRequest,
-                                    onClick = {
-                                        if (requiresApproval) {
-                                            joinRequestGroup = group
-                                            joinReasonText = ""
-                                        } else {
-                                            viewModel.joinGroup(
-                                                groupId = group.id,
-                                                onResult = { isSuccess, status, message ->
-                                                    if (isSuccess) {
-                                                        if (status == "ACTIVE") {
-                                                            Toast.makeText(context, "تم الانضمام إلى ${group.name} بنجاح! 🎉", Toast.LENGTH_SHORT).show()
-                                                            activeTab = GroupsTab.MY_GROUPS
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    GlassButton(
+                                        text = when {
+                                            hasPendingRequest -> "طلبك قيد المراجعة"
+                                            rejectedRequest -> "إعادة طلب الانضمام"
+                                            requiresApproval -> "طلب الانضمام إلى المجموعة 🔐"
+                                            else -> "انضمام مباشر ➕"
+                                        },
+                                        icon = Icons.Default.GroupAdd,
+                                        enabled = !hasPendingRequest,
+                                        onClick = {
+                                            if (requiresApproval) {
+                                                joinRequestGroup = group
+                                                joinReasonText = ""
+                                            } else {
+                                                viewModel.joinGroup(
+                                                    groupId = group.id,
+                                                    onResult = { isSuccess, status, message ->
+                                                        if (isSuccess) {
+                                                            if (status == "ACTIVE") {
+                                                                Toast.makeText(context, "تم الانضمام إلى ${group.name} بنجاح! 🎉", Toast.LENGTH_SHORT).show()
+                                                                activeTab = GroupsTab.MY_GROUPS
+                                                            } else {
+                                                                Toast.makeText(context, "تم إرسال طلب الانضمام إلى ${group.name}، بانتظار موافقة المشرفين ⏳", Toast.LENGTH_LONG).show()
+                                                            }
                                                         } else {
-                                                            Toast.makeText(context, "تم إرسال طلب الانضمام إلى ${group.name}، بانتظار موافقة المشرفين ⏳", Toast.LENGTH_LONG).show()
+                                                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                                                         }
-                                                    } else {
-                                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                                                     }
-                                                }
-                                            )
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (canManageGroupMembers(group)) {
+                                        GlassOutlinedButton(
+                                            text = "إدارة الطلبات",
+                                            onClick = {
+                                                managingGroup = group
+                                                viewModel.loadGroupMembers(group.id)
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
