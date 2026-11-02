@@ -262,25 +262,41 @@ class TanweerRepository(
     // UNIFIED SYNC ENGINE: Server -> Sync Engine -> Room -> Compose UI
     // =========================================================================
 
+    /**
+     * Startup reconciliation. The server is authoritative: refresh the signed-in
+     * user's profile and active memberships first, then fetch the current academic
+     * view and every server-backed section for every group the user actively belongs to.
+     */
     suspend fun syncInitial(groupId: String, todayDate: String): SyncResult = withContext(Dispatchers.IO) {
         try {
             val results = mutableListOf<SyncResult>()
+
+            // These must run first because they determine the current server identity
+            // and the set of groups the authenticated account is allowed to access.
             results.add(syncProfile())
             results.add(syncGroups())
-            if (groupId.isNotBlank()) {
-                results.add(syncSchedule(groupId))
-                results.add(syncDay(groupId, todayDate))
-                results.add(syncHomeworks(groupId))
-                results.add(syncExams(groupId))
-                results.add(syncIssues(groupId))
-                results.add(syncEvents(groupId))
-                val user = db.userDao().getUserSync()
-                if (user != null && user.gradeId != null) {
-                    results.add(syncBooks(user.gradeId))
-                }
+
+            val refreshedUser = db.userDao().getUserSync()
+            val activeGroups = db.groupDao().getMyGroupsSync()
+            val effectiveGroupId = activeGroups.firstOrNull { it.id == groupId }?.id
+                ?: activeGroups.firstOrNull { it.id == refreshedUser?.defaultGroupId }?.id
+                ?: activeGroups.firstOrNull()?.id
+                ?: ""
+
+            // Daily view is date-scoped; the complete group archives are synchronized below.
+            if (effectiveGroupId.isNotBlank() && todayDate.isNotBlank()) {
+                results.add(syncDay(effectiveGroupId, todayDate))
             }
-            // Sync cross-group historical archive so moving between grades/groups preserves student's complete academic history
-            results.add(syncStudentAcademicArchive())
+
+            // This fetches the cross-group archive and reconciles lessons, homework,
+            // exams, events, schedules, issues, and the selected calendar month.
+            results.add(syncStudentAcademicArchive(todayDate.takeIf { it.length >= 7 }?.take(7)))
+
+            // Books belong to the student's grade, not to a particular joined group.
+            // New accounts with no group membership must still receive their catalog.
+            refreshedUser?.gradeId?.let { gradeId ->
+                results.add(syncBooks(gradeId))
+            }
 
             val errors = results.filterIsInstance<SyncResult.Error>()
             val offlines = results.filterIsInstance<SyncResult.Offline>()
@@ -294,7 +310,7 @@ class TanweerRepository(
                 else -> SyncResult.Success()
             }
         } catch (e: Exception) {
-            Log.e("TanweerRepository", "Initial sync error", e)
+            Log.e("TanweerRepository", "Initial server reconciliation error", e)
             SyncResult.Offline("وضع عدم الاتصال: تعذر إكمال المزامنة الكاملة")
         }
     }
@@ -351,62 +367,69 @@ class TanweerRepository(
         }
     }
 
-    suspend fun syncStudentAcademicArchive(): SyncResult = withContext(Dispatchers.IO) {
+    suspend fun syncStudentAcademicArchive(calendarMonth: String? = null): SyncResult = withContext(Dispatchers.IO) {
         try {
             val subResults = mutableListOf<SyncResult>()
 
-            // TA-26: Fetch historical cross-grade contributions/lessons directly from server archive
+            // Pull the account-scoped cross-grade archive from the authenticated server.
             try {
                 val archiveRes = api.getAcademicArchive()
-                if (archiveRes.isSuccessful && archiveRes.body() != null) {
-                    val archiveContents = archiveRes.body()!!.contents
-                    if (archiveContents.isNotEmpty()) {
-                        val entities = archiveContents.map {
-                            val mediaJson = if (it.media.isNotEmpty()) {
-                                try {
-                                    org.json.JSONArray(it.media.map { m -> m.url }).toString()
-                                } catch (_: Exception) { "[]" }
-                            } else "[]"
-                            ContentEntity(
-                                id = it.id,
-                                groupId = it.groupId,
-                                studyDate = it.studyDate,
-                                subjectId = it.subjectId,
-                                type = it.type,
-                                title = it.title,
-                                description = it.description,
-                                createdBy = it.createdBy,
-                                authorName = it.authorName,
-                                authorGradeSection = it.authorGradeSection,
-                                viewsCount = it.viewsCount,
-                                usefulCount = it.usefulCount,
-                                createdAt = it.createdAt,
-                                subjectName = it.subjectName,
-                                subjectIcon = it.subjectIcon,
-                                colorHex = it.colorHex,
-                                mediaUrlsJson = mediaJson,
-                                syncStatus = "SYNCED"
-                            )
-                        }
-                        db.contentDao().insertContents(entities)
-                        subResults.add(SyncResult.Success(entities.size))
+                val archiveBody = archiveRes.body()
+                if (archiveRes.isSuccessful && archiveBody?.success == true) {
+                    val entities = archiveBody.contents.map {
+                        val mediaJson = if (it.media.isNotEmpty()) {
+                            try {
+                                org.json.JSONArray(it.media.map { media -> media.url }).toString()
+                            } catch (_: Exception) { "[]" }
+                        } else "[]"
+                        ContentEntity(
+                            id = it.id,
+                            groupId = it.groupId,
+                            studyDate = it.studyDate,
+                            subjectId = it.subjectId,
+                            type = it.type,
+                            title = it.title,
+                            description = it.description,
+                            createdBy = it.createdBy,
+                            authorName = it.authorName,
+                            authorGradeSection = it.authorGradeSection,
+                            viewsCount = it.viewsCount,
+                            usefulCount = it.usefulCount,
+                            createdAt = it.createdAt,
+                            subjectName = it.subjectName,
+                            subjectIcon = it.subjectIcon,
+                            colorHex = it.colorHex,
+                            mediaUrlsJson = mediaJson,
+                            syncStatus = "SYNCED"
+                        )
                     }
+                    if (entities.isNotEmpty()) db.contentDao().insertContents(entities)
+                    subResults.add(SyncResult.Success(entities.size))
+                } else {
+                    subResults.add(resolveHttpError(archiveRes, "تعذر جلب الأرشيف الأكاديمي"))
                 }
             } catch (e: Exception) {
-                Log.w("TanweerRepository", "Failed fetching academic archive from server: ${e.message}")
+                subResults.add(resolveException(e, "تعذر جلب الأرشيف الأكاديمي"))
             }
 
-            val myGroups = db.groupDao().getMyGroupsSync()
-            for (grp in myGroups) {
+            // getMyGroupsSync() contains only active memberships returned by /groups.
+            // Never request another account's private group data or treat discoverable
+            // groups as joined groups.
+            val activeGroups = db.groupDao().getMyGroupsSync()
+            for (group in activeGroups) {
                 try {
-                    subResults.add(syncContents(grp.id))
-                    subResults.add(syncHomeworks(grp.id))
-                    subResults.add(syncExams(grp.id))
-                    subResults.add(syncEvents(grp.id))
-                    subResults.add(syncSchedule(grp.id))
+                    subResults.add(syncContents(group.id))
+                    subResults.add(syncHomeworks(group.id))
+                    subResults.add(syncExams(group.id))
+                    subResults.add(syncEvents(group.id))
+                    subResults.add(syncSchedule(group.id))
+                    subResults.add(syncIssues(group.id))
+                    if (!calendarMonth.isNullOrBlank()) {
+                        subResults.add(syncCalendarMonth(group.id, calendarMonth))
+                    }
                 } catch (e: Exception) {
-                    Log.w("TanweerRepository", "Failed syncing academic archive for group ${grp.id}: ${e.message}")
-                    subResults.add(resolveException(e, "تعذر مزامنة أرشيف الشعبة ${grp.name}"))
+                    Log.w("TanweerRepository", "Failed syncing server data for group ${group.id}: ${e.message}")
+                    subResults.add(resolveException(e, "تعذر مزامنة بيانات المجموعة ${group.name}"))
                 }
             }
 
@@ -419,14 +442,12 @@ class TanweerRepository(
                     SyncResult.Error(errors.first().message, errors.first().isNetworkError)
                 offlines.isNotEmpty() && offlines.size == subResults.size ->
                     SyncResult.Offline("وضع عدم الاتصال: تعذر إكمال مزامنة الأرشيف الأكاديمي")
-                errors.isNotEmpty() || offlines.isNotEmpty() -> {
-                    val succeededCount = successes.size
-                    val totalCount = subResults.size
-                    SyncResult.Offline("اكتملت مزامنة بعض أقسام الأرشيف ($succeededCount/$totalCount)، وبقيت أقسام أخرى غير مكتملة أو دون اتصال")
-                }
+                errors.isNotEmpty() || offlines.isNotEmpty() ->
+                    SyncResult.Offline("اكتملت مزامنة بعض أقسام الأرشيف (${successes.size}/${subResults.size})، وبقيت أقسام أخرى غير مكتملة أو دون اتصال")
                 else -> SyncResult.Success(successes.size)
             }
         } catch (e: Exception) {
+            Log.e("TanweerRepository", "Academic archive reconciliation failed", e)
             SyncResult.Offline("أوفلاين: الأرشيف الأكاديمي")
         }
     }
