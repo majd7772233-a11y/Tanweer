@@ -51,6 +51,17 @@ export function buildNewDeviceSessionStatements(env: Env, input: NewDeviceSessio
          app_version = excluded.app_version,
          last_seen = excluded.last_seen`
     ).bind(deviceId, userId, platform, appVersion, now, sessionId, userId, tokenHash),
+
+    // Remove stale device inventory rows left behind by expired sessions.
+    env.DB.prepare(
+      `DELETE FROM devices
+       WHERE user_id = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM sessions
+           WHERE sessions.user_id = ? AND sessions.device_id = devices.device_id
+             AND sessions.expires_at > ?
+         )`
+    ).bind(userId, userId, now),
   ];
 }
 
@@ -95,7 +106,7 @@ export async function handleGetMyDevices(user: UserContext, env: Env): Promise<R
     `SELECT s.device_id AS deviceId,
             COALESCE(d.platform, 'Android') AS platform,
             COALESCE(d.app_version, '') AS appVersion,
-            COALESCE(d.last_seen, MAX(s.created_at)) AS lastSeen,
+            MAX(s.created_at) AS lastSeen,
             MAX(s.created_at) AS connectedAt
      FROM sessions s
      LEFT JOIN devices d ON d.device_id = s.device_id AND d.user_id = s.user_id
