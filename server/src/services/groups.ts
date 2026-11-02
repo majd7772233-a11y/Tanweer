@@ -445,8 +445,14 @@ async function notifyGroupManagers(
          ON gm.user_id = u.id AND gm.group_id = ? AND gm.status = 'ACTIVE'
        WHERE u.id != ?
          AND (
-           UPPER(gm.role) IN ('MODERATOR', 'TEACHER', 'ADMIN')
-           OR UPPER(u.role) IN ('MODERATOR', 'TEACHER', 'VERIFIED_TEACHER', 'ADMIN', 'SYSTEM_OWNER')
+           UPPER(u.role) = 'ADMIN'
+           OR (
+             gm.status = 'ACTIVE'
+             AND (
+               UPPER(gm.role) IN ('MODERATOR', 'TEACHER', 'ADMIN')
+               OR UPPER(u.role) IN ('TEACHER', 'VERIFIED_TEACHER')
+             )
+           )
          )`
     ).bind(groupId, excludeUserId).all<{ user_id: string }>();
     const rows = managers.results || [];
