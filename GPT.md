@@ -1561,6 +1561,7 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **Debug APK artifact:** `Tanweer-debug-823660d24355a83334b0e5ab4a82a4fa6b5237bd`, artifact ID `13136773993`, 30,649,285 bytes, SHA-256 `5e910cbe05d9390392954b85254c519c076646c2413f14b0c039fff17c1e54a9`. The artifact is available in Actions run 41437771455 and expires 2026-11-09.
 - **Cloudflare safety:** Only read-only D1/Worker inspection and CI `wrangler deploy --dry-run` checks were performed. No production Worker deployment, D1 write/migration, secret modification, or production data change occurred.
 - **Device testing:** No physical-device test was performed in this session; CI validates build and automated tests only.
+- **Notebook language cleanup:** Removed the remaining Arabic-script brand label and Arabic text from search-operator examples. Verified the entire `GPT.md` file contains no Arabic-script characters.
 - **Validation PRs:** PR #4 and PR #5 were both closed without merging. Each targeted a disposable branch copied from main; neither targeted `main` directly.
 
 ---
