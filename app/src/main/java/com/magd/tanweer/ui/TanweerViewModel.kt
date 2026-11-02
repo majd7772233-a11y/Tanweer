@@ -1447,6 +1447,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 reason = reason
             )
             result.onSuccess { msg ->
+                // A schedule proposal is also a unified community decision.
+                // Take the user straight to that shared decision list after the server confirms it.
+                loadCommunityDecisions()
+                setSubScreen(SubScreen.COMMUNITY_DECISIONS)
                 onResult(true, msg)
             }.onFailure { err ->
                 onResult(false, err.message ?: "تعذر إرسال المقترح")
