@@ -2165,7 +2165,7 @@ class TanweerRepository(
                     subjectIcon = it.subjectIcon,
                     colorHex = it.colorHex,
                     isCompleted = it.isCompleted,
-                    examType = it.examType,
+                    examType = if (it.examType == "QUIZ") "MONTHLY" else it.examType,
                     syncStatus = it.syncStatus
                 )
             }
@@ -2187,7 +2187,7 @@ class TanweerRepository(
                     subjectIcon = it.subjectIcon,
                     colorHex = it.colorHex,
                     isCompleted = it.isCompleted,
-                    examType = it.examType,
+                    examType = if (it.examType == "QUIZ") "MONTHLY" else it.examType,
                     syncStatus = it.syncStatus
                 )
             }
