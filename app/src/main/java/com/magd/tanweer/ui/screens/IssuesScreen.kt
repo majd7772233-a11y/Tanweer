@@ -348,8 +348,30 @@ fun IssueDetailView(
 
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val currentRole = currentUser?.role?.trim()?.uppercase().orEmpty()
+    var isApprovedGroupTeacher by remember(issueId) { mutableStateOf(false) }
+
+    LaunchedEffect(issue?.groupId, currentUser?.id, currentRole) {
+        isApprovedGroupTeacher = false
+        val groupId = issue?.groupId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        val userId = currentUser?.id ?: return@LaunchedEffect
+        val hasGlobalApproval = currentRole in setOf(
+            "TEACHER", "VERIFIED_TEACHER", "ADMIN", "ADMINISTRATOR", "SYSTEM_OWNER", "OWNER"
+        )
+        val isIssueAuthor = issue?.authorName == currentUser?.fullName
+        if (hasGlobalApproval || isIssueAuthor) return@LaunchedEffect
+
+        viewModel.repository.getGroupMembers(groupId).onSuccess { response ->
+            isApprovedGroupTeacher = response.members.any { member ->
+                member.userId == userId &&
+                    member.status.equals("ACTIVE", ignoreCase = true) &&
+                    member.memberRole.equals("TEACHER", ignoreCase = true)
+            }
+        }
+    }
+
     val canApproveBestAnswer =
         issue?.authorName == currentUser?.fullName ||
+            isApprovedGroupTeacher ||
             currentRole in setOf("TEACHER", "VERIFIED_TEACHER", "ADMIN", "ADMINISTRATOR", "SYSTEM_OWNER", "OWNER")
     val context = LocalContext.current
     var replyText by remember { mutableStateOf("") }
