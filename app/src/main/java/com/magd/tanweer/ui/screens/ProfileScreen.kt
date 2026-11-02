@@ -37,6 +37,21 @@ import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+
+private fun formatYemeniPhoneForDisplay(rawPhone: String): String {
+    val digits = rawPhone.filter { it.isDigit() }
+    val local = when {
+        digits.startsWith("00967") && digits.length == 14 -> digits.drop(5)
+        digits.startsWith("967") && digits.length == 12 -> digits.drop(3)
+        digits.startsWith("0") && digits.length == 10 -> digits.drop(1)
+        else -> digits
+    }
+    return if (local.length == 9 && local.startsWith("7")) {
+        "${local.substring(0, 3)} ${local.substring(3, 6)} ${local.substring(6, 9)}"
+    } else {
+        rawPhone
+    }
+}
 import com.magd.tanweer.util.ArabicNameValidator
 import com.magd.tanweer.util.TanweerHapticManager
 
@@ -190,7 +205,7 @@ fun ProfileScreen(
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    text = "📱 رقم الهاتف: ${currentUser?.phoneNumber ?: ""}",
+                                    text = "📱 رقم الهاتف: ${currentUser?.phoneNumber?.let(::formatYemeniPhoneForDisplay) ?: ""}",
                                     fontSize = 11.sp,
                                     color = TextMuted
                                 )
