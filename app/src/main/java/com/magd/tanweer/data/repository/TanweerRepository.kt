@@ -3243,43 +3243,59 @@ class TanweerRepository(
     }
 
     suspend fun toggleExamCompletion(examId: String, targetStatus: Boolean): Result<Boolean> = withContext(Dispatchers.IO) {
-        val pendingDelete = db.outboxDao().getPendingMutation(examId, "EXAM_DELETE")
-        if (pendingDelete != null) {
-            return@withContext Result.failure(Exception("لا يمكن تغيير حالة اختبار قيد الحذف"))
-        }
-        val exam = db.examDao().getExamById(examId)
-            ?: return@withContext Result.failure(Exception("الاختبار غير موجود"))
-        if (exam.syncStatus == "DELETE_PENDING") {
-            return@withContext Result.failure(Exception("طلب حذف هذا الاختبار قيد المزامنة"))
-        }
-        val isNotSyncedYet = exam.syncStatus != "SYNCED"
-        db.examDao().updateExamCompletion(examId, targetStatus)
-
-        if (isNotSyncedYet) {
-            val outboxItem = OutboxEntity(
-                id = "ob_examt_${examId}_${System.currentTimeMillis()}",
-                entityType = "EXAM_TOGGLE",
-                entityId = examId,
-                operation = "UPDATE",
-                payloadJson = "{\"isCompleted\": $targetStatus}"
-            )
-            db.outboxDao().insertOutbox(outboxItem)
-            return@withContext Result.success(targetStatus)
-        }
-
+        examMutationMutex.lock()
         try {
-            val res = api.toggleExamCompletion(examId, ToggleCompletionRequest(isCompleted = targetStatus))
-            if (res.isSuccessful) {
-                db.outboxDao().deleteByEntityIdAndType(examId, "EXAM_TOGGLE")
-                val serverCompleted = res.body()?.isCompleted ?: targetStatus
-                db.examDao().updateExamCompletion(examId, serverCompleted)
-                Result.success(serverCompleted)
-            } else if (res.code() in listOf(401, 403)) {
-                // Rollback on rejection or authorization failure
-                db.examDao().updateExamCompletion(examId, !targetStatus)
-                Result.failure(Exception("لا تملك صلاحية تغيير حالة الاختبار (كود ${res.code()})"))
-            } else {
-                // Server temporary failure: queue in outbox for reliable retry
+            val pendingDelete = db.outboxDao().getPendingMutation(examId, "EXAM_DELETE")
+            if (pendingDelete != null) {
+                return@withContext Result.failure(Exception("لا يمكن تغيير حالة اختبار قيد الحذف"))
+            }
+
+            val exam = db.examDao().getExamById(examId)
+                ?: return@withContext Result.failure(Exception("الاختبار غير موجود"))
+            if (exam.syncStatus == "DELETE_PENDING") {
+                return@withContext Result.failure(Exception("طلب حذف هذا الاختبار قيد المزامنة"))
+            }
+
+            val pendingToggle = db.outboxDao().getPendingMutation(examId, "EXAM_TOGGLE")
+            val mustQueue = exam.syncStatus != "SYNCED" || pendingToggle != null
+            db.examDao().updateExamCompletion(examId, targetStatus)
+
+            if (mustQueue) {
+                val outboxItem = OutboxEntity(
+                    id = "ob_examt_${examId}_${System.currentTimeMillis()}",
+                    entityType = "EXAM_TOGGLE",
+                    entityId = examId,
+                    operation = "UPDATE",
+                    payloadJson = "{\"isCompleted\": $targetStatus}"
+                )
+                db.outboxDao().insertOutbox(outboxItem)
+                return@withContext Result.success(targetStatus)
+            }
+
+            try {
+                val res = api.toggleExamCompletion(examId, ToggleCompletionRequest(isCompleted = targetStatus))
+                if (res.isSuccessful) {
+                    db.outboxDao().deleteByEntityIdAndType(examId, "EXAM_TOGGLE")
+                    val serverCompleted = res.body()?.isCompleted ?: targetStatus
+                    db.examDao().updateExamCompletion(examId, serverCompleted)
+                    Result.success(serverCompleted)
+                } else if (res.code() in listOf(401, 403)) {
+                    // Rollback on rejection or authorization failure.
+                    db.examDao().updateExamCompletion(examId, !targetStatus)
+                    Result.failure(Exception("لا تملك صلاحية تغيير حالة الاختبار (كود ${res.code()})"))
+                } else {
+                    val outboxItem = OutboxEntity(
+                        id = "ob_examt_${examId}_${System.currentTimeMillis()}",
+                        entityType = "EXAM_TOGGLE",
+                        entityId = examId,
+                        operation = "UPDATE",
+                        payloadJson = "{\"isCompleted\": $targetStatus}"
+                    )
+                    db.outboxDao().insertOutbox(outboxItem)
+                    Result.success(targetStatus)
+                }
+            } catch (_: Exception) {
+                // Network failure: retain the desired state for reliable retry.
                 val outboxItem = OutboxEntity(
                     id = "ob_examt_${examId}_${System.currentTimeMillis()}",
                     entityType = "EXAM_TOGGLE",
@@ -3290,17 +3306,8 @@ class TanweerRepository(
                 db.outboxDao().insertOutbox(outboxItem)
                 Result.success(targetStatus)
             }
-        } catch (_: Exception) {
-            // Network failure: queue in outbox for reliable offline retry
-            val outboxItem = OutboxEntity(
-                id = "ob_examt_${examId}_${System.currentTimeMillis()}",
-                entityType = "EXAM_TOGGLE",
-                entityId = examId,
-                operation = "UPDATE",
-                payloadJson = "{\"isCompleted\": $targetStatus}"
-            )
-            db.outboxDao().insertOutbox(outboxItem)
-            Result.success(targetStatus)
+        } finally {
+            examMutationMutex.unlock()
         }
     }
 
