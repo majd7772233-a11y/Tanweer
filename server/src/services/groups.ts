@@ -436,11 +436,11 @@ async function notifyGroupManagers(
 ): Promise<void> {
   try {
     const managers = await env.DB.prepare(
-      `SELECT DISTINCT gm.user_id
-       FROM group_members gm
-       JOIN users u ON u.id = gm.user_id
-       WHERE gm.group_id = ? AND gm.status = 'ACTIVE'
-         AND gm.user_id != ?
+      `SELECT DISTINCT u.id AS user_id
+       FROM users u
+       LEFT JOIN group_members gm
+         ON gm.user_id = u.id AND gm.group_id = ? AND gm.status = 'ACTIVE'
+       WHERE u.id != ?
          AND (
            UPPER(gm.role) IN ('MODERATOR', 'TEACHER', 'ADMIN')
            OR UPPER(u.role) IN ('TEACHER', 'VERIFIED_TEACHER', 'ADMIN', 'SYSTEM_OWNER')
