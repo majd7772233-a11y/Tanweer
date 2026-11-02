@@ -18,6 +18,23 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  flavorDimensions += "environment"
+
+  productFlavors {
+    create("production") {
+      dimension = "environment"
+      buildConfigField("String", "API_BASE_URL", "\"https://tanweer.magd.workers.dev/\"")
+    }
+
+    create("staging") {
+      dimension = "environment"
+      applicationIdSuffix = ".staging"
+      versionNameSuffix = "-staging"
+      buildConfigField("String", "API_BASE_URL", "\"https://tanweer-staging.magd.workers.dev/\"")
+      resValue("string", "app_name", "تنوير (تجريبي)")
+    }
+  }
+
   signingConfigs {
     create("release") {
         val keystorePath = System.getenv("KEYSTORE_PATH")

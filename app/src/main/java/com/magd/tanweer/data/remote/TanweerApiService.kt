@@ -653,12 +653,45 @@ interface GitHubApiService {
 }
 
 object NetworkModule {
-    private const val BASE_URL = "https://tanweer.magd.workers.dev/"
+    private val BASE_URL = BuildConfig.API_BASE_URL
     private const val GITHUB_BASE_URL = "https://api.github.com/"
     private var authToken: String? = null
 
     fun setAuthToken(token: String?) {
         authToken = token
+    }
+
+    val apiBaseUrl: String
+        get() = BASE_URL
+
+    /**
+     * Resolves a server-returned relative URL against the selected build flavor.
+     * Absolute HTTP(S) URLs (for example, external media hosts) remain untouched.
+     */
+    fun resolveApiUrl(url: String): String {
+        val trimmed = url.trim()
+        if (trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true)
+        ) {
+            return trimmed
+        }
+
+        return "${BASE_URL.trimEnd('/')}/${trimmed.trimStart('/')}"
+    }
+
+    /**
+     * Builds a WebSocket URL from the same API origin used by Retrofit.
+     */
+    fun resolveWebSocketUrl(path: String): String {
+        val websocketBaseUrl = when {
+            BASE_URL.startsWith("https://", ignoreCase = true) ->
+                "wss://${BASE_URL.substringAfter("://")}"
+            BASE_URL.startsWith("http://", ignoreCase = true) ->
+                "ws://${BASE_URL.substringAfter("://")}"
+            else -> throw IllegalStateException("Unsupported API base URL scheme")
+        }
+
+        return "${websocketBaseUrl.trimEnd('/')}/${path.trimStart('/')}"
     }
 
     private val moshi = Moshi.Builder()

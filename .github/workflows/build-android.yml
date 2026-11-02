@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - work/release-readiness
     paths-ignore:
       - 'server/**'
       - 'docs/**'
@@ -25,6 +26,9 @@ jobs:
     name: Build Tanweer Android
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # Only main produces Production builds. Every other branch builds Staging by default.
+      BUILD_FLAVOR: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Staging' }}
 
     steps:
       - name: Checkout repository
@@ -64,16 +68,16 @@ jobs:
           ./gradlew --version
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace --no-daemon
+        run: ./gradlew "test${BUILD_FLAVOR}DebugUnitTest" --stacktrace --no-daemon
 
       # PRs do not have access to repository secrets.
       # Build Debug there so CI still verifies the Android project.
       - name: Assemble Debug APK
         if: github.event_name == 'pull_request'
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        run: ./gradlew "assemble${BUILD_FLAVOR}Debug" --stacktrace --no-daemon
 
       # ------------------------------------------------------------
-      # Release signing - main / manual runs only
+      # Release signing - Production on main; Staging on other branches / manual runs
       # ------------------------------------------------------------
 
       - name: Prepare release keystore
@@ -152,7 +156,7 @@ jobs:
             exit 1
           }
 
-          ./gradlew clean assembleRelease \
+          ./gradlew clean "assemble${BUILD_FLAVOR}Release" \
             --stacktrace \
             --no-daemon
 
@@ -161,7 +165,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          APK_PATH="app/build/outputs/apk/release/app-release.apk"
+          APK_PATH="app/build/outputs/apk/${BUILD_FLAVOR,,}/release/app-${BUILD_FLAVOR,,}-release.apk"
 
           test -f "$APK_PATH" || {
             echo "Release APK was not generated."
@@ -187,18 +191,18 @@ jobs:
           mkdir -p artifacts
 
           cp \
-            app/build/outputs/apk/release/app-release.apk \
-            "artifacts/Tanweer-${GITHUB_SHA::7}-release.apk"
+            app/build/outputs/apk/${BUILD_FLAVOR,,}/release/app-${BUILD_FLAVOR,,}-release.apk \
+            "artifacts/Tanweer-${GITHUB_SHA::7}-${BUILD_FLAVOR,,}-release.apk"
 
           cp \
             app-release.sha256 \
-            "artifacts/Tanweer-${GITHUB_SHA::7}-release.apk.sha256"
+            "artifacts/Tanweer-${GITHUB_SHA::7}-${BUILD_FLAVOR,,}-release.apk.sha256"
 
       - name: Upload signed Release APK
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: Tanweer-release-${{ github.sha }}
+          name: Tanweer-${{ env.BUILD_FLAVOR }}-release-${{ github.sha }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
@@ -208,6 +212,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Tanweer-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/${BUILD_FLAVOR,,}/debug/app-${BUILD_FLAVOR,,}-debug.apk
           if-no-files-found: error
           retention-days: 7

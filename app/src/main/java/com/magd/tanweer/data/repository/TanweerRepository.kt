@@ -2660,7 +2660,7 @@ class TanweerRepository(
                     if (uploadRes.isSuccessful && uploadRes.body() != null) {
                         val body = uploadRes.body()!!
                         remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
-                            if (rel.startsWith("http")) rel else "https://tanweer.magd.workers.dev/${rel.removePrefix("/")}"
+                            if (rel.startsWith("http")) rel else NetworkModule.resolveApiUrl(rel)
                         }
                         serverChecksum = body.checksum ?: page.sha256
                     }
@@ -2781,7 +2781,7 @@ class TanweerRepository(
                         if (uploadRes.isSuccessful && uploadRes.body() != null) {
                             val body = uploadRes.body()!!
                             val remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
-                                if (rel.startsWith("http")) rel else "https://tanweer.magd.workers.dev/${rel.removePrefix("/")}"
+                                if (rel.startsWith("http")) rel else NetworkModule.resolveApiUrl(rel)
                             }
                             if (remoteUrl != null) {
                                 val csum = body.checksum ?: item.checksum ?: try { ImageProcessingUtils.calculateSha256(file.readBytes()) } catch (_: Exception) { null }
@@ -3007,7 +3007,7 @@ class TanweerRepository(
                     if (uploadRes.isSuccessful && uploadRes.body() != null) {
                         val body = uploadRes.body()!!
                         remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
-                            if (rel.startsWith("http")) rel else "https://tanweer.magd.workers.dev/${rel.removePrefix("/")}"
+                            if (rel.startsWith("http")) rel else NetworkModule.resolveApiUrl(rel)
                         }
                     }
                 }
@@ -3129,7 +3129,7 @@ class TanweerRepository(
                         if (uploadRes.isSuccessful && uploadRes.body() != null) {
                             val body = uploadRes.body()!!
                             val remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
-                                if (rel.startsWith("http")) rel else "https://tanweer.magd.workers.dev/${rel.removePrefix("/")}"
+                                if (rel.startsWith("http")) rel else NetworkModule.resolveApiUrl(rel)
                             }
                             if (remoteUrl != null) {
                                 finalRemoteUrls.add(remoteUrl)
