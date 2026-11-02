@@ -35,6 +35,9 @@
   },
   "env": {
     "staging": {
+      "vars": {
+        "ENVIRONMENT": "staging"
+      },
       "d1_databases": [
         {
           "binding": "DB",
