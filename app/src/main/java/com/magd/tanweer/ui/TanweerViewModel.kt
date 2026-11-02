@@ -494,7 +494,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                             // Refresh server-backed secondary screens before releasing startup.
                             // The server still authorizes each endpoint; this only preloads data
                             // for the signed-in account and its currently active group.
-                            refreshStartupAuxiliaryData(user, authorizedGroupId)
+                            refreshStartupAuxiliaryData(user, authorizedGroupId, activeGroupIds)
 
                             applyStartupSyncResult(syncResult)
                         } catch (e: Exception) {
@@ -512,11 +512,20 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun refreshStartupAuxiliaryData(user: User, groupId: String) = coroutineScope {
+    private suspend fun refreshStartupAuxiliaryData(user: User, groupId: String, activeGroupIds: List<String>) = coroutineScope {
         val tasks = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
 
         tasks += async(Dispatchers.IO) {
             _myRoleRequests.value = repository.getMyRoleRequests()
+        }
+
+        // Pull recent chat history for every server-confirmed active membership.
+        // No WebSocket is opened until the user enters that group's chat.
+        activeGroupIds.distinct().forEach { activeGroupId ->
+            tasks += async(Dispatchers.IO) {
+                repository.syncGroupChatHistory(activeGroupId)
+                Unit
+            }
         }
 
         if (groupId.isNotBlank()) {
