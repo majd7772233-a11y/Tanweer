@@ -10,6 +10,7 @@ import com.magd.tanweer.data.remote.ConnectionStatus
 import com.magd.tanweer.data.remote.NetworkModule
 import com.magd.tanweer.data.repository.SyncResult
 import com.magd.tanweer.data.repository.TanweerRepository
+import com.magd.tanweer.util.AcademicSessionSelection
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -120,6 +121,37 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             // Save today's date for this user
             prefs.edit().putString(userDateKey, todayDateStr).apply()
         }
+    }
+
+    private fun restoreAcademicSelection(user: User, resetGroup: Boolean = false) {
+        val groupKey = "selected_group_id_${user.id}"
+        val savedGroupId = prefs.getString(groupKey, null)
+        val groupId = if (resetGroup) {
+            AcademicSessionSelection.resolveGroupId(null, user.defaultGroupId)
+        } else {
+            AcademicSessionSelection.resolveGroupId(savedGroupId, user.defaultGroupId)
+        }
+        _selectedGroupId.value = groupId
+
+        val dateKey = "selected_study_date_${user.id}"
+        val savedDate = prefs.getString(dateKey, null)
+        val studyDate = AcademicSessionSelection.resolveStudyDate(savedDate, todayDateStr)
+        _selectedDate.value = studyDate
+
+        prefs.edit()
+            .putString(groupKey, groupId)
+            .putString(dateKey, studyDate)
+            .apply()
+    }
+
+    private fun persistSelectedGroup(groupId: String) {
+        val userId = currentUser.value?.id ?: currentActiveUserId ?: return
+        prefs.edit().putString("selected_group_id_${userId}", groupId).apply()
+    }
+
+    private fun persistSelectedStudyDate(date: String) {
+        val userId = currentUser.value?.id ?: currentActiveUserId ?: return
+        prefs.edit().putString("selected_study_date_${userId}", date).apply()
     }
 
     fun dismissCatchUpCard() {
@@ -388,11 +420,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 .distinctUntilChangedBy { it?.id }
                 .collect { user ->
                     if (user != null) {
-                        if (_selectedGroupId.value.isEmpty()) {
-                            _selectedGroupId.value = user.defaultGroupId
-                        }
+                        restoreAcademicSelection(user)
                         if (_autoSyncEnabled.value) {
-                            syncInitialData(user.defaultGroupId, _selectedDate.value)
+                            syncInitialData(getActiveGroupId(), _selectedDate.value)
                             syncBooks(user.gradeId)
                         }
                     }
@@ -489,14 +519,18 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setSelectedGroup(groupId: String) {
+        if (groupId.isBlank()) return
         _selectedGroupId.value = groupId
+        persistSelectedGroup(groupId)
         if (_autoSyncEnabled.value) {
             syncInitialData(groupId, _selectedDate.value)
         }
     }
 
     fun setSelectedDate(date: String) {
+        if (!AcademicSessionSelection.isValidIsoDate(date)) return
         _selectedDate.value = date
+        persistSelectedStudyDate(date)
         syncHome(getActiveGroupId(), date, isRefresh = false)
     }
 
@@ -1268,11 +1302,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val result = repository.register(fullName, phone, pass, gradeId, sectionId)
             result.onSuccess { pair ->
-                _selectedGroupId.value = pair.first.defaultGroupId
+                restoreAcademicSelection(pair.first)
                 if (pair.second.isNotEmpty()) {
                     _recoveryCodeDialog.value = pair.second
                 }
-                syncInitialData(pair.first.defaultGroupId, _selectedDate.value, isExplicitAction = true)
+                syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
                 syncBooks(pair.first.gradeId, isRefresh = true)
                 onSuccess()
             }.onFailure { err ->
@@ -1290,8 +1324,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val result = repository.login(phone, pass)
             result.onSuccess { user ->
-                _selectedGroupId.value = user.defaultGroupId
-                syncInitialData(user.defaultGroupId, _selectedDate.value, isExplicitAction = true)
+                restoreAcademicSelection(user)
+                syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
                 syncBooks(user.gradeId, isRefresh = true)
                 onSuccess()
             }.onFailure { err ->
@@ -1308,8 +1342,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val result = repository.loginWithRecoveryCode(code)
             result.onSuccess { user ->
-                _selectedGroupId.value = user.defaultGroupId
-                syncInitialData(user.defaultGroupId, _selectedDate.value, isExplicitAction = true)
+                restoreAcademicSelection(user)
+                syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
                 syncBooks(user.gradeId, isRefresh = true)
                 onSuccess()
             }.onFailure { err ->
@@ -1328,8 +1362,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val result = repository.updateProfile(fullName, gradeId, sectionId)
             result.onSuccess { user ->
-                _selectedGroupId.value = user.defaultGroupId
-                syncInitialData(user.defaultGroupId, _selectedDate.value, isExplicitAction = true)
+                restoreAcademicSelection(user, resetGroup = user.defaultGroupId != _selectedGroupId.value)
+                syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
                 syncBooks(user.gradeId, isRefresh = true)
                 onSuccess()
             }.onFailure { err ->
