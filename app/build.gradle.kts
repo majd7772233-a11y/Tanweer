@@ -31,7 +31,6 @@ android {
       applicationIdSuffix = ".staging"
       versionNameSuffix = "-staging"
       buildConfigField("String", "API_BASE_URL", "\"https://tanweer-staging.magd.workers.dev/\"")
-      resValue("string", "app_name", "تنوير (تجريبي)")
     }
   }
 

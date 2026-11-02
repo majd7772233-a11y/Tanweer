@@ -1,7 +1,7 @@
 /**
  * Tanweer Control Center (Owner Dashboard & Management Core)
  * Unified Administrative Engine & Cloudflare Worker Dashboard
- * URL: https://tanweer.magd.workers.dev/dashboard
+ * URL: /dashboard (relative to the current Worker origin)
  */
 
 import { Env } from '../env';
@@ -3659,7 +3659,7 @@ export function renderDashboardHtml(): Response {
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.5rem;">
             <div style="background:rgba(255,255,255,0.02); padding:1.25rem; border-radius:12px; border:1px solid var(--border);">
               <h3 style="font-size:0.95rem; color:var(--cyan); margin-bottom:0.75rem;">بيانات الخادم (Cloudflare Workers)</h3>
-              <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">المسار المعتمد: <code>https://tanweer.magd.workers.dev/dashboard</code></p>
+              <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">المسار المعتمد: <code>/dashboard</code> (على عنوان البيئة الحالية)</p>
               <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">حالة البيئة: <strong id="sysEnv" style="color:var(--emerald);">-</strong></p>
               <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">الموقع الجغرافي: <strong>Cloudflare Edge Network</strong></p>
               <p style="font-size:0.85rem; color:var(--text-sec);">قاعدة البيانات: <strong>Cloudflare D1 (مفعلة ومتصلة)</strong></p>
