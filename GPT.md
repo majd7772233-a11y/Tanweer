@@ -1546,6 +1546,19 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **Cloudflare:** No D1 writes, migrations, secrets changes, or Worker deployment.
 - **Next step:** Verify the Android build and unit tests plus server tests on the latest HEAD; inspect all current-head logs and close the validation-only PR unmerged.
 
+
+### 2026-11-02 — Startup chat history and latest validation cycle
+
+- **Branch / commit:** work/release-readiness / 99a88d8102a20202d54124ef550efa1b47fb34cf.
+- **Inspected:** Android chat REST endpoint and response model, ChatDao, Repository WebSocket lifecycle, ViewModel startup gate, Worker chat service, and Cloudflare D1 transaction documentation.
+- **Server contract verified:** The authenticated chat endpoint checks active group membership and returns the latest 100 messages in chronological order. The client must not retrieve group chat for accounts that are not active members.
+- **Repository change, commit d3433e2bb711e744bd3b360f9356297985212302:** Added syncGroupChatHistory(groupId), validates success and group scope, inserts server-confirmed messages as SENT, and does not clear older local history.
+- **ViewModel change, commit 99a88d8102a20202d54124ef550efa1b47fb34cf:** Startup now fetches recent chat history for every server-confirmed active group. It does not open WebSockets in the background; the live socket remains tied to entering the chat screen.
+- **CI:** Server typecheck, unit/integration tests, and Wrangler production-bundle validation passed for HEAD 99a88d8102a20202d54124ef550efa1b47fb34cf (run 41436885537). Android build was pending when this entry was written (run 41436885467). A previous Android CI run for earlier HEAD 437ec8d4ac8cab0552ff46362acce31e5d0bfd58 passed unit tests and Debug APK assembly, but does not validate the latest chat-history changes.
+- **Cloudflare:** Read current D1 Worker API documentation. D1 batch operations execute sequentially inside a SQL transaction; no D1 writes, migrations, secrets changes, or Worker deployment were performed.
+- **Remaining scope:** The Android app still has user-specific local-only study data such as Daily Plan entries and PDF annotations/reading state that do not yet have complete server APIs. Startup cannot synchronize data that has no server persistence contract. Chat prefetch is the latest 100 server messages per active group, matching the current endpoint limit; older local history is retained.
+- **Next step:** Verify Android CI on the latest HEAD, update this log with the final CI/artifact state, and close validation-only PR #4 without merging.
+
 ---
 
 # END OF GPT.md
