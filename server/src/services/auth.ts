@@ -5,6 +5,30 @@ import { validateArabicFullName, validateYemenPhoneNumber, evaluatePasswordStren
 import { errorResponse, jsonResponse } from '../lib/response';
 import { getCurrentAcademicYearId } from '../lib/school';
 import { Role, normalizeRole, sanitizePublicRole } from '../lib/roles';
+import { buildNewDeviceSessionStatements, createDeviceSession, revokeCreatedDeviceSession } from './devices';
+
+function resolveDeviceIdentity(request: Request, requestedId?: string, requestedPlatform?: string, requestedVersion?: string) {
+  const rawDeviceId = (requestedId || request.headers.get('X-Device-Id') || generateId('dev')).trim();
+  if (!/^[A-Za-z0-9._:-]{8,128}$/.test(rawDeviceId)) return null;
+
+  const platform = (requestedPlatform || 'Android').trim().slice(0, 40) || 'Android';
+  const appVersion = (requestedVersion || 'Unknown').trim().slice(0, 40) || 'Unknown';
+  return { deviceId: rawDeviceId, platform, appVersion };
+}
+
+async function isDeviceLimitReached(
+  env: Env,
+  userId: string,
+  deviceId: string,
+  now: number
+): Promise<boolean> {
+  const count = await env.DB.prepare(
+    `SELECT COUNT(DISTINCT device_id) as count
+     FROM sessions
+     WHERE user_id = ? AND expires_at > ? AND device_id != ?`
+  ).bind(userId, now, deviceId).first<{ count: number }>();
+  return (count?.count || 0) >= 3;
+}
 
 export async function handleRegister(request: Request, env: Env): Promise<Response> {
   const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
@@ -20,6 +44,8 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     sectionId?: string;
     email?: string;
     deviceId?: string;
+    platform?: string;
+    appVersion?: string;
   };
 
   if (!body.phoneNumber || !body.password || !body.fullName || !body.gradeId || !body.sectionId) {
@@ -50,6 +76,10 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   }
 
   const classGroupId = `class_${body.gradeId}_${body.sectionId.toUpperCase()}`;
+  const deviceIdentity = resolveDeviceIdentity(request, body.deviceId, body.platform, body.appVersion);
+  if (!deviceIdentity) {
+    return errorResponse('INVALID_DEVICE_ID', 'معرّف الجهاز غير صالح. حدّث التطبيق وحاول مجدداً.', 400);
+  }
 
   const existingUser = await env.DB.prepare(
     `SELECT id, password_hash, grade_id, section_id, status FROM users WHERE phone_number = ?`
@@ -98,6 +128,16 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   }
 
   const now = Date.now();
+  // Fail early for incomplete-registration repair when this account already uses
+  // all three other device slots. The final insert also checks the limit atomically.
+  if (await isDeviceLimitReached(env, userId, deviceIdentity.deviceId, now)) {
+    return errorResponse(
+      'DEVICE_LIMIT_REACHED',
+      'وصلت إلى الحد الأقصى وهو 3 أجهزة نشطة للحساب. أزل جهازاً قديماً من الإعدادات ثم أعد المحاولة.',
+      403
+    );
+  }
+
   const { hash: passwordHash } = await hashPassword(body.password, pepper);
   const recoveryCode = generateRecoveryCode();
   const recoveryCodeHash = await hashString(recoveryCode.replace(/[\s\-]/g, '').toUpperCase(), pepper);
@@ -189,19 +229,34 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     ).bind(classGroupId, userId, Role.STUDENT, now)
   );
 
-  batchStatements.push(
-    env.DB.prepare(
-      `INSERT INTO sessions (id, user_id, device_id, refresh_token_hash, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(sessionId, userId, deviceId, tokenHash, expiresAt, now)
-  );
+  const deviceSessionStatements = buildNewDeviceSessionStatements(env, {
+    userId,
+    deviceId: deviceIdentity.deviceId,
+    sessionId,
+    tokenHash,
+    expiresAt,
+    platform: deviceIdentity.platform,
+    appVersion: deviceIdentity.appVersion,
+    now,
+  });
+  const sessionInsertResultIndex = batchStatements.length + 1;
+  batchStatements.push(...deviceSessionStatements);
 
+  let registrationResults: any[] = [];
   if (typeof env.DB.batch === 'function') {
-    await env.DB.batch(batchStatements);
+    registrationResults = await env.DB.batch(batchStatements);
   } else {
     for (const stmt of batchStatements) {
-      await stmt.run();
+      registrationResults.push(await stmt.run());
     }
+  }
+
+  if (registrationResults[sessionInsertResultIndex]?.meta?.changes !== 1) {
+    return errorResponse(
+      'DEVICE_LIMIT_REACHED',
+      'وصلت إلى الحد الأقصى وهو 3 أجهزة نشطة للحساب. أزل جهازاً قديماً من أحد أجهزتك ثم أعد المحاولة.',
+      403
+    );
   }
 
   return jsonResponse({
@@ -231,6 +286,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
     password?: string;
     deviceId?: string;
     appVersion?: string;
+    platform?: string;
   };
 
   if (!body.phoneNumber || !body.password) {
@@ -317,16 +373,40 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
 
   await env.DB.prepare(`UPDATE users SET last_seen = ? WHERE id = ?`).bind(now, user.id).run();
 
+  const deviceIdentity = resolveDeviceIdentity(request, body.deviceId, body.platform, body.appVersion);
+  if (!deviceIdentity) {
+    return errorResponse('INVALID_DEVICE_ID', 'معرّف الجهاز غير صالح. حدّث التطبيق وحاول مجدداً.', 400);
+  }
+
   const token = generateRandomToken();
   const tokenHash = await hashString(token, pepper);
   const sessionId = generateId('sess');
-  const deviceId = body.deviceId || generateId('dev');
   const expiresAt = now + 90 * 24 * 3600 * 1000;
 
-  await env.DB.prepare(
-    `INSERT INTO sessions (id, user_id, device_id, refresh_token_hash, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(sessionId, user.id, deviceId, tokenHash, expiresAt, now).run();
+  let sessionCreated = false;
+  try {
+    sessionCreated = await createDeviceSession(env, {
+      userId: user.id,
+      deviceId: deviceIdentity.deviceId,
+      sessionId,
+      tokenHash,
+      expiresAt,
+      platform: deviceIdentity.platform,
+      appVersion: deviceIdentity.appVersion,
+      now,
+    });
+  } catch (error) {
+    console.error('Failed to create device session:', error);
+    return errorResponse('SESSION_STORE_UNAVAILABLE', 'تعذر إنشاء جلسة الجهاز حالياً. يرجى المحاولة لاحقاً.', 503);
+  }
+
+  if (!sessionCreated) {
+    return errorResponse(
+      'DEVICE_LIMIT_REACHED',
+      'وصلت إلى الحد الأقصى وهو 3 أجهزة نشطة للحساب. افتح الإعدادات من جهاز مسجل، وأزل جهازاً قديماً ثم أعد تسجيل الدخول.',
+      403
+    );
+  }
 
   const classGroupId = (user.grade_id && user.section_id && user.role !== Role.ADMIN) ? `class_${user.grade_id}_${user.section_id}` : '';
 
@@ -354,6 +434,8 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
   const body = await request.json() as {
     recoveryCode?: string;
     deviceId?: string;
+    platform?: string;
+    appVersion?: string;
   };
 
   if (!body.recoveryCode || !body.recoveryCode.trim()) {
@@ -409,6 +491,17 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
   }
 
   const now = Date.now();
+  const deviceIdentity = resolveDeviceIdentity(request, body.deviceId, body.platform, body.appVersion);
+  if (!deviceIdentity) {
+    return errorResponse('INVALID_DEVICE_ID', 'معرّف الجهاز غير صالح. حدّث التطبيق وحاول مجدداً.', 400);
+  }
+  if (await isDeviceLimitReached(env, user.id, deviceIdentity.deviceId, now)) {
+    return errorResponse(
+      'DEVICE_LIMIT_REACHED',
+      'وصلت إلى الحد الأقصى وهو 3 أجهزة نشطة للحساب. أزل جهازاً قديماً من الإعدادات قبل استخدام رمز الاسترداد.',
+      403
+    );
+  }
 
   // Read the token's revocation/expiry state. A storage failure must never bypass
   // the single-use policy, so do not catch-and-ignore D1 errors here.
@@ -454,6 +547,36 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
     }
   }
 
+  const token = generateRandomToken();
+  const tokenHash = await hashString(token, pepper);
+  const sessionId = generateId('sess');
+  const expiresAt = now + 90 * 24 * 3600 * 1000;
+
+  let reservedSession = false;
+  try {
+    reservedSession = await createDeviceSession(env, {
+      userId: user.id,
+      deviceId: deviceIdentity.deviceId,
+      sessionId,
+      tokenHash,
+      expiresAt,
+      platform: deviceIdentity.platform,
+      appVersion: deviceIdentity.appVersion,
+      now,
+    });
+  } catch (error) {
+    console.error('Failed to reserve a device slot for recovery login:', error);
+    return errorResponse('SESSION_STORE_UNAVAILABLE', 'تعذر إنشاء جلسة الجهاز حالياً. يرجى المحاولة لاحقاً.', 503);
+  }
+
+  if (!reservedSession) {
+    return errorResponse(
+      'DEVICE_LIMIT_REACHED',
+      'وصلت إلى الحد الأقصى وهو 3 أجهزة نشطة للحساب. أزل جهازاً قديماً من الإعدادات قبل استخدام رمز الاسترداد.',
+      403
+    );
+  }
+
   // Compare-and-swap on the verified hash. Concurrent requests can read the
   // same code, but only one can replace this exact hash with the burned marker.
   const burnedHash = 'USED_' + now + '_' + generateRandomToken().slice(0, 12);
@@ -488,6 +611,9 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
   }
 
   if (burnResult.meta?.changes !== 1) {
+    await revokeCreatedDeviceSession(env, user.id, deviceIdentity.deviceId, sessionId).catch(error =>
+      console.error('Failed to clean up recovery session after a lost race:', error)
+    );
     return errorResponse(
       'RECOVERY_CODE_USED',
       'تم استخدام رمز الاسترداد أو إبطاله بالفعل. يرجى طلب رمز جديد من الإدارة.',
@@ -508,6 +634,9 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
 
       if (tokenUse.meta?.changes !== 1) {
         console.error('Recovery code user hash was burned but its issuance counter was not updated:', recoveryToken.id);
+        await revokeCreatedDeviceSession(env, user.id, deviceIdentity.deviceId, sessionId).catch(error =>
+          console.error('Failed to clean up recovery session after token counter failure:', error)
+        );
         return errorResponse(
           'AUTHENTICATION_UNAVAILABLE',
           'تم إيقاف رمز الاسترداد أثناء التحقق. تواصل مع إدارة المنظومة لإصدار رمز جديد.',
@@ -516,6 +645,9 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
       }
     } catch (error) {
       console.error('Failed to update recovery-token usage counter:', error);
+      await revokeCreatedDeviceSession(env, user.id, deviceIdentity.deviceId, sessionId).catch(cleanupError =>
+        console.error('Failed to clean up recovery session after token usage error:', cleanupError)
+      );
       return errorResponse(
         'AUTHENTICATION_UNAVAILABLE',
         'تعذر إكمال التحقق من رمز الاسترداد. تواصل مع إدارة المنظومة لإصدار رمز جديد.',
@@ -523,17 +655,6 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
       );
     }
   }
-
-  const token = generateRandomToken();
-  const tokenHash = await hashString(token, pepper);
-  const sessionId = generateId('sess');
-  const deviceId = body.deviceId || generateId('dev');
-  const expiresAt = now + 90 * 24 * 3600 * 1000;
-
-  await env.DB.prepare(
-    `INSERT INTO sessions (id, user_id, device_id, refresh_token_hash, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(sessionId, user.id, deviceId, tokenHash, expiresAt, now).run();
 
   const classGroupId = (user.grade_id && user.section_id && user.role !== Role.ADMIN) ? `class_${user.grade_id}_${user.section_id}` : '';
 
