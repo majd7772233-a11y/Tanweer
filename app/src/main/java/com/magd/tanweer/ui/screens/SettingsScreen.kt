@@ -75,6 +75,36 @@ fun SettingsScreen(
     var syncReportDialog by remember { mutableStateOf<ComprehensiveSyncReport?>(null) }
     var isSyncingComprehensive by remember { mutableStateOf(false) }
 
+    var registeredDevices by remember {
+        mutableStateOf<List<com.magd.tanweer.data.remote.RegisteredDevice>>(emptyList())
+    }
+    var activeDevicesCount by remember { mutableIntStateOf(0) }
+    var maxActiveDevices by remember { mutableIntStateOf(3) }
+    var isLoadingDevices by remember { mutableStateOf(false) }
+    var deviceLoadError by remember { mutableStateOf<String?>(null) }
+    var deviceToRemove by remember {
+        mutableStateOf<com.magd.tanweer.data.remote.RegisteredDevice?>(null)
+    }
+    var isRemovingDevice by remember { mutableStateOf(false) }
+
+    suspend fun reloadRegisteredDevices() {
+        isLoadingDevices = true
+        deviceLoadError = null
+        val result = viewModel.repository.getRegisteredDevices()
+        result.onSuccess { response ->
+            registeredDevices = response.devices
+            activeDevicesCount = response.activeDevicesCount
+            maxActiveDevices = response.maxActiveDevices
+        }.onFailure { error ->
+            deviceLoadError = error.message ?: "تعذر تحميل الأجهزة المسجلة"
+        }
+        isLoadingDevices = false
+    }
+
+    LaunchedEffect(Unit) {
+        reloadRegisteredDevices()
+    }
+
     fun openAppNotificationSettings() {
         val intent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
@@ -785,7 +815,142 @@ fun SettingsScreen(
         }
 
         // -------------------------------------------------------------
-        // SECTION 8: APP VERSION & UPDATE CHECK
+        // SECTION 8: ACCOUNT DEVICES & ACTIVE SESSIONS
+        // -------------------------------------------------------------
+        item {
+            SettingsSectionHeader(
+                title = "📱 أجهزتي المسجلة",
+                subtitle = "إدارة الأجهزة المتصلة بحسابك (بحد أقصى ثلاثة أجهزة نشطة)"
+            )
+        }
+
+        item {
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "الأجهزة النشطة: $activeDevicesCount / $maxActiveDevices",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (activeDevicesCount >= maxActiveDevices) WarmAmber else CyanAccent
+                            )
+                            Text(
+                                text = "يمكنك إزالة جهاز قديم لإضافة جهاز جديد. إعادة الدخول من الجهاز نفسه لا تستهلك خانة إضافية.",
+                                fontSize = 10.sp,
+                                color = TextSecondary
+                            )
+                        }
+                        IconButton(
+                            onClick = { coroutineScope.launch { reloadRegisteredDevices() } },
+                            enabled = !isLoadingDevices
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "تحديث الأجهزة", tint = CyanAccent)
+                        }
+                    }
+
+                    if (isLoadingDevices && registeredDevices.isEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = CyanAccent
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("جارٍ تحميل الأجهزة...", fontSize = 11.sp, color = TextSecondary)
+                        }
+                    } else if (deviceLoadError != null && registeredDevices.isEmpty()) {
+                        Text(
+                            text = deviceLoadError ?: "تعذر تحميل الأجهزة",
+                            fontSize = 11.sp,
+                            color = RubyRed
+                        )
+                        GlassOutlinedButton(
+                            text = "إعادة المحاولة",
+                            onClick = { coroutineScope.launch { reloadRegisteredDevices() } }
+                        )
+                    } else if (registeredDevices.isEmpty()) {
+                        Text(
+                            text = "لا توجد أجهزة نشطة مسجلة لهذا الحساب.",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    } else {
+                        registeredDevices.forEach { device ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MidnightSurface.copy(alpha = 0.7f))
+                                    .border(1.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Smartphone,
+                                    contentDescription = null,
+                                    tint = if (device.isCurrent) CyanAccent else TextSecondary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = device.platform.ifBlank { "Android" },
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = if (device.appVersion.isBlank()) "إصدار التطبيق غير محدد" else "الإصدار ${device.appVersion}",
+                                        fontSize = 10.sp,
+                                        color = TextSecondary
+                                    )
+                                    Text(
+                                        text = "آخر نشاط: " + if (device.lastSeen > 0L) {
+                                            java.text.SimpleDateFormat(
+                                                "yyyy-MM-dd  HH:mm",
+                                                java.util.Locale.getDefault()
+                                            ).format(java.util.Date(device.lastSeen))
+                                        } else "غير معروف",
+                                        fontSize = 9.sp,
+                                        color = TextMuted
+                                    )
+                                }
+
+                                if (device.isCurrent) {
+                                    GlassPill(
+                                        text = "هذا الجهاز",
+                                        color = CyanAccent,
+                                        bgColor = CyanAccent.copy(alpha = 0.14f)
+                                    )
+                                } else {
+                                    TextButton(
+                                        onClick = { deviceToRemove = device },
+                                        enabled = !isRemovingDevice
+                                    ) {
+                                        Text("إزالة", color = RubyRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // SECTION 9: APP VERSION & UPDATE CHECK
         // -------------------------------------------------------------
         item {
             SettingsSectionHeader(title = "🚀 التحديثات والإصدار", subtitle = "التحقق من حالة النسخة وسجل التحسينات")
@@ -829,6 +994,57 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (deviceToRemove != null) {
+        val selectedDevice = deviceToRemove!!
+        AlertDialog(
+            onDismissRequest = { if (!isRemovingDevice) deviceToRemove = null },
+            title = {
+                Text("إزالة الجهاز؟", color = RubyRed, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    "سيتم إنهاء جلسات هذا الجهاز وإزالته من حسابك. يمكنك تسجيل الدخول منه مجدداً بعد توفر خانة نشطة.",
+                    color = TextPrimary,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isRemovingDevice,
+                    onClick = {
+                        isRemovingDevice = true
+                        coroutineScope.launch {
+                            val result = viewModel.repository.revokeRegisteredDevice(selectedDevice.deviceId)
+                            result.onSuccess {
+                                deviceToRemove = null
+                                Toast.makeText(context, "تمت إزالة الجهاز بنجاح ✓", Toast.LENGTH_SHORT).show()
+                                reloadRegisteredDevices()
+                            }.onFailure { error ->
+                                Toast.makeText(
+                                    context,
+                                    error.message ?: "تعذر إزالة الجهاز",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            isRemovingDevice = false
+                        }
+                    }
+                ) {
+                    Text(if (isRemovingDevice) "جارٍ الإزالة..." else "إزالة الجهاز", color = RubyRed)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isRemovingDevice,
+                    onClick = { deviceToRemove = null }
+                ) {
+                    Text("إلغاء", color = TextSecondary)
+                }
+            },
+            containerColor = MidnightSurface
+        )
     }
 
     if (syncReportDialog != null) {
