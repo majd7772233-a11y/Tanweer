@@ -3697,26 +3697,25 @@ class TanweerRepository(
                 return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }
 
-            // Atomically cancel only a create that has not been claimed by the sync worker.
-            if (exam.syncStatus in listOf("PENDING", "FAILED") &&
-                (pendingCreate == null || pendingCreate.status != "SYNCING")
-            ) {
-                val cancelledCreate = if (pendingCreate != null) {
-                    db.outboxDao().deleteUnclaimedMutation(examId, "EXAM_CREATE")
-                } else {
-                    0
-                }
+            // Atomically cancel a create that has never been attempted; once attempted,
+            // a lost response may still mean the server committed it, so verify by DELETE.
+            if (pendingCreate != null && pendingCreate.status != "SYNCING") {
+                val cancelledCreate = db.outboxDao().deleteUnclaimedMutation(examId, "EXAM_CREATE")
                 val remainingCreate = db.outboxDao().getPendingMutation(examId, "EXAM_CREATE")
-                if (remainingCreate == null && (pendingCreate == null || cancelledCreate > 0)) {
+                if (cancelledCreate > 0 && remainingCreate == null &&
+                    pendingCreate.attempts == 0 &&
+                    pendingToggle?.status != "SYNCING"
+                ) {
                     db.outboxDao().deleteByEntityId(examId)
                     db.examDao().deleteExamById(examId)
                     return@withContext Result.success(ExamDeleteResult.LocalOnly())
                 }
+                queueExamDeletion(examId)
+                return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }
 
-            // A running create or review mutation must settle before the delete is sent.
-            val pendingToggle = db.outboxDao().getPendingMutation(examId, "EXAM_TOGGLE")
-            if (pendingCreate != null || pendingToggle != null) {
+            // Never race an in-flight create or review mutation.
+            if (pendingCreate != null || pendingToggle?.status == "SYNCING" || pendingToggle != null) {
                 queueExamDeletion(examId)
                 return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }

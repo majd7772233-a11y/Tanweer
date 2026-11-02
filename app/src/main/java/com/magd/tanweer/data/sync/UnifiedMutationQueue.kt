@@ -501,25 +501,23 @@ class UnifiedMutationQueue private constructor(
                     val pendingToggle = outboxDao.getPendingMutation(item.entityId, "EXAM_TOGGLE")
                     val localExam = db.examDao().getExamById(item.entityId)
 
-                    when {
-                        pendingCreate?.status == "FAILED" -> {
-                            db.examDao().deleteExamById(item.entityId)
-                            outboxDao.deleteByEntityId(item.entityId)
-                            true
-                        }
+                    val createStillActive = when {
+                        pendingCreate?.status == "SYNCING" -> true
                         pendingCreate != null -> {
+                            outboxDao.deleteUnclaimedMutation(item.entityId, "EXAM_CREATE")
+                            outboxDao.getPendingMutation(item.entityId, "EXAM_CREATE") != null
+                        }
+                        else -> false
+                    }
+
+                    when {
+                        createStillActive -> {
                             handleMutationFailure(item, "تأجيل حذف الاختبار حتى يكتمل رفعه إلى الخادم")
                             false
                         }
                         pendingToggle?.status == "SYNCING" -> {
                             handleMutationFailure(item, "تأجيل حذف الاختبار حتى تكتمل مزامنة حالة المراجعة")
                             false
-                        }
-                        localExam != null && localExam.syncStatus in listOf("PENDING", "FAILED") -> {
-                            // The create operation was rejected or cancelled before reaching the server.
-                            db.examDao().deleteExamById(item.entityId)
-                            outboxDao.deleteByEntityId(item.entityId)
-                            true
                         }
                         else -> {
                             if (pendingToggle != null) {
