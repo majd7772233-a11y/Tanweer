@@ -3693,6 +3693,7 @@ class TanweerRepository(
 
             val pendingCreate = db.outboxDao().getPendingMutation(examId, "EXAM_CREATE")
             val pendingDelete = db.outboxDao().getPendingMutation(examId, "EXAM_DELETE")
+            val pendingToggle = db.outboxDao().getPendingMutation(examId, "EXAM_TOGGLE")
             if (pendingDelete != null) {
                 return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }
@@ -3715,7 +3716,7 @@ class TanweerRepository(
             }
 
             // Never race an in-flight create or review mutation.
-            if (pendingCreate != null || pendingToggle?.status == "SYNCING" || pendingToggle != null) {
+            if (pendingCreate != null || pendingToggle != null) {
                 queueExamDeletion(examId)
                 return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }

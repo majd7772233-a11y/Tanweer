@@ -499,7 +499,6 @@ class UnifiedMutationQueue private constructor(
                 "EXAM_DELETE" -> {
                     val pendingCreate = outboxDao.getPendingMutation(item.entityId, "EXAM_CREATE")
                     val pendingToggle = outboxDao.getPendingMutation(item.entityId, "EXAM_TOGGLE")
-                    val localExam = db.examDao().getExamById(item.entityId)
 
                     val createStillActive = when {
                         pendingCreate?.status == "SYNCING" -> true
