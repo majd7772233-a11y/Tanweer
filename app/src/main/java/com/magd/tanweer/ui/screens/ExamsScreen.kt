@@ -720,6 +720,16 @@ fun CanvasExamsTableBoard(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                if (exam.syncStatus == "DELETE_PENDING") {
+                                    Text(
+                                        text = "طلب الحذف بانتظار الاتصال",
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = WarmAmber,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
 

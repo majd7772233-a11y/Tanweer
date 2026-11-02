@@ -219,13 +219,13 @@ interface ExamDao {
         insertExam(newEntity)
     }
 
-    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExams(groupId: String)
 
-    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExamsForDate(groupId: String, date: String)
 
-    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExamsForMonth(groupId: String, monthPrefix: String)
 
     @Query("DELETE FROM cached_exams WHERE groupId = :groupId")
@@ -531,6 +531,9 @@ interface OutboxDao {
 
     @Query("SELECT * FROM outbox WHERE entityId = :entityId AND status IN ('PENDING', 'SYNCING', 'FAILED') LIMIT 1")
     suspend fun getPendingByEntityId(entityId: String): OutboxEntity?
+
+    @Query("SELECT * FROM outbox WHERE entityId = :entityId AND entityType = :entityType AND status IN ('PENDING', 'SYNCING', 'FAILED') ORDER BY createdAt ASC LIMIT 1")
+    suspend fun getPendingMutation(entityId: String, entityType: String): OutboxEntity?
 
     @Query("UPDATE outbox SET entityId = :newEntityId WHERE entityId = :oldEntityId")
     suspend fun updateEntityId(oldEntityId: String, newEntityId: String)

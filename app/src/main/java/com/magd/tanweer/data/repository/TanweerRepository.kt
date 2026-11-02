@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -35,6 +37,7 @@ class TanweerRepository(
     val chatManager: RealtimeChatManager = RealtimeChatManager()
 ) {
     val mutationQueue = UnifiedMutationQueue.getInstance(db, api)
+    private val examMutationMutex = Mutex()
 
     init {
         mutationQueue.start()
@@ -639,7 +642,10 @@ class TanweerRepository(
                 // Reconcile Exams for this date
                 db.examDao().clearSyncedExamsForDate(groupId, date)
                 if (body.exams.isNotEmpty()) {
-                    val exams = body.exams.map {
+                    val exams = body.exams.mapNotNull {
+                        if (db.outboxDao().getPendingMutation(it.id, "EXAM_DELETE") != null) {
+                            return@mapNotNull null
+                        }
                         val local = db.examDao().getExamById(it.id)
                         val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
                         val isDone = if (pendingToggle != null && pendingToggle.entityType == "EXAM_TOGGLE") {
@@ -748,7 +754,10 @@ class TanweerRepository(
         try {
             val res = api.getExams(groupId)
             if (res.isSuccessful && res.body()?.exams != null) {
-                val exams = res.body()!!.exams.map {
+                val exams = res.body()!!.exams.mapNotNull {
+                    if (db.outboxDao().getPendingMutation(it.id, "EXAM_DELETE") != null) {
+                        return@mapNotNull null
+                    }
                     val local = db.examDao().getExamById(it.id)
                     val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
                     val isDone = if (pendingToggle != null && pendingToggle.entityType == "EXAM_TOGGLE") {
@@ -834,7 +843,10 @@ class TanweerRepository(
 
                 // 1. Process and cache exams
                 if (body.exams.isNotEmpty()) {
-                    val exams = body.exams.map {
+                    val exams = body.exams.mapNotNull {
+                        if (db.outboxDao().getPendingMutation(it.id, "EXAM_DELETE") != null) {
+                            return@mapNotNull null
+                        }
                         val local = db.examDao().getExamById(it.id)
                         val pendingToggle = db.outboxDao().getPendingByEntityId(it.id)
                         val isDone = if (pendingToggle != null && pendingToggle.entityType == "EXAM_TOGGLE") {
@@ -3127,6 +3139,7 @@ class TanweerRepository(
         notes: String?,
         examType: String = "MONTHLY"
     ): Result<ExamAddResult> = withContext(Dispatchers.IO) {
+        examMutationMutex.withLock {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
         val subject = gradeSubjects.find { it.id == subjectId }
@@ -3223,6 +3236,7 @@ class TanweerRepository(
             db.outboxDao().insertOutbox(outboxItem)
             db.examDao().updateSyncStatus(id, "PENDING")
             Result.success(ExamAddResult.QueuedOffline(id))
+        }
         }
     }
 
@@ -3644,33 +3658,73 @@ class TanweerRepository(
         } catch (_: Exception) {}
     }
 
-    suspend fun deleteExamById(examId: String): Result<ExamDeleteResult> = withContext(Dispatchers.IO) {
-        db.examDao().deleteExamById(examId)
-        try {
-            val res = api.deleteExam(examId)
-            if (res.isSuccessful || res.code() == 404) {
-                Result.success(ExamDeleteResult.Synced())
-            } else {
-                val outboxItem = OutboxEntity(
+    private suspend fun queueExamDeletion(examId: String) {
+        val existing = db.outboxDao().getPendingMutation(examId, "EXAM_DELETE")
+        if (existing == null) {
+            db.outboxDao().insertOutbox(
+                OutboxEntity(
                     id = "ob_exd_${examId}_${System.currentTimeMillis()}",
                     entityType = "EXAM_DELETE",
                     entityId = examId,
                     operation = "DELETE",
                     payloadJson = "{}"
                 )
-                db.outboxDao().insertOutbox(outboxItem)
+            )
+        }
+        db.examDao().updateSyncStatus(examId, "DELETE_PENDING")
+        mutationQueue.triggerDrain()
+    }
+
+    suspend fun deleteExamById(examId: String): Result<ExamDeleteResult> = withContext(Dispatchers.IO) {
+        examMutationMutex.withLock {
+            val exam = db.examDao().getExamById(examId)
+                ?: return@withLock Result.failure(Exception("الاختبار غير موجود"))
+
+            val pendingCreate = db.outboxDao().getPendingMutation(examId, "EXAM_CREATE")
+            val pendingDelete = db.outboxDao().getPendingMutation(examId, "EXAM_DELETE")
+            if (pendingDelete != null) {
+                return@withLock Result.success(ExamDeleteResult.QueuedOffline())
+            }
+
+            // A local-only exam whose create operation has not been claimed can be cancelled safely.
+            if (exam.syncStatus in listOf("PENDING", "FAILED") &&
+                (pendingCreate == null || pendingCreate.status != "SYNCING")
+            ) {
+                db.outboxDao().deleteByEntityId(examId)
+                db.examDao().deleteExamById(examId)
+                return@withLock Result.success(ExamDeleteResult.LocalOnly())
+            }
+
+            // Do not race an in-flight create. Queue the delete behind it; the queue enforces order.
+            if (pendingCreate != null) {
+                queueExamDeletion(examId)
+                return@withLock Result.success(ExamDeleteResult.QueuedOffline())
+            }
+
+            try {
+                val res = api.deleteExam(examId)
+                when {
+                    res.isSuccessful || res.code() == 404 -> {
+                        db.examDao().deleteExamById(examId)
+                        db.outboxDao().deleteByEntityId(examId)
+                        Result.success(ExamDeleteResult.Synced())
+                    }
+                    res.code() in 400..499 -> {
+                        val message = when (res.code()) {
+                            401, 403 -> "لا تملك صلاحية حذف هذا الاختبار (HTTP ${res.code()})"
+                            else -> "رفض الخادم حذف الاختبار (HTTP ${res.code()})"
+                        }
+                        Result.failure(Exception(message))
+                    }
+                    else -> {
+                        queueExamDeletion(examId)
+                        Result.success(ExamDeleteResult.QueuedOffline())
+                    }
+                }
+            } catch (_: Exception) {
+                queueExamDeletion(examId)
                 Result.success(ExamDeleteResult.QueuedOffline())
             }
-        } catch (e: Exception) {
-            val outboxItem = OutboxEntity(
-                id = "ob_exd_${examId}_${System.currentTimeMillis()}",
-                entityType = "EXAM_DELETE",
-                entityId = examId,
-                operation = "DELETE",
-                payloadJson = "{}"
-            )
-            db.outboxDao().insertOutbox(outboxItem)
-            Result.success(ExamDeleteResult.QueuedOffline())
         }
     }
 

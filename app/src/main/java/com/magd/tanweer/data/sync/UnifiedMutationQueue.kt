@@ -346,14 +346,23 @@ class UnifiedMutationQueue private constructor(
                         val res = api.createExam(req)
                         if (res.isSuccessful) {
                             val serverId = res.body()?.examId ?: res.body()?.id
-                            if (serverId != null && serverId != item.entityId) {
+                            val resolvedId = serverId?.takeIf { it.isNotBlank() } ?: item.entityId
+                            if (resolvedId != item.entityId) {
                                 if (ex != null) {
-                                    val updated = ex.copy(id = serverId, syncStatus = "SYNCED")
-                                    db.examDao().replaceExamId(ex.id, updated)
+                                    db.examDao().replaceExamId(ex.id, ex.copy(id = resolvedId))
                                 }
-                            } else {
-                                db.examDao().updateSyncStatus(item.entityId, "SYNCED")
+                                outboxDao.updateEntityId(item.entityId, resolvedId)
                             }
+                            val deletePending = outboxDao.getPendingMutation(resolvedId, "EXAM_DELETE") != null
+                            db.examDao().updateSyncStatus(
+                                resolvedId,
+                                if (deletePending) "DELETE_PENDING" else "SYNCED"
+                            )
+                            outboxDao.deleteOutbox(item.id)
+                            true
+                        } else if (res.code() in 400..499) {
+                            db.examDao().updateSyncStatus(item.entityId, "FAILED")
+                            handleMutationFailure(item, "رفض الخادم رفع الاختبار (${res.code()})")
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
@@ -361,8 +370,10 @@ class UnifiedMutationQueue private constructor(
                             false
                         }
                     } else {
+                        db.examDao().updateSyncStatus(item.entityId, "FAILED")
                         handleMutationFailure(item, "تعذر العثور على بيانات الاختبار محلياً (id: ${item.entityId})")
-                        false
+                        outboxDao.deleteOutbox(item.id)
+                        true
                     }
                 }
                 "EVENT_CREATE" -> {
@@ -484,13 +495,50 @@ class UnifiedMutationQueue private constructor(
                     }
                 }
                 "EXAM_DELETE" -> {
-                    val res = api.deleteExam(item.entityId)
-                    if (res.isSuccessful || res.code() == 404) {
-                        outboxDao.deleteOutbox(item.id)
-                        true
-                    } else {
-                        handleMutationFailure(item, "فشل حذف الامتحان من الخادم (${res.code()})")
-                        false
+                    val pendingCreate = outboxDao.getPendingMutation(item.entityId, "EXAM_CREATE")
+                    val localExam = db.examDao().getExamById(item.entityId)
+
+                    when {
+                        pendingCreate?.status == "FAILED" -> {
+                            db.examDao().deleteExamById(item.entityId)
+                            outboxDao.deleteByEntityId(item.entityId)
+                            true
+                        }
+                        pendingCreate != null -> {
+                            handleMutationFailure(item, "تأجيل حذف الاختبار حتى يكتمل رفعه إلى الخادم")
+                            false
+                        }
+                        localExam != null && localExam.syncStatus in listOf("PENDING", "FAILED") -> {
+                            // The create operation was rejected or cancelled before reaching the server.
+                            db.examDao().deleteExamById(item.entityId)
+                            outboxDao.deleteByEntityId(item.entityId)
+                            true
+                        }
+                        else -> {
+                            val res = api.deleteExam(item.entityId)
+                            when {
+                                res.isSuccessful || res.code() == 404 -> {
+                                    db.examDao().deleteExamById(item.entityId)
+                                    outboxDao.deleteByEntityId(item.entityId)
+                                    true
+                                }
+                                res.code() in 400..499 -> {
+                                    db.examDao().updateSyncStatus(item.entityId, "SYNCED")
+                                    val message = if (res.code() == 401 || res.code() == 403) {
+                                        "لا تملك صلاحية حذف الاختبار من الخادم (${res.code()})"
+                                    } else {
+                                        "رفض الخادم حذف الاختبار (${res.code()})"
+                                    }
+                                    handleMutationFailure(item, message)
+                                    outboxDao.deleteOutbox(item.id)
+                                    true
+                                }
+                                else -> {
+                                    handleMutationFailure(item, "فشل حذف الاختبار من الخادم (${res.code()})")
+                                    false
+                                }
+                            }
+                        }
                     }
                 }
                 "SCHEDULE_SLOT_DELETE" -> {
