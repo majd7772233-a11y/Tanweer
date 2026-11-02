@@ -203,21 +203,26 @@ describe('Authentication hardening regressions', () => {
                   return null;
                 },
                 async run() {
-                  if (sql.includes('UPDATE users') && sql.includes('recovery_code_hash = ?')) {
-                    const validUserHash = user.recovery_code_hash === params[3];
-                    const tokenId = params[5];
+                  // Final credential revalidation occurs after the device session is reserved.
+                  // It must accept repeated use of a permanent, non-revoked recovery code,
+                  // regardless of the legacy uses_count/expiry columns.
+                  if (sql.includes('SET last_seen = ?') && sql.includes('recovery_code_hash = ?')) {
+                    const [now, userId, expectedHash, tokenId, existsTokenId, tokenUserId, tokenHash] = params as any[];
+                    const validUserHash = user.id === userId && user.recovery_code_hash === expectedHash;
                     const tokenStillValid = tokenId == null || (
                       recoveryToken.id === tokenId &&
-                      recoveryToken.user_id === params[6] &&
-                      recoveryToken.revoked === 0 &&
-                      recoveryToken.expires_at > Number(params[7]) &&
-                      recoveryToken.uses_count < recoveryToken.max_uses
+                      recoveryToken.user_id === tokenUserId &&
+                      tokenUserId === userId &&
+                      recoveryToken.token_hash === tokenHash &&
+                      recoveryToken.type === 'RECOVERY_CODE' &&
+                      recoveryToken.revoked === 0
                     );
-                    if (!validUserHash || !tokenStillValid) {
-                      return { success: true, meta: { changes: 0 } };
-                    }
-                    user.recovery_code_hash = String(params[0]);
-                    return { success: true, meta: { changes: 1 } };
+                    return { success: true, meta: { changes: validUserHash && tokenStillValid ? 1 : 0 } };
+                  }
+
+                  if (sql.includes('UPDATE users') && sql.includes('recovery_code_hash = ?')) {
+                    // The former single-use burn path must never be reached.
+                    return { success: true, meta: { changes: 0 } };
                   }
 
                   if (sql.includes('UPDATE user_recovery_tokens') && sql.includes('uses_count = uses_count + 1')) {
