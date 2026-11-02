@@ -1825,10 +1825,14 @@ class TanweerRepository(
     suspend fun getGroupMembers(groupId: String): Result<com.magd.tanweer.data.model.GroupMembersResponse> = withContext(Dispatchers.IO) {
         try {
             val res = api.getGroupMembers(groupId)
-            if (res.isSuccessful && res.body() != null) {
-                Result.success(res.body()!!)
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true) {
+                Result.success(body)
             } else {
-                Result.failure(Exception("تعذر جلب أعضاء المجموعة"))
+                val message = body?.message
+                    ?: res.errorBody()?.string()?.takeIf { it.isNotBlank() }
+                    ?: "تعذر جلب أعضاء المجموعة (HTTP ${res.code()})"
+                Result.failure(Exception(message))
             }
         } catch (e: Exception) {
             Result.failure(e)
