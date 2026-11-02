@@ -947,8 +947,8 @@ export async function handleGetTeacherDashboardData(user: UserContext, env: Env)
       officialExamsCount: officialExamsCount?.count || 0,
       teacherAnswersCount: teacherAnswersCount?.count || 0,
     },
-    recentHomeworks: myRecentHomeworks.results || [],
-    recentExams: myRecentExams.results || [],
+    recentHomeworks: (myRecentHomeworks.results || []).map(mapHomework),
+    recentExams: (myRecentExams.results || []).map(mapExam),
   });
 }
 
