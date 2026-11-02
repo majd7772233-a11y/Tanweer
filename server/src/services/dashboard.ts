@@ -5125,7 +5125,7 @@ export function renderDashboardHtml(): Response {
               const rawUrl = m.previewUrl || m.media_url || m.url || '';
               const safeUrl = escapeHtml(encodeURI(String(rawUrl)));
               const safeMime = escapeHtml(m.mime_type || m.mimeType || 'مرفق');
-              return '<div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.4); text-align:center; cursor:pointer;" data-url="' + safeUrl + '" onclick="openMediaLightbox(this.getAttribute(\'data-url\'))">' +
+              return '<div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.4); text-align:center; cursor:pointer;" data-url="' + safeUrl + '" onclick="openMediaLightbox(this.dataset.url)">' +
                 '<img src="' + safeUrl + '" alt="مرفق الواجب" style="width:100%; height:90px; object-fit:cover; display:block;">' +
                 '<div style="padding:0.3rem; font-size:0.7rem; color:var(--text-muted); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">' + safeMime + '</div>' +
                 '</div>';
