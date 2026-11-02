@@ -115,12 +115,24 @@ class GroupsManagementDb {
 
         if (normalized.startsWith("UPDATE group_members SET status = 'ACTIVE'")) {
           const member = db.members.find((row) =>
+            row.group_id === params[1] &&
+            row.user_id === params[2] &&
+            row.status === 'PENDING'
+          );
+          if (!member) return { success: true, meta: { changes: 0 } };
+          member.status = 'ACTIVE';
+          member.joined_at = Number(params[0]);
+          return { success: true, meta: { changes: 1 } };
+        }
+
+        if (normalized.startsWith("UPDATE group_members SET status = 'REJECTED'")) {
+          const member = db.members.find((row) =>
             row.group_id === params[0] &&
             row.user_id === params[1] &&
             row.status === 'PENDING'
           );
           if (!member) return { success: true, meta: { changes: 0 } };
-          member.status = 'ACTIVE';
+          member.status = 'REJECTED';
           return { success: true, meta: { changes: 1 } };
         }
 
@@ -308,7 +320,7 @@ describe('Group member management state and scope', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(db.members.some((row) => row.user_id === 'pending-1')).toBe(false);
+    expect(db.members.find((row) => row.user_id === 'pending-1')?.status).toBe('REJECTED');
     expect(db.members.find((row) => row.user_id === 'student-1')?.status).toBe('ACTIVE');
   });
 });
@@ -426,8 +438,9 @@ describe('Public group creation consistency', () => {
 
 class GroupJoinDb {
   groups = [
-    { id: 'optional-group', type: 'OPTIONAL' },
-    { id: 'class-group', type: 'CLASS' },
+    { id: 'optional-group', name: 'نادي البرمجة', type: 'OPTIONAL', visibility: 'PUBLIC' },
+    { id: 'private-group', name: 'فريق المسابقة', type: 'OPTIONAL', visibility: 'PRIVATE' },
+    { id: 'class-group', name: 'الأول الثانوي أ', type: 'CLASS', visibility: 'PRIVATE' },
   ];
   members: Array<Record<string, unknown>> = [];
   messages: Array<Record<string, unknown>> = [];
@@ -441,7 +454,7 @@ class GroupJoinDb {
         return statement;
       },
       async first<T = unknown>(): Promise<T | null> {
-        if (sql.includes('SELECT id, type FROM groups WHERE id = ?')) {
+        if (sql.includes('SELECT id, name, type, visibility FROM groups WHERE id = ?')) {
           return (db.groups.find(row => row.id === params[0]) as T | undefined) ?? null;
         }
         if (sql.includes('SELECT status FROM group_members WHERE group_id = ? AND user_id = ?')) {
@@ -452,6 +465,19 @@ class GroupJoinDb {
         return null;
       },
       async run() {
+        if (sql.includes("UPDATE group_members") && sql.includes("status = 'REJECTED'")) {
+          const member = db.members.find(row =>
+            row.group_id === params[4] && row.user_id === params[5] && row.status === 'REJECTED'
+          );
+          if (!member) return { success: true, meta: { changes: 0 } };
+          Object.assign(member, {
+            status: params[0],
+            role: params[1],
+            joined_at: params[2],
+            request_reason: params[3],
+          });
+          return { success: true, meta: { changes: 1 } };
+        }
         if (sql.includes('INSERT OR IGNORE INTO group_members')) {
           const exists = db.members.some(row =>
             row.group_id === params[0] && row.user_id === params[1]
@@ -538,6 +564,76 @@ describe('Group join request concurrency and state', () => {
       request_reason: 'أدرس في هذه الشعبة',
     });
     expect(db.messages).toHaveLength(0);
+  });
+
+  it('creates a pending request for a private discoverable group', async () => {
+    const db = new GroupJoinDb();
+    const response = await handleJoinGroupRequest(
+      'private-group',
+      student,
+      joinRequest('أرغب في الانضمام للفريق'),
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json() as any).status).toBe('PENDING');
+    expect(db.members[0]).toMatchObject({
+      group_id: 'private-group',
+      user_id: student.userId,
+      status: 'PENDING',
+      request_reason: 'أرغب في الانضمام للفريق',
+    });
+    expect(db.messages).toHaveLength(0);
+  });
+
+  it('allows a student to submit a new request after a prior rejection', async () => {
+    const db = new GroupJoinDb();
+    db.members.push({
+      group_id: 'private-group',
+      user_id: student.userId,
+      role: 'STUDENT',
+      status: 'REJECTED',
+      joined_at: 1,
+      request_reason: 'طلب سابق',
+    });
+
+    const response = await handleJoinGroupRequest(
+      'private-group',
+      student,
+      joinRequest('أعيد تقديم الطلب مع توضيح جديد'),
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json() as any).status).toBe('PENDING');
+    expect(db.members).toHaveLength(1);
+    expect(db.members[0]).toMatchObject({
+      status: 'PENDING',
+      request_reason: 'أعيد تقديم الطلب مع توضيح جديد',
+    });
+  });
+
+  it('allows a rejected applicant to join a public group directly on retry', async () => {
+    const db = new GroupJoinDb();
+    db.members.push({
+      group_id: 'optional-group',
+      user_id: student.userId,
+      role: 'STUDENT',
+      status: 'REJECTED',
+      joined_at: 1,
+    });
+
+    const response = await handleJoinGroupRequest(
+      'optional-group',
+      student,
+      joinRequest(),
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json() as any).status).toBe('ACTIVE');
+    expect(db.members[0].status).toBe('ACTIVE');
+    expect(db.messages).toHaveLength(1);
   });
 
   it('never replaces a banned membership when a user requests to join again', async () => {
