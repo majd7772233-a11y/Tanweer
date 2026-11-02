@@ -242,7 +242,7 @@ fun ExamsScreen(
                     }
                 }
 
-                // Exam Type Filter Tabs (شهري، شفهي، كويز، نصفي، نهائي)
+                // Exam Type Filter Tabs (شهري، شفهي، نصفي، نهائي)
                 item {
                     Row(
                         modifier = Modifier
@@ -254,7 +254,6 @@ fun ExamsScreen(
                             null to "جميع الأنواع",
                             "MONTHLY" to "شهري 📝",
                             "ORAL" to "شفهي 🗣️",
-                            "QUIZ" to "كويز ⚡",
                             "MIDTERM" to "نصفي 📑",
                             "FINAL" to "نهائي 🏆"
                         ).forEach { (typeKey, typeLabel) ->
@@ -263,7 +262,6 @@ fun ExamsScreen(
                             val displayLabel = "$typeLabel ($typeCount)"
                             val chipColor = when (typeKey) {
                                 "ORAL" -> CyanAccent
-                                "QUIZ" -> WarmAmber
                                 "MIDTERM" -> EmeraldGreen
                                 "FINAL" -> Color(0xFFFFB74D)
                                 else -> RubyRed
@@ -835,7 +833,6 @@ fun CanvasExamsTableBoard(
 fun ExamTypePill(examType: String) {
     val (label, color) = when (examType) {
         "ORAL" -> "شفهي 🗣️" to CyanAccent
-        "QUIZ" -> "كويز ⚡" to WarmAmber
         "MIDTERM" -> "نصفي 📑" to EmeraldGreen
         "FINAL" -> "نهائي 🏆" to Color(0xFFFFB74D)
         else -> "شهري 📝" to RubyRed
@@ -956,7 +953,7 @@ fun AddExamSheet(
 ) {
     var selectedSubj by remember { mutableStateOf(gradeSubjects.firstOrNull()) }
     var title by remember { mutableStateOf("") }
-    var examType by remember { mutableStateOf("MONTHLY") } // MONTHLY, QUIZ, MIDTERM, FINAL
+    var examType by remember { mutableStateOf("MONTHLY") } // MONTHLY, ORAL, MIDTERM, FINAL
     var chapters by remember { mutableStateOf("") }
     var teacherNotes by remember { mutableStateOf("") }
     var examDate by remember(initialExamDate) { mutableStateOf(initialExamDate ?: TanweerViewModel.getTodayDateString()) }
@@ -1039,7 +1036,6 @@ fun AddExamSheet(
                 GlassPill(
                     text = when (examType) {
                         "ORAL" -> "اختبار شفهي 🗣️"
-                        "QUIZ" -> "تسميع / كويز ⚡"
                         "MIDTERM" -> "اختبار نصفي 📑"
                         "FINAL" -> "اختبار نهائي 🏆"
                         else -> "اختبار شهري 📝"
@@ -1059,7 +1055,6 @@ fun AddExamSheet(
                 listOf(
                     "MONTHLY" to "شهري 📝",
                     "ORAL" to "شفهي 🗣️",
-                    "QUIZ" to "كويز ⚡",
                     "MIDTERM" to "نصفي 📑",
                     "FINAL" to "نهائي 🏆"
                 ).forEach { (key, label) ->
