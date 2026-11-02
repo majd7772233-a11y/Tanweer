@@ -144,11 +144,6 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
           };
           return statement;
         },
-        batch: async (statements: Array<{ run: () => Promise<any> }>) => {
-          const results = [];
-          for (const statement of statements) results.push(await statement.run());
-          return results;
-        },
       },
       SESSION_PEPPER: 'test-pepper-123',
     } as unknown as Env;
