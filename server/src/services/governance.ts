@@ -882,6 +882,15 @@ export async function handleVoteCommunityDecision(
     `UPDATE community_decisions SET votes_for = ?, votes_against = ?, status = ? WHERE id = ?`
   ).bind(vFor, vAgainst, newStatus, decisionId).run();
 
+  if (decision.request_type === 'SCHEDULE' || decision.request_type === 'SCHEDULE_CHANGE') {
+    const scheduleStatus = newStatus === 'APPLIED' ? 'ACCEPTED' : newStatus;
+    await env.DB.prepare(
+      `UPDATE schedule_proposals
+       SET status = ?, votes_for = ?, votes_against = ?
+       WHERE id = ? AND group_id = ?`
+    ).bind(scheduleStatus, vFor, vAgainst, decision.target_id, decision.group_id).run();
+  }
+
   return jsonResponse({
     success: true,
     votesFor: vFor,
