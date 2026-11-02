@@ -8,7 +8,7 @@
 
 ## 0. Project identity
 
-- **Project:** Tanweer / تنوير.
+- **Project:** Tanweer.
 - **Concept:** A collaborative school platform that replaces scattered WhatsApp class groups with structured academic information: lessons, homework, exams, events, calendars, schedules, Q&A, chat, books/PDFs, notifications, governance, and student contributions.
 - **Core philosophy:** Students are contributors, not passive viewers. Student contributions are a first-class part of the product.
 - **Problem being solved:** Lessons, homework, and school updates disappear inside chat conversations. Tanweer turns them into searchable, organized, dated, synchronized academic records.
@@ -383,11 +383,11 @@ Target filters: all, lessons, homework, exams, events, questions, books, message
 
 Example operators:
 ~~~text
-subject:رياضيات
+subject:Mathematics
 kind:exam
 type:homework
 date:2026-10-05
-from:اسم
+from:Name
 in:group
 ~~~
 
@@ -1422,7 +1422,7 @@ The original baseline SHA and main-branch state above are historical only. Alway
 
 ## 43. Design decisions to preserve
 
-1. Official project name: Tanweer / تنوير.
+1. Official project name: Tanweer.
 2. Students are contributors, not passive viewers.
 3. Content ownership must be preserved.
 4. Role hierarchy: Student → Moderator → Teacher → Admin → System Owner.
