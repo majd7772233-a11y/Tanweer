@@ -24,7 +24,9 @@ data class RegisterRequest(
     val gradeId: Int,
     val sectionId: String,
     val email: String? = null,
-    val deviceId: String? = null
+    val deviceId: String? = null,
+    val platform: String = "Android",
+    val appVersion: String = BuildConfig.VERSION_NAME
 )
 
 @JsonClass(generateAdapter = true)
@@ -32,13 +34,16 @@ data class LoginRequest(
     val phoneNumber: String,
     val password: String,
     val deviceId: String? = null,
-    val appVersion: String? = "1.0"
+    val platform: String = "Android",
+    val appVersion: String = BuildConfig.VERSION_NAME
 )
 
 @JsonClass(generateAdapter = true)
 data class RecoveryLoginRequest(
     val recoveryCode: String,
-    val deviceId: String? = null
+    val deviceId: String? = null,
+    val platform: String = "Android",
+    val appVersion: String = BuildConfig.VERSION_NAME
 )
 
 @JsonClass(generateAdapter = true)
@@ -344,6 +349,26 @@ data class ProfileResponse(
     val user: User? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class RegisteredDevice(
+    val deviceId: String,
+    val platform: String = "Android",
+    val appVersion: String = "",
+    val lastSeen: Long = 0L,
+    val connectedAt: Long = 0L,
+    val isCurrent: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class RegisteredDevicesResponse(
+    val success: Boolean,
+    val maxActiveDevices: Int = 3,
+    val activeDevicesCount: Int = 0,
+    val devices: List<RegisteredDevice> = emptyList(),
+    val message: String? = null,
+    val error: ApiError? = null
+)
+
 interface TanweerApiService {
 
     @POST("api/v1/auth/register")
@@ -354,6 +379,15 @@ interface TanweerApiService {
 
     @POST("api/v1/auth/recovery-login")
     suspend fun loginWithRecoveryCode(@Body req: RecoveryLoginRequest): Response<AuthResponse>
+
+    @GET("api/v1/auth/devices")
+    suspend fun getRegisteredDevices(): Response<RegisteredDevicesResponse>
+
+    @DELETE("api/v1/auth/devices/{deviceId}")
+    suspend fun revokeRegisteredDevice(@Path("deviceId") deviceId: String): Response<GenericResponse>
+
+    @POST("api/v1/auth/logout")
+    suspend fun logoutCurrentDevice(): Response<GenericResponse>
 
     @GET("api/v1/me")
     suspend fun getProfile(): Response<ProfileResponse>
@@ -658,6 +692,14 @@ object NetworkModule {
     private val BASE_URL = BuildConfig.API_BASE_URL
     private const val GITHUB_BASE_URL = "https://api.github.com/"
     private var authToken: String? = null
+    @Volatile private var installationDeviceId: String? = null
+
+    val deviceId: String
+        get() = installationDeviceId.orEmpty()
+
+    fun setDeviceId(deviceId: String?) {
+        installationDeviceId = deviceId?.trim()?.takeIf { it.length in 8..128 }
+    }
 
     fun setAuthToken(token: String?) {
         authToken = token
@@ -708,7 +750,10 @@ object NetworkModule {
         authToken?.let {
             builder.addHeader("Authorization", "Bearer $it")
         }
-        builder.addHeader("X-App-Version", BuildConfig.VERSION_NAME)
+        installationDeviceId?.let {
+            builder.header("X-Device-Id", it)
+        }
+        builder.header("X-App-Version", BuildConfig.VERSION_NAME)
         builder.addHeader("X-App-Version-Code", BuildConfig.VERSION_CODE.toString())
         val response = chain.proceed(builder.build())
         if (response.code == 401 && !original.url.encodedPath.contains("/auth/")) {
