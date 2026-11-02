@@ -150,7 +150,10 @@ data class GroupItem(
     val description: String? = null,
     val icon: String? = null,
     val role: String = "MEMBER",
-    val memberCount: Int = 1
+    val memberCount: Int = 1,
+    val visibility: String = "PUBLIC",
+    val chatPolicy: String = "MEMBERS",
+    val membershipStatus: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -253,7 +256,8 @@ data class JoinGroupBody(
 data class CreateGroupRequest(
     val name: String,
     val description: String? = null,
-    val icon: String? = "👥"
+    val icon: String? = "👥",
+    val visibility: String = "PUBLIC"
 )
 
 @JsonClass(generateAdapter = true)
@@ -522,7 +526,9 @@ data class SchoolEventItem(
     val category: String = "ACTIVITY", // 'ACTIVITY', 'COMPETITION', 'TRIP', 'ANNOUNCEMENT', 'HOLIDAY'
     val location: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val syncStatus: String = "SYNCED", // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val sourceName: String? = null,
+    val isOfficial: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
