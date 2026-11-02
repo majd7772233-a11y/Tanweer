@@ -410,6 +410,9 @@ interface TanweerApiService {
         @Body req: com.magd.tanweer.data.model.JoinGroupBody = com.magd.tanweer.data.model.JoinGroupBody()
     ): Response<GenericResponse>
 
+    @POST("api/v1/groups/{id}/leave")
+    suspend fun leaveGroup(@Path("id") groupId: String): Response<GenericResponse>
+
     @POST("api/v1/groups")
     suspend fun createPublicGroup(
         @Body req: com.magd.tanweer.data.model.CreateGroupRequest
