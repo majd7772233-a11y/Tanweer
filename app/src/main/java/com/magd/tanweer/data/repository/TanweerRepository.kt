@@ -716,7 +716,8 @@ class TanweerRepository(
                                 subjectIcon = it.subjectIcon,
                                 colorHex = it.colorHex,
                                 isCompleted = isDone,
-                                examType = finalExamType
+                                examType = finalExamType,
+                                isOfficial = it.isOfficial
                             )
                         }
                         val reconciledDayExams = ServerSnapshotReconciliation.preservePending(
@@ -852,7 +853,8 @@ class TanweerRepository(
                         colorHex = it.colorHex,
                         isCompleted = isDone,
                         examType = finalExamType,
-                        syncStatus = "SYNCED"
+                        syncStatus = "SYNCED",
+                        isOfficial = it.isOfficial
                     )
                 }
                 db.withTransaction {
@@ -959,7 +961,8 @@ class TanweerRepository(
                                 subjectIcon = it.subjectIcon,
                                 colorHex = it.colorHex,
                                 isCompleted = isDone,
-                                examType = finalExamType
+                                examType = finalExamType,
+                                isOfficial = it.isOfficial
                             )
                         }
                         val reconciledMonthExams = ServerSnapshotReconciliation.preservePending(
@@ -2166,7 +2169,8 @@ class TanweerRepository(
                     colorHex = it.colorHex,
                     isCompleted = it.isCompleted,
                     examType = if (it.examType == "QUIZ") "MONTHLY" else it.examType,
-                    syncStatus = it.syncStatus
+                    syncStatus = it.syncStatus,
+                    isOfficial = it.isOfficial
                 )
             }
         }
@@ -2188,7 +2192,8 @@ class TanweerRepository(
                     colorHex = it.colorHex,
                     isCompleted = it.isCompleted,
                     examType = if (it.examType == "QUIZ") "MONTHLY" else it.examType,
-                    syncStatus = it.syncStatus
+                    syncStatus = it.syncStatus,
+                    isOfficial = it.isOfficial
                 )
             }
         }
