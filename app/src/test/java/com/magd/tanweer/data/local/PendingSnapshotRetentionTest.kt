@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -162,4 +163,53 @@ class PendingSnapshotRetentionTest {
         assertEquals("DELETE_PENDING", database.eventDao().getPendingEvents(groupId).single().syncStatus)
         assertEquals("DELETE_PENDING", database.issueDao().getPendingIssues(groupId).single().syncStatus)
     }
+
+    @Test
+    fun insertingLatestServerChatHistoryKeepsOlderCachedMessagesAndConfirmsEchoes() = runBlocking {
+        val olderCached = ChatMessageEntity(
+            id = "older_cached_message",
+            groupId = groupId,
+            senderId = "student_1",
+            senderName = "Student One",
+            senderGradeSection = "10/B",
+            text = "Older message still in local history",
+            timestamp = 100L,
+            status = "SENT"
+        )
+        val pendingEcho = ChatMessageEntity(
+            id = "local_message_1",
+            groupId = groupId,
+            senderId = "current_user",
+            senderName = "Current User",
+            senderGradeSection = "10/B",
+            text = "Message awaiting server acknowledgement",
+            timestamp = 200L,
+            status = "SENDING"
+        )
+        database.chatDao().insertMessages(listOf(olderCached, pendingEcho))
+
+        database.chatDao().insertMessages(
+            listOf(
+                pendingEcho.copy(status = "SENT"),
+                ChatMessageEntity(
+                    id = "latest_server_message",
+                    groupId = groupId,
+                    senderId = "student_2",
+                    senderName = "Student Two",
+                    senderGradeSection = "10/B",
+                    text = "Latest message returned by server",
+                    timestamp = 300L,
+                    status = "SENT"
+                )
+            )
+        )
+
+        val stored = database.chatDao().getMessages(groupId).first()
+        assertEquals(
+            setOf("older_cached_message", "local_message_1", "latest_server_message"),
+            stored.map { it.id }.toSet()
+        )
+        assertEquals("SENT", stored.first { it.id == "local_message_1" }.status)
+    }
+
 }
