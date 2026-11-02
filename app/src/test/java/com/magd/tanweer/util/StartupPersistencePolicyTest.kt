@@ -7,6 +7,44 @@ import org.junit.Test
 
 class StartupPersistencePolicyTest {
 
+    private data class SnapshotRecord(val id: String, val value: String)
+
+    @Test
+    fun pendingLocalMutationWinsWhenServerReturnsSameId() {
+        val merged = ServerSnapshotReconciliation.preservePending(
+            serverRows = listOf(SnapshotRecord("item-1", "server-value")),
+            localPendingRows = listOf(SnapshotRecord("item-1", "local-pending-value"))
+        ) { it.id }
+
+        assertEquals(listOf(SnapshotRecord("item-1", "local-pending-value")), merged)
+    }
+
+    @Test
+    fun pendingLocalMutationSurvivesWhenMissingFromServerSnapshot() {
+        val merged = ServerSnapshotReconciliation.preservePending(
+            serverRows = listOf(SnapshotRecord("server-only", "server-value")),
+            localPendingRows = listOf(SnapshotRecord("local-pending", "unsent-value"))
+        ) { it.id }
+
+        assertEquals(
+            listOf(
+                SnapshotRecord("server-only", "server-value"),
+                SnapshotRecord("local-pending", "unsent-value")
+            ),
+            merged
+        )
+    }
+
+    @Test
+    fun serverSnapshotReplacesRowsWithoutPendingLocalMutations() {
+        val merged = ServerSnapshotReconciliation.preservePending(
+            serverRows = listOf(SnapshotRecord("item-1", "fresh-server-value")),
+            localPendingRows = emptyList()
+        ) { it.id }
+
+        assertEquals(listOf(SnapshotRecord("item-1", "fresh-server-value")), merged)
+    }
+
     @Test
     fun savedGroupWinsOverDefaultGroup() {
         assertEquals(
