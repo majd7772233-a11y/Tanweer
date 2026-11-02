@@ -123,7 +123,7 @@ interface ContentDao {
     @Query("DELETE FROM cached_contents WHERE groupId = :groupId")
     suspend fun clearContents(groupId: String)
 
-    @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND studyDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND studyDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedContentsForDate(groupId: String, date: String)
 
     @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
@@ -174,10 +174,10 @@ interface HomeworkDao {
     @Query("SELECT * FROM cached_homeworks WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun getPendingHomeworks(groupId: String): List<HomeworkEntity>
 
-    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND (studyDate = :date OR dueDate = :date) AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND (studyDate = :date OR dueDate = :date) AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedHomeworksForDate(groupId: String, date: String)
 
-    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND (studyDate LIKE :monthPrefix || '%' OR dueDate LIKE :monthPrefix || '%') AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND (studyDate LIKE :monthPrefix || '%' OR dueDate LIKE :monthPrefix || '%') AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedHomeworksForMonth(groupId: String, monthPrefix: String)
 
     @Query("SELECT * FROM cached_homework_completions WHERE userId = :userId")
@@ -292,10 +292,10 @@ interface EventDao {
     @Query("SELECT * FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun getPendingEvents(groupId: String): List<EventEntity>
 
-    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedEventsForDate(groupId: String, date: String)
 
-    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedEventsForMonth(groupId: String, monthPrefix: String)
 
     @Query("DELETE FROM cached_events WHERE groupId = :groupId OR groupId = 'all'")
