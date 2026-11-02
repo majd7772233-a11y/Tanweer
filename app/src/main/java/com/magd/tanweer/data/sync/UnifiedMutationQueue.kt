@@ -50,7 +50,7 @@ class UnifiedMutationQueue private constructor(
     var isAutoSyncEnabled: Boolean = true
 
     @Volatile
-    var isDrainAllowed: Boolean = true
+    var isDrainAllowed: Boolean = false
 
     var onRetryHomework: (suspend (String) -> Result<Unit>)? = null
     var onRetryContent: (suspend (String) -> Result<Unit>)? = null
