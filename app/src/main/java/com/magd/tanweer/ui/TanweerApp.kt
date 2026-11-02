@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,6 +54,7 @@ fun TanweerApp(
     val uploadInitialSubjectId by viewModel.uploadInitialSubjectId.collectAsStateWithLifecycle()
     val recoveryCodeDialog by viewModel.recoveryCodeDialog.collectAsStateWithLifecycle()
     val isCheckingAuth by viewModel.isCheckingAuth.collectAsStateWithLifecycle()
+    val navigationStateHolder = rememberSaveableStateHolder()
 
     if (isCheckingAuth) {
         Box(
@@ -210,35 +212,39 @@ fun TanweerApp(
                             }
                         }
 
-                        when (subScreen) {
-                            SubScreen.EXTRA_SECTIONS_HUB -> ExtraSectionsHubScreen(viewModel = viewModel)
-                            SubScreen.GROUPS -> GroupsScreen(viewModel = viewModel)
-                            SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> LibraryScreen(viewModel = viewModel)
-                            SubScreen.SCHEDULE -> ScheduleScreen(viewModel = viewModel)
-                            SubScreen.TIMELINE -> SubjectTimelineScreen(viewModel = viewModel)
-                            SubScreen.PROFILE -> ProfileScreen(viewModel = viewModel)
-                            SubScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
-                            SubScreen.WHAT_DID_I_MISS -> WhatDidIMissScreen(viewModel = viewModel)
-                            SubScreen.SEARCH -> SearchScreen(viewModel = viewModel)
-                            SubScreen.SUBJECT_KNOWLEDGE_BASE -> ClassKnowledgeBaseScreen(viewModel = viewModel)
-                            SubScreen.ACADEMIC_HISTORY -> AcademicHistoryScreen(viewModel = viewModel)
-                            SubScreen.TEACHER_DASHBOARD -> TeacherDashboardScreen(viewModel = viewModel)
-                            SubScreen.MODERATOR_DASHBOARD -> ModeratorDashboardScreen(viewModel = viewModel)
-                            SubScreen.ADMIN_DASHBOARD -> AdminDashboardScreen(viewModel = viewModel)
-                            SubScreen.COMMUNITY_DECISIONS -> CommunityDecisionsScreen(viewModel = viewModel)
-                            SubScreen.EVENTS -> EventsScreen(viewModel = viewModel)
-                            SubScreen.VERSION_CHECK -> VersionCheckScreen(viewModel = viewModel)
-                            else -> HomeScreen(viewModel = viewModel)
+                        navigationStateHolder.SaveableStateProvider(key = "subscreen-${subScreen.name}") {
+                            when (subScreen) {
+                                SubScreen.EXTRA_SECTIONS_HUB -> ExtraSectionsHubScreen(viewModel = viewModel)
+                                SubScreen.GROUPS -> GroupsScreen(viewModel = viewModel)
+                                SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> LibraryScreen(viewModel = viewModel)
+                                SubScreen.SCHEDULE -> ScheduleScreen(viewModel = viewModel)
+                                SubScreen.TIMELINE -> SubjectTimelineScreen(viewModel = viewModel)
+                                SubScreen.PROFILE -> ProfileScreen(viewModel = viewModel)
+                                SubScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
+                                SubScreen.WHAT_DID_I_MISS -> WhatDidIMissScreen(viewModel = viewModel)
+                                SubScreen.SEARCH -> SearchScreen(viewModel = viewModel)
+                                SubScreen.SUBJECT_KNOWLEDGE_BASE -> ClassKnowledgeBaseScreen(viewModel = viewModel)
+                                SubScreen.ACADEMIC_HISTORY -> AcademicHistoryScreen(viewModel = viewModel)
+                                SubScreen.TEACHER_DASHBOARD -> TeacherDashboardScreen(viewModel = viewModel)
+                                SubScreen.MODERATOR_DASHBOARD -> ModeratorDashboardScreen(viewModel = viewModel)
+                                SubScreen.ADMIN_DASHBOARD -> AdminDashboardScreen(viewModel = viewModel)
+                                SubScreen.COMMUNITY_DECISIONS -> CommunityDecisionsScreen(viewModel = viewModel)
+                                SubScreen.EVENTS -> EventsScreen(viewModel = viewModel)
+                                SubScreen.VERSION_CHECK -> VersionCheckScreen(viewModel = viewModel)
+                                else -> HomeScreen(viewModel = viewModel)
+                            }
                         }
                     }
                 } else {
-                    when (currentTab) {
-                        NavigationTab.TODAY -> HomeScreen(viewModel = viewModel)
-                        NavigationTab.CALENDAR -> CalendarScreen(viewModel = viewModel)
-                        NavigationTab.HOMEWORK -> HomeworkScreen(viewModel = viewModel)
-                        NavigationTab.EXAMS -> ExamsScreen(viewModel = viewModel)
-                        NavigationTab.ISSUES -> IssuesScreen(viewModel = viewModel)
-                        NavigationTab.MORE -> HomeScreen(viewModel = viewModel)
+                    navigationStateHolder.SaveableStateProvider(key = "tab-${currentTab.name}") {
+                        when (currentTab) {
+                            NavigationTab.TODAY -> HomeScreen(viewModel = viewModel)
+                            NavigationTab.CALENDAR -> CalendarScreen(viewModel = viewModel)
+                            NavigationTab.HOMEWORK -> HomeworkScreen(viewModel = viewModel)
+                            NavigationTab.EXAMS -> ExamsScreen(viewModel = viewModel)
+                            NavigationTab.ISSUES -> IssuesScreen(viewModel = viewModel)
+                            NavigationTab.MORE -> HomeScreen(viewModel = viewModel)
+                        }
                     }
                 }
 
