@@ -3185,9 +3185,14 @@ class TanweerRepository(
                     db.examDao().updateSyncStatus(id, "SYNCED")
                     Result.success(ExamAddResult.Synced(id))
                 }
-            } else if (res.code() in listOf(401, 403)) {
+            } else if (!isRetryableHttpStatus(res.code())) {
                 db.examDao().updateSyncStatus(id, "FAILED")
-                Result.failure(Exception(res.message() ?: "لا تملك صلاحية حفظ هذا الاختبار"))
+                val message = if (res.code() in listOf(401, 403)) {
+                    "لا تملك صلاحية حفظ هذا الاختبار (HTTP ${res.code()})"
+                } else {
+                    "رفض الخادم حفظ الاختبار بسبب بيانات غير مقبولة (HTTP ${res.code()})"
+                }
+                Result.failure(Exception(message))
             } else {
                 val examJson = try {
                     org.json.JSONObject().apply {
@@ -3359,9 +3364,14 @@ class TanweerRepository(
                     db.eventDao().updateSyncStatus(id, "SYNCED")
                     Result.success(EventAddResult.Synced(id))
                 }
-            } else if (res.code() in listOf(401, 403)) {
+            } else if (!isRetryableHttpStatus(res.code())) {
                 db.eventDao().updateSyncStatus(id, "FAILED")
-                Result.failure(Exception(res.message() ?: "لا تملك صلاحية نشر هذه الفعالية"))
+                val message = if (res.code() in listOf(401, 403)) {
+                    "لا تملك صلاحية نشر هذه الفعالية (HTTP ${res.code()})"
+                } else {
+                    "رفض الخادم إنشاء الفعالية بسبب بيانات غير مقبولة (HTTP ${res.code()})"
+                }
+                Result.failure(Exception(message))
             } else {
                 val outboxItem = OutboxEntity(
                     id = "ob_evc_${id}_${System.currentTimeMillis()}",
