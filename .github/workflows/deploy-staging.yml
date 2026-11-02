@@ -1,6 +1,9 @@
 name: Deploy Tanweer Staging
 
 on:
+  push:
+    branches:
+      - work/release-readiness
   workflow_dispatch:
 
 permissions:
@@ -109,3 +112,18 @@ jobs:
 
           echo "::error::Staging health check failed."
           exit 1
+
+      - name: Owner Dashboard route smoke test
+        working-directory: .
+        run: |
+          set -euo pipefail
+          BASE_URL="https://tanweer-staging.magd.workers.dev"
+
+          LOGIN_STATUS="$(curl --silent --show-error --max-time 15 --output dashboard-login.html --write-out '%{http_code}' "$BASE_URL/dashboard/login")"
+          test "$LOGIN_STATUS" = "200"
+          grep -q "TANWEER CONTROL CENTER" dashboard-login.html
+
+          DASHBOARD_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' "$BASE_URL/dashboard")"
+          test "$DASHBOARD_STATUS" = "302"
+
+          echo "Owner Dashboard login page is reachable and unauthenticated dashboard access redirects to login."
