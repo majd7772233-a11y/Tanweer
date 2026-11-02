@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { Env } from '../src/env';
+import { Env, UserContext } from '../src/env';
 import {
   MAX_ACTIVE_DEVICES,
   createDeviceSession,
   handleGetMyDevices,
   handleRevokeMyDevice,
 } from '../src/services/devices';
-import { UserContext } from '../src/env';
 
 type SessionRow = {
   id: string;
@@ -123,12 +122,12 @@ class FakeDeviceDb {
     }
 
     if (/^DELETE FROM devices WHERE user_id = \? AND NOT EXISTS/i.test(sql)) {
-      const [userId, now] = params as [string, number];
+      const [userId, sessionUserId, now] = params as [string, string, number];
       const before = this.devices.length;
       this.devices = this.devices.filter(device =>
         device.user_id !== userId ||
         this.sessions.some(session =>
-          session.user_id === userId && session.device_id === device.device_id && session.expires_at > now
+          session.user_id === sessionUserId && session.device_id === device.device_id && session.expires_at > now
         )
       );
       return { success: true, meta: { changes: before - this.devices.length } };
