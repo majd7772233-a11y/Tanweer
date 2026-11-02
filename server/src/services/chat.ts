@@ -4,6 +4,41 @@ import { mapChatMessage } from '../lib/mappers';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
+import { Role, normalizeRole } from '../lib/roles';
+
+
+export async function getGroupChatSendPermission(
+  groupId: string,
+  userId: string,
+  globalRole: string,
+  env: Env
+): Promise<{ allowed: boolean; chatPolicy: string; memberRole: string }> {
+  const row = await env.DB.prepare(
+    `SELECT g.chat_policy, gm.role AS member_role, u.role AS global_role
+     FROM groups g
+     JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = ? AND gm.status = 'ACTIVE'
+     JOIN users u ON u.id = gm.user_id
+     WHERE g.id = ?`
+  ).bind(userId, groupId).first<{
+    chat_policy: string | null;
+    member_role: string;
+    global_role: string;
+  }>();
+
+  const chatPolicy = (row?.chat_policy || 'MEMBERS').toUpperCase();
+  const effectiveGlobalRole = normalizeRole(row?.global_role || globalRole);
+  const groupRole = normalizeRole(row?.member_role || Role.STUDENT);
+  if (chatPolicy !== 'STAFF_ONLY') {
+    return { allowed: true, chatPolicy, memberRole: groupRole };
+  }
+
+  const allowedRoles = new Set<Role>([Role.TEACHER, Role.ADMIN, Role.SYSTEM_OWNER]);
+  return {
+    allowed: allowedRoles.has(effectiveGlobalRole) || groupRole === Role.TEACHER || groupRole === Role.ADMIN,
+    chatPolicy,
+    memberRole: groupRole,
+  };
+}
 
 export async function handleGetGroupMessages(groupId: string, user: UserContext, env: Env): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
@@ -33,6 +68,11 @@ export async function handlePostGroupMessage(
 ): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
+
+  const sendPermission = await getGroupChatSendPermission(groupId, user.userId, user.role, env);
+  if (!sendPermission.allowed) {
+    return errorResponse('READ_ONLY_GROUP', 'هذه المجموعة مخصصة للقراءة للطلاب. الإرسال متاح للأساتذة المعتمدين وإدارة المدرسة فقط.', 403);
+  }
 
   const body = await request.json() as { id?: string; text?: string; messageText?: string; message?: string };
   const messageText = body.text || body.messageText || body.message;
