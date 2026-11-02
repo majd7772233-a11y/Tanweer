@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -3139,7 +3138,8 @@ class TanweerRepository(
         notes: String?,
         examType: String = "MONTHLY"
     ): Result<ExamAddResult> = withContext(Dispatchers.IO) {
-        examMutationMutex.withLock {
+        examMutationMutex.lock()
+        try {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
         val subject = gradeSubjects.find { it.id == subjectId }
@@ -3237,6 +3237,8 @@ class TanweerRepository(
             db.examDao().updateSyncStatus(id, "PENDING")
             Result.success(ExamAddResult.QueuedOffline(id))
         }
+        } finally {
+            examMutationMutex.unlock()
         }
     }
 
@@ -3676,14 +3678,15 @@ class TanweerRepository(
     }
 
     suspend fun deleteExamById(examId: String): Result<ExamDeleteResult> = withContext(Dispatchers.IO) {
-        examMutationMutex.withLock {
+        examMutationMutex.lock()
+        try {
             val exam = db.examDao().getExamById(examId)
-                ?: return@withLock Result.failure(Exception("الاختبار غير موجود"))
+                ?: return@withContext Result.failure(Exception("الاختبار غير موجود"))
 
             val pendingCreate = db.outboxDao().getPendingMutation(examId, "EXAM_CREATE")
             val pendingDelete = db.outboxDao().getPendingMutation(examId, "EXAM_DELETE")
             if (pendingDelete != null) {
-                return@withLock Result.success(ExamDeleteResult.QueuedOffline())
+                return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }
 
             // A local-only exam whose create operation has not been claimed can be cancelled safely.
@@ -3692,13 +3695,13 @@ class TanweerRepository(
             ) {
                 db.outboxDao().deleteByEntityId(examId)
                 db.examDao().deleteExamById(examId)
-                return@withLock Result.success(ExamDeleteResult.LocalOnly())
+                return@withContext Result.success(ExamDeleteResult.LocalOnly())
             }
 
             // Do not race an in-flight create. Queue the delete behind it; the queue enforces order.
             if (pendingCreate != null) {
                 queueExamDeletion(examId)
-                return@withLock Result.success(ExamDeleteResult.QueuedOffline())
+                return@withContext Result.success(ExamDeleteResult.QueuedOffline())
             }
 
             try {
@@ -3725,6 +3728,8 @@ class TanweerRepository(
                 queueExamDeletion(examId)
                 Result.success(ExamDeleteResult.QueuedOffline())
             }
+        } finally {
+            examMutationMutex.unlock()
         }
     }
 
