@@ -476,7 +476,10 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
         return `${location} ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`;
       });
 
-      expect(syntaxDiagnostics).toEqual([]);
+      const diagnosticContext = syntaxDiagnostics.length
+        ? script!.split('\n').slice(1022, 1028).map((line, index) => `${1023 + index}: ${line}`).join('\n')
+        : '';
+      expect(syntaxDiagnostics, diagnosticContext).toEqual([]);
       expect(() => new Function(script!)).not.toThrow();
     });
   });
