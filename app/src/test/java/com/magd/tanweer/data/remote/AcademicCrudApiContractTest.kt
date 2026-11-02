@@ -1,6 +1,5 @@
 package com.magd.tanweer.data.remote
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -14,14 +13,14 @@ class AcademicCrudApiContractTest {
         val method = TanweerApiService::class.java.methods.first { it.name == methodName }
         val annotation = method.getAnnotation(PATCH::class.java)
         assertNotNull("$methodName must declare PATCH", annotation)
-        assertEquals(expectedPath, annotation.value)
+        assertEquals(expectedPath, annotation?.value)
     }
 
     private fun assertDeleteEndpoint(methodName: String, expectedPath: String) {
         val method = TanweerApiService::class.java.methods.first { it.name == methodName }
         val annotation = method.getAnnotation(DELETE::class.java)
         assertNotNull("$methodName must declare DELETE", annotation)
-        assertEquals(expectedPath, annotation.value)
+        assertEquals(expectedPath, annotation?.value)
     }
 
     @Test
@@ -39,41 +38,40 @@ class AcademicCrudApiContractTest {
         assertDeleteEndpoint("deleteEvent", "api/v1/events/{id}")
     }
 
+    private fun assertJsonField(json: String, field: String, expectedValue: String) {
+        assertTrue(
+            "Expected JSON field \"$field\" with value $expectedValue, actual: $json",
+            json.contains("\"$field\":$expectedValue")
+        )
+    }
+
     @Test
     fun updateRequestDtosUseServerCamelCaseFieldNames() {
         val moshi = com.squareup.moshi.Moshi.Builder()
             .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
             .build()
 
-        val content = JSONObject(
-            moshi.adapter(UpdateContentRequest::class.java)
-                .toJson(UpdateContentRequest(title = "عنوان", description = "وصف", type = "LESSON"))
-        )
-        assertEquals("عنوان", content.getString("title"))
-        assertEquals("وصف", content.getString("description"))
-        assertEquals("LESSON", content.getString("type"))
+        val content = moshi.adapter(UpdateContentRequest::class.java)
+            .toJson(UpdateContentRequest(title = "عنوان", description = "وصف", type = "LESSON"))
+        assertJsonField(content, "title", "\"عنوان\"")
+        assertJsonField(content, "description", "\"وصف\"")
+        assertJsonField(content, "type", "\"LESSON\"")
 
-        val homework = JSONObject(
-            moshi.adapter(UpdateHomeworkRequest::class.java)
-                .toJson(UpdateHomeworkRequest(dueDate = "2026-11-03", pageNumbers = "10-15", isOfficial = true))
-        )
-        assertEquals("2026-11-03", homework.getString("dueDate"))
-        assertEquals("10-15", homework.getString("pageNumbers"))
-        assertTrue(homework.getBoolean("isOfficial"))
+        val homework = moshi.adapter(UpdateHomeworkRequest::class.java)
+            .toJson(UpdateHomeworkRequest(dueDate = "2026-11-03", pageNumbers = "10-15", isOfficial = true))
+        assertJsonField(homework, "dueDate", "\"2026-11-03\"")
+        assertJsonField(homework, "pageNumbers", "\"10-15\"")
+        assertJsonField(homework, "isOfficial", "true")
 
-        val exam = JSONObject(
-            moshi.adapter(UpdateExamRequest::class.java)
-                .toJson(UpdateExamRequest(examDate = "2026-11-04", examType = "MIDTERM"))
-        )
-        assertEquals("2026-11-04", exam.getString("examDate"))
-        assertEquals("MIDTERM", exam.getString("examType"))
+        val exam = moshi.adapter(UpdateExamRequest::class.java)
+            .toJson(UpdateExamRequest(examDate = "2026-11-04", examType = "MIDTERM"))
+        assertJsonField(exam, "examDate", "\"2026-11-04\"")
+        assertJsonField(exam, "examType", "\"MIDTERM\"")
 
-        val event = JSONObject(
-            moshi.adapter(UpdateEventRequest::class.java)
-                .toJson(UpdateEventRequest(eventDate = "2026-11-05", timeStr = "09:30", isOfficial = false))
-        )
-        assertEquals("2026-11-05", event.getString("eventDate"))
-        assertEquals("09:30", event.getString("timeStr"))
-        assertEquals(false, event.getBoolean("isOfficial"))
+        val event = moshi.adapter(UpdateEventRequest::class.java)
+            .toJson(UpdateEventRequest(eventDate = "2026-11-05", timeStr = "09:30", isOfficial = false))
+        assertJsonField(event, "eventDate", "\"2026-11-05\"")
+        assertJsonField(event, "timeStr", "\"09:30\"")
+        assertJsonField(event, "isOfficial", "false")
     }
 }
