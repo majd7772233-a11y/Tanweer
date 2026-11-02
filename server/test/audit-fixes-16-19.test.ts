@@ -110,6 +110,11 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
 
     const mockEnv = {
       DB: {
+        batch: async (statements: Array<{ run: () => Promise<{ success: boolean; meta: { changes: number } }> }>) => {
+          const results = [];
+          for (const statement of statements) results.push(await statement.run());
+          return results;
+        },
         prepare: (sql: string) => {
           let params: any[] = [];
           const statement: any = {
