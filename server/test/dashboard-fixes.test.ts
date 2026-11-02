@@ -456,4 +456,17 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       expect(script).not.toContain("getElementById('purgeModalSecretInput')");
     });
   });
+  
+  describe('D-11: Dashboard inline JavaScript syntax', () => {
+    it('renders a JavaScript block that the browser can parse before wiring any controls', async () => {
+      const response = renderDashboardHtml();
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      const scripts = Array.from(html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/gi));
+
+      expect(scripts).toHaveLength(1);
+      expect(() => new Function(scripts[0][1])).not.toThrow();
+    });
+  });
+
 });
