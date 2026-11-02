@@ -1676,6 +1676,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         dueDate: String,
         taskType: String = "HOMEWORK",
         pages: List<com.magd.tanweer.util.ProcessedPageResult> = emptyList(),
+        isOfficial: Boolean = false,
         onResult: ((Result<PublicationResult>) -> Unit)? = null,
         onComplete: (() -> Unit)? = null
     ) {
@@ -1693,7 +1694,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                     pageNumbers = pageNumbers,
                     questionNumbers = questionNumbers,
                     taskType = taskType,
-                    pages = pages
+                    pages = pages,
+                    isOfficial = isOfficial
                 )
             } else {
                 repository.addHomework(
@@ -1705,7 +1707,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                     details = details,
                     pageNumbers = pageNumbers,
                     questionNumbers = questionNumbers,
-                    taskType = taskType
+                    taskType = taskType,
+                    isOfficial = isOfficial
                 )
             }
             onResult?.invoke(result)
@@ -1737,6 +1740,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         notes: String?,
         examDate: String,
         examType: String = "MONTHLY",
+        isOfficial: Boolean = false,
         onResult: ((Result<com.magd.tanweer.data.local.ExamAddResult>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
@@ -1749,7 +1753,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 title = title,
                 requiredChapters = requiredChapters,
                 notes = notes,
-                examType = examType
+                examType = examType,
+                isOfficial = isOfficial
             )
             onResult?.invoke(res)
         }
