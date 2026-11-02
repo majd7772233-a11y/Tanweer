@@ -1564,6 +1564,23 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **Notebook language cleanup:** Removed the remaining Arabic-script brand label and Arabic text from search-operator examples. Verified the entire `GPT.md` file contains no Arabic-script characters.
 - **Validation PRs:** PR #4 and PR #5 were both closed without merging. Each targeted a disposable branch copied from main; neither targeted `main` directly.
 
+
+### 2026-11-02 — Isolated Staging deployment and CI authentication repair
+
+- **Working branch:** `work/release-readiness`. Production `main` remains unchanged at `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- **Purpose:** Prepare an isolated backend environment for owner-led Android and Dashboard testing. Production Worker `tanweer` and production D1 database `tanweer-db` were explicitly excluded from every deployment and migration command.
+- **Android Release run:** GitHub Actions run #76, ID `41442432262`, triggered on commit `65632a65765439b1ce5ceb5a31ddb3149ca8707e`. Android unit tests passed; the Release keystore decoded successfully and the requested alias was validated. At the time of this entry, `assembleRelease` was still running; APK verification, SHA-256, and artifact upload were not yet confirmed.
+- **Staging deployment attempts:** Run #1 (`41442432388`) successfully completed server typecheck/tests, Wrangler dry-run, Cloudflare credential validation, and D1 migrations, but failed because the direct Wrangler secret-configuration shell step lacked `CLOUDFLARE_API_TOKEN`. Run #2 (`41442817064`) proved the secret step fixed and uploaded the staging secrets, but then exposed the same missing environment variable in the direct Worker-deploy shell step.
+- **Workflow fix:** Added `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` mappings from GitHub Actions Secrets to both direct Wrangler shell steps in `.github/workflows/deploy-staging.yml`. No secret values were copied into the repository or logs by this change.
+- **Successful Staging run:** Run #3, ID `41443013168`, completed successfully. TypeScript checks, all 160 server tests, staging Wrangler dry-run, Cloudflare authentication, migration step, secret configuration, Worker deployment, and the Staging health check all passed.
+- **Staging Worker:** Created and deployed `tanweer-staging` at `https://tanweer-staging.magd.workers.dev`. Cloudflare deployment ID: `5feac8a8-9ada-4def-9298-19dd7885ba0c`; active version ID: `8741c85f-6de3-4b35-8575-13e5c7394997` at 100% traffic. The GitHub health check for `/api/v1/health` returned success.
+- **Staging D1:** `tanweer-staging-db` (UUID `603edee6-c5f7-4158-8256-24b109110ec0`) now has the project's complete migration schema through `0026_media_upload_ownership.sql`. The only row in `users` is the seeded non-login `SYSTEM_OWNER` principal. No student, teacher, or test-account records were created by deployment.
+- **Staging secrets:** The workflow successfully configured `JWT_SECRET`, `SESSION_PEPPER`, `PASSWORD_PEPPER`, and the separate staging `TANWEER_OWNER_SECRET` sourced from `TANWEER_OWNER_SECRET_STAGING`. Secret values must never be written into this notebook. This is separate from the production Owner secret.
+- **Manual-only safeguards:** Temporary push triggers on `work/release-readiness` were used only to start the Release and Staging workflows because the connected GitHub actions interface did not expose a workflow-dispatch action. The original trigger configuration was restored immediately after each run was queued. Current `build-android.yml` and `deploy-staging.yml` are back to `workflow_dispatch`-only for these manual paths; no automatic future Staging deployment was left enabled.
+- **Cloudflare production safety:** No deployment, migration, secret update, or D1 write was performed on production Worker `tanweer` or D1 `tanweer-db`.
+- **Device testing:** No physical Android device test has been performed yet. CI and the Staging health endpoint passing do not replace testing login, sync, chat, and Dashboard behavior from the actual devices.
+- **Next steps:** Confirm the signed Release APK artifact and SHA-256 from run #76; then install it and test against the Staging API. Verify the Owner Dashboard login separately using the staging-only owner secret and test the application with clean staging data before considering any production rollout.
+
 ---
 
 # END OF GPT.md
