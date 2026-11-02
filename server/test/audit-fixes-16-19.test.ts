@@ -17,11 +17,6 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
             }),
           }),
         }),
-        batch: async (statements: Array<{ run: () => Promise<any> }>) => {
-          const results = [];
-          for (const statement of statements) results.push(await statement.run());
-          return results;
-        },
       },
     } as unknown as Env;
 
@@ -301,6 +296,11 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
             },
           }),
         }),
+        batch: async (statements: Array<{ run: () => Promise<any> }>) => {
+          const results = [];
+          for (const statement of statements) results.push(await statement.run());
+          return results;
+        },
       },
     } as unknown as Env;
 
