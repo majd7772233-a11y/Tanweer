@@ -251,7 +251,9 @@ abstract class TanweerDatabase : RoomDatabase() {
                         MIGRATION_11_12,
                         MIGRATION_12_13
                     )
-                    .fallbackToDestructiveMigrationOnDowngrade()
+                    // Never silently erase a user's academic cache on an app downgrade.
+                    // Unsupported schema transitions must fail visibly until a preserving
+                    // migration is provided for the target database version.
                     .build()
                 INSTANCE = instance
                 instance
