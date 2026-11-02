@@ -77,6 +77,7 @@ export async function createDeviceSession(env: Env, input: NewDeviceSessionInput
   const inserted = await statements[1].run();
   if (inserted.meta?.changes !== 1) return false;
   await statements[2].run();
+  await statements[3].run();
   return true;
 }
 
