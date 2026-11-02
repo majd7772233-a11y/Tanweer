@@ -81,6 +81,7 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
     const rawContent = {
       id: 'cnt_123',
       group_id: 'grp_1',
+      created_by: 'usr_author_123',
       study_date: '2026-09-30',
       subject_id: 'chemistry',
       type: 'LESSON',
@@ -102,16 +103,19 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
         url: 'https://tanweer.magd.workers.dev/api/v1/media/med_1',
         mime_type: 'image/jpeg',
         file_size: 450000,
+        checksum: 'sha256:lesson-page-1',
       },
     ];
     const mapped = mapContent(rawContent, rawMedia);
     expect(mapped.groupId).toBe('grp_1');
+    expect(mapped.createdBy).toBe('usr_author_123');
     expect(mapped.authorGradeSection).toBe('أول ثانوي — أ');
     expect(mapped.viewsCount).toBe(15);
     expect(mapped.usefulCount).toBe(8);
     expect(mapped.media.length).toBe(1);
     expect(mapped.media[0].pageOrder).toBe(1);
     expect(mapped.media[0].fileSize).toBe(450000);
+    expect(mapped.media[0].checksum).toBe('sha256:lesson-page-1');
     expect((mapped as any).author_grade_section).toBeUndefined();
   });
 

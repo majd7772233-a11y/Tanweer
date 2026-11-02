@@ -115,6 +115,7 @@ export function mapContent(r: any, media: any[] = []) {
       url: m.url,
       mimeType: m.mime_type ?? m.mimeType ?? 'image/jpeg',
       fileSize: Number(m.file_size ?? m.fileSize ?? 0),
+      checksum: m.checksum ?? null,
     })),
   };
 }

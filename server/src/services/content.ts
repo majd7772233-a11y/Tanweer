@@ -344,7 +344,7 @@ export async function handleGetContents(
 
   const contents = await env.DB.prepare(
     `SELECT c.id, c.group_id, c.study_date, c.subject_id, c.type, c.title, c.description,
-            c.author_name, c.author_grade_section, c.views_count, c.useful_count, c.created_at,
+            c.created_by, c.author_name, c.author_grade_section, c.views_count, c.useful_count, c.created_at,
             s.name_ar as subject_name, s.icon as subject_icon, s.color_hex
      FROM contents c
      LEFT JOIN subjects s ON c.subject_id = s.id
@@ -355,7 +355,7 @@ export async function handleGetContents(
   const contentList = [];
   for (const c of (contents.results as any[])) {
     const media = await env.DB.prepare(
-      `SELECT id, page_order, url, mime_type, file_size FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
+      `SELECT id, page_order, url, mime_type, file_size, checksum FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
     ).bind(c.id).all();
     contentList.push(mapContent(c, media.results || []));
   }
@@ -378,7 +378,7 @@ export async function handleGetAcademicArchive(
 ): Promise<Response> {
   const contents = await env.DB.prepare(
     `SELECT c.id, c.group_id, c.study_date, c.subject_id, c.type, c.title, c.description,
-            c.author_name, c.author_grade_section, c.views_count, c.useful_count, c.created_at,
+            c.created_by, c.author_name, c.author_grade_section, c.views_count, c.useful_count, c.created_at,
             s.name_ar as subject_name, s.icon as subject_icon, s.color_hex,
             g.name as group_name
      FROM contents c
@@ -395,7 +395,7 @@ export async function handleGetAcademicArchive(
   const contentList = [];
   for (const c of (contents.results as any[])) {
     const media = await env.DB.prepare(
-      `SELECT id, page_order, url, mime_type, file_size FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
+      `SELECT id, page_order, url, mime_type, file_size, checksum FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
     ).bind(c.id).all();
     contentList.push(mapContent(c, media.results || []));
   }
