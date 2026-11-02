@@ -4586,25 +4586,19 @@ export function renderDashboardHtml(): Response {
       const resContainer = document.getElementById('udReissueResult');
       resContainer.style.display = 'block';
       resContainer.innerHTML = '<div style="color:var(--text-sec); font-size:0.8rem;">جاري إصدار رمز استرداد جديد...</div>';
-
       try {
-        const res = await fetch(\`/api/dashboard/users/\${activeUserId}/reissue-credentials\`, {
+        const res = await fetch('/api/dashboard/users/' + encodeURIComponent(activeUserId) + '/reissue-credentials', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'RECOVERY_CODE', revokeExistingSessions })
         });
         const data = await res.json();
         if (data.success) {
-          resContainer.innerHTML = `
-            <div style="color:var(--emerald); font-weight:bold; font-size:0.85rem; margin-bottom:0.4rem;">✓ تم إنشاء رمز استرداد دائم بنجاح.</div>
-            <div style="color:var(--text-sec); font-size:0.78rem; line-height:1.8;">
-              حُفظت الرسالة التي تحتوي الرمز مشفرة داخل إشعارات حساب المستخدم.
-              لن يظهر الرمز في لوحة الإدارة أو في استجابة الخادم؛ يستطيع صاحب الحساب فقط عرضه من ملفه الشخصي بعد تسجيل الدخول.
-            </div>
-            <div style="color:var(--amber); font-size:0.75rem; margin-top:0.35rem;">يبقى الرمز صالحاً حتى تغييره من المستخدم أو إلغائه بإصدار رمز بديل.</div>
-          `;
+          resContainer.innerHTML = '<div style="color:var(--emerald); font-weight:bold; font-size:0.85rem; margin-bottom:0.4rem;">✓ تم إنشاء رمز استرداد دائم بنجاح.</div>' +
+            '<div style="color:var(--text-sec); font-size:0.78rem; line-height:1.8;">حُفظت الرسالة التي تحتوي الرمز مشفرة داخل إشعارات حساب المستخدم. لن يظهر الرمز في لوحة الإدارة أو استجابة الخادم؛ يستطيع صاحب الحساب فقط عرضه من ملفه الشخصي بعد تسجيل الدخول.</div>' +
+            '<div style="color:var(--amber); font-size:0.75rem; margin-top:0.35rem;">يبقى الرمز صالحاً حتى تغييره من المستخدم أو إلغائه من الإدارة.</div>';
           showToast('تم تسليم رمز الاسترداد إلى إشعارات حساب المستخدم');
-          const resRefresh = await fetch('/api/dashboard/users/' + activeUserId);
+          const resRefresh = await fetch('/api/dashboard/users/' + encodeURIComponent(activeUserId));
           const dataRefresh = await resRefresh.json();
           if (dataRefresh.success) {
             const sBody = document.getElementById('udSessionsTableBody');
@@ -4612,22 +4606,20 @@ export function renderDashboardHtml(): Response {
             if (sessions.length) {
               sBody.innerHTML = sessions.map(s => {
                 const sId = escapeHtml(s.id);
-                return \`<tr>
-                  <td><code>\${escapeHtml(s.id.substring(0, 10))}...</code></td>
-                  <td>\${escapeHtml(s.ip_address)}</td>
-                  <td>\${escapeHtml(s.device_info)}</td>
-                  <td>\${new Date(s.created_at).toLocaleString('ar-EG')}</td>
-                  <td>
-                    <button class="action-btn reject" data-user="\${escapeHtml(activeUserId)}" data-session="\${sId}" onclick="revokeSingleSession(this.getAttribute('data-user'), this.getAttribute('data-session'))" style="font-size:0.7rem; padding:0.2rem 0.5rem;">طرد</button>
-                  </td>
-                </tr>\`;
+                return '<tr>' +
+                  '<td><code>' + escapeHtml(s.id.substring(0, 10)) + '...</code></td>' +
+                  '<td>' + escapeHtml(s.ip_address) + '</td>' +
+                  '<td>' + escapeHtml(s.device_info) + '</td>' +
+                  '<td>' + new Date(s.created_at).toLocaleString('ar-EG') + '</td>' +
+                  '<td><button class="action-btn reject" data-user="' + escapeHtml(activeUserId) + '" data-session="' + sId + '" onclick="revokeSingleSession(this.getAttribute(\'data-user\'), this.getAttribute(\'data-session\'))" style="font-size:0.7rem; padding:0.2rem 0.5rem;">طرد</button></td>' +
+                  '</tr>';
               }).join('');
             } else {
               sBody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">لا توجد جلسات نشطة حالياً</td></tr>';
             }
           }
         } else {
-          resContainer.innerHTML = \`<div style="color:var(--ruby); font-size:0.85rem;">\${escapeHtml(data.message || 'فشلت عملية إصدار الرمز')}</div>\`;
+          resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">' + escapeHtml(data.message || 'فشلت عملية إصدار الرمز') + '</div>';
         }
       } catch (e) {
         resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
@@ -4641,23 +4633,22 @@ export function renderDashboardHtml(): Response {
       resContainer.style.display = 'block';
       resContainer.innerHTML = '<div style="color:var(--text-sec); font-size:0.8rem;">جارٍ إلغاء رمز الاسترداد...</div>';
       try {
-        const res = await fetch(`/api/dashboard/users/${activeUserId}/revoke-recovery-code`, {
+        const res = await fetch('/api/dashboard/users/' + encodeURIComponent(activeUserId) + '/revoke-recovery-code', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
         });
         const data = await res.json();
         if (data.success) {
-          resContainer.innerHTML = `<div style="color:var(--amber); font-size:0.85rem; font-weight:bold;">✓ ${escapeHtml(data.message || 'تم إلغاء رمز الاسترداد')}</div>`;
+          resContainer.innerHTML = '<div style="color:var(--amber); font-size:0.85rem; font-weight:bold;">✓ ' + escapeHtml(data.message || 'تم إلغاء رمز الاسترداد') + '</div>';
           showToast('تم إلغاء رمز الاسترداد السابق');
         } else {
-          resContainer.innerHTML = `<div style="color:var(--ruby); font-size:0.85rem;">${escapeHtml(data.message || 'فشل إلغاء رمز الاسترداد')}</div>`;
+          resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">' + escapeHtml(data.message || 'فشل إلغاء رمز الاسترداد') + '</div>';
         }
       } catch (error) {
         resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
       }
     }
-
     async function loadRoles() {
       const container = document.getElementById('rolesList');
       container.innerHTML = '<div style="text-align:center; color:var(--text-sec); grid-column:1/-1;">جاري جلب بيانات الرتب...</div>';
