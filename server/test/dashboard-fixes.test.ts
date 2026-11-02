@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import * as ts from 'typescript';
 import {
   verifyOwnerAuth,
   handlePreviewPurge,
@@ -465,6 +466,17 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
 
       expect(script).toBeDefined();
+      const parsed = ts.transpileModule(script!, {
+        compilerOptions: { target: ts.ScriptTarget.ES2022 },
+        reportDiagnostics: true,
+      });
+      const syntaxDiagnostics = (parsed.diagnostics || []).map(diagnostic => {
+        const position = diagnostic.file?.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
+        const location = position ? `L${position.line + 1}:C${position.character + 1}` : 'unknown location';
+        return `${location} ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`;
+      });
+
+      expect(syntaxDiagnostics).toEqual([]);
       expect(() => new Function(script!)).not.toThrow();
     });
   });
