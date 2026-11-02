@@ -6,6 +6,7 @@ import { handleGenerateMyRecoveryCode, handleGetMyNotifications } from './servic
 import {
   handleGetGroups,
   handleJoinGroupRequest,
+  handleLeaveGroup,
   handleGetGroupMembers,
   handleUpdateGroupMemberRole,
   handleRemoveGroupMember,
@@ -220,6 +221,10 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path.startsWith('/api/v1/groups/') && path.endsWith('/join-request') && method === 'POST') {
     const groupId = path.split('/')[4];
     return handleJoinGroupRequest(groupId, user, request, env);
+  }
+  if (path.startsWith('/api/v1/groups/') && path.endsWith('/leave') && (method === 'POST' || method === 'DELETE')) {
+    const groupId = path.split('/')[4];
+    return handleLeaveGroup(groupId, user, env);
   }
   if (path.startsWith('/api/v1/groups/') && path.endsWith('/members') && method === 'GET') {
     const groupId = path.split('/')[4];
