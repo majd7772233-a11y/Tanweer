@@ -1578,8 +1578,8 @@ class TanweerRepository(
     suspend fun getScheduleMetaAndSlots(groupId: String): Result<com.magd.tanweer.data.model.ScheduleResponse> = withContext(Dispatchers.IO) {
         try {
             val res = api.getSchedule(groupId)
-            if (res.isSuccessful && res.body() != null) {
-                val body = res.body()!!
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true) {
                 val slots = body.slots.map {
                     ScheduleSlotEntity(
                         id = it.id,
@@ -1591,16 +1591,14 @@ class TanweerRepository(
                         subjectIcon = it.subjectIcon,
                         colorHex = it.colorHex,
                         startTime = it.startTime,
-                        endTime = it.endTime
+                        endTime = it.endTime,
+                        syncStatus = "SYNCED"
                     )
                 }
-                db.scheduleDao().clearSlots(groupId)
-                if (slots.isNotEmpty()) {
-                    db.scheduleDao().insertSlots(slots)
-                }
+                db.scheduleDao().reconcileGroupSchedule(groupId, slots)
                 Result.success(body)
             } else {
-                Result.failure(Exception("تعذر جلب بيانات الجدول"))
+                Result.failure(Exception(body?.let { "تعذر جلب بيانات الجدول (HTTP ${res.code()})" } ?: "تعذر جلب بيانات الجدول"))
             }
         } catch (e: Exception) {
             Result.failure(e)
