@@ -4,6 +4,8 @@ import { mapExam } from '../lib/mappers';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
+
+export const SUPPORTED_EXAM_TYPES = ['MONTHLY', 'ORAL', 'MIDTERM', 'FINAL'] as const;
 import { isValidIsoDate } from '../lib/validation';
 
 export async function handleGetExams(groupId: string, user: UserContext, env: Env): Promise<Response> {
@@ -48,8 +50,7 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
   const examDate = body.examDate || body.date;
   const chapters = body.requiredChapters || body.topics;
   const rawType = (body.examType || 'MONTHLY').trim().toUpperCase();
-  const allowedExamTypes = ['MONTHLY', 'ORAL', 'MIDTERM', 'FINAL'];
-  if (!allowedExamTypes.includes(rawType)) {
+  if (!SUPPORTED_EXAM_TYPES.includes(rawType as typeof SUPPORTED_EXAM_TYPES[number])) {
     return errorResponse('INVALID_EXAM_TYPE', 'أنواع الاختبارات المتاحة هي: شهري، شفهي، نصفي، نهائي فقط');
   }
   const examType = rawType;
@@ -182,7 +183,7 @@ export async function handleUpdateExam(
   }
 
   const rawType = body.examType ? body.examType.trim().toUpperCase() : null;
-  const examTypeVal = rawType && ['MONTHLY', 'ORAL', 'MIDTERM', 'FINAL'].includes(rawType) ? rawType : null;
+  const examTypeVal = rawType && SUPPORTED_EXAM_TYPES.includes(rawType as typeof SUPPORTED_EXAM_TYPES[number]) ? rawType : null;
   if (rawType && examTypeVal === null) {
     return errorResponse('INVALID_EXAM_TYPE', 'أنواع الاختبارات المتاحة هي: شهري، شفهي، نصفي، نهائي فقط');
   }
