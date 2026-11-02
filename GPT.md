@@ -1539,6 +1539,7 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **Date/month deletion fix, commit ea168eb9e803503f2bad7dbc1cdd6e8feb2b193c:** Extended DELETE_PENDING retention to contents, homework, and event date/month cleanup queries.
 - **Database integration tests, commit 9faa3fbd3302b2457c19c560222a751cc297dcd7:** Added in-memory Room tests for pending state lookups and DELETE_PENDING retention across full/date/month cleanup.
 - **Login-time verification retry, commit 4846400c5f659a3ab5eb0fb2f8edba57c07d99e3:** Retries a previously unavailable data-generation check after authentication, before any queued local write can be submitted.
+- **Closed-by-default queue initialization, commit 08291af89c496893d24d245b06096081d79fd7df:** UnifiedMutationQueue now starts with `isDrainAllowed = false`, preventing the periodic worker from racing ahead of ViewModel's startup generation check.
 - **Tests/CI:** The current branch has not yet passed a CI run for these newest commits. The earlier successful CI run is not evidence for this code. The temporary validation PR is PR #4 and must be closed without merging after the final result.
 - **Cloudflare:** No D1 writes, migrations, secrets changes, or Worker deployment.
 - **Next step:** Verify the Android build and unit tests plus server tests on the latest HEAD; inspect all current-head logs and close the validation-only PR unmerged.
