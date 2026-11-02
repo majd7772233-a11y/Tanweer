@@ -232,8 +232,23 @@ describe('Authentication hardening regressions', () => {
                   }
 
                   if (sql.includes('INSERT INTO sessions')) {
-                    sessions.push({ id: params[0], user_id: params[1] });
+                    sessions.push({ id: params[0], user_id: params[1], device_id: params[2] });
                     return { success: true, meta: { changes: 1 } };
+                  }
+
+                  if (sql.includes('DELETE FROM sessions WHERE id = ? AND user_id = ? AND device_id = ?')) {
+                    const before = sessions.length;
+                    const [sessionId, userId, deviceId] = params;
+                    for (let index = sessions.length - 1; index >= 0; index--) {
+                      if (
+                        sessions[index].id === sessionId &&
+                        sessions[index].user_id === userId &&
+                        sessions[index].device_id === deviceId
+                      ) {
+                        sessions.splice(index, 1);
+                      }
+                    }
+                    return { success: true, meta: { changes: before - sessions.length } };
                   }
 
                   return { success: true, meta: { changes: 0 } };
