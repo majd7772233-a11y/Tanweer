@@ -65,6 +65,7 @@ fun GroupsScreen(
         group.chatPolicy != "STAFF_ONLY" ||
             userRole == Role.TEACHER ||
             userRole == Role.ADMIN ||
+            currentUser?.role == "SYSTEM_OWNER" ||
             group.role == "TEACHER" ||
             group.role == "ADMIN"
     } ?: false
