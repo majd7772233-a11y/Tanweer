@@ -529,10 +529,13 @@ interface OutboxDao {
     @Query("DELETE FROM outbox WHERE entityId = :entityId")
     suspend fun deleteByEntityId(entityId: String)
 
+    @Query("DELETE FROM outbox WHERE entityId = :entityId AND entityType = :entityType")
+    suspend fun deleteByEntityIdAndType(entityId: String, entityType: String)
+
     @Query("SELECT * FROM outbox WHERE entityId = :entityId AND status IN ('PENDING', 'SYNCING', 'FAILED') LIMIT 1")
     suspend fun getPendingByEntityId(entityId: String): OutboxEntity?
 
-    @Query("SELECT * FROM outbox WHERE entityId = :entityId AND entityType = :entityType AND status IN ('PENDING', 'SYNCING', 'FAILED') ORDER BY createdAt ASC LIMIT 1")
+    @Query("SELECT * FROM outbox WHERE entityId = :entityId AND (entityType = :entityType OR (:entityType = 'EXAM_CREATE' AND entityType = 'EXAM' AND operation = 'CREATE') OR (:entityType = 'EXAM_DELETE' AND entityType = 'EXAM' AND operation = 'DELETE')) AND status IN ('PENDING', 'SYNCING', 'FAILED') ORDER BY createdAt ASC LIMIT 1")
     suspend fun getPendingMutation(entityId: String, entityType: String): OutboxEntity?
 
     @Query("UPDATE outbox SET entityId = :newEntityId WHERE entityId = :oldEntityId")

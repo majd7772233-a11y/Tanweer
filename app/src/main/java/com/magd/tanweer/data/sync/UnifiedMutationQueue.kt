@@ -183,7 +183,9 @@ class UnifiedMutationQueue private constructor(
 
             val pendingItems = outboxDao.getPendingItemsSync()
             for (rawItem in pendingItems) {
-                val item = normalizeLegacyOperation(rawItem)
+                // An earlier queued create may have replaced this entity's server ID.
+                val currentItem = outboxDao.getOutboxItemById(rawItem.id) ?: continue
+                val item = normalizeLegacyOperation(currentItem)
 
                 // Exponential backoff check: 2s, 4s, 8s, 16s, max 60s
                 val backoffMs = (1000L * (1 shl item.attempts.coerceAtMost(5))).coerceIn(2000L, 60_000L)
@@ -360,7 +362,7 @@ class UnifiedMutationQueue private constructor(
                             )
                             outboxDao.deleteOutbox(item.id)
                             true
-                        } else if (res.code() in 400..499) {
+                        } else if (res.code() in 400..499 && res.code() !in listOf(408, 429)) {
                             db.examDao().updateSyncStatus(item.entityId, "FAILED")
                             handleMutationFailure(item, "رفض الخادم رفع الاختبار (${res.code()})")
                             outboxDao.deleteOutbox(item.id)
@@ -522,7 +524,7 @@ class UnifiedMutationQueue private constructor(
                                     outboxDao.deleteByEntityId(item.entityId)
                                     true
                                 }
-                                res.code() in 400..499 -> {
+                                res.code() in 400..499 && res.code() !in listOf(408, 429) -> {
                                     db.examDao().updateSyncStatus(item.entityId, "SYNCED")
                                     val message = if (res.code() == 401 || res.code() == 403) {
                                         "لا تملك صلاحية حذف الاختبار من الخادم (${res.code()})"

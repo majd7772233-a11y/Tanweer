@@ -795,10 +795,19 @@ fun CanvasExamsTableBoard(
                             modifier = Modifier.width(85.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            CanvasSmartStatusBadge(
-                                isDone = isReviewed,
-                                onClick = { onToggleDone(exam.id, isReviewed) }
-                            )
+                            if (exam.syncStatus == "DELETE_PENDING") {
+                                Text(
+                                    text = "قيد الحذف",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = WarmAmber
+                                )
+                            } else {
+                                CanvasSmartStatusBadge(
+                                    isDone = isReviewed,
+                                    onClick = { onToggleDone(exam.id, isReviewed) }
+                                )
+                            }
                         }
 
                         // Delete Action (Only visible for teachers / admins)

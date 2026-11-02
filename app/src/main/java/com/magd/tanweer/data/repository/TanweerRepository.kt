@@ -3243,8 +3243,16 @@ class TanweerRepository(
     }
 
     suspend fun toggleExamCompletion(examId: String, targetStatus: Boolean): Result<Boolean> = withContext(Dispatchers.IO) {
+        val pendingDelete = db.outboxDao().getPendingMutation(examId, "EXAM_DELETE")
+        if (pendingDelete != null) {
+            return@withContext Result.failure(Exception("لا يمكن تغيير حالة اختبار قيد الحذف"))
+        }
         val exam = db.examDao().getExamById(examId)
-        val isNotSyncedYet = exam != null && exam.syncStatus != "SYNCED"
+            ?: return@withContext Result.failure(Exception("الاختبار غير موجود"))
+        if (exam.syncStatus == "DELETE_PENDING") {
+            return@withContext Result.failure(Exception("طلب حذف هذا الاختبار قيد المزامنة"))
+        }
+        val isNotSyncedYet = exam.syncStatus != "SYNCED"
         db.examDao().updateExamCompletion(examId, targetStatus)
 
         if (isNotSyncedYet) {
@@ -3262,7 +3270,7 @@ class TanweerRepository(
         try {
             val res = api.toggleExamCompletion(examId, ToggleCompletionRequest(isCompleted = targetStatus))
             if (res.isSuccessful) {
-                db.outboxDao().deleteByEntityId(examId)
+                db.outboxDao().deleteByEntityIdAndType(examId, "EXAM_TOGGLE")
                 val serverCompleted = res.body()?.isCompleted ?: targetStatus
                 db.examDao().updateExamCompletion(examId, serverCompleted)
                 Result.success(serverCompleted)
@@ -3712,7 +3720,7 @@ class TanweerRepository(
                         db.outboxDao().deleteByEntityId(examId)
                         Result.success(ExamDeleteResult.Synced())
                     }
-                    res.code() in 400..499 -> {
+                    res.code() in 400..499 && res.code() !in listOf(408, 429) -> {
                         val message = when (res.code()) {
                             401, 403 -> "لا تملك صلاحية حذف هذا الاختبار (HTTP ${res.code()})"
                             else -> "رفض الخادم حذف الاختبار (HTTP ${res.code()})"
