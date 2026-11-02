@@ -119,7 +119,7 @@ class MockD1Database {
     }
 
     // Device-session lifecycle: model the conditional D1 writes used by authentication.
-    if (/^DELETE FROM sessions WHERE user_id = \\? AND \\(expires_at <= \\? OR device_id = \\?\\)$/i.test(normalized)) {
+    if (/^DELETE FROM sessions WHERE user_id = \? AND \(expires_at <= \? OR device_id = \?\)$/i.test(normalized)) {
       const [userId, now, deviceId] = params;
       const rows = this.tables.sessions || [];
       const removed = rows.filter(row =>
@@ -129,7 +129,7 @@ class MockD1Database {
       return removed;
     }
 
-    if (/^INSERT INTO sessions \\(id, user_id, device_id, refresh_token_hash, expires_at, created_at\\) SELECT/i.test(normalized)) {
+    if (/^INSERT INTO sessions \(id, user_id, device_id, refresh_token_hash, expires_at, created_at\) SELECT/i.test(normalized)) {
       const [id, userId, deviceId, tokenHash, expiresAt, createdAt, countUserId, now, maxDevices] = params;
       const activeDeviceIds = new Set(
         (this.tables.sessions || [])
@@ -149,7 +149,7 @@ class MockD1Database {
       return [row];
     }
 
-    if (/^INSERT INTO devices \\(device_id, user_id, platform, app_version, push_token, last_seen\\) SELECT/i.test(normalized)) {
+    if (/^INSERT INTO devices \(device_id, user_id, platform, app_version, push_token, last_seen\) SELECT/i.test(normalized)) {
       const [deviceId, userId, platform, appVersion, lastSeen, sessionId, expectedUserId, expectedTokenHash] = params;
       const session = (this.tables.sessions || []).find(row =>
         row.id === sessionId && row.user_id === expectedUserId && row.refresh_token_hash === expectedTokenHash
@@ -223,7 +223,7 @@ class MockD1Database {
 
     // DELETE
     if (/^DELETE FROM/i.test(normalized)) {
-      if (/^DELETE FROM sessions WHERE id = \\? AND user_id = \\? AND device_id = \\?$/i.test(normalized)) {
+      if (/^DELETE FROM sessions WHERE id = \? AND user_id = \? AND device_id = \?$/i.test(normalized)) {
         const [sessionId, userId, deviceId] = params;
         const rows = this.tables.sessions || [];
         const removed = rows.filter(row =>
@@ -233,7 +233,7 @@ class MockD1Database {
         return removed;
       }
 
-      if (/^DELETE FROM sessions WHERE user_id = \\? AND device_id = \\?$/i.test(normalized)) {
+      if (/^DELETE FROM sessions WHERE user_id = \? AND device_id = \?$/i.test(normalized)) {
         const [userId, deviceId] = params;
         const rows = this.tables.sessions || [];
         const removed = rows.filter(row => row.user_id === userId && row.device_id === deviceId);
@@ -241,7 +241,7 @@ class MockD1Database {
         return removed;
       }
 
-      if (/^DELETE FROM devices WHERE user_id = \\? AND device_id = \\?$/i.test(normalized)) {
+      if (/^DELETE FROM devices WHERE user_id = \? AND device_id = \?$/i.test(normalized)) {
         const [userId, deviceId] = params;
         const rows = this.tables.devices || [];
         const removed = rows.filter(row => row.user_id === userId && row.device_id === deviceId);
@@ -249,7 +249,7 @@ class MockD1Database {
         return removed;
       }
 
-      if (/^DELETE FROM devices WHERE user_id = \\? AND NOT EXISTS/i.test(normalized)) {
+      if (/^DELETE FROM devices WHERE user_id = \? AND NOT EXISTS/i.test(normalized)) {
         const [userId, sessionUserId, now] = params;
         const rows = this.tables.devices || [];
         const removed = rows.filter(device =>
@@ -264,7 +264,7 @@ class MockD1Database {
         return removed;
       }
 
-      const match = normalized.match(/DELETE FROM (\\w+)/i);
+      const match = normalized.match(/DELETE FROM (\w+)/i);
       if (match) {
         const table = match[1];
 
@@ -368,7 +368,7 @@ class MockD1Database {
         });
       }
 
-      if (table.toLowerCase() === 'sessions' && /^SELECT 1 FROM sessions WHERE user_id = \\? AND device_id = \\? AND expires_at > \\?/i.test(normalized)) {
+      if (table.toLowerCase() === 'sessions' && /^SELECT 1 FROM sessions WHERE user_id = \? AND device_id = \? AND expires_at > \?/i.test(normalized)) {
         const [userId, deviceId, now] = params;
         const active = (this.tables.sessions || []).some(row =>
           row.user_id === userId && row.device_id === deviceId && Number(row.expires_at) > Number(now)
