@@ -72,7 +72,8 @@ export function mapExam(r: any) {
     subjectName: r.subject_name ?? r.subjectName ?? '',
     subjectIcon: r.subject_icon ?? r.subjectIcon ?? '🔴',
     colorHex: r.color_hex ?? r.colorHex ?? '#FF3366',
-    // QUIZ was retired; keep legacy rows visible under the supported MONTHLY category.\n    examType: rawExamType === 'QUIZ' ? 'MONTHLY' : rawExamType,
+    // QUIZ was retired; keep legacy rows visible under the supported MONTHLY category.
+    examType: rawExamType === 'QUIZ' ? 'MONTHLY' : rawExamType,
     isOfficial: Boolean(r.is_official ?? r.isOfficial ?? false),
     isCompleted: Boolean(r.is_completed ?? r.isCompleted ?? false),
     createdAt: Number(r.created_at ?? r.createdAt ?? Date.now()),
