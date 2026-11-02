@@ -136,7 +136,11 @@ export async function handleGetGroupMembers(groupId: string, user: UserContext, 
   const isGlobalAdmin = normRole === Role.ADMIN || normRole === Role.SYSTEM_OWNER;
   const canManage = isGlobalAdmin || await hasPermission(user, Permission.MANAGE_GROUP_MEMBERS, { db: env.DB, groupId });
 
-  const statusFilter = canManage ? '' : "AND gm.status = 'ACTIVE'";
+  // Managers see active members, pending requests and banned users.
+  // Rejected requests remain visible to the applicant in discovery, not as fake members here.
+  const statusFilter = canManage
+    ? "AND gm.status IN ('ACTIVE', 'PENDING', 'BANNED')"
+    : "AND gm.status = 'ACTIVE'";
 
   let members: any;
   try {
