@@ -123,7 +123,8 @@ data class ExamEntity(
     val colorHex: String,
     val isCompleted: Boolean = false,
     val examType: String = "MONTHLY",
-    val syncStatus: String = "SYNCED"
+    val syncStatus: String = "SYNCED",
+    val isOfficial: Boolean = false
 )
 
 @Entity(tableName = "cached_events")
