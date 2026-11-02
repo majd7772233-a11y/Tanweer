@@ -475,7 +475,7 @@ fun HomeworkScreen(
                     isLocalAddModalOpen = false
                     viewModel.closeAddHomeworkDialog()
                 },
-                onAddWithPages = { subjId, title, details, pages, questions, dueDate, taskType, scanPages ->
+                onAddWithPages = { subjId, title, details, pages, questions, dueDate, taskType, scanPages, finishSubmission ->
                     viewModel.addHomework(
                         subjectId = subjId,
                         title = title,
@@ -485,7 +485,9 @@ fun HomeworkScreen(
                         dueDate = dueDate,
                         taskType = taskType,
                         pages = scanPages.mapNotNull { it.processedResult },
+                        isOfficial = false,
                         onResult = { result ->
+                            finishSubmission()
                             if (result.isSuccess) {
                                 val outcome = result.getOrNull()
                                 if (outcome?.isSynced == true) {
@@ -720,6 +722,16 @@ fun HomeworkCard(
                                         .padding(horizontal = 5.dp, vertical = 2.dp)
                                 ) {
                                     Text("مشروع 🎯", style = AppTypography.Badge.copy(color = WarmAmber))
+                                }
+                            }
+                            if (homework.isOfficial) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(WarmAmber.copy(alpha = 0.15f))
+                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                ) {
+                                    Text("رسمي • من الأستاذ 🎓", style = AppTypography.Badge.copy(color = WarmAmber))
                                 }
                             }
                         }
@@ -975,7 +987,7 @@ fun AddHomeworkDialog(
     initialDueDate: String? = null,
     isOfficial: Boolean = false,
     onDismiss: () -> Unit,
-    onAddWithPages: (subjectId: String, title: String, details: String?, pages: String?, questions: String?, dueDate: String, taskType: String, scanPages: List<HomeworkScanPage>) -> Unit
+    onAddWithPages: (subjectId: String, title: String, details: String?, pages: String?, questions: String?, dueDate: String, taskType: String, scanPages: List<HomeworkScanPage>, onFinished: () -> Unit) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -989,6 +1001,7 @@ fun AddHomeworkDialog(
     var taskType by remember { mutableStateOf("HOMEWORK") }
     var scannedPages by remember { mutableStateOf<List<HomeworkScanPage>>(emptyList()) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var isSubmitting by remember { mutableStateOf(false) }
 
     val datePickerState = rememberDatePickerState(
         initialSelectedDateMillis = remember(dueDate) {
@@ -1167,11 +1180,23 @@ fun AddHomeworkDialog(
                             modifier = Modifier.weight(1f)
                         )
                         GlassButton(
-                            text = if (isOfficial) "نشر الواجب الرسمي ⭐" else "حفظ ونشر الواجب ✨",
-                            enabled = title.isNotBlank(),
+                            text = if (isSubmitting) "جارٍ النشر..." else if (isOfficial) "نشر الواجب الرسمي ⭐" else "حفظ ونشر الواجب ✨",
+                            enabled = title.isNotBlank() && !isSubmitting,
                             onClick = {
-                                if (title.isNotBlank()) {
-                                    onAddWithPages(selectedSubjId, title, details, pageNumbers, questionNumbers, dueDate, taskType, scannedPages)
+                                if (title.isNotBlank() && !isSubmitting) {
+                                    isSubmitting = true
+                                    onAddWithPages(
+                                        selectedSubjId,
+                                        title,
+                                        details,
+                                        pageNumbers,
+                                        questionNumbers,
+                                        dueDate,
+                                        taskType,
+                                        scannedPages
+                                    ) {
+                                        isSubmitting = false
+                                    }
                                 }
                             },
                             modifier = Modifier.weight(2f)
