@@ -137,7 +137,8 @@ data class CreateHomeworkRequest(
     val pageNumbers: String? = null,
     val questionNumbers: String? = null,
     val taskType: String = "HOMEWORK",
-    val mediaUrls: List<String> = emptyList()
+    val mediaUrls: List<String> = emptyList(),
+    val isOfficial: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
@@ -149,7 +150,8 @@ data class CreateExamRequest(
     val title: String,
     val requiredChapters: String? = null,
     val notes: String? = null,
-    val examType: String = "MONTHLY"
+    val examType: String = "MONTHLY",
+    val isOfficial: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
