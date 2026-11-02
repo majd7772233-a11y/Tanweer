@@ -800,13 +800,33 @@ export async function handleVoteCommunityDecision(
     return errorResponse('DECISION_NOT_FOUND', 'القرار الجماعي غير موجود', 404);
   }
 
+  // Do not allow a non-member who guessed a decision ID to mutate its expiry state.
+  const memberCheck = await requireGroupMember(user, decision.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
   if (decision.status !== 'PENDING') {
     return errorResponse('DECISION_CLOSED', 'تم إغلاق التصويت على هذا القرار');
   }
 
-  // Check expiration
+  // Expire the decision and its linked schedule proposal together.
   if (decision.expires_at && decision.expires_at < Date.now()) {
-    await env.DB.prepare(`UPDATE community_decisions SET status = 'EXPIRED' WHERE id = ?`).bind(decisionId).run();
+    if (decision.request_type === 'SCHEDULE' || decision.request_type === 'SCHEDULE_CHANGE') {
+      await env.DB.batch([
+        env.DB.prepare(
+          `UPDATE community_decisions SET status = 'EXPIRED'
+           WHERE id = ? AND group_id = ? AND status = 'PENDING'`
+        ).bind(decisionId, decision.group_id),
+        env.DB.prepare(
+          `UPDATE schedule_proposals SET status = 'EXPIRED'
+           WHERE id = ? AND group_id = ? AND status = 'PENDING'`
+        ).bind(decision.target_id, decision.group_id),
+      ]);
+    } else {
+      await env.DB.prepare(
+        `UPDATE community_decisions SET status = 'EXPIRED'
+         WHERE id = ? AND group_id = ? AND status = 'PENDING'`
+      ).bind(decisionId, decision.group_id).run();
+    }
     return errorResponse('DECISION_EXPIRED', 'انتهت المهلة المحددة للتصويت على هذا القرار', 410);
   }
 
@@ -828,9 +848,6 @@ export async function handleVoteCommunityDecision(
       403
     );
   }
-
-  const memberCheck = await requireGroupMember(user, decision.group_id, env.DB);
-  if (memberCheck) return memberCheck;
 
   const body = await request.json() as { voteChoice: number }; // 1 = For, 0 = Against
   const choice = body.voteChoice === 1 ? 1 : 0;
