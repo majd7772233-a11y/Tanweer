@@ -2692,8 +2692,21 @@ class TanweerRepository(
                 }
                 Result.success(Unit)
             } else {
-                db.contentDao().updateSyncStatus(contentId, "FAILED")
-                Result.failure(Exception(res.message() ?: "فشل مزامنة الدرس مع السيرفر"))
+                val statusCode = res.code()
+                val message = if (statusCode in listOf(401, 403)) {
+                    "لا تملك صلاحية نشر هذا الدرس (HTTP $statusCode)"
+                } else {
+                    "رفض الخادم نشر الدرس (HTTP $statusCode)"
+                }
+                db.contentDao().updateSyncStatus(
+                    contentId,
+                    if (isRetryableHttpStatus(statusCode)) "PENDING" else "FAILED"
+                )
+                if (isRetryableHttpStatus(statusCode)) {
+                    Result.failure(Exception(message))
+                } else {
+                    Result.failure(PermanentHttpFailureException(statusCode, message))
+                }
             }
         } catch (e: Exception) {
             db.contentDao().updateSyncStatus(contentId, "FAILED")
@@ -3045,8 +3058,21 @@ class TanweerRepository(
                 }
                 Result.success(Unit)
             } else {
-                db.homeworkDao().updateSyncStatus(homeworkId, "FAILED")
-                Result.failure(Exception(res.message() ?: "فشل المزامنة"))
+                val statusCode = res.code()
+                val message = if (statusCode in listOf(401, 403)) {
+                    "لا تملك صلاحية نشر هذا الواجب (HTTP $statusCode)"
+                } else {
+                    "رفض الخادم نشر الواجب (HTTP $statusCode)"
+                }
+                db.homeworkDao().updateSyncStatus(
+                    homeworkId,
+                    if (isRetryableHttpStatus(statusCode)) "PENDING" else "FAILED"
+                )
+                if (isRetryableHttpStatus(statusCode)) {
+                    Result.failure(Exception(message))
+                } else {
+                    Result.failure(PermanentHttpFailureException(statusCode, message))
+                }
             }
         } catch (e: Exception) {
             db.homeworkDao().updateSyncStatus(homeworkId, "FAILED")
