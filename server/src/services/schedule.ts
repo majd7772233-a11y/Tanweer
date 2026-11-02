@@ -561,6 +561,23 @@ export async function handleGetScheduleProposals(groupId: string, user: UserCont
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
 
+  const now = Date.now();
+  await env.DB.prepare(
+    `UPDATE community_decisions
+     SET status = 'EXPIRED'
+     WHERE group_id = ? AND request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')
+       AND status = 'PENDING' AND expires_at IS NOT NULL AND expires_at < ?`
+  ).bind(groupId, now).run();
+  await env.DB.prepare(
+    `UPDATE schedule_proposals
+     SET status = 'EXPIRED'
+     WHERE group_id = ? AND status = 'PENDING'
+       AND id IN (
+         SELECT target_id FROM community_decisions
+         WHERE group_id = ? AND request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE') AND status = 'EXPIRED'
+       )`
+  ).bind(groupId, groupId).run();
+
   const proposals = await env.DB.prepare(
     `SELECT sp.id, sp.group_id, sp.proposed_by, sp.day_of_week, sp.slot_order,
             sp.old_subject_id, sp.new_subject_id, sp.reason,
@@ -664,8 +681,16 @@ export async function handleProposeScheduleChange(user: UserContext, request: Re
   if (!eligibleVoters.includes(user.userId)) eligibleVoters.push(user.userId);
   const totalEligible = Math.max(1, eligibleVoters.length);
   const thresholdPercent = 60;
+  const subjectRows = await env.DB.prepare(
+    `SELECT id, name_ar FROM subjects WHERE id IN (?, ?)`
+  ).bind(finalOldSubjectId || '', body.newSubjectId.trim()).all<{ id: string; name_ar: string }>();
+  const subjectNames = new Map((subjectRows.results || []).map(row => [row.id, row.name_ar]));
+  const oldSubjectLabel = finalOldSubjectId
+    ? (subjectNames.get(finalOldSubjectId) || finalOldSubjectId)
+    : 'فارغة';
+  const newSubjectLabel = subjectNames.get(body.newSubjectId.trim()) || body.newSubjectId.trim();
   const voterSnapshot = JSON.stringify({
-    text: `تغيير مادة الحصة من ${finalOldSubjectId || 'فارغة'} إلى ${body.newSubjectId.trim()}. السبب: ${body.reason.trim()}`,
+    text: `تغيير مادة الحصة من ${oldSubjectLabel} إلى ${newSubjectLabel}. السبب: ${body.reason.trim()}`,
     voters: eligibleVoters,
     targetType: 'SCHEDULE',
   });
