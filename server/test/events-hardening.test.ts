@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { handleUpdateEvent } from '../src/services/events';
+import { handleDeleteEvent, handleUpdateEvent } from '../src/services/events';
 import { Env, UserContext } from '../src/env';
 
 type EventRow = {
@@ -159,5 +159,51 @@ describe('Event CRUD authorization and holiday invariants', () => {
     expect(response.status).toBe(200);
     expect(db.event.category).toBe('HOLIDAY');
     expect(db.event.is_official).toBe(1);
+  });
+
+  it('prevents a teacher who owns a school circular from editing the admin announcement', async () => {
+    const db = new EventCrudMockDb('TEACHER');
+    db.event.group_id = 'all';
+    db.event.category = 'ANNOUNCEMENT';
+    const teacher = makeUser('TEACHER');
+
+    const response = await handleUpdateEvent(
+      'evt_existing',
+      teacher,
+      makeRequest({ title: 'تغيير غير مصرح به' }),
+      makeEnv(db)
+    );
+
+    expect(response.status).toBe(403);
+    expect(db.event.title).toBe('نشاط مدرسي');
+  });
+
+  it('prevents teachers from deleting official school announcements', async () => {
+    const db = new EventCrudMockDb('TEACHER');
+    db.event.group_id = 'all';
+    db.event.category = 'ANNOUNCEMENT';
+    const teacher = makeUser('TEACHER');
+
+    const response = await handleDeleteEvent('evt_existing', teacher, makeEnv(db));
+
+    expect(response.status).toBe(403);
+    expect(db.event.category).toBe('ANNOUNCEMENT');
+  });
+
+  it('allows the school admin to update an official school circular', async () => {
+    const db = new EventCrudMockDb('ADMIN');
+    db.event.group_id = 'all';
+    db.event.category = 'ANNOUNCEMENT';
+    const admin = makeUser('ADMIN', 'school-admin');
+
+    const response = await handleUpdateEvent(
+      'evt_existing',
+      admin,
+      makeRequest({ title: 'تعميم محدث' }),
+      makeEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.event.title).toBe('تعميم محدث');
   });
 });
