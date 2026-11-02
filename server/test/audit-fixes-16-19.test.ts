@@ -17,6 +17,11 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
             }),
           }),
         }),
+        batch: async (statements: Array<{ run: () => Promise<any> }>) => {
+          const results = [];
+          for (const statement of statements) results.push(await statement.run());
+          return results;
+        },
       },
     } as unknown as Env;
 
@@ -276,7 +281,18 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
               }
               return null;
             },
-            all: async () => ({ results: [{ role: 'STUDENT' }] }),
+            all: async () => {
+              if (sql.includes('SELECT user_id FROM group_members')) {
+                return { results: [{ user_id: 'usr_student' }, { user_id: 'usr_second_voter' }] };
+              }
+              if (sql.includes('SELECT id, name_ar FROM subjects')) {
+                return { results: [
+                  { id: 'physics', name_ar: 'الفيزياء' },
+                  { id: 'chemistry', name_ar: 'الكيمياء' },
+                ] };
+              }
+              return { results: [] };
+            },
             run: async () => {
               if (sql.includes('INSERT INTO schedule_proposals')) {
                 insertedProposal = params;
