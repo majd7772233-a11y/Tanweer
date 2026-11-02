@@ -7,7 +7,7 @@ import {
 } from '../src/services/chat';
 
 class GroupChatPolicyDb {
-  messages: Array<Record<string, unknown>> = [];
+  messages: Array<{ sql: string; params: unknown[] }> = [];
   constructor(
     readonly chatPolicy: string,
     readonly memberRole: string,
@@ -48,7 +48,7 @@ class GroupChatPolicyDb {
           return { success: true, meta: { changes: 1 } };
         }
         if (normalized.includes("DELETE FROM chat_messages")) {
-          db.messages = db.messages.filter(row => row.params?.[0] !== params[0]);
+          db.messages = db.messages.filter(row => row.params[0] !== params[0]);
           return { success: true, meta: { changes: 1 } };
         }
         return { success: true, meta: { changes: 0 } };
