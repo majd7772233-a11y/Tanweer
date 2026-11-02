@@ -99,6 +99,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _isCheckingAuth = MutableStateFlow(true)
     val isCheckingAuth: StateFlow<Boolean> = _isCheckingAuth.asStateFlow()
+    private val localSessionReady = CompletableDeferred<Unit>()
 
     fun updateUserSessionState(userId: String) {
         if (userId.isBlank()) return
@@ -141,7 +142,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         prefs.edit()
             .putString(groupKey, groupId)
             .putString(dateKey, studyDate)
-            .apply()
+            .commit()
     }
 
     private fun persistSelectedGroup(groupId: String) {
@@ -174,14 +175,21 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         repository.mutationQueue.isAutoSyncEnabled = _autoSyncEnabled.value
 
         viewModelScope.launch {
-            val user = db.userDao().getUserSync()
-            if (user != null) {
-                NetworkModule.setAuthToken(user.token)
-                updateUserSessionState(user.id)
+            try {
+                val user = db.userDao().getUserSync()
+                if (user != null) {
+                    NetworkModule.setAuthToken(user.token)
+                    updateUserSessionState(user.id)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("TanweerViewModel", "Failed restoring local session", e)
+            } finally {
+                // Startup synchronization must not race the first local session/token read.
+                localSessionReady.complete(Unit)
             }
-            _isCheckingAuth.value = false
 
-            // Observe future user changes (e.g., login or account switch)
+            // Observe future user changes (e.g., login or account switch).
+            // The startup coordinator below decides when the app may leave the splash screen.
             repository.currentUser.collect { u ->
                 if (u != null && u.id != currentActiveUserId) {
                     updateUserSessionState(u.id)
@@ -390,10 +398,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val dataGenerationReady = CompletableDeferred<Unit>()
 
     init {
-        // TA-20: Block outbox queue draining until data generation check is verified
+        // Never allow queued local mutations to run before the server generation is verified.
         repository.mutationQueue.isDrainAllowed = false
 
         viewModelScope.launch {
+            localSessionReady.await()
             try {
                 val res = repository.getSystemVersion()
                 if (res.isSuccess) {
@@ -403,36 +412,103 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                         logout()
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                android.util.Log.w("TanweerViewModel", "Server generation check unavailable; startup will use cached data if needed", e)
             } finally {
-                repository.mutationQueue.isDrainAllowed = true
+                // Keep the outbox blocked until the complete startup push-then-pull sequence finishes.
                 dataGenerationReady.complete(Unit)
-                if (_autoSyncEnabled.value) {
-                    repository.mutationQueue.triggerDrain()
-                }
             }
         }
 
         viewModelScope.launch {
-            // TA-20: Guarantee that initial sync NEVER starts before data_generation verification completes
+            localSessionReady.await()
             dataGenerationReady.await()
             currentUser
                 .distinctUntilChangedBy { it?.id }
                 .collect { user ->
-                    if (user != null) {
+                    if (user == null) {
+                        repository.mutationQueue.isDrainAllowed = true
+                        _isCheckingAuth.value = false
+                    } else {
+                        _isCheckingAuth.value = true
                         restoreAcademicSelection(user)
-                        if (_autoSyncEnabled.value) {
-                            syncInitialData(getActiveGroupId(), _selectedDate.value)
-                            syncBooks(user.gradeId)
+                        try {
+                            // Push acknowledged local mutations first, then pull the authoritative
+                            // server snapshot. This happens on every app launch/login, independent
+                            // of the optional background auto-sync preference.
+                            val outboxResult = repository.processOutboxQueue()
+                            outboxResult.exceptionOrNull()?.let {
+                                android.util.Log.w("TanweerViewModel", "Startup outbox drain was incomplete", it)
+                            }
+
+                            val syncResult = repository.syncInitial(getActiveGroupId(), _selectedDate.value)
+
+                            // Memberships are now server-refreshed. Never retain a saved group
+                            // selection after the server has removed this account from that group.
+                            val refreshedUser = db.userDao().getUserSync()
+                            val activeGroupIds = db.groupDao().getMyGroupsSync().map { it.id }
+                            val authorizedGroupId = AcademicSessionSelection.resolveAuthorizedGroupId(
+                                savedGroupId = _selectedGroupId.value,
+                                defaultGroupId = refreshedUser?.defaultGroupId ?: user.defaultGroupId,
+                                availableGroupIds = activeGroupIds
+                            )
+                            _selectedGroupId.value = authorizedGroupId
+                            prefs.edit()
+                                .putString("selected_group_id_${user.id}", authorizedGroupId)
+                                .commit()
+
+                            applyStartupSyncResult(syncResult)
+                        } catch (e: Exception) {
+                            android.util.Log.e("TanweerViewModel", "Startup server reconciliation failed", e)
+                            applyStartupSyncResult(SyncResult.Offline("تعذر الاتصال بالخادم؛ يتم عرض النسخة المحفوظة محليًا"))
+                        } finally {
+                            repository.mutationQueue.isDrainAllowed = true
+                            _isCheckingAuth.value = false
+                            if (_autoSyncEnabled.value) {
+                                repository.mutationQueue.triggerDrain()
+                            }
                         }
                     }
                 }
         }
     }
 
-    private fun getActiveGroupId(): String {
-        return _selectedGroupId.value.ifEmpty { currentUser.value?.defaultGroupId ?: "" }
+    private fun applyStartupSyncResult(result: SyncResult) {
+        when (result) {
+            is SyncResult.Success -> {
+                _homeSyncState.value = SyncState.Success()
+                _scheduleSyncState.value = SyncState.Success()
+                _homeworkSyncState.value = SyncState.Success()
+                _examsSyncState.value = SyncState.Success()
+                _calendarSyncState.value = SyncState.Success()
+                _issuesSyncState.value = SyncState.Success()
+                _librarySyncState.value = SyncState.Success()
+                _groupsSyncState.value = SyncState.Success()
+            }
+            is SyncResult.Offline -> {
+                _homeSyncState.value = SyncState.OfflineCached()
+                _scheduleSyncState.value = SyncState.OfflineCached()
+                _homeworkSyncState.value = SyncState.OfflineCached()
+                _examsSyncState.value = SyncState.OfflineCached()
+                _calendarSyncState.value = SyncState.OfflineCached()
+                _issuesSyncState.value = SyncState.OfflineCached()
+                _librarySyncState.value = SyncState.OfflineCached()
+                _groupsSyncState.value = SyncState.OfflineCached()
+            }
+            is SyncResult.Error -> {
+                _homeSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _scheduleSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _homeworkSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _examsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _calendarSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _issuesSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _librarySyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _groupsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+            }
+        }
     }
+
+    private fun getActiveGroupId(): String = _selectedGroupId.value
 
     // =========================================================================
     // NAVIGATION & ON-DEMAND SYNCING
@@ -1299,6 +1375,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
+        _isCheckingAuth.value = true
         viewModelScope.launch {
             val result = repository.register(fullName, phone, pass, gradeId, sectionId)
             result.onSuccess { pair ->
@@ -1306,10 +1383,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 if (pair.second.isNotEmpty()) {
                     _recoveryCodeDialog.value = pair.second
                 }
-                syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
-                syncBooks(pair.first.gradeId, isRefresh = true)
+                // The current-user startup coordinator performs the required server pull.
                 onSuccess()
             }.onFailure { err ->
+                _isCheckingAuth.value = false
                 onError(err.message ?: "فشل إنشاء الحساب")
             }
         }
@@ -1321,14 +1398,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
+        _isCheckingAuth.value = true
         viewModelScope.launch {
             val result = repository.login(phone, pass)
             result.onSuccess { user ->
                 restoreAcademicSelection(user)
-                syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
-                syncBooks(user.gradeId, isRefresh = true)
+                // The current-user startup coordinator performs the required server pull.
                 onSuccess()
             }.onFailure { err ->
+                _isCheckingAuth.value = false
                 onError(err.message ?: "فشل تسجيل الدخول")
             }
         }
@@ -1339,14 +1417,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
+        _isCheckingAuth.value = true
         viewModelScope.launch {
             val result = repository.loginWithRecoveryCode(code)
             result.onSuccess { user ->
                 restoreAcademicSelection(user)
-                syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
-                syncBooks(user.gradeId, isRefresh = true)
+                // The current-user startup coordinator performs the required server pull.
                 onSuccess()
             }.onFailure { err ->
+                _isCheckingAuth.value = false
                 onError(err.message ?: "فشل تسجيل الدخول بالرقم السري")
             }
         }
@@ -1365,7 +1444,6 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             result.onSuccess { user ->
                 restoreAcademicSelection(user, resetGroup = previousDefaultGroupId != user.defaultGroupId)
                 syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
-                syncBooks(user.gradeId, isRefresh = true)
                 onSuccess()
             }.onFailure { err ->
                 onError(err.message ?: "فشل تحديث البيانات")
