@@ -348,7 +348,9 @@ fun ProfileScreen(
         // Permanent recovery credential and the encrypted private delivery notification.
         item {
             val recoveryNotification = myNotifications.firstOrNull { it.type == "RECOVERY_CODE_RESET" }
-            val activeRecoveryCode = generatedRecoveryCode ?: recoveryNotification?.recoveryCode
+            // The latest server notification wins over any code cached in this screen.
+            // This keeps the UI in sync when an administrator rotates the code while the profile is open.
+            val activeRecoveryCode = recoveryNotification?.recoveryCode ?: generatedRecoveryCode
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 backgroundColor = MidnightSurface,
@@ -369,6 +371,17 @@ fun ProfileScreen(
                                 "رمز دائم لا تنتهي صلاحيته إلا عند تغييره أو إلغائه من الإدارة",
                                 fontSize = 11.sp,
                                 color = TextSecondary
+                            )
+                        }
+                        IconButton(
+                            onClick = { viewModel.loadMyNotifications() },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "تحديث رسالة رمز الاسترداد",
+                                tint = CyanAccent,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                         GlassPill(text = "دائم", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.14f))
