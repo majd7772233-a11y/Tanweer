@@ -432,8 +432,9 @@ fun GroupsScreen(
 
             if (activeTab == GroupsTab.MY_GROUPS) {
                 // Tab 1: MY GROUPS
-                val officialClassGroup = myGroups.find { it.type == "CLASS" || it.id.startsWith("class_") || it.role == "OFFICIAL" }
-                    ?: myGroups.firstOrNull()
+                val officialClassGroup = myGroups.find {
+                    it.type == "CLASS" || it.id.startsWith("class_") || it.role == "OFFICIAL"
+                }
                 val sharedGroups = myGroups.filter { it.id != officialClassGroup?.id }
 
                 // 1. Official Section Group (الشعبة الرسمية الأساسية) - Distinguished Hero Card
@@ -742,9 +743,11 @@ fun GroupsScreen(
 
                                 val requiresApproval = group.visibility == "PRIVATE" || group.type == "CLASS"
                                 val pendingRequest = group.membershipStatus == "PENDING"
+                                val rejectedRequest = group.membershipStatus == "REJECTED"
                                 GlassButton(
                                     text = when {
                                         pendingRequest -> "طلبك قيد المراجعة"
+                                        rejectedRequest -> "إعادة طلب الانضمام"
                                         requiresApproval -> "طلب الانضمام إلى المجموعة 🔐"
                                         else -> "انضمام مباشر ➕"
                                     },
