@@ -597,10 +597,9 @@ fun CreateOfficialExamSheet(
 
     val examTypes = listOf(
         Pair("MONTHLY", "اختبار شهري 📑"),
-        Pair("QUIZ", "كويز قصير ⚡"),
         Pair("ORAL", "اختبار شفهي 🗣️"),
-        Pair("MIDTERM", "نصف العام 🏛️"),
-        Pair("FINAL", "نهاية العام 🎓")
+        Pair("MIDTERM", "اختبار نصفي 🏛️"),
+        Pair("FINAL", "اختبار نهائي 🎓")
     )
 
     AlertDialog(
@@ -620,6 +619,7 @@ fun CreateOfficialExamSheet(
                         notes = notes.trim().ifEmpty { null },
                         examDate = examDate,
                         examType = examType,
+                        isOfficial = true,
                         onResult = { res ->
                             isSubmitting = false
                             if (res.isSuccess) {
