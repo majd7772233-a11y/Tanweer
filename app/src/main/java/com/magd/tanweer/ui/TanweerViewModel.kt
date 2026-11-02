@@ -524,39 +524,47 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 repository.getGroupMembers(groupId).onSuccess { data ->
                     _groupMembersState.value = data
                 }
+                Unit
             }
             tasks += async(Dispatchers.IO) {
                 repository.getScheduleProposals(groupId).onSuccess { proposals ->
                     _scheduleProposals.value = proposals
                 }
+                Unit
             }
             tasks += async(Dispatchers.IO) {
                 repository.getGroupCorrections(groupId).onSuccess { corrections ->
                     _groupCorrections.value = corrections
                 }
+                Unit
             }
             tasks += async(Dispatchers.IO) {
                 repository.getCommunityDecisions(groupId).onSuccess { decisions ->
                     _communityDecisions.value = decisions
                 }
+                Unit
             }
             tasks += async(Dispatchers.IO) {
                 repository.getScheduleMetaAndSlots(groupId).onSuccess { schedule ->
                     _scheduleMeta.value = schedule.meta
                     _scheduleVersion.value = schedule.version
                 }
+                Unit
             }
         }
 
         when (user.role.uppercase(Locale.ROOT)) {
             "TEACHER" -> tasks += async(Dispatchers.IO) {
                 repository.getTeacherDashboard().onSuccess { _teacherDashboard.value = it }
+                Unit
             }
             "MODERATOR" -> tasks += async(Dispatchers.IO) {
                 repository.getModeratorDashboard().onSuccess { _moderatorDashboard.value = it }
+                Unit
             }
             "ADMIN" -> tasks += async(Dispatchers.IO) {
                 repository.getAdminDashboard().onSuccess { _adminDashboard.value = it }
+                Unit
             }
         }
 
