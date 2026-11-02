@@ -1,7 +1,6 @@
 package com.magd.tanweer.data.local
 
 import androidx.room.Entity
-import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "cached_user")
@@ -88,7 +87,7 @@ data class HomeworkEntity(
     val mediaUrlsJson: String = "[]",
     val createdAt: Long,
     val syncStatus: String = "SYNCED",
-    @ColumnInfo(defaultValue = "0") val isOfficial: Boolean = false
+    val isOfficial: Boolean = false
 )
 
 @Entity(tableName = "cached_homework_completions", primaryKeys = ["homeworkId", "userId"])
