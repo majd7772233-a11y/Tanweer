@@ -678,6 +678,15 @@ class UnifiedMutationQueue private constructor(
         val status = if (nextAttempts >= 5) "FAILED" else "PENDING"
         outboxDao.updateOutboxStatus(item.id, status = status, now = System.currentTimeMillis(), error = errorMsg)
 
+        if (status == "FAILED") {
+            when (item.entityType) {
+                "HOMEWORK_UPLOAD", "HOMEWORK_CREATE" -> db.homeworkDao().updateSyncStatus(item.entityId, "FAILED")
+                "CONTENT_UPLOAD", "LESSON_CREATE" -> db.contentDao().updateSyncStatus(item.entityId, "FAILED")
+                "EXAM_CREATE" -> db.examDao().updateSyncStatus(item.entityId, "FAILED")
+                "EVENT_CREATE" -> db.eventDao().updateSyncStatus(item.entityId, "FAILED")
+            }
+        }
+
         if (item.entityType == "CHAT_MESSAGE") {
             db.chatDao().updateMessageStatus(item.entityId, "FAILED")
         }
