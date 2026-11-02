@@ -1597,6 +1597,14 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **Earlier Production-targeted artifact:** Android run #76 succeeded, but it predates the environment split and targets Production. Do not use it for this testing session. The intended test artifact is only the Staging-flavor Release from run #79 after successful verification and upload.
 - **Manual test plan:** Install the Staging APK alongside the existing Production app. Use only the Staging backend and the separately configured `TANWEER_OWNER_SECRET_STAGING` for the Owner Dashboard. Test registration/login, offline sync/retry, media uploads and preview, realtime group chat, role-specific dashboards, and owner operations. Verify Dashboard reports `staging`. Keep Production unused during test-data creation.
 
+
+### 2026-11-02 — Staging Release retry status
+
+- **Build #79:** GitHub Actions run ID `41447916533`, SHA `44e60d633c5a3a466bac0d3b48bc130d2cac85e1`. Staging unit tests passed, the release keystore was prepared and its alias validated, but the signed Release assemble step remained `in_progress` with no artifact available during the latest inspection.
+- **Build #80:** Started a separate Staging retry as run ID `41448942136`, SHA `7ac6cafb818d4a32a1a2386d019f796cd0b2f03b`, using a per-commit concurrency group so it would not cancel #79. At the latest inspection its unit-test step was still `in_progress`; no artifact was available.
+- **Workflow trigger safety:** The temporary push trigger used to start #80 was removed after it entered the Actions queue. Current Android workflow push trigger is main-only with `workflow_dispatch` retained. The per-commit concurrency grouping remains, so distinct commits do not cancel each other's build runs.
+- **Delivery restriction:** Do not hand out the earlier Production-targeted build #76 for this test session. Do not claim a Staging APK exists until a Staging run succeeds through APK verification and artifact upload and its SHA-256 file has been checked.
+
 ---
 
 # END OF GPT.md
