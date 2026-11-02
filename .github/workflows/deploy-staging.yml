@@ -1,9 +1,6 @@
 name: Deploy Tanweer Staging
 
 on:
-  push:
-    branches:
-      - work/release-readiness
   workflow_dispatch:
 
 permissions:
