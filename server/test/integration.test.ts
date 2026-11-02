@@ -172,6 +172,28 @@ class MockD1Database {
       return [row];
     }
 
+    // Schedule proposal INSERT has a literal PENDING status and vote counters,
+    // so its bound created_at value is the ninth parameter, not the status column.
+    if (/^INSERT INTO schedule_proposals/i.test(normalized)) {
+      const [id, groupId, proposedBy, dayOfWeek, slotOrder, oldSubjectId, newSubjectId, reason, createdAt] = params;
+      const row = {
+        id,
+        group_id: groupId,
+        proposed_by: proposedBy,
+        day_of_week: dayOfWeek,
+        slot_order: slotOrder,
+        old_subject_id: oldSubjectId,
+        new_subject_id: newSubjectId,
+        reason,
+        status: 'PENDING',
+        votes_for: 1,
+        votes_against: 0,
+        created_at: createdAt,
+      };
+      this.tables.schedule_proposals.push(row);
+      return [row];
+    }
+
     // INSERT INTO
     if (/^INSERT INTO/i.test(normalized)) {
       const match = normalized.match(/INSERT (?:OR IGNORE )?INTO (\w+)/i);
