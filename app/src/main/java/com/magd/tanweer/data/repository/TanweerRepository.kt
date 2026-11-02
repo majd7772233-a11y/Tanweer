@@ -7,6 +7,7 @@ import com.magd.tanweer.data.remote.*
 import com.magd.tanweer.data.sync.UnifiedMutationQueue
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
+import com.magd.tanweer.util.DataGenerationPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -3446,42 +3447,32 @@ class TanweerRepository(
 
     suspend fun checkAndApplyDataGeneration(context: android.content.Context, serverGeneration: String?): Boolean = withContext(Dispatchers.IO) {
         if (serverGeneration.isNullOrBlank()) return@withContext false
+
         val prefs = context.getSharedPreferences("tanweer_prefs", android.content.Context.MODE_PRIVATE)
         val lastGen = prefs.getString("data_generation", null)
-        if (lastGen == null) {
-            // TA-20: Distinguish between clean fresh installation and legacy local data/outbox items
-            val hasExistingUser = db.userDao().getUserSync() != null
-            val hasPendingOutbox = db.outboxDao().getPendingItemsSync().isNotEmpty()
-            val hasExistingGroups = db.groupDao().getMyGroupsSync().isNotEmpty()
 
-            if (hasExistingUser || hasPendingOutbox || hasExistingGroups) {
-                Log.w("TanweerRepo", "No data_generation in preferences but local tables/outbox contain pre-existing data. Purging stale local data to align with server generation $serverGeneration!")
-                return@withContext try {
-                    db.clearAllTables()
-                    NetworkModule.setAuthToken(null)
-                    prefs.edit().putString("data_generation", serverGeneration).apply()
-                    true
-                } catch (e: Exception) {
-                    Log.e("TanweerRepo", "Error clearing tables on missing generation with existing data", e)
-                    false
-                }
-            } else {
-                prefs.edit().putString("data_generation", serverGeneration).apply()
-                return@withContext false
-            }
+        if (lastGen.isNullOrBlank()) {
+            // This is usually an upgrade from a version that did not record data_generation.
+            // Adopt the server marker without deleting the existing Room database or logging
+            // the user out; a missing local marker is not evidence of stale or foreign data.
+            Log.i("TanweerRepo", "Initializing local data generation to $serverGeneration without purging existing user data.")
+            prefs.edit().putString("data_generation", serverGeneration).apply()
+            return@withContext false
         }
-        if (lastGen != serverGeneration) {
-            Log.w("TanweerRepo", "Server data generation changed from $lastGen to $serverGeneration. Purging local data!")
+
+        if (DataGenerationPolicy.shouldPurgeLocalCache(lastGen, serverGeneration)) {
+            Log.w("TanweerRepo", "Server data generation explicitly changed from $lastGen to $serverGeneration. Purging local data.")
             return@withContext try {
                 db.clearAllTables()
                 NetworkModule.setAuthToken(null)
                 prefs.edit().putString("data_generation", serverGeneration).apply()
                 true
             } catch (e: Exception) {
-                Log.e("TanweerRepo", "Error clearing tables on data generation change", e)
+                Log.e("TanweerRepo", "Error clearing tables on explicit data generation change", e)
                 false
             }
         }
+
         false
     }
 
