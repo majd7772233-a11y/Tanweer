@@ -149,6 +149,9 @@ export async function handleUpdateEvent(
     id: string;
     group_id: string;
     created_by: string;
+    category: string;
+    description: string | null;
+    is_official: number;
   }>();
 
   if (!event) {
@@ -197,8 +200,25 @@ export async function handleUpdateEvent(
         groupId: event.group_id,
       });
 
+  // A holiday is an official school decision, not an ordinary user-created event.
+  // Enforce the same publication policy here as in handleCreateEvent so an owner
+  // cannot bypass it by changing an existing event's category.
+  const resultingCategory = (body.category ?? event.category ?? '').trim().toUpperCase();
+  const resultingDescription = body.description !== undefined ? body.description : event.description;
+  if (resultingCategory === 'HOLIDAY') {
+    if (typeof resultingDescription !== 'string' || !resultingDescription.trim()) {
+      return errorResponse('INVALID_INPUT', 'يرجى توضيح سبب الإجازة المدرسية في حقل الوصف');
+    }
+    if (!canPublishOfficial && !isPrivilegedRole) {
+      return errorResponse('FORBIDDEN', 'لا تملك صلاحية تحديد إجازة مدرسية معتمدة', 403);
+    }
+  }
+
   let officialVal: number | null = null;
-  if (body.isOfficial !== undefined && canPublishOfficial) {
+  if (resultingCategory === 'HOLIDAY') {
+    // Holidays are always official, even when an update body omits isOfficial.
+    officialVal = 1;
+  } else if (body.isOfficial !== undefined && canPublishOfficial) {
     officialVal = body.isOfficial ? 1 : 0;
   }
 
@@ -217,7 +237,7 @@ export async function handleUpdateEvent(
     body.timeStr || null,
     body.title?.trim() || null,
     body.description?.trim() || null,
-    body.category || null,
+    body.category?.trim().toUpperCase() || null,
     body.location?.trim() || null,
     officialVal,
     eventId
