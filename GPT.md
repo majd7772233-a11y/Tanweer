@@ -632,6 +632,7 @@ At each app launch and after successful authentication:
 5. Fetch all server-backed academic data for groups with active membership.
 6. Fetch the account-scoped cross-grade archive.
 7. Fetch grade books even when a new account has not joined a group.
+8. Prefetch the signed-in user's role requests and the selected active group's members, schedule proposals/meta, corrections, and community decisions; fetch only the dashboard matching the user's global role.
 8. Keep the splash/loading gate visible until the server reconciliation attempt completes.
 9. Validate the saved selected group against the fresh active-membership list.
 10. If the server is unavailable, keep safe local cached data visible and preserve pending mutations. Do not pretend that the cache was freshly verified.
@@ -1540,6 +1541,7 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **Database integration tests, commit 9faa3fbd3302b2457c19c560222a751cc297dcd7:** Added in-memory Room tests for pending state lookups and DELETE_PENDING retention across full/date/month cleanup.
 - **Login-time verification retry, commit 4846400c5f659a3ab5eb0fb2f8edba57c07d99e3:** Retries a previously unavailable data-generation check after authentication, before any queued local write can be submitted.
 - **Closed-by-default queue initialization, commit 08291af89c496893d24d245b06096081d79fd7df:** UnifiedMutationQueue now starts with `isDrainAllowed = false`, preventing the periodic worker from racing ahead of ViewModel's startup generation check.
+- **Authorized secondary-data prefetch, commits 05c0dda490c9ee7a8fe79a28874fb3e5dc153765 and 32496f7a9f6ddfcbaf009960ac98c59cab0cb585:** Startup now concurrently preloads the current active group's members, schedule metadata/proposals, corrections, community decisions, the user's role requests, and only the global-role dashboard corresponding to the signed-in account.
 - **Tests/CI:** The current branch has not yet passed a CI run for these newest commits. The earlier successful CI run is not evidence for this code. The temporary validation PR is PR #4 and must be closed without merging after the final result.
 - **Cloudflare:** No D1 writes, migrations, secrets changes, or Worker deployment.
 - **Next step:** Verify the Android build and unit tests plus server tests on the latest HEAD; inspect all current-head logs and close the validation-only PR unmerged.
