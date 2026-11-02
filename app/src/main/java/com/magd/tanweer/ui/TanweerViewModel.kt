@@ -2014,15 +2014,59 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         name: String,
         description: String? = null,
         icon: String? = "👥",
+        visibility: String = "PUBLIC",
         onResult: (Boolean, String) -> Unit
     ) {
         viewModelScope.launch {
-            val res = repository.createPublicGroup(name, description, icon)
+            val res = repository.createPublicGroup(name, description, icon, visibility)
             res.onSuccess {
                 syncGroups(isRefresh = true)
                 onResult(true, it.message ?: "تم إنشاء المجموعة بنجاح")
             }.onFailure {
                 onResult(false, it.message ?: "تعذر إنشاء المجموعة")
+            }
+        }
+    }
+
+    fun leaveGroup(groupId: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            repository.leaveGroup(groupId)
+                .onSuccess { message ->
+                    syncGroups(isRefresh = true)
+                    if (_selectedGroupId.value == groupId) {
+                        currentUser.value?.defaultGroupId?.takeIf { it.isNotBlank() && it != groupId }?.let {
+                            setSelectedGroup(it)
+                        }
+                    }
+                    onResult(true, message)
+                }
+                .onFailure { error ->
+                    onResult(false, error.message ?: "تعذر مغادرة المجموعة")
+                }
+        }
+    }
+
+    fun publishSchoolAnnouncement(
+        title: String,
+        content: String,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = repository.addEvent(
+                groupId = "all",
+                eventDate = getTodayDateString(),
+                title = title.trim(),
+                timeStr = null,
+                category = "ANNOUNCEMENT",
+                description = content.trim(),
+                location = null
+            )
+            result.onSuccess {
+                val groupId = getActiveGroupId()
+                if (groupId.isNotBlank()) repository.syncEvents(groupId)
+                onResult(true, "تم نشر التعميم رسمياً، وسيظهر في الصفحة الرئيسية والفعاليات لجميع أعضاء المدرسة.")
+            }.onFailure { error ->
+                onResult(false, error.message ?: "تعذر نشر التعميم المدرسي")
             }
         }
     }
