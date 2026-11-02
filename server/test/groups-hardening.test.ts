@@ -715,6 +715,30 @@ class GroupMemberVisibilityDb {
 }
 
 describe('Group manager request list visibility', () => {
+  it('allows a school teacher with the global group-management permission to review requests without joining first', async () => {
+    const db = new GroupMemberVisibilityDb();
+    const teacher: UserContext = {
+      userId: 'teacher-1',
+      phoneNumber: '777000098',
+      fullName: 'أستاذ المدرسة',
+      gradeId: 0,
+      sectionId: 'SYSTEM',
+      role: Role.TEACHER,
+    };
+
+    const response = await handleGetGroupMembers(
+      'private-group',
+      teacher,
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.canManageMembers).toBe(true);
+    expect(body.members.some((member: any) => member.status === 'PENDING')).toBe(true);
+    expect(db.statements.some(sql => sql.includes('SELECT role FROM group_members'))).toBe(true);
+  });
+
   it('returns active members and pending requests to a global admin without exposing rejected requests as members', async () => {
     const db = new GroupMemberVisibilityDb();
     const admin: UserContext = {
