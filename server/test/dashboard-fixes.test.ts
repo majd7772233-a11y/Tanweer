@@ -476,9 +476,15 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
         return `${location} ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`;
       });
 
-      const diagnosticContext = syntaxDiagnostics.length
-        ? script!.split('\n').slice(1022, 1028).map((line, index) => `${1023 + index}: ${line}`).join('\n')
-        : '';
+      const diagnosticContext = (parsed.diagnostics || []).map(diagnostic => {
+        const position = diagnostic.file?.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
+        if (!position) return ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+        const lines = script!.split('\n');
+        const start = Math.max(0, position.line - 1);
+        const end = Math.min(lines.length, position.line + 2);
+        const context = lines.slice(start, end).map((line, index) => `${start + index + 1}: ${line}`).join('\n');
+        return `L${position.line + 1}:C${position.character + 1}\n${context}`;
+      }).join('\n');
       expect(syntaxDiagnostics, diagnosticContext).toEqual([]);
       expect(() => new Function(script!)).not.toThrow();
     });
