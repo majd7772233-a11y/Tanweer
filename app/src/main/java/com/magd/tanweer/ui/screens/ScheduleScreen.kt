@@ -572,16 +572,6 @@ fun ScheduleScreen(
                     viewModel.voteScheduleProposal(proposalId, voteType) { success, msg ->
                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }
-                },
-                onApprove = { proposalId ->
-                    viewModel.approveScheduleProposal(proposalId) { success, msg ->
-                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                    }
-                },
-                onReject = { proposalId ->
-                    viewModel.rejectScheduleProposal(proposalId) { success, msg ->
-                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                    }
                 }
             )
         }
@@ -1322,9 +1312,7 @@ fun ScheduleProposalsReviewDialog(
     proposals: List<com.magd.tanweer.data.model.ScheduleProposalItem>,
     canManageSchedule: Boolean,
     onDismiss: () -> Unit,
-    onVote: (proposalId: String, voteType: String) -> Unit,
-    onApprove: (proposalId: String) -> Unit,
-    onReject: (proposalId: String) -> Unit
+    onVote: (proposalId: String, voteType: String) -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1403,13 +1391,17 @@ fun ScheduleProposalsReviewDialog(
                                         color = CyanAccent
                                     )
                                     val statusColor = when (prop.status) {
-                                        "ACCEPTED" -> EmeraldGreen
+                                        "ACCEPTED", "APPLIED" -> EmeraldGreen
                                         "REJECTED" -> RubyRed
+                                        "EXPIRED" -> TextMuted
+                                        "CONFLICTED" -> WarmAmber
                                         else -> WarmAmber
                                     }
                                     val statusText = when (prop.status) {
-                                        "ACCEPTED" -> "معتمد ومطبق ✅"
+                                        "ACCEPTED", "APPLIED" -> "مقبول ومطبق ✅"
                                         "REJECTED" -> "مرفوض ❌"
+                                        "EXPIRED" -> "انتهت مهلة التصويت ⌛"
+                                        "CONFLICTED" -> "تعارض مع نسخة الجدول ⚠️"
                                         else -> "قيد التصويت ⏳"
                                     }
                                     GlassPill(text = statusText, color = statusColor, bgColor = statusColor.copy(alpha = 0.15f))
@@ -1482,27 +1474,14 @@ fun ScheduleProposalsReviewDialog(
                                             )
                                         }
 
-                                        // Manager Decision buttons
-                                        if (canManageSchedule) {
-                                            Button(
-                                                onClick = { onApprove(prop.id) },
-                                                modifier = Modifier.weight(1.2f).height(32.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                shape = RoundedCornerShape(8.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
-                                            ) {
-                                                Text("اعتماد ✅", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                                            }
-                                            Button(
-                                                onClick = { onReject(prop.id) },
-                                                modifier = Modifier.weight(0.9f).height(32.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                shape = RoundedCornerShape(8.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = RubyRed)
-                                            ) {
-                                                Text("رفض ❌", fontSize = 10.sp, color = Color.White)
-                                            }
-                                        }
+                                    }
+                                    if (canManageSchedule) {
+                                        Text(
+                                            text = "الحسم يتم عبر التصويت الجماعي الموحد؛ لا يوجد اعتماد إداري منفصل عن أصوات المجموعة.",
+                                            fontSize = 9.sp,
+                                            color = TextMuted,
+                                            lineHeight = 13.sp
+                                        )
                                     }
                                 }
                             }
