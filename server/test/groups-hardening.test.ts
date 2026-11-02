@@ -474,6 +474,15 @@ class GroupJoinDb {
   ];
   members: Array<Record<string, unknown>> = [];
   messages: Array<Record<string, unknown>> = [];
+  notifications: Array<Record<string, unknown>> = [];
+  managerUsers: Array<{ user_id: string }> = [];
+  managerQuery = '';
+
+  async batch(statements: Array<{ run: () => Promise<{ success: boolean; meta: { changes: number } }> }>) {
+    const results = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
+  }
 
   prepare(sql: string) {
     const db = this;
@@ -495,9 +504,22 @@ class GroupJoinDb {
         return null;
       },
       async all<T = unknown>(): Promise<{ results: T[] }> {
+        if (sql.includes('SELECT DISTINCT u.id AS user_id')) {
+          db.managerQuery = sql;
+          return { results: db.managerUsers as T[] };
+        }
         return { results: [] };
       },
       async run() {
+        if (sql.includes('INSERT INTO user_notifications')) {
+          db.notifications.push({
+            user_id: params[1],
+            type: params[2],
+            title: params[3],
+            body: params[4],
+          });
+          return { success: true, meta: { changes: 1 } };
+        }
         if (sql.includes("UPDATE group_members") && sql.includes("status = 'REJECTED'")) {
           const member = db.members.find(row =>
             row.group_id === params[4] && row.user_id === params[5] && row.status === 'REJECTED'
@@ -573,6 +595,33 @@ describe('Group join request concurrency and state', () => {
       status: 'ACTIVE',
     });
     expect(db.messages).toHaveLength(1);
+  });
+
+  it('notifies active managers of the requested group and the school admin only', async () => {
+    const db = new GroupJoinDb();
+    db.managerUsers = [
+      { user_id: 'group-moderator' },
+      { user_id: 'group-teacher' },
+      { user_id: 'school-admin' },
+    ];
+
+    const response = await handleJoinGroupRequest(
+      'private-group',
+      student,
+      joinRequest('أرغب في الانضمام'),
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.managerQuery).toContain("gm.status = 'ACTIVE'");
+    expect(db.managerQuery).toContain("UPPER(u.role) = 'ADMIN'");
+    expect(db.managerQuery).not.toContain("'SYSTEM_OWNER'");
+    expect(db.notifications.map(row => row.user_id).sort()).toEqual([
+      'group-moderator',
+      'group-teacher',
+      'school-admin',
+    ]);
+    expect(db.notifications.every(row => row.type === 'GROUP_JOIN_REQUEST')).toBe(true);
   });
 
   it('creates a pending request for a class group without posting a membership message', async () => {
