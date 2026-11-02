@@ -1,5 +1,6 @@
 import { Env } from '../env';
 import { generateId } from '../lib/ids';
+import { getGroupChatSendPermission } from '../services/chat';
 
 interface ClientSession {
   ws: WebSocket;
@@ -76,12 +77,20 @@ export class GroupChatDO {
           const raw = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
           const data = JSON.parse(raw);
 
-          if (!session.canSend) {
+          // Re-check membership and group policy for every message.
+          // This invalidates already-open sockets immediately after demotion/removal.
+          const livePermission = await getGroupChatSendPermission(
+            session.groupId,
+            session.userId,
+            session.role,
+            this.env
+          );
+          if (!livePermission.allowed) {
             try {
               server.send(JSON.stringify({
                 type: 'error',
                 code: 'READ_ONLY_GROUP',
-                message: 'هذه المجموعة للقراءة فقط بالنسبة لحسابك.',
+                message: 'لم تعد تملك صلاحية الإرسال في هذه المجموعة. يمكنك متابعة القراءة فقط.',
               }));
             } catch {}
             return;
