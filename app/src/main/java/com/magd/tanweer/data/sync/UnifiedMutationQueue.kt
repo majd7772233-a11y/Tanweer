@@ -6,8 +6,10 @@ import com.magd.tanweer.data.local.OutboxDao
 import com.magd.tanweer.data.local.OutboxEntity
 import com.magd.tanweer.data.local.TanweerDatabase
 import com.magd.tanweer.data.remote.NetworkModule
+import com.magd.tanweer.data.remote.PermanentHttpFailureException
 import com.magd.tanweer.data.remote.PostMessageRequest
 import com.magd.tanweer.data.remote.TanweerApiService
+import com.magd.tanweer.data.remote.isRetryableHttpStatus
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -243,8 +245,16 @@ class UnifiedMutationQueue private constructor(
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, res.exceptionOrNull()?.message ?: "فشل مزامنة الواجب مع الخادم")
-                            false
+                            val failure = res.exceptionOrNull()
+                            if (failure is PermanentHttpFailureException) {
+                                handleMutationFailure(item, failure.message ?: "رفض الخادم مزامنة الواجب")
+                                outboxDao.deleteOutbox(item.id)
+                                db.homeworkDao().updateSyncStatus(item.entityId, "FAILED")
+                                true
+                            } else {
+                                handleMutationFailure(item, failure?.message ?: "فشل مزامنة الواجب مع الخادم")
+                                false
+                            }
                         }
                     } else {
                         handleMutationFailure(item, "محرك رفع الواجبات غير مهيأ بعد")
@@ -259,8 +269,16 @@ class UnifiedMutationQueue private constructor(
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, res.exceptionOrNull()?.message ?: "فشل مزامنة الدرس مع الخادم")
-                            false
+                            val failure = res.exceptionOrNull()
+                            if (failure is PermanentHttpFailureException) {
+                                handleMutationFailure(item, failure.message ?: "رفض الخادم مزامنة الدرس")
+                                outboxDao.deleteOutbox(item.id)
+                                db.contentDao().updateSyncStatus(item.entityId, "FAILED")
+                                true
+                            } else {
+                                handleMutationFailure(item, failure?.message ?: "فشل مزامنة الدرس مع الخادم")
+                                false
+                            }
                         }
                     } else {
                         handleMutationFailure(item, "محرك رفع الدروس غير مهيأ بعد")
@@ -275,7 +293,7 @@ class UnifiedMutationQueue private constructor(
                     if (res.isSuccessful || res.code() == 404) {
                         outboxDao.deleteOutbox(item.id)
                         true
-                    } else if (res.code() in listOf(401, 403)) {
+                    } else if (!isRetryableHttpStatus(res.code())) {
                         val currentUserId = db.userDao().getUserSync()?.id ?: ""
                         if (currentUserId.isNotBlank() && isCompleted != null) {
                             if (isCompleted) {
@@ -284,6 +302,7 @@ class UnifiedMutationQueue private constructor(
                                 db.homeworkDao().insertCompletion(com.magd.tanweer.data.local.HomeworkCompletionEntity(homeworkId = item.entityId, userId = currentUserId))
                             }
                         }
+                        handleMutationFailure(item, "رفض الخادم تغيير حالة الواجب (HTTP __CODE__)".replace("__CODE__", res.code().toString()))
                         outboxDao.deleteOutbox(item.id)
                         false
                     } else {
@@ -302,10 +321,11 @@ class UnifiedMutationQueue private constructor(
                         }
                         outboxDao.deleteOutbox(item.id)
                         true
-                    } else if (res.code() in listOf(401, 403)) {
+                    } else if (!isRetryableHttpStatus(res.code())) {
                         if (isCompleted != null) {
                             db.examDao().updateExamCompletion(item.entityId, !isCompleted)
                         }
+                        handleMutationFailure(item, "رفض الخادم تغيير حالة الاختبار (HTTP __CODE__)".replace("__CODE__", res.code().toString()))
                         outboxDao.deleteOutbox(item.id)
                         false
                     } else {
@@ -362,7 +382,7 @@ class UnifiedMutationQueue private constructor(
                             )
                             outboxDao.deleteOutbox(item.id)
                             true
-                        } else if (res.code() in 400..499 && res.code() !in listOf(408, 429)) {
+                        } else if (!isRetryableHttpStatus(res.code())) {
                             db.examDao().updateSyncStatus(item.entityId, "FAILED")
                             handleMutationFailure(item, "رفض الخادم رفع الاختبار (${res.code()})")
                             outboxDao.deleteOutbox(item.id)
@@ -397,13 +417,19 @@ class UnifiedMutationQueue private constructor(
                             db.eventDao().updateSyncStatus(ev.id, "SYNCED")
                             outboxDao.deleteOutbox(item.id)
                             true
+                        } else if (!isRetryableHttpStatus(res.code())) {
+                            handleMutationFailure(item, "رفض الخادم إنشاء الفعالية (HTTP __CODE__)".replace("__CODE__", res.code().toString()))
+                            outboxDao.deleteOutbox(item.id)
+                            db.eventDao().updateSyncStatus(ev.id, "FAILED")
+                            true
                         } else {
-                            handleMutationFailure(item, "فشل رفع الفعالية إلى الخادم (${res.code()})")
+                            handleMutationFailure(item, "فشل رفع الفعالية إلى الخادم (HTTP __CODE__)".replace("__CODE__", res.code().toString()))
                             false
                         }
                     } else {
-                        handleMutationFailure(item, "تعذر العثور على الفعالية محلياً للمزامنة (id: ${item.entityId})")
-                        false
+                        handleMutationFailure(item, "تعذر العثور على الفعالية محلياً للمزامنة (id: __ID__)".replace("__ID__", item.entityId))
+                        outboxDao.deleteOutbox(item.id)
+                        true
                     }
                 }
                 "ISSUE_CREATE" -> {
