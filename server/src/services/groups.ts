@@ -48,23 +48,6 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
     `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
   ).bind(groupId, user.userId).first<{ status: string }>();
 
-  const existingStatusResponse = (status: string): Response => {
-    if (status === 'ACTIVE') {
-      return errorResponse('ALREADY_MEMBER', 'أنت عضو مسجل بالفعل في هذه المجموعة');
-    }
-    if (status === 'BANNED') {
-      return errorResponse('BANNED', 'تم حظر حسابك من هذه المجموعة من قِبل المشرفين', 403);
-    }
-    if (status === 'REJECTED') {
-      return errorResponse('JOIN_REQUEST_REJECTED', 'سبق رفض طلب الانضمام إلى هذه المجموعة. تواصل مع مشرفيها لإعادة النظر.', 409);
-    }
-    return errorResponse('ALREADY_REQUESTED', 'طلب الانضمام قيد المراجعة');
-  };
-
-  if (existing) {
-    return existingStatusResponse(existing.status);
-  }
-
   let requestReason: string | null = null;
   try {
     const body = await request.json() as { reason?: unknown };
@@ -74,21 +57,50 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
   } catch {}
 
   const initialStatus = group.visibility === 'PUBLIC' && group.type !== 'CLASS' ? 'ACTIVE' : 'PENDING';
-  const insertResult = await env.DB.prepare(
-    `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at, request_reason)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(groupId, user.userId, Role.STUDENT, initialStatus, Date.now(), requestReason).run();
-
-  if (insertResult.meta?.changes !== 1) {
-    // Another request may have created or changed the membership after our first read.
-    const latest = await env.DB.prepare(
-      `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
-    ).bind(groupId, user.userId).first<{ status: string }>();
-
-    if (latest) {
-      return existingStatusResponse(latest.status);
+  const existingStatusResponse = (status: string): Response => {
+    if (status === 'ACTIVE') {
+      return errorResponse('ALREADY_MEMBER', 'أنت عضو مسجل بالفعل في هذه المجموعة');
     }
-    return errorResponse('JOIN_REQUEST_CONFLICT', 'تعذر إنشاء طلب الانضمام بسبب تغيير متزامن. حدّث القائمة وحاول مجدداً.', 409);
+    if (status === 'BANNED') {
+      return errorResponse('BANNED', 'تم حظر حسابك من هذه المجموعة من قِبل المشرفين', 403);
+    }
+    return errorResponse('ALREADY_REQUESTED', 'طلب الانضمام قيد المراجعة');
+  };
+
+  if (existing && existing.status !== 'REJECTED') {
+    return existingStatusResponse(existing.status);
+  }
+
+  if (existing?.status === 'REJECTED') {
+    const retry = await env.DB.prepare(
+      `UPDATE group_members
+       SET status = ?, role = ?, joined_at = ?, request_reason = ?
+       WHERE group_id = ? AND user_id = ? AND status = 'REJECTED'`
+    ).bind(initialStatus, Role.STUDENT, Date.now(), requestReason, groupId, user.userId).run();
+    if (retry.meta?.changes !== 1) {
+      const latest = await env.DB.prepare(
+        `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
+      ).bind(groupId, user.userId).first<{ status: string }>();
+      return latest ? existingStatusResponse(latest.status) :
+        errorResponse('JOIN_REQUEST_CONFLICT', 'تعذر إعادة تقديم طلب الانضمام بسبب تغيير متزامن. حدّث القائمة وحاول مجدداً.', 409);
+    }
+  } else {
+    const insertResult = await env.DB.prepare(
+      `INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at, request_reason)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(groupId, user.userId, Role.STUDENT, initialStatus, Date.now(), requestReason).run();
+
+    if (insertResult.meta?.changes !== 1) {
+      // Another request may have created or changed the membership after our first read.
+      const latest = await env.DB.prepare(
+        `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
+      ).bind(groupId, user.userId).first<{ status: string }>();
+
+      if (latest) {
+        return existingStatusResponse(latest.status);
+      }
+      return errorResponse('JOIN_REQUEST_CONFLICT', 'تعذر إنشاء طلب الانضمام بسبب تغيير متزامن. حدّث القائمة وحاول مجدداً.', 409);
+    }
   }
 
   if (initialStatus === 'ACTIVE') {
