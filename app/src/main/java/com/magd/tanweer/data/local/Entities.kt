@@ -86,7 +86,8 @@ data class HomeworkEntity(
     val colorHex: String,
     val mediaUrlsJson: String = "[]",
     val createdAt: Long,
-    val syncStatus: String = "SYNCED"
+    val syncStatus: String = "SYNCED",
+    @ColumnInfo(defaultValue = "0") val isOfficial: Boolean = false
 )
 
 @Entity(tableName = "cached_homework_completions", primaryKeys = ["homeworkId", "userId"])
