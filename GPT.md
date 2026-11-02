@@ -1622,6 +1622,23 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **Manual workflow safeguards:** Android push remains main-only with manual `workflow_dispatch`; Staging deployment remains manual-only with `workflow_dispatch`. The temporary branch push triggers used to start CI were removed. Android build concurrency is scoped by both ref and commit SHA.
 - **Remaining work:** User must install and test the Staging APK on real devices. Focus on registration/login, profile and role dashboards, offline queue/sync, media uploads/retries/previews, realtime chat, and Owner Dashboard operations. Confirm the Dashboard labels the environment as `staging`; keep all created test records in Staging. No physical-device testing has yet occurred.
 
+
+### 2026-11-02 — Owner Dashboard JavaScript syntax regression fixed and Staging redeployed
+
+- **User-reported failure:** Owner Dashboard displayed but all click handlers failed. Browser console showed `Uncaught SyntaxError: Unexpected identifier 'data'` and consequent `switchTab is not defined` / `toggleMobileMenu is not defined`.
+- **Root cause:** In `server/src/services/dashboard.ts`, the homework-media card HTML was assembled inside a single-quoted JavaScript string. Its inline handler called `this.getAttribute('data-url')`; quote escaping was lost in the generated inline script, terminating the string early and preventing the entire dashboard script from parsing.
+- **Code fix:** Replaced that handler with `openMediaLightbox(this.dataset.url)`, avoiding nested quote parsing. The rendered card still uses the same `data-url` attribute and opens its media lightbox with the corresponding URL.
+- **Regression protection:** Added D-11 to `server/test/dashboard-fixes.test.ts`. It extracts the rendered dashboard inline script, checks TypeScript parser diagnostics, prints nearby lines on parse failure, and verifies the script can be parsed by `new Function`. This test failed on the original broken HTML with the same `Unexpected identifier 'data'` error, then passed after the fix.
+- **Fix commit:** `54b475b05e61ceb6691e42533451731e7c055e19` (`fix(dashboard): preserve JavaScript syntax in homework media cards`).
+- **Verification:** Server CI run `41451715769` completed successfully on commit `6f06afa4e13833953eb74e13d89590983c71c8ec`; the run includes typecheck, the full server tests (including D-11), and Wrangler dry-run checks.
+- **Staging deployment:** Deploy run `41451897054` completed successfully. It checked out only `work/release-readiness`, passed server tests and Staging Wrangler validation, verified Cloudflare credentials, applied migrations to `tanweer-staging-db` only, configured Staging secrets, and deployed only Worker `tanweer-staging`. New deployed Worker version ID: `6d4e5eb3-42e4-4dd6-aca5-c03b1177d57c`.
+- **Post-deployment checks:** `/api/v1/health` succeeded; Owner Dashboard login returned HTTP 200 with the expected Control Center marker; unauthenticated `/dashboard` returned HTTP 302 to login. These route smoke tests passed in run `41451897054`.
+- **Workflow safety restored:** The temporary push trigger used to deploy the fix was removed immediately after the successful deployment. `.github/workflows/deploy-staging.yml` is back to `workflow_dispatch` only. Its deployment job still checks that the selected ref is `work/release-readiness`.
+- **Branch and Production boundary:** Current `work/release-readiness` head after recording this note is expected to advance with this notebook commit. `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`. No Production Worker, Production D1, or Production secrets were changed.
+- **Outstanding separate console item:** The screenshot also showed `/favicon.ico` returning HTTP 401. That is independent of the syntax failure and does not cause the click handlers to disappear; it was not changed as part of this targeted fix.
+- **User retest:** Ask the user to hard-refresh the Staging Dashboard (Ctrl+Shift+R / Ctrl+F5) so the browser requests the new HTML, then test the navigation menu and tabs. No APK rebuild is required for this server-rendered Dashboard fix. Physical browser interaction is not yet independently observed by the assistant.
+
+
 ---
 
 # END OF GPT.md
