@@ -1,6 +1,8 @@
 package com.magd.tanweer.ui.screens
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -8,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -43,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.magd.tanweer.data.model.HomeworkItem
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.data.remote.NetworkModule
 import com.magd.tanweer.data.notifications.TanweerNotificationManager
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.NavigationTab
@@ -515,7 +519,10 @@ fun HomeworkScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     val imgUrl = fullScreenImagePreviewUrl!!
-                    if (imgUrl.startsWith("/") || imgUrl.startsWith("file://")) {
+                    val isLocalImage = imgUrl.startsWith("file://") ||
+                        (!imgUrl.startsWith("http://", true) && !imgUrl.startsWith("https://", true) &&
+                            !imgUrl.startsWith("/api/", true) && !imgUrl.startsWith("api/", true))
+                    if (isLocalImage) {
                         val file = File(imgUrl.removePrefix("file://"))
                         if (file.exists()) {
                             val bmp = BitmapFactory.decodeFile(file.absolutePath)
@@ -533,7 +540,7 @@ fun HomeworkScreen(
                         }
                     } else {
                         AsyncImage(
-                            model = imgUrl,
+                            model = NetworkModule.resolveApiUrl(imgUrl),
                             contentDescription = "معاينة صورة الواجب",
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -831,7 +838,10 @@ fun HomeworkCard(
                                     .border(1.dp, CyanGlow, RoundedCornerShape(8.dp))
                                     .clickable { onImageClick(imgUrl) }
                             ) {
-                                if (imgUrl.startsWith("/") || imgUrl.startsWith("file://")) {
+                                val isLocalImage = imgUrl.startsWith("file://") ||
+                                    (!imgUrl.startsWith("http://", true) && !imgUrl.startsWith("https://", true) &&
+                                        !imgUrl.startsWith("/api/", true) && !imgUrl.startsWith("api/", true))
+                                if (isLocalImage) {
                                     val file = File(imgUrl.removePrefix("file://"))
                                     if (file.exists()) {
                                         val bmp = BitmapFactory.decodeFile(file.absolutePath)
@@ -846,7 +856,7 @@ fun HomeworkCard(
                                     }
                                 } else {
                                     AsyncImage(
-                                        model = imgUrl,
+                                        model = NetworkModule.resolveApiUrl(imgUrl),
                                         contentDescription = "صورة الحل",
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Crop
@@ -963,6 +973,7 @@ fun getRemainingTimeText(dueDateStr: String): String {
 fun AddHomeworkDialog(
     subjects: List<SubjectItem>,
     initialDueDate: String? = null,
+    isOfficial: Boolean = false,
     onDismiss: () -> Unit,
     onAddWithPages: (subjectId: String, title: String, details: String?, pages: String?, questions: String?, dueDate: String, taskType: String, scanPages: List<HomeworkScanPage>) -> Unit
 ) {
@@ -1081,6 +1092,20 @@ fun AddHomeworkDialog(
         }
     }
 
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            cameraLauncher.launch(null)
+        } else {
+            Toast.makeText(
+                context,
+                "يلزم السماح لتنوير باستخدام الكاميرا حتى تتمكن من تصوير مرفقات الواجب.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -1112,13 +1137,13 @@ fun AddHomeworkDialog(
                                 Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextPrimary)
                             }
                             Text(
-                                text = "إضافة وتوثيق واجب مدرسي 📝",
+                                text = if (isOfficial) "إضافة واجب رسمي معتمد 📝" else "إضافة وتوثيق واجب مدرسي 📝",
                                 style = AppTypography.CardTitle.copy(color = CyanAccent)
                             )
                         }
 
                         GlassPill(
-                            text = if (taskType == "HOMEWORK") "واجب منزلي" else "مشروع / بحث",
+                            text = if (isOfficial) "رسمي من الأستاذ 🎓" else if (taskType == "HOMEWORK") "واجب منزلي" else "مشروع / بحث",
                             color = CyanAccent,
                             bgColor = CyanGlow
                         )
@@ -1142,7 +1167,7 @@ fun AddHomeworkDialog(
                             modifier = Modifier.weight(1f)
                         )
                         GlassButton(
-                            text = "حفظ ونشر الواجب ✨",
+                            text = if (isOfficial) "نشر الواجب الرسمي ⭐" else "حفظ ونشر الواجب ✨",
                             enabled = title.isNotBlank(),
                             onClick = {
                                 if (title.isNotBlank()) {
@@ -1344,7 +1369,18 @@ fun AddHomeworkDialog(
                         }
 
                         OutlinedButton(
-                            onClick = { cameraLauncher.launch(null) },
+                            onClick = {
+                                val hasCameraPermission = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.CAMERA
+                                ) == PackageManager.PERMISSION_GRANTED
+
+                                if (hasCameraPermission) {
+                                    cameraLauncher.launch(null)
+                                } else {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            },
                             modifier = Modifier.weight(1f).height(42.dp),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = WarmAmber),
