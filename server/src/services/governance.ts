@@ -1,4 +1,4 @@
-import { Env, UserContext } from '../env';
+import { Env, UserContext } from '../env';\nimport { mapHomework, mapExam } from '../lib/mappers';
 import { generateId } from '../lib/ids';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
@@ -899,7 +899,7 @@ export async function handleVoteCommunityDecision(
 // Teacher Teaching Center
 export async function handleGetTeacherDashboardData(user: UserContext, env: Env): Promise<Response> {
   const normRole = normalizeRole(user.role);
-  if (normRole !== Role.TEACHER && normRole !== Role.ADMIN && normRole !== Role.SYSTEM_OWNER) {
+  if (normRole !== Role.TEACHER && normRole !== Role.ADMIN) {
     return errorResponse('FORBIDDEN', 'هذا المركز مخصص للأساتذة المعتمدين', 403);
   }
 
@@ -916,11 +916,21 @@ export async function handleGetTeacherDashboardData(user: UserContext, env: Env)
   ).bind(user.userId).first<{ count: number }>();
 
   const myRecentHomeworks = await env.DB.prepare(
-    `SELECT h.*, s.name_ar as subject_name FROM homeworks h LEFT JOIN subjects s ON h.subject_id = s.id WHERE h.created_by = ? ORDER BY h.created_at DESC LIMIT 5`
+    `SELECT h.*, COALESCE(s.name_ar, h.subject_id) as subject_name,
+            COALESCE(s.icon, '📝') as subject_icon, s.color_hex
+     FROM homeworks h
+     LEFT JOIN subjects s ON h.subject_id = s.id
+     WHERE h.created_by = ? AND h.is_official = 1
+     ORDER BY h.created_at DESC LIMIT 50`
   ).bind(user.userId).all();
 
   const myRecentExams = await env.DB.prepare(
-    `SELECT e.*, s.name_ar as subject_name FROM exams e LEFT JOIN subjects s ON e.subject_id = s.id WHERE e.created_by = ? ORDER BY e.created_at DESC LIMIT 5`
+    `SELECT e.*, COALESCE(s.name_ar, e.subject_id) as subject_name,
+            COALESCE(s.icon, '🔴') as subject_icon, s.color_hex
+     FROM exams e
+     LEFT JOIN subjects s ON e.subject_id = s.id
+     WHERE e.created_by = ? AND e.is_official = 1
+     ORDER BY e.created_at DESC LIMIT 50`
   ).bind(user.userId).all();
 
   return jsonResponse({
