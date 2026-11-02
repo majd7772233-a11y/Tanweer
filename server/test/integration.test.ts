@@ -118,6 +118,60 @@ class MockD1Database {
       return [row];
     }
 
+    // Device-session lifecycle: model the conditional D1 writes used by authentication.
+    if (/^DELETE FROM sessions WHERE user_id = \\? AND \\(expires_at <= \\? OR device_id = \\?\\)$/i.test(normalized)) {
+      const [userId, now, deviceId] = params;
+      const rows = this.tables.sessions || [];
+      const removed = rows.filter(row =>
+        row.user_id === userId && (Number(row.expires_at) <= Number(now) || row.device_id === deviceId)
+      );
+      this.tables.sessions = rows.filter(row => !removed.includes(row));
+      return removed;
+    }
+
+    if (/^INSERT INTO sessions \\(id, user_id, device_id, refresh_token_hash, expires_at, created_at\\) SELECT/i.test(normalized)) {
+      const [id, userId, deviceId, tokenHash, expiresAt, createdAt, countUserId, now, maxDevices] = params;
+      const activeDeviceIds = new Set(
+        (this.tables.sessions || [])
+          .filter(row => row.user_id === countUserId && Number(row.expires_at) > Number(now))
+          .map(row => row.device_id)
+      );
+      if (activeDeviceIds.size >= Number(maxDevices)) return [];
+      const row = {
+        id,
+        user_id: userId,
+        device_id: deviceId,
+        refresh_token_hash: tokenHash,
+        expires_at: expiresAt,
+        created_at: createdAt,
+      };
+      this.tables.sessions.push(row);
+      return [row];
+    }
+
+    if (/^INSERT INTO devices \\(device_id, user_id, platform, app_version, push_token, last_seen\\) SELECT/i.test(normalized)) {
+      const [deviceId, userId, platform, appVersion, lastSeen, sessionId, expectedUserId, expectedTokenHash] = params;
+      const session = (this.tables.sessions || []).find(row =>
+        row.id === sessionId && row.user_id === expectedUserId && row.refresh_token_hash === expectedTokenHash
+      );
+      if (!session) return [];
+      const existing = (this.tables.devices || []).find(row => row.device_id === deviceId);
+      if (existing) {
+        Object.assign(existing, { user_id: userId, platform, app_version: appVersion, last_seen: lastSeen });
+        return [existing];
+      }
+      const row = {
+        device_id: deviceId,
+        user_id: userId,
+        platform,
+        app_version: appVersion,
+        push_token: null,
+        last_seen: lastSeen,
+      };
+      this.tables.devices.push(row);
+      return [row];
+    }
+
     // INSERT INTO
     if (/^INSERT INTO/i.test(normalized)) {
       const match = normalized.match(/INSERT (?:OR IGNORE )?INTO (\w+)/i);
@@ -169,7 +223,48 @@ class MockD1Database {
 
     // DELETE
     if (/^DELETE FROM/i.test(normalized)) {
-      const match = normalized.match(/DELETE FROM (\w+)/i);
+      if (/^DELETE FROM sessions WHERE id = \\? AND user_id = \\? AND device_id = \\?$/i.test(normalized)) {
+        const [sessionId, userId, deviceId] = params;
+        const rows = this.tables.sessions || [];
+        const removed = rows.filter(row =>
+          row.id === sessionId && row.user_id === userId && row.device_id === deviceId
+        );
+        this.tables.sessions = rows.filter(row => !removed.includes(row));
+        return removed;
+      }
+
+      if (/^DELETE FROM sessions WHERE user_id = \\? AND device_id = \\?$/i.test(normalized)) {
+        const [userId, deviceId] = params;
+        const rows = this.tables.sessions || [];
+        const removed = rows.filter(row => row.user_id === userId && row.device_id === deviceId);
+        this.tables.sessions = rows.filter(row => !removed.includes(row));
+        return removed;
+      }
+
+      if (/^DELETE FROM devices WHERE user_id = \\? AND device_id = \\?$/i.test(normalized)) {
+        const [userId, deviceId] = params;
+        const rows = this.tables.devices || [];
+        const removed = rows.filter(row => row.user_id === userId && row.device_id === deviceId);
+        this.tables.devices = rows.filter(row => !removed.includes(row));
+        return removed;
+      }
+
+      if (/^DELETE FROM devices WHERE user_id = \\? AND NOT EXISTS/i.test(normalized)) {
+        const [userId, sessionUserId, now] = params;
+        const rows = this.tables.devices || [];
+        const removed = rows.filter(device =>
+          device.user_id === userId &&
+          !(this.tables.sessions || []).some(session =>
+            session.user_id === sessionUserId &&
+            session.device_id === device.device_id &&
+            Number(session.expires_at) > Number(now)
+          )
+        );
+        this.tables.devices = rows.filter(row => !removed.includes(row));
+        return removed;
+      }
+
+      const match = normalized.match(/DELETE FROM (\\w+)/i);
       if (match) {
         const table = match[1];
 
@@ -232,6 +327,21 @@ class MockD1Database {
       if (!fromMatch) return [];
 
       const table = fromMatch[1];
+
+      if (table.toLowerCase() === 'sessions' && normalized.includes('COUNT(DISTINCT device_id)')) {
+        const [userId, now, excludedDeviceId] = params;
+        const devices = new Set(
+          (this.tables.sessions || [])
+            .filter(row =>
+              row.user_id === userId &&
+              Number(row.expires_at) > Number(now) &&
+              row.device_id !== excludedDeviceId
+            )
+            .map(row => row.device_id)
+        );
+        return [{ count: devices.size }];
+      }
+
       let rows = [...(this.tables[table] || [])];
 
       // Handle JOIN query for sessions and users
