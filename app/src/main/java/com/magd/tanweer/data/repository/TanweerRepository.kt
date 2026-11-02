@@ -588,7 +588,9 @@ class TanweerRepository(
                         role = it.role,
                         memberCount = it.memberCount,
                         isDiscoverable = false,
-                        isOfficial = (it.type == "CLASS" || it.id.startsWith("class_") || it.role == "OFFICIAL")
+                        isOfficial = (it.type == "CLASS" || it.id.startsWith("class_") || it.role == "OFFICIAL"),
+                        visibility = it.visibility,
+                        chatPolicy = it.chatPolicy
                     )
                 }
                 val discoverEntities = body.discoverGroups.map {
@@ -601,7 +603,9 @@ class TanweerRepository(
                         role = it.role,
                         memberCount = it.memberCount,
                         isDiscoverable = true,
-                        isOfficial = (it.type == "CLASS" || it.id.startsWith("class_") || it.role == "OFFICIAL")
+                        isOfficial = (it.type == "CLASS" || it.id.startsWith("class_") || it.role == "OFFICIAL"),
+                        visibility = it.visibility,
+                        chatPolicy = it.chatPolicy
                     )
                 }
                 val allEntities = myEntities + discoverEntities
@@ -953,7 +957,9 @@ class TanweerRepository(
                         description = it.description,
                         category = it.category,
                         location = it.location,
-                        createdAt = it.createdAt
+                        createdAt = it.createdAt,
+                        sourceName = it.sourceName,
+                        isOfficial = it.isOfficial
                     )
                 }
                 db.withTransaction {
@@ -1879,9 +1885,29 @@ class TanweerRepository(
         }
     }
 
-    suspend fun createPublicGroup(name: String, description: String? = null, icon: String? = "👥"): Result<GenericResponse> = withContext(Dispatchers.IO) {
+    suspend fun leaveGroup(groupId: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val res = api.createPublicGroup(com.magd.tanweer.data.model.CreateGroupRequest(name, description, icon))
+            val response = api.leaveGroup(groupId)
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true) {
+                syncGroups()
+                Result.success(body.message ?: "تمت مغادرة المجموعة بنجاح")
+            } else {
+                Result.failure(Exception(body?.error?.message ?: body?.message ?: "تعذر مغادرة المجموعة"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createPublicGroup(
+        name: String,
+        description: String? = null,
+        icon: String? = "👥",
+        visibility: String = "PUBLIC"
+    ): Result<GenericResponse> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.createPublicGroup(com.magd.tanweer.data.model.CreateGroupRequest(name, description, icon, visibility))
             if (res.isSuccessful && res.body()?.success == true) {
                 syncGroups()
                 Result.success(res.body()!!)
@@ -3621,7 +3647,9 @@ class TanweerRepository(
             category = category,
             location = location,
             createdAt = System.currentTimeMillis(),
-            syncStatus = "SYNCING"
+            syncStatus = "SYNCING",
+            sourceName = if (groupId == "all") "إدارة المدرسة" else null,
+            isOfficial = groupId == "all" && category.equals("ANNOUNCEMENT", ignoreCase = true)
         )
         db.eventDao().insertEvent(entity)
 
