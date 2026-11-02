@@ -668,7 +668,12 @@ export async function handleProposeScheduleChange(user: UserContext, request: Re
     serverCurrentSubjectId = currentSlot?.subject_id || null;
   }
 
-  const finalOldSubjectId = serverCurrentSubjectId !== null ? serverCurrentSubjectId : (body.oldSubjectId || null);
+  // The active schedule is authoritative even when the requested cell is empty.
+  // Never trust a stale client oldSubjectId when the server has no subject in that slot.
+  const finalOldSubjectId = serverCurrentSubjectId;
+  if (finalOldSubjectId === body.newSubjectId.trim()) {
+    return errorResponse('NO_SCHEDULE_CHANGE', 'المادة الجديدة هي نفسها المادة الموجودة حالياً في هذه الحصة؛ لا يوجد تغيير لطرحه للتصويت', 400);
+  }
 
   const proposalId = generateId('prop');
   const decisionId = generateId('dec');
