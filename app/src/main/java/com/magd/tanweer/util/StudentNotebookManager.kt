@@ -3,12 +3,14 @@ package com.magd.tanweer.util
 import android.content.Context
 import android.util.Log
 import com.magd.tanweer.data.model.ContentItem
+import com.magd.tanweer.data.remote.NetworkModule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.URL
 
 data class TranscribedLessonRecord(
@@ -184,66 +186,85 @@ data class LessonCachingResult(
         val pathsMap = existing.localImagePaths.toMutableMap()
         var newlyDownloadedCount = 0
         var failedCount = 0
-
         val prefs = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
         val authToken = prefs.getString("auth_token", "") ?: ""
 
         content.media.forEachIndexed { index, mediaItem ->
-            val urlStr = mediaItem.url
-            val effectiveUrl = when {
-                urlStr.startsWith("http://") || urlStr.startsWith("https://") -> urlStr
-                urlStr.startsWith("/") -> "https://tanweer.magd.workers.dev$urlStr"
-                else -> urlStr
-            }
+            val source = mediaItem.url.trim()
+            val remoteUrl = resolveRemoteMediaUrl(source)
+            val localSource = resolveLocalMediaFile(source)
             val destFile = File(offlineDir, "board_${content.id}_${index}.jpg")
 
             if (destFile.exists() && destFile.length() > 0) {
                 pathsMap[index] = destFile.absolutePath
-            } else if (effectiveUrl.startsWith("http://") || effectiveUrl.startsWith("https://")) {
-                try {
-                    val conn = (URL(effectiveUrl).openConnection() as java.net.HttpURLConnection).apply {
-                        connectTimeout = 15000
-                        readTimeout = 20000
-                        if (authToken.isNotBlank()) {
-                            setRequestProperty("Authorization", "Bearer $authToken")
+                return@forEachIndexed
+            }
+
+            val partialFile = File(offlineDir, "${destFile.name}.part")
+            try {
+                partialFile.delete()
+                if (remoteUrl != null) {
+                    val connection = openAuthenticatedMediaConnection(
+                        remoteUrl = remoteUrl,
+                        authToken = authToken,
+                        groupId = content.groupId
+                    )
+                    try {
+                        val statusCode = connection.responseCode
+                        if (statusCode !in 200..299) {
+                            throw IOException("تعذر تنزيل الصورة (HTTP $statusCode)")
                         }
-                        if (content.groupId.isNotBlank()) {
-                            setRequestProperty("X-Group-Id", content.groupId)
+                        val mimeType = connection.contentType?.substringBefore(';')?.trim()?.lowercase()
+                        if (mimeType != null && !mimeType.startsWith("image/")) {
+                            throw IOException("استجابة الخادم ليست ملف صورة صالحاً")
                         }
-                    }
-                    conn.inputStream.use { input ->
-                        FileOutputStream(destFile).use { out ->
-                            input.copyTo(out)
+                        connection.inputStream.use { input ->
+                            FileOutputStream(partialFile).use { output -> input.copyTo(output) }
                         }
+                    } finally {
+                        connection.disconnect()
                     }
-                    if (destFile.exists() && destFile.length() > 0) {
-                        pathsMap[index] = destFile.absolutePath
-                        newlyDownloadedCount++
-                    } else {
-                        destFile.delete()
-                        failedCount++
+                } else if (localSource != null && localSource.exists() && localSource.length() > 0) {
+                    FileInputStream(localSource).use { input ->
+                        FileOutputStream(partialFile).use { output -> input.copyTo(output) }
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to download board image at index $index: ${e.message}")
-                    if (destFile.exists() && destFile.length() == 0L) {
-                        destFile.delete()
-                    }
-                    failedCount++
+                } else {
+                    throw IOException("ملف الصورة غير متاح")
                 }
-            } else if (File(effectiveUrl).exists()) {
-                pathsMap[index] = effectiveUrl
-            } else {
+
+                if (!partialFile.exists() || partialFile.length() <= 0) {
+                    throw IOException("تم استلام ملف صورة فارغ")
+                }
+                if (destFile.exists() && !destFile.delete()) {
+                    throw IOException("تعذر استبدال نسخة الصورة المحلية")
+                }
+                if (!partialFile.renameTo(destFile)) {
+                    partialFile.copyTo(destFile, overwrite = true)
+                    partialFile.delete()
+                }
+                if (!destFile.exists() || destFile.length() <= 0) {
+                    throw IOException("فشل حفظ الصورة في التخزين المحلي")
+                }
+
+                pathsMap[index] = destFile.absolutePath
+                newlyDownloadedCount++
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to cache lesson image at index $index: ${e.message}", e)
+                partialFile.delete()
+                if (destFile.exists() && destFile.length() == 0L) destFile.delete()
                 failedCount++
             }
         }
 
-        val updatedRecord = existing.copy(localImagePaths = pathsMap)
+        val updatedRecord = existing.copy(
+            totalPages = content.media.size,
+            localImagePaths = pathsMap
+        )
         saveLessonRecord(context, updatedRecord)
 
         val totalPages = content.media.size
-        val successfulCount = pathsMap.size
+        val successfulCount = pathsMap.keys.count { it in content.media.indices }
         val isAllOk = totalPages > 0 && successfulCount >= totalPages && failedCount == 0
-
         val cachingResult = LessonCachingResult(
             totalPages = totalPages,
             successfulCount = successfulCount,
@@ -270,11 +291,12 @@ data class LessonCachingResult(
         pageIndex: Int,
         groupId: String = ""
     ): Result<android.net.Uri> = withContext(Dispatchers.IO) {
+        var galleryUri: android.net.Uri? = null
+        var connection: java.net.HttpURLConnection? = null
         try {
             val resolver = context.contentResolver
             val safeTitle = title.replace(Regex("[^a-zA-Z0-9\\u0600-\\u06FF]"), "_").take(30)
             val fileName = "Tanweer_${safeTitle}_P${pageIndex + 1}_${System.currentTimeMillis()}.jpg"
-
             val contentValues = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                 put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -285,43 +307,84 @@ data class LessonCachingResult(
             }
 
             val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-                ?: return@withContext Result.failure(Exception("تعذر إنشاء مسار الصورة في معرض الصور"))
+                ?: throw IOException("تعذر إنشاء ملف الصورة في معرض الصور")
+            galleryUri = uri
 
-            val prefs = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
-            val authToken = prefs.getString("auth_token", "") ?: ""
-
-            resolver.openOutputStream(uri)?.use { out ->
-                if (imageSource.startsWith("http://") || imageSource.startsWith("https://")) {
-                    val conn = (URL(imageSource).openConnection() as java.net.HttpURLConnection).apply {
-                        connectTimeout = 15000
-                        readTimeout = 20000
-                        if (authToken.isNotBlank()) {
-                            setRequestProperty("Authorization", "Bearer $authToken")
-                        }
-                        if (groupId.isNotBlank()) {
-                            setRequestProperty("X-Group-Id", groupId)
-                        }
+            resolver.openOutputStream(uri, "w")?.use { output ->
+                val remoteUrl = resolveRemoteMediaUrl(imageSource.trim())
+                if (remoteUrl != null) {
+                    val prefs = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
+                    val authToken = prefs.getString("auth_token", "") ?: ""
+                    connection = openAuthenticatedMediaConnection(remoteUrl, authToken, groupId)
+                    val statusCode = connection!!.responseCode
+                    if (statusCode !in 200..299) {
+                        throw IOException("تعذر تنزيل الصورة (HTTP $statusCode)")
                     }
-                    conn.inputStream.use { input ->
-                        input.copyTo(out)
+                    val mimeType = connection!!.contentType?.substringBefore(';')?.trim()?.lowercase()
+                    if (mimeType != null && !mimeType.startsWith("image/")) {
+                        throw IOException("استجابة الخادم ليست صورة صالحة")
                     }
+                    connection!!.inputStream.use { input -> input.copyTo(output) }
                 } else {
-                    java.io.FileInputStream(File(imageSource)).use { input ->
-                        input.copyTo(out)
+                    val sourceFile = resolveLocalMediaFile(imageSource.trim())
+                        ?: throw IOException("مصدر الصورة غير صالح")
+                    if (!sourceFile.exists() || sourceFile.length() <= 0) {
+                        throw IOException("ملف الصورة غير موجود على الجهاز")
                     }
+                    FileInputStream(sourceFile).use { input -> input.copyTo(output) }
                 }
-            } ?: return@withContext Result.failure(Exception("تعذر فتح مجرى الكتابة للصورة"))
+            } ?: throw IOException("تعذر فتح مجرى الكتابة للصورة")
 
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                contentValues.clear()
-                contentValues.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
-                resolver.update(uri, contentValues, null, null)
+                val completedValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                }
+                val changed = resolver.update(uri, completedValues, null, null)
+                if (changed <= 0) throw IOException("تعذر إكمال حفظ الصورة في المعرض")
             }
 
             Result.success(uri)
         } catch (e: Exception) {
+            galleryUri?.let { try { context.contentResolver.delete(it, null, null) } catch (_: Exception) {} }
             Log.e(TAG, "Failed saving image to gallery", e)
             Result.failure(e)
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private fun resolveRemoteMediaUrl(source: String): String? {
+        if (source.startsWith("https://", ignoreCase = true) || source.startsWith("http://", ignoreCase = true)) {
+            return source
+        }
+        if (source.startsWith("/api/", ignoreCase = true) || source.startsWith("api/", ignoreCase = true)) {
+            return NetworkModule.resolveApiUrl(source)
+        }
+        return null
+    }
+
+    private fun resolveLocalMediaFile(source: String): File? {
+        val normalized = if (source.startsWith("file://", ignoreCase = true)) {
+            source.removePrefix("file://")
+        } else {
+            source
+        }
+        if (normalized.isBlank() || normalized.startsWith("content://", ignoreCase = true)) return null
+        return try { File(normalized) } catch (_: Exception) { null }
+    }
+
+    private fun openAuthenticatedMediaConnection(
+        remoteUrl: String,
+        authToken: String,
+        groupId: String
+    ): java.net.HttpURLConnection {
+        return (URL(remoteUrl).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 15000
+            readTimeout = 20000
+            requestMethod = "GET"
+            setRequestProperty("Accept", "image/*")
+            if (authToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $authToken")
+            if (groupId.isNotBlank()) setRequestProperty("X-Group-Id", groupId)
         }
     }
 
