@@ -804,7 +804,9 @@ class TanweerRepository(
                                 description = it.description,
                                 category = it.category,
                                 location = it.location,
-                                createdAt = it.createdAt
+                                createdAt = it.createdAt,
+                                sourceName = it.sourceName,
+                                isOfficial = it.isOfficial
                             )
                         }
                         val reconciledDayEvents = ServerSnapshotReconciliation.preservePending(
@@ -3685,6 +3687,9 @@ class TanweerRepository(
                     "رفض الخادم إنشاء الفعالية بسبب بيانات غير مقبولة (HTTP ${res.code()})"
                 }
                 Result.failure(Exception(message))
+            } else if (groupId == "all" && category.equals("ANNOUNCEMENT", ignoreCase = true)) {
+                db.eventDao().updateSyncStatus(id, "FAILED")
+                Result.failure(Exception("يلزم الاتصال بالإنترنت لنشر التعميم الرسمي. لم يتم تسجيله كمنشور ناجح."))
             } else {
                 val outboxItem = OutboxEntity(
                     id = "ob_evc_${id}_${System.currentTimeMillis()}",
@@ -3698,17 +3703,22 @@ class TanweerRepository(
                 Result.success(EventAddResult.QueuedOffline(id))
             }
         } catch (e: Exception) {
-            // Queue in Outbox for offline synchronization
-            val outboxItem = OutboxEntity(
-                id = "ob_evc_${id}_${System.currentTimeMillis()}",
-                entityType = "EVENT_CREATE",
-                entityId = id,
-                operation = "CREATE",
-                payloadJson = "{}"
-            )
-            db.outboxDao().insertOutbox(outboxItem)
-            db.eventDao().updateSyncStatus(id, "PENDING")
-            Result.success(EventAddResult.QueuedOffline(id))
+            if (groupId == "all" && category.equals("ANNOUNCEMENT", ignoreCase = true)) {
+                db.eventDao().updateSyncStatus(id, "FAILED")
+                Result.failure(Exception("تعذر نشر التعميم دون الاتصال بالخادم. تحقق من الإنترنت وحاول مجدداً."))
+            } else {
+                // Queue ordinary local events for later synchronization.
+                val outboxItem = OutboxEntity(
+                    id = "ob_evc_${id}_${System.currentTimeMillis()}",
+                    entityType = "EVENT_CREATE",
+                    entityId = id,
+                    operation = "CREATE",
+                    payloadJson = "{}"
+                )
+                db.outboxDao().insertOutbox(outboxItem)
+                db.eventDao().updateSyncStatus(id, "PENDING")
+                Result.success(EventAddResult.QueuedOffline(id))
+            }
         }
     }
 
