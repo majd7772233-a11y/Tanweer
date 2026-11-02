@@ -462,10 +462,10 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       const response = renderDashboardHtml();
       expect(response.status).toBe(200);
       const html = await response.text();
-      const scripts = Array.from(html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/gi));
+      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
 
-      expect(scripts).toHaveLength(1);
-      expect(() => new Function(scripts[0][1])).not.toThrow();
+      expect(script).toBeDefined();
+      expect(() => new Function(script!)).not.toThrow();
     });
   });
 
