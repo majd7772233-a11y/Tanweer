@@ -12,6 +12,10 @@ import com.magd.tanweer.data.repository.SyncResult
 import com.magd.tanweer.data.repository.TanweerRepository
 import com.magd.tanweer.util.AcademicSessionSelection
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -487,6 +491,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                                 .putString("selected_group_id_${user.id}", authorizedGroupId)
                                 .commit()
 
+                            // Refresh server-backed secondary screens before releasing startup.
+                            // The server still authorizes each endpoint; this only preloads data
+                            // for the signed-in account and its currently active group.
+                            refreshStartupAuxiliaryData(user, authorizedGroupId)
+
                             applyStartupSyncResult(syncResult)
                         } catch (e: Exception) {
                             android.util.Log.e("TanweerViewModel", "Startup server reconciliation failed", e)
@@ -501,6 +510,57 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
         }
+    }
+
+    private suspend fun refreshStartupAuxiliaryData(user: User, groupId: String) = coroutineScope {
+        val tasks = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
+
+        tasks += async(Dispatchers.IO) {
+            _myRoleRequests.value = repository.getMyRoleRequests()
+        }
+
+        if (groupId.isNotBlank()) {
+            tasks += async(Dispatchers.IO) {
+                repository.getGroupMembers(groupId).onSuccess { data ->
+                    _groupMembersState.value = data
+                }
+            }
+            tasks += async(Dispatchers.IO) {
+                repository.getScheduleProposals(groupId).onSuccess { proposals ->
+                    _scheduleProposals.value = proposals
+                }
+            }
+            tasks += async(Dispatchers.IO) {
+                repository.getGroupCorrections(groupId).onSuccess { corrections ->
+                    _groupCorrections.value = corrections
+                }
+            }
+            tasks += async(Dispatchers.IO) {
+                repository.getCommunityDecisions(groupId).onSuccess { decisions ->
+                    _communityDecisions.value = decisions
+                }
+            }
+            tasks += async(Dispatchers.IO) {
+                repository.getScheduleMetaAndSlots(groupId).onSuccess { schedule ->
+                    _scheduleMeta.value = schedule.meta
+                    _scheduleVersion.value = schedule.version
+                }
+            }
+        }
+
+        when (user.role.uppercase(Locale.ROOT)) {
+            "TEACHER" -> tasks += async(Dispatchers.IO) {
+                repository.getTeacherDashboard().onSuccess { _teacherDashboard.value = it }
+            }
+            "MODERATOR" -> tasks += async(Dispatchers.IO) {
+                repository.getModeratorDashboard().onSuccess { _moderatorDashboard.value = it }
+            }
+            "ADMIN" -> tasks += async(Dispatchers.IO) {
+                repository.getAdminDashboard().onSuccess { _adminDashboard.value = it }
+            }
+        }
+
+        tasks.awaitAll()
     }
 
     private fun applyStartupSyncResult(result: SyncResult) {
