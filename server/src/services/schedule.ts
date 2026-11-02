@@ -563,20 +563,28 @@ export async function handleGetScheduleProposals(groupId: string, user: UserCont
 
   const proposals = await env.DB.prepare(
     `SELECT sp.id, sp.group_id, sp.proposed_by, sp.day_of_week, sp.slot_order,
-            sp.old_subject_id, sp.new_subject_id, sp.reason, sp.status,
-            sp.votes_for, sp.votes_against, sp.created_at,
+            sp.old_subject_id, sp.new_subject_id, sp.reason,
+            CASE WHEN cd.status = 'APPLIED' THEN 'ACCEPTED'
+                 WHEN cd.status IS NOT NULL THEN cd.status ELSE sp.status END AS status,
+            COALESCE(cd.votes_for, sp.votes_for, 0) AS votes_for,
+            COALESCE(cd.votes_against, sp.votes_against, 0) AS votes_against,
+            sp.created_at,
             u.full_name as proposer_name,
             u.role as proposer_role,
             COALESCE(s_old.name_ar, sp.old_subject_id) as old_subject_name,
             COALESCE(s_new.name_ar, sp.new_subject_id) as new_subject_name,
             COALESCE(s_new.icon, '📚') as new_subject_icon,
-            (SELECT vote_type FROM schedule_proposal_votes spv WHERE spv.proposal_id = sp.id AND spv.user_id = ?) as my_vote
+            CASE WHEN cv.vote_choice = 1 THEN 'FOR'
+                 WHEN cv.vote_choice = 0 THEN 'AGAINST' ELSE NULL END AS my_vote
      FROM schedule_proposals sp
      LEFT JOIN users u ON sp.proposed_by = u.id
      LEFT JOIN subjects s_old ON sp.old_subject_id = s_old.id
      LEFT JOIN subjects s_new ON sp.new_subject_id = s_new.id
+     LEFT JOIN community_decisions cd
+       ON cd.target_id = sp.id AND cd.request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')
+     LEFT JOIN community_votes cv ON cv.decision_id = cd.id AND cv.user_id = ?
      WHERE sp.group_id = ?
-     ORDER BY CASE WHEN sp.status = 'PENDING' THEN 0 ELSE 1 END, sp.created_at DESC`
+     ORDER BY CASE WHEN COALESCE(cd.status, sp.status) = 'PENDING' THEN 0 ELSE 1 END, sp.created_at DESC`
   ).bind(user.userId, groupId).all();
 
   const isScheduleManager = await hasPermission(user, Permission.MANAGE_SCHEDULE, {
@@ -646,38 +654,82 @@ export async function handleProposeScheduleChange(user: UserContext, request: Re
   const finalOldSubjectId = serverCurrentSubjectId !== null ? serverCurrentSubjectId : (body.oldSubjectId || null);
 
   const proposalId = generateId('prop');
+  const decisionId = generateId('dec');
   const now = Date.now();
+  const eligibleRows = await env.DB.prepare(
+    `SELECT user_id FROM group_members
+     WHERE group_id = ? AND status = 'ACTIVE' AND role != 'BANNED'`
+  ).bind(body.groupId).all<{ user_id: string }>();
+  const eligibleVoters = [...new Set((eligibleRows.results || []).map(row => row.user_id))];
+  if (!eligibleVoters.includes(user.userId)) eligibleVoters.push(user.userId);
+  const totalEligible = Math.max(1, eligibleVoters.length);
+  const thresholdPercent = 60;
+  const voterSnapshot = JSON.stringify({
+    text: `تغيير مادة الحصة من ${finalOldSubjectId || 'فارغة'} إلى ${body.newSubjectId.trim()}. السبب: ${body.reason.trim()}`,
+    voters: eligibleVoters,
+    targetType: 'SCHEDULE',
+  });
+  const dayNames = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+  const decisionTitle = `اقتراح تعديل الجدول • ${dayNames[body.dayOfWeek] || 'اليوم'} • الحصة ${body.slotOrder}`;
 
-  await env.DB.prepare(
-    `INSERT INTO schedule_proposals (id, group_id, proposed_by, day_of_week, slot_order, old_subject_id, new_subject_id, reason, status, votes_for, votes_against, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    proposalId,
-    body.groupId,
-    user.userId,
-    body.dayOfWeek,
-    body.slotOrder,
-    finalOldSubjectId,
-    body.newSubjectId.trim(),
-    body.reason.trim(),
-    'PENDING',
-    1,
-    0,
-    now
-  ).run();
-
-  // Proposer automatically votes FOR
   try {
-    await env.DB.prepare(
-      `INSERT OR REPLACE INTO schedule_proposal_votes (proposal_id, user_id, vote_type, created_at)
-       VALUES (?, ?, 'FOR', ?)`
-    ).bind(proposalId, user.userId, now).run();
-  } catch {}
+    if (typeof env.DB.batch !== 'function') {
+      return errorResponse('DECISION_STORE_UNAVAILABLE', 'يتطلب ربط مقترحات الجدول بمحرك القرارات دعماً للعمليات الذرية', 503);
+    }
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO schedule_proposals
+         (id, group_id, proposed_by, day_of_week, slot_order, old_subject_id, new_subject_id, reason, status, votes_for, votes_against, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 1, 0, ?)`
+      ).bind(
+        proposalId, body.groupId, user.userId, body.dayOfWeek, body.slotOrder,
+        finalOldSubjectId, body.newSubjectId.trim(), body.reason.trim(), now
+      ),
+      env.DB.prepare(
+        `INSERT INTO community_decisions
+         (id, group_id, request_type, target_id, title, description,
+          requested_by, requester_name, total_eligible_voters, threshold_percent,
+          votes_for, votes_against, status, expires_at, created_at)
+         VALUES (?, ?, 'SCHEDULE', ?, ?, ?, ?, ?, ?, ?, 1, 0, 'PENDING', ?, ?)`
+      ).bind(
+        decisionId, body.groupId, proposalId, decisionTitle, voterSnapshot,
+        user.userId, user.fullName, totalEligible, thresholdPercent, now + 48 * 3600 * 1000, now
+      ),
+      env.DB.prepare(
+        `INSERT INTO community_votes (decision_id, user_id, vote_choice, created_at)
+         VALUES (?, ?, 1, ?)`
+      ).bind(decisionId, user.userId, now),
+    ]);
+  } catch (error) {
+    console.error('Failed to create linked schedule proposal and community decision:', error);
+    return errorResponse('SCHEDULE_DECISION_CREATE_FAILED', 'تعذر إنشاء مقترح الجدول والقرار المرتبط به بصورة مكتملة', 503);
+  }
+
+  if (totalEligible <= 1) {
+    const result = await applyScheduleProposalToActiveSchedule({
+      id: proposalId, group_id: body.groupId, day_of_week: body.dayOfWeek,
+      slot_order: body.slotOrder, old_subject_id: finalOldSubjectId,
+      new_subject_id: body.newSubjectId.trim(), status: 'PENDING', proposed_by: user.userId,
+    }, user.userId, env);
+    if (result.success) {
+      await env.DB.prepare(`UPDATE schedule_proposals SET status = 'ACCEPTED' WHERE id = ?`).bind(proposalId).run();
+      await env.DB.prepare(`UPDATE community_decisions SET status = 'APPLIED', applied_at = ?, applied_by = ? WHERE id = ?`)
+        .bind(Date.now(), user.userId, decisionId).run();
+    } else {
+      await env.DB.prepare(`UPDATE schedule_proposals SET status = 'CONFLICTED' WHERE id = ?`).bind(proposalId).run();
+      await env.DB.prepare(`UPDATE community_decisions SET status = 'REJECTED' WHERE id = ?`).bind(decisionId).run();
+      return errorResponse('SCHEDULE_CONFLICT', result.message, 409);
+    }
+  }
 
   return jsonResponse({
     success: true,
     proposalId,
-    message: 'تم رفع مقترح تعديل الجدول بنجاح وطرحه لتصويت ومراجعة الأعضاء 🗳️',
+    decisionId,
+    status: totalEligible <= 1 ? 'APPLIED' : 'PENDING',
+    message: totalEligible <= 1
+      ? 'تم اعتماد المقترح تلقائياً لعدم وجود أعضاء آخرين للتصويت'
+      : 'تم نشر مقترح الجدول مباشرة في شاشة القرارات والتصويتات الجماعية 🗳️',
   });
 }
 
