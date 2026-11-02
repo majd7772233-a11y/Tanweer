@@ -21,9 +21,6 @@ import {
   handleDeleteScheduleSlot,
   handleGetScheduleProposals,
   handleProposeScheduleChange,
-  handleVoteScheduleProposal,
-  handleApproveScheduleProposal,
-  handleRejectScheduleProposal,
   handleGetScheduleVersions,
 } from './services/schedule';
 import { handleGetCalendarOverview, handleGetDayDetail } from './services/calendar';
@@ -59,6 +56,28 @@ import { handleGetProfile, handleUpdateProfile } from './services/users';
 import { handleGetMedia, handleUploadMedia } from './services/media';
 import { handleGetMyDevices, handleRevokeMyDevice, handleLogoutCurrentDevice } from './services/devices';
 import { handleCreateRoleRequest, handleGetMyRoleRequests, handleGetRoleMetadata, handleRedeemRoleCode } from './services/roleRequests';
+
+async function handleUnifiedScheduleProposalVote(
+  proposalId: string,
+  user: import('./env').UserContext,
+  env: Env,
+  voteChoice: number
+): Promise<Response> {
+  const decision = await env.DB.prepare(
+    `SELECT id FROM community_decisions
+     WHERE target_id = ? AND request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')
+     LIMIT 1`
+  ).bind(proposalId).first<{ id: string }>();
+  if (!decision) {
+    return errorResponse('DECISION_NOT_FOUND', 'لا يوجد قرار جماعي مرتبط بهذا المقترح. حدّث قائمة القرارات ثم حاول مجدداً.', 404);
+  }
+  const voteRequest = new Request('https://tanweer.internal/api/v1/decisions/vote', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ voteChoice: voteChoice === 1 ? 1 : 0 }),
+  });
+  return handleVoteCommunityDecision(decision.id, user, voteRequest, env);
+}
 
 export async function handleApiRoute(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -307,15 +326,16 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/vote') && method === 'POST') {
     const proposalId = path.split('/')[5];
-    return handleVoteScheduleProposal(proposalId, user, request, env);
+    const body = await request.json() as { voteType?: string };
+    return handleUnifiedScheduleProposalVote(proposalId, user, env, body.voteType === 'AGAINST' ? 0 : 1);
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/approve') && method === 'POST') {
     const proposalId = path.split('/')[5];
-    return handleApproveScheduleProposal(proposalId, user, env);
+    return handleUnifiedScheduleProposalVote(proposalId, user, env, 1);
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/reject') && method === 'POST') {
     const proposalId = path.split('/')[5];
-    return handleRejectScheduleProposal(proposalId, user, request, env);
+    return handleUnifiedScheduleProposalVote(proposalId, user, env, 0);
   }
   if ((path === '/api/v1/schedule/proposals' || (path.startsWith('/api/v1/schedule/') && path.endsWith('/proposals'))) && method === 'POST') {
     return handleProposeScheduleChange(user, request, env);
