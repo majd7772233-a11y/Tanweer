@@ -917,7 +917,7 @@ fun SettingsScreen(
                                         color = TextSecondary
                                     )
                                     Text(
-                                        text = "آخر نشاط: " + if (device.lastSeen > 0L) {
+                                        text = "آخر تسجيل دخول: " + if (device.lastSeen > 0L) {
                                             java.text.SimpleDateFormat(
                                                 "yyyy-MM-dd  HH:mm",
                                                 java.util.Locale.getDefault()
