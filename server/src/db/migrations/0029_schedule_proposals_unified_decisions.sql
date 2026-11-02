@@ -27,6 +27,7 @@ SELECT
   COALESCE(sp.votes_against, 0),
   CASE
     WHEN UPPER(sp.status) IN ('ACCEPTED', 'APPROVED', 'APPLIED') THEN 'APPLIED'
+    WHEN UPPER(sp.status) = 'EXPIRED' THEN 'EXPIRED'
     WHEN UPPER(sp.status) = 'PENDING' THEN 'PENDING'
     ELSE 'REJECTED'
   END,
