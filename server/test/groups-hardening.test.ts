@@ -494,6 +494,9 @@ class GroupJoinDb {
         }
         return null;
       },
+      async all<T = unknown>(): Promise<{ results: T[] }> {
+        return { results: [] };
+      },
       async run() {
         if (sql.includes("UPDATE group_members") && sql.includes("status = 'REJECTED'")) {
           const member = db.members.find(row =>
