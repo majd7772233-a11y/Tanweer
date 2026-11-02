@@ -108,13 +108,8 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
     let insertedNotification: any = null;
     let updatedUserRecoveryHash: string | null = null;
 
-    const mockEnv = {
+    const mockEnv: any = {
       DB: {
-        batch: async (statements: Array<{ run: () => Promise<{ success: boolean; meta: { changes: number } }> }>) => {
-          const results = [];
-          for (const statement of statements) results.push(await statement.run());
-          return results;
-        },
         prepare: (sql: string) => {
           let params: any[] = [];
           const statement: any = {
@@ -146,7 +141,12 @@ describe('Audit Fixes 16-19 (TA-16 to TA-19)', () => {
         },
       },
       SESSION_PEPPER: 'test-pepper-123',
-    } as unknown as Env;
+    };
+    mockEnv.DB.batch = async (statements: Array<{ run: () => Promise<{ success: boolean; meta: { changes: number } }> }>) => {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
+    };
 
     const req = new Request('http://localhost/api/dashboard/users/usr_target/reissue-credentials', {
       method: 'POST',
