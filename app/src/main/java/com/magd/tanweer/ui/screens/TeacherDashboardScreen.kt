@@ -523,7 +523,6 @@ fun OfficialExamCard(exam: ExamItem) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateOfficialHomeworkSheet(
     onDismiss: () -> Unit,
@@ -536,149 +535,41 @@ fun CreateOfficialHomeworkSheet(
         com.magd.tanweer.data.model.SchoolHierarchy.getSubjectsForGrade(currentUser?.gradeId ?: 11)
     }
 
-    var selectedSubjectId by remember { mutableStateOf(gradeSubjects.firstOrNull()?.id ?: "math") }
-    var title by remember { mutableStateOf("") }
-    var details by remember { mutableStateOf("") }
-    var pageNumbers by remember { mutableStateOf("") }
-    var questionNumbers by remember { mutableStateOf("") }
-    val todayStr = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()) }
-    var dueDate by remember { mutableStateOf(todayStr) }
-    var isSubmitting by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = { if (!isSubmitting) onDismiss() },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (title.isBlank()) {
-                        android.widget.Toast.makeText(context, "يرجى كتابة عنوان الواجب الرسمي", android.widget.Toast.LENGTH_SHORT).show()
-                        return@Button
-                    }
-                    isSubmitting = true
-                    viewModel.addHomework(
-                        subjectId = selectedSubjectId,
-                        title = title.trim(),
-                        details = details.trim().ifEmpty { null },
-                        pageNumbers = pageNumbers.trim().ifEmpty { null },
-                        questionNumbers = questionNumbers.trim().ifEmpty { null },
-                        dueDate = dueDate,
-                        taskType = "HOMEWORK",
-                        onResult = { res ->
-                            isSubmitting = false
-                            if (res.isSuccess) {
-                                android.widget.Toast.makeText(context, "تم نشر الواجب الرسمي المعتمد بنجاح 🎓", android.widget.Toast.LENGTH_LONG).show()
-                                onCreated()
-                            } else {
-                                android.widget.Toast.makeText(context, res.exceptionOrNull()?.message ?: "تعذر حفظ الواجب", android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    )
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
-                enabled = !isSubmitting
-            ) {
-                Text(if (isSubmitting) "جاري النشر..." else "نشر كواجب رسمي ⭐", color = TextOnAccent, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
-                Text("إلغاء", color = TextSecondary)
-            }
-        },
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("📝", fontSize = 22.sp)
-                Column {
-                    Text("إضافة واجب رسمي معتمد", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("يُنشر مباشرة باسمك كمعلم للشعبة", fontSize = 11.sp, color = CyanAccent)
-                }
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Subject selector chips
-                Text("اختر المادة:", fontSize = 12.sp, color = TextMuted)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    gradeSubjects.forEach { subj ->
-                        val isSelected = subj.id == selectedSubjectId
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) CyanAccent else GlassSurface)
-                                .clickable { selectedSubjectId = subj.id }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = "${subj.icon} ${subj.name}",
-                                fontSize = 12.sp,
-                                color = if (isSelected) TextOnAccent else TextSecondary,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
+    AddHomeworkDialog(
+        subjects = gradeSubjects,
+        initialDueDate = TanweerViewModel.getTodayDateString(),
+        isOfficial = true,
+        onDismiss = onDismiss,
+        onAddWithPages = { subjectId, title, details, pages, questions, dueDate, taskType, scanPages, finishSubmission ->
+            viewModel.addHomework(
+                subjectId = subjectId,
+                title = title,
+                details = details,
+                pageNumbers = pages,
+                questionNumbers = questions,
+                dueDate = dueDate,
+                taskType = taskType,
+                pages = scanPages.mapNotNull { it.processedResult },
+                isOfficial = true,
+                onResult = { result ->
+                    finishSubmission()
+                    if (result.isSuccess) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "تم نشر الواجب الرسمي مع مرفقاته بنجاح 🎓",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                        onCreated()
+                    } else {
+                        android.widget.Toast.makeText(
+                            context,
+                            result.exceptionOrNull()?.message ?: "تعذر نشر الواجب الرسمي",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
                     }
                 }
-
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("عنوان الواجب الرسمي") },
-                    placeholder = { Text("مثال: حل تمارين الوحدة الأولى") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = pageNumbers,
-                        onValueChange = { pageNumbers = it },
-                        label = { Text("الصفحات") },
-                        placeholder = { Text("مثال: ص 24-25") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = questionNumbers,
-                        onValueChange = { questionNumbers = it },
-                        label = { Text("الأسئلة") },
-                        placeholder = { Text("س 1، 3، 5") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                OutlinedTextField(
-                    value = dueDate,
-                    onValueChange = { dueDate = it },
-                    label = { Text("تاريخ التسليم (YYYY-MM-DD)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = details,
-                    onValueChange = { details = it },
-                    label = { Text("توجيهات وملاحظات إضافية للطلاب") },
-                    minLines = 2,
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        containerColor = MidnightSurface,
-        shape = RoundedCornerShape(16.dp)
+            )
+        }
     )
 }
 
