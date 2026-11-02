@@ -169,8 +169,8 @@ class UnifiedMutationQueue private constructor(
     /**
      * Drains all pending items in the outbox queue using unified execution and atomic reservation.
      */
-    suspend fun drainQueue(): Int = withContext(Dispatchers.IO) {
-        if (!isDrainAllowed) {
+    suspend fun drainQueue(forceAfterGenerationCheck: Boolean = false): Int = withContext(Dispatchers.IO) {
+        if (!isDrainAllowed && !forceAfterGenerationCheck) {
             Log.d("UnifiedMutationQueue", "Drain blocked: awaiting data_generation verification")
             return@withContext 0
         }
