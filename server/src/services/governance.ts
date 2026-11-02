@@ -1,4 +1,5 @@
-import { Env, UserContext } from '../env';\nimport { mapHomework, mapExam } from '../lib/mappers';
+import { Env, UserContext } from '../env';
+import { mapHomework, mapExam } from '../lib/mappers';
 import { generateId } from '../lib/ids';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
