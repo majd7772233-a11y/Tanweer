@@ -437,6 +437,9 @@ describe('End-to-End System Integration Flow', () => {
     expect(loginRes.status).toBe(200);
     expect(loginJson.token).toBeDefined();
 
+    // Logging in again from the same installation replaces the previous session token.
+    token = loginJson.token;
+
     const authHeaders = {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
