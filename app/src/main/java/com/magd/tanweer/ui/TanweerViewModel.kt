@@ -100,6 +100,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _isCheckingAuth = MutableStateFlow(true)
     val isCheckingAuth: StateFlow<Boolean> = _isCheckingAuth.asStateFlow()
     private val localSessionReady = CompletableDeferred<Unit>()
+    @Volatile private var dataGenerationVerified = false
 
     fun updateUserSessionState(userId: String) {
         if (userId.isBlank()) return
@@ -407,9 +408,12 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 val res = repository.getSystemVersion()
                 if (res.isSuccess) {
                     val sysVer = res.getOrNull()
-                    val purged = repository.checkAndApplyDataGeneration(getApplication(), sysVer?.dataGeneration)
-                    if (purged) {
-                        logout()
+                    if (!sysVer?.dataGeneration.isNullOrBlank()) {
+                        val purged = repository.checkAndApplyDataGeneration(getApplication(), sysVer?.dataGeneration)
+                        dataGenerationVerified = true
+                        if (purged) {
+                            logout()
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -436,9 +440,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                             // Push acknowledged local mutations first, then pull the authoritative
                             // server snapshot. This happens on every app launch/login, independent
                             // of the optional background auto-sync preference.
-                            val outboxResult = repository.processOutboxQueue()
-                            outboxResult.exceptionOrNull()?.let {
-                                android.util.Log.w("TanweerViewModel", "Startup outbox drain was incomplete", it)
+                            if (dataGenerationVerified) {
+                                val outboxResult = repository.processOutboxQueue()
+                                outboxResult.exceptionOrNull()?.let {
+                                    android.util.Log.w("TanweerViewModel", "Startup outbox drain was incomplete", it)
+                                }
+                            } else {
+                                // Do not submit queued mutations until the server's data generation
+                                // has been verified. The pull still runs and local pending rows remain.
+                                android.util.Log.w("TanweerViewModel", "Skipping startup outbox drain because server generation was not verified")
                             }
 
                             val syncResult = repository.syncInitial(getActiveGroupId(), _selectedDate.value)
