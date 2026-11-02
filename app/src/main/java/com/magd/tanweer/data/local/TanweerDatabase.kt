@@ -32,7 +32,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DailyPlanEntity::class,
         BookExtractedPageEntity::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 abstract class TanweerDatabase : RoomDatabase() {
@@ -69,6 +69,10 @@ abstract class TanweerDatabase : RoomDatabase() {
                 "`id` TEXT NOT NULL, `bookId` TEXT NOT NULL, `pageIndex` INTEGER NOT NULL, " +
                 "`extractedText` TEXT NOT NULL, `extractionType` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))"
             )
+            // Preserve all existing homework rows while adding the official-publication flag.
+            try {
+                database.execSQL("ALTER TABLE `cached_homeworks` ADD COLUMN `isOfficial` INTEGER NOT NULL DEFAULT 0")
+            } catch (_: Exception) {}
             try {
                 // If legacy table daily_plans exists, migrate rows to cached_daily_plan
                 val cursor = database.query("SELECT name FROM sqlite_master WHERE type='table' AND name='daily_plans'")
@@ -236,6 +240,12 @@ abstract class TanweerDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                applyUniversalSchemaUpgrades(database)
+            }
+        }
+
         fun getInstance(context: Context): TanweerDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -249,7 +259,8 @@ abstract class TanweerDatabase : RoomDatabase() {
                         MIGRATION_10_11,
                         MIGRATION_10_12,
                         MIGRATION_11_12,
-                        MIGRATION_12_13
+                        MIGRATION_12_13,
+                        MIGRATION_13_14
                     )
                     // Never silently erase a user's academic cache on an app downgrade.
                     // Unsupported schema transitions must fail visibly until a preserving
