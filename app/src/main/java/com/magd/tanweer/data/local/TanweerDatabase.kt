@@ -32,7 +32,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DailyPlanEntity::class,
         BookExtractedPageEntity::class
     ],
-    version = 15,
+    version = 16,
     exportSchema = false
 )
 abstract class TanweerDatabase : RoomDatabase() {
@@ -75,6 +75,18 @@ abstract class TanweerDatabase : RoomDatabase() {
             } catch (_: Exception) {}
             try {
                 database.execSQL("ALTER TABLE `cached_exams` ADD COLUMN `isOfficial` INTEGER NOT NULL DEFAULT 0")
+            } catch (_: Exception) {}
+            try {
+                database.execSQL("ALTER TABLE `cached_groups` ADD COLUMN `visibility` TEXT NOT NULL DEFAULT 'PUBLIC'")
+            } catch (_: Exception) {}
+            try {
+                database.execSQL("ALTER TABLE `cached_groups` ADD COLUMN `chatPolicy` TEXT NOT NULL DEFAULT 'MEMBERS'")
+            } catch (_: Exception) {}
+            try {
+                database.execSQL("ALTER TABLE `cached_events` ADD COLUMN `sourceName` TEXT")
+            } catch (_: Exception) {}
+            try {
+                database.execSQL("ALTER TABLE `cached_events` ADD COLUMN `isOfficial` INTEGER NOT NULL DEFAULT 0")
             } catch (_: Exception) {}
             try {
                 // If legacy table daily_plans exists, migrate rows to cached_daily_plan
@@ -255,6 +267,12 @@ abstract class TanweerDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                applyUniversalSchemaUpgrades(database)
+            }
+        }
+
         fun getInstance(context: Context): TanweerDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -270,7 +288,8 @@ abstract class TanweerDatabase : RoomDatabase() {
                         MIGRATION_11_12,
                         MIGRATION_12_13,
                         MIGRATION_13_14,
-                        MIGRATION_14_15
+                        MIGRATION_14_15,
+                        MIGRATION_15_16
                     )
                     // Never silently erase a user's academic cache on an app downgrade.
                     // Unsupported schema transitions must fail visibly until a preserving
