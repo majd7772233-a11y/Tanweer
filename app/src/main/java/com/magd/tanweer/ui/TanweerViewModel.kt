@@ -1362,7 +1362,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val result = repository.updateProfile(fullName, gradeId, sectionId)
             result.onSuccess { user ->
-                restoreAcademicSelection(user, resetGroup = user.defaultGroupId != _selectedGroupId.value)
+                restoreAcademicSelection(user, resetGroup = gradeId != null || sectionId != null)
                 syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
                 syncBooks(user.gradeId, isRefresh = true)
                 onSuccess()
