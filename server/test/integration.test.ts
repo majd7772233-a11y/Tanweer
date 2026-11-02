@@ -445,18 +445,22 @@ class MockD1Database {
       }
 
       if (table.toLowerCase() === 'group_members') {
-        // Find member with group_id and user_id and active status
         const groupId = params[0];
-        const userId = params[1];
+        // Schedule voting snapshots query all active members in a group, not one user's membership.
+        if (normalized.includes('SELECT user_id FROM group_members') && !normalized.includes('user_id = ?')) {
+          return (this.tables.group_members || [])
+            .filter(m => m.group_id === groupId && m.status === 'ACTIVE' && m.role !== 'BANNED')
+            .map(m => ({ user_id: m.user_id }));
+        }
 
-        const matching = (this.tables.group_members || []).filter(
+        // Other member checks are scoped to the current user.
+        const userId = params[1];
+        return (this.tables.group_members || []).filter(
           (m) =>
             m.group_id === groupId &&
             m.user_id === userId &&
             (m.status === 'ACTIVE' || !m.status)
         );
-
-        return matching;
       }
 
       if (normalized.includes('user_id = ? AND group_id = ?')) {
@@ -562,6 +566,17 @@ describe('End-to-End System Integration Flow', () => {
       id: 'mem_1',
       group_id: 'class_10_A',
       user_id: regJson.user.id,
+      role: 'STUDENT',
+      status: 'ACTIVE',
+      joined_at: Date.now(),
+    });
+
+    // This class has multiple eligible voters, so the schedule proposal remains
+    // pending for the unified community-decision quorum instead of auto-applying.
+    mockDb.tables.group_members.push({
+      id: 'mem_2',
+      group_id: 'class_10_A',
+      user_id: 'usr_second_voter',
       role: 'STUDENT',
       status: 'ACTIVE',
       joined_at: Date.now(),
@@ -745,7 +760,7 @@ describe('End-to-End System Integration Flow', () => {
           dayOfWeek: 1,
           slotOrder: 1,
           oldSubjectId: 'sub_science',
-          newSubjectId: 'sub_math',
+          newSubjectId: 'sub_science',
           reason: 'يوجد تعارض في الحصة الأولى ونحتاج نقل الرياضيات إلى هذا الموعد.',
         }),
       }
@@ -770,7 +785,8 @@ describe('End-to-End System Integration Flow', () => {
       proposed_by: regJson.user.id,
       day_of_week: 1,
       slot_order: 1,
-      new_subject_id: 'sub_math',
+      old_subject_id: 'sub_math',
+      new_subject_id: 'sub_science',
       status: 'PENDING',
     });
 
