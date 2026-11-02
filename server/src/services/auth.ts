@@ -603,6 +603,9 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
     ).run();
   } catch (error) {
     console.error('Failed to consume recovery code:', error);
+    await revokeCreatedDeviceSession(env, user.id, deviceIdentity.deviceId, sessionId).catch(cleanupError =>
+      console.error('Failed to clean up reserved recovery session after storage error:', cleanupError)
+    );
     return errorResponse(
       'AUTHENTICATION_UNAVAILABLE',
       'تعذر استهلاك رمز الاسترداد بأمان حالياً. يرجى المحاولة لاحقاً.',
