@@ -203,7 +203,8 @@ export async function handleUpdateEvent(
   // A holiday is an official school decision, not an ordinary user-created event.
   // Enforce the same publication policy here as in handleCreateEvent so an owner
   // cannot bypass it by changing an existing event's category.
-  const resultingCategory = (body.category ?? event.category ?? '').trim().toUpperCase();
+  const requestedCategory = typeof body.category === 'string' ? body.category.trim() : '';
+  const resultingCategory = (requestedCategory || event.category || '').trim().toUpperCase();
   const resultingDescription = body.description !== undefined ? body.description : event.description;
   if (resultingCategory === 'HOLIDAY') {
     if (typeof resultingDescription !== 'string' || !resultingDescription.trim()) {

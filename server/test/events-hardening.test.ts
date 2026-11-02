@@ -112,6 +112,24 @@ describe('Event CRUD authorization and holiday invariants', () => {
     expect(db.event.is_official).toBe(0);
   });
 
+  it('does not let an owner bypass holiday restrictions with an empty category field', async () => {
+    const db = new EventCrudMockDb('STUDENT');
+    db.event.category = 'HOLIDAY';
+    db.event.is_official = 1;
+    const user = makeUser('STUDENT');
+
+    const response = await handleUpdateEvent(
+      'evt_existing',
+      user,
+      makeRequest({ category: '', title: 'تعديل إجازة معتمدة' }),
+      makeEnv(db)
+    );
+
+    expect(response.status).toBe(403);
+    expect(db.event.title).toBe('نشاط مدرسي');
+    expect(db.event.category).toBe('HOLIDAY');
+  });
+
   it('requires a non-empty reason when an authorized user creates a holiday by updating an event', async () => {
     const db = new EventCrudMockDb('TEACHER');
     const user = makeUser('TEACHER', 'teacher_1');
