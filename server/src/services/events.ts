@@ -214,6 +214,10 @@ export async function handleUpdateEvent(
   // cannot bypass it by changing an existing event's category.
   const requestedCategory = typeof body.category === 'string' ? body.category.trim() : '';
   const resultingCategory = (requestedCategory || event.category || '').trim().toUpperCase();
+  const isSchoolAdmin = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER';
+  if (isSchoolWide && (event.category === 'ANNOUNCEMENT' || resultingCategory === 'ANNOUNCEMENT') && !isSchoolAdmin) {
+    return errorResponse('FORBIDDEN', 'تعديل التعاميم المدرسية الرسمية محصور بمدير المدرسة', 403);
+  }
   const resultingDescription = body.description !== undefined ? body.description : event.description;
   if (resultingCategory === 'HOLIDAY') {
     if (typeof resultingDescription !== 'string' || !resultingDescription.trim()) {
@@ -268,6 +272,7 @@ export async function handleDeleteEvent(
     id: string;
     group_id: string;
     created_by: string;
+    category: string;
   }>();
 
   if (!event) {
@@ -275,6 +280,9 @@ export async function handleDeleteEvent(
   }
 
   const isSchoolWide = event.group_id === 'all';
+  if (isSchoolWide && event.category === 'ANNOUNCEMENT' && user.role !== 'ADMIN' && user.role !== 'SYSTEM_OWNER') {
+    return errorResponse('FORBIDDEN', 'حذف التعاميم المدرسية الرسمية محصور بمدير المدرسة', 403);
+  }
   const isPrivilegedRole = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER' || user.role === 'TEACHER' || user.role === 'VERIFIED_TEACHER';
 
   if (!isSchoolWide) {
