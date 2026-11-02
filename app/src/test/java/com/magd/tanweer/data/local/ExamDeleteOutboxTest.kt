@@ -86,4 +86,46 @@ class ExamDeleteOutboxTest {
         assertNull(database.outboxDao().getPendingMutation(examId, "EXAM_CREATE"))
         assertNotNull(database.outboxDao().getPendingMutation(examId, "EXAM_TOGGLE"))
     }
+    @Test
+    fun `legacy exam delete and create entries remain discoverable by typed lookup`() = runBlocking {
+        val examId = "legacy_exam"
+        database.outboxDao().insertOutbox(
+            OutboxEntity(
+                id = "legacy_delete",
+                entityType = "EXAM",
+                entityId = examId,
+                operation = "DELETE",
+                payloadJson = "{}"
+            )
+        )
+        database.outboxDao().insertOutbox(
+            OutboxEntity(
+                id = "legacy_create",
+                entityType = "EXAM",
+                entityId = examId,
+                operation = "CREATE",
+                payloadJson = "{}"
+            )
+        )
+
+        assertEquals("legacy_delete", database.outboxDao().getPendingMutation(examId, "EXAM_DELETE")?.id)
+        assertEquals("legacy_create", database.outboxDao().getPendingMutation(examId, "EXAM_CREATE")?.id)
+    }
+
+    @Test
+    fun `deleting one mutation type preserves the other operation for same exam`() = runBlocking {
+        val examId = "typed_delete_exam"
+        database.outboxDao().insertOutbox(
+            OutboxEntity("toggle_op", "EXAM_TOGGLE", examId, "UPDATE", "{}")
+        )
+        database.outboxDao().insertOutbox(
+            OutboxEntity("delete_op", "EXAM_DELETE", examId, "DELETE", "{}")
+        )
+
+        database.outboxDao().deleteByEntityIdAndType(examId, "EXAM_TOGGLE")
+
+        assertNull(database.outboxDao().getPendingMutation(examId, "EXAM_TOGGLE"))
+        assertEquals("delete_op", database.outboxDao().getPendingMutation(examId, "EXAM_DELETE")?.id)
+    }
+
 }
