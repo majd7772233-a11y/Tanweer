@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - work/release-readiness
+      - work/release-readiness
     paths-ignore:
       - 'server/**'
       - 'docs/**'
