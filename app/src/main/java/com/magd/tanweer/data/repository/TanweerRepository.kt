@@ -676,7 +676,8 @@ class TanweerRepository(
                                 subjectIcon = it.subjectIcon,
                                 colorHex = it.colorHex,
                                 mediaUrlsJson = serializeStringList(it.mediaUrls),
-                                createdAt = it.createdAt
+                                createdAt = it.createdAt,
+                                isOfficial = it.isOfficial
                             )
                         }
                         val reconciledDayHomeworks = ServerSnapshotReconciliation.preservePending(
@@ -792,7 +793,8 @@ class TanweerRepository(
                         subjectIcon = item.subjectIcon,
                         colorHex = item.colorHex,
                         mediaUrlsJson = serializeStringList(item.mediaUrls),
-                        createdAt = item.createdAt
+                        createdAt = item.createdAt,
+                        isOfficial = item.isOfficial
                     )
                 }
                 db.withTransaction {
@@ -1018,7 +1020,8 @@ class TanweerRepository(
                                 subjectIcon = it.subjectIcon,
                                 colorHex = it.colorHex,
                                 mediaUrlsJson = org.json.JSONArray(it.mediaUrls).toString(),
-                                createdAt = it.createdAt
+                                createdAt = it.createdAt,
+                                isOfficial = it.isOfficial
                             )
                         }
                         val reconciledMonthHomeworks = ServerSnapshotReconciliation.preservePending(
@@ -2104,7 +2107,8 @@ class TanweerRepository(
                         mediaUrls = parseStringListJson(it.mediaUrlsJson),
                         isCompleted = completedIds.contains(it.id),
                         createdAt = it.createdAt,
-                        syncStatus = it.syncStatus
+                        syncStatus = it.syncStatus,
+                        isOfficial = it.isOfficial
                     )
                 }
             }
@@ -2138,7 +2142,8 @@ class TanweerRepository(
                         mediaUrls = parseStringListJson(it.mediaUrlsJson),
                         isCompleted = completedIds.contains(it.id),
                         createdAt = it.createdAt,
-                        syncStatus = it.syncStatus
+                        syncStatus = it.syncStatus,
+                        isOfficial = it.isOfficial
                     )
                 }
             }
@@ -2871,7 +2876,8 @@ class TanweerRepository(
         pageNumbers: String?,
         questionNumbers: String?,
         taskType: String = "HOMEWORK",
-        mediaUrls: List<String> = emptyList()
+        mediaUrls: List<String> = emptyList(),
+        isOfficial: Boolean = false
     ): Result<PublicationResult> = withContext(Dispatchers.IO) {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
@@ -2894,7 +2900,8 @@ class TanweerRepository(
             colorHex = subject?.colorHex ?: "#00E5FF",
             mediaUrlsJson = serializeStringList(mediaUrls),
             createdAt = System.currentTimeMillis(),
-            syncStatus = "SYNCING"
+            syncStatus = "SYNCING",
+            isOfficial = isOfficial
         )
         db.homeworkDao().insertHomework(entity)
 
@@ -2911,7 +2918,8 @@ class TanweerRepository(
                     pageNumbers = pageNumbers,
                     questionNumbers = questionNumbers,
                     taskType = taskType,
-                    mediaUrls = mediaUrls
+                    mediaUrls = mediaUrls,
+                    isOfficial = isOfficial
                 )
             )
             if (res.isSuccessful) {
@@ -2941,6 +2949,7 @@ class TanweerRepository(
                 put("questionNumbers", questionNumbers ?: "")
                 put("taskType", taskType)
                 put("mediaUrls", serializeStringList(mediaUrls))
+                put("isOfficial", isOfficial)
             }.toString()
             val outboxItem = OutboxEntity(
                 id = "ob_hwc_${id}_${System.currentTimeMillis()}",
@@ -2965,7 +2974,8 @@ class TanweerRepository(
         pageNumbers: String?,
         questionNumbers: String?,
         taskType: String = "HOMEWORK",
-        pages: List<ProcessedPageResult> = emptyList()
+        pages: List<ProcessedPageResult> = emptyList(),
+        isOfficial: Boolean = false
     ): Result<PublicationResult> = withContext(Dispatchers.IO) {
         val user = db.userDao().getUserSync()
         val gradeSubjects = SchoolHierarchy.getSubjectsForGrade(user?.gradeId ?: 10)
@@ -2990,7 +3000,8 @@ class TanweerRepository(
             colorHex = subject?.colorHex ?: "#00E5FF",
             mediaUrlsJson = serializeStringList(localUrls),
             createdAt = System.currentTimeMillis(),
-            syncStatus = "SYNCING"
+            syncStatus = "SYNCING",
+            isOfficial = isOfficial
         )
         db.homeworkDao().insertHomework(entity)
 
@@ -3046,7 +3057,8 @@ class TanweerRepository(
                     pageNumbers = pageNumbers,
                     questionNumbers = questionNumbers,
                     taskType = taskType,
-                    mediaUrls = uploadedUrls
+                    mediaUrls = uploadedUrls,
+                    isOfficial = isOfficial
                 )
             )
             if (res.isSuccessful) {
@@ -3094,6 +3106,7 @@ class TanweerRepository(
                 put("questionNumbers", questionNumbers ?: "")
                 put("taskType", taskType)
                 put("mediaUrls", serializeStringList(uploadedUrls))
+                put("isOfficial", isOfficial)
             }.toString()
             val outboxItem = OutboxEntity(
                 id = "ob_hwc_${id}_${System.currentTimeMillis()}",
@@ -3177,7 +3190,8 @@ class TanweerRepository(
                     pageNumbers = hw.pageNumbers,
                     questionNumbers = hw.questionNumbers,
                     taskType = hw.taskType,
-                    mediaUrls = finalRemoteUrls
+                    mediaUrls = finalRemoteUrls,
+                    isOfficial = hw.isOfficial
                 )
             )
             if (res.isSuccessful) {
@@ -3309,7 +3323,8 @@ class TanweerRepository(
         title: String,
         requiredChapters: String?,
         notes: String?,
-        examType: String = "MONTHLY"
+        examType: String = "MONTHLY",
+        isOfficial: Boolean = false
     ): Result<ExamAddResult> = withContext(Dispatchers.IO) {
         examMutationMutex.lock()
         try {
@@ -3344,7 +3359,8 @@ class TanweerRepository(
                     title = title,
                     requiredChapters = requiredChapters,
                     notes = notes,
-                    examType = examType
+                    examType = examType,
+                    isOfficial = isOfficial
                 )
             )
             if (res.isSuccessful) {
@@ -3377,6 +3393,7 @@ class TanweerRepository(
                         put("requiredChapters", requiredChapters)
                         put("notes", notes)
                         put("examType", examType)
+                        put("isOfficial", isOfficial)
                     }.toString()
                 } catch (_: Exception) { "{}" }
                 val outboxItem = OutboxEntity(
@@ -3402,6 +3419,7 @@ class TanweerRepository(
                     put("requiredChapters", requiredChapters)
                     put("notes", notes)
                     put("examType", examType)
+                    put("isOfficial", isOfficial)
                 }.toString()
             } catch (_: Exception) { "{}" }
             val outboxItem = OutboxEntity(
