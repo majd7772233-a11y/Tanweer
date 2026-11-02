@@ -3864,7 +3864,9 @@ class TanweerRepository(
 
     suspend fun processOutboxQueue(): Result<Int> = withContext(Dispatchers.IO) {
         try {
-            val count = mutationQueue.drainQueue()
+            // Caller must complete the server data-generation check before invoking this.
+            // Force is intentionally limited to this explicit startup/manual reconciliation path.
+            val count = mutationQueue.drainQueue(forceAfterGenerationCheck = true)
             Result.success(count)
         } catch (e: Exception) {
             Result.failure(e)
