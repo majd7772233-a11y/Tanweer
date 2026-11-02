@@ -43,7 +43,7 @@ class GroupChatPolicyDb {
         return { results: [] };
       },
       async run() {
-        if (normalized.includes("INSERT INTO chat_messages")) {
+        if (normalized.includes("INTO chat_messages")) {
           db.messages.push({ sql: normalized, params });
           return { success: true, meta: { changes: 1 } };
         }
