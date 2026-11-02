@@ -1045,15 +1045,21 @@ fun GroupMembersManagementDialog(
     onApproveJoin: (userId: String) -> Unit,
     onRejectJoin: (userId: String) -> Unit = {}
 ) {
-    val members = membersResponse?.members ?: emptyList()
+    val members = membersResponse?.members.orEmpty()
     val canManage = membersResponse?.canManageMembers == true
+    val pendingMembers = members.filter { it.status == "PENDING" }
+    val activeMembers = members.filter { it.status == "ACTIVE" }
+    val bannedMembers = members.filter { it.status == "BANNED" }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(group.icon ?: "👥", fontSize = 22.sp)
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = "إدارة أعضاء ${group.name}",
                         color = CyanAccent,
@@ -1061,7 +1067,7 @@ fun GroupMembersManagementDialog(
                         fontSize = 17.sp
                     )
                     Text(
-                        text = "${members.size} عضو مسجل في المجموعة",
+                        text = "${activeMembers.size} عضو معتمد • ${pendingMembers.size} طلب معلق",
                         color = TextSecondary,
                         fontSize = 11.sp
                     )
@@ -1069,144 +1075,266 @@ fun GroupMembersManagementDialog(
             }
         },
         text = {
-            if (members.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(20.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("جاري جلب قائمة الأعضاء...", fontSize = 12.sp, color = TextSecondary)
+            when {
+                membersResponse == null -> {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = CyanAccent,
+                            strokeWidth = 2.dp
+                        )
+                    }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(members, key = { it.userId }) { m ->
-                        val isPending = m.status == "PENDING"
-                        val isBanned = m.status == "BANNED"
+                members.isEmpty() -> {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "لا يوجد أعضاء أو طلبات انضمام حالياً.",
+                            fontSize = 12.sp,
+                            color = TextSecondary
+                        )
+                    }
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 430.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (canManage && pendingMembers.isNotEmpty()) {
+                            item(key = "pending-requests-heading") {
+                                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            "طلبات الانضمام المعلقة",
+                                            color = WarmAmber,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        GlassPill(
+                                            text = "${pendingMembers.size} طلب",
+                                            color = WarmAmber,
+                                            bgColor = AmberGlow
+                                        )
+                                    }
+                                    Text(
+                                        "راجع سبب كل طلب ثم وافق أو ارفض. سيصل إشعار للطالب بالنتيجة.",
+                                        color = TextSecondary,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
+                            items(pendingMembers, key = { "pending-${it.userId}" }) { member ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(11.dp))
+                                        .background(AmberGlow.copy(alpha = 0.42f))
+                                        .border(1.dp, WarmAmber.copy(alpha = 0.55f), RoundedCornerShape(11.dp))
+                                        .padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                member.fullName,
+                                                fontSize = 13.sp,
+                                                color = TextPrimary,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            member.phoneNumber?.let {
+                                                Text(it, fontSize = 10.sp, color = TextMuted)
+                                            }
+                                            Text(
+                                                "الصف ${member.gradeId} • الشعبة ${member.sectionId}",
+                                                fontSize = 10.sp,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                        GlassPill(
+                                            text = "بانتظارك ⏳",
+                                            color = WarmAmber,
+                                            bgColor = AmberGlow
+                                        )
+                                    }
+                                    if (!member.requestReason.isNullOrBlank()) {
+                                        Text(
+                                            text = "سبب الطلب: ${member.requestReason}",
+                                            fontSize = 11.sp,
+                                            color = WarmAmber,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(7.dp))
+                                                .background(MidnightBackground.copy(alpha = 0.6f))
+                                                .padding(8.dp)
+                                        )
+                                    } else {
+                                        Text(
+                                            "لم يضف الطالب سبباً للانضمام.",
+                                            fontSize = 10.sp,
+                                            color = TextMuted
+                                        )
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = { onApproveJoin(member.userId) },
+                                            modifier = Modifier.weight(1f).height(34.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+                                        ) {
+                                            Text("قبول الطلب ✓", fontSize = 11.sp, color = Color.White)
+                                        }
+                                        OutlinedButton(
+                                            onClick = { onRejectJoin(member.userId) },
+                                            modifier = Modifier.weight(1f).height(34.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, RubyRed.copy(alpha = 0.7f))
+                                        ) {
+                                            Text("رفض الطلب", fontSize = 11.sp, color = RubyRed)
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MidnightBackground)
-                                .border(1.dp, if (isPending) WarmAmber else GlassBorderSubtle, RoundedCornerShape(10.dp))
-                                .padding(10.dp)
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (activeMembers.isNotEmpty()) {
+                            item(key = "active-members-heading") {
+                                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    HorizontalDivider(color = GlassBorderSubtle, thickness = 0.7.dp)
+                                    Text(
+                                        "الأعضاء المعتمدون (${activeMembers.size})",
+                                        color = CyanAccent,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(top = 5.dp)
+                                    )
+                                }
+                            }
+                            items(activeMembers, key = { "active-${it.userId}" }) { member ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(MidnightBackground)
+                                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(10.dp))
+                                        .padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                member.fullName,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimary
+                                            )
+                                            member.phoneNumber?.let {
+                                                Text(it, fontSize = 10.sp, color = TextMuted)
+                                            }
+                                        }
+                                        val roleLabel = when (member.memberRole) {
+                                            "ADMIN" -> "👑 مدير"
+                                            "TEACHER" -> "🎓 أستاذ"
+                                            "MODERATOR" -> "🛡️ مشرف"
+                                            else -> "👤 طالب"
+                                        }
+                                        GlassPill(
+                                            text = roleLabel,
+                                            color = CyanAccent,
+                                            bgColor = CyanGlow
+                                        )
+                                    }
+                                    if (canManage) {
+                                        HorizontalDivider(color = GlassBorderSubtle, thickness = 0.5.dp)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            if (member.memberRole == "STUDENT") {
+                                                OutlinedButton(
+                                                    onClick = { onUpdateRole(member.userId, "MODERATOR") },
+                                                    modifier = Modifier.weight(1f).height(30.dp),
+                                                    contentPadding = PaddingValues(horizontal = 3.dp),
+                                                    shape = RoundedCornerShape(7.dp)
+                                                ) {
+                                                    Text("ترقية لمشرف", fontSize = 9.sp, color = CyanAccent)
+                                                }
+                                            } else if (member.memberRole == "MODERATOR") {
+                                                OutlinedButton(
+                                                    onClick = { onUpdateRole(member.userId, "STUDENT") },
+                                                    modifier = Modifier.weight(1f).height(30.dp),
+                                                    contentPadding = PaddingValues(horizontal = 3.dp),
+                                                    shape = RoundedCornerShape(7.dp)
+                                                ) {
+                                                    Text("خفض لطالب", fontSize = 9.sp, color = TextSecondary)
+                                                }
+                                            }
+                                            OutlinedButton(
+                                                onClick = { onRemove(member.userId, false) },
+                                                modifier = Modifier.weight(0.75f).height(30.dp),
+                                                contentPadding = PaddingValues(horizontal = 3.dp),
+                                                shape = RoundedCornerShape(7.dp)
+                                            ) {
+                                                Text("إزالة", fontSize = 9.sp, color = RubyRed)
+                                            }
+                                            OutlinedButton(
+                                                onClick = { onRemove(member.userId, true) },
+                                                modifier = Modifier.weight(0.75f).height(30.dp),
+                                                contentPadding = PaddingValues(horizontal = 3.dp),
+                                                shape = RoundedCornerShape(7.dp)
+                                            ) {
+                                                Text("حظر", fontSize = 9.sp, color = RubyRed)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (bannedMembers.isNotEmpty()) {
+                            item(key = "banned-members-heading") {
+                                Text(
+                                    "الحسابات المحظورة (${bannedMembers.size})",
+                                    color = RubyRed,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 7.dp)
+                                )
+                            }
+                            items(bannedMembers, key = { "banned-${it.userId}" }) { member ->
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .background(RubyRed.copy(alpha = 0.08f))
+                                        .border(1.dp, RubyRed.copy(alpha = 0.35f), RoundedCornerShape(9.dp))
+                                        .padding(10.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column {
-                                        Text(
-                                            text = m.fullName,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = TextPrimary
-                                        )
-                                        m.phoneNumber?.let {
-                                            Text(text = it, fontSize = 10.sp, color = TextMuted)
-                                        }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(member.fullName, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        member.phoneNumber?.let { Text(it, color = TextMuted, fontSize = 10.sp) }
                                     }
-
-                                    val roleLabel = when (m.memberRole) {
-                                        "ADMIN" -> "👑 مدير"
-                                        "TEACHER" -> "🎓 أستاذ"
-                                        "MODERATOR" -> "🛡️ مشرف"
-                                        else -> "👤 طالب"
-                                    }
-                                    GlassPill(
-                                        text = if (isPending) "طلب انضمام ⏳" else if (isBanned) "محظور 🚫" else roleLabel,
-                                        color = if (isPending) WarmAmber else if (isBanned) RubyRed else CyanAccent,
-                                        bgColor = if (isPending) AmberGlow else CyanGlow
-                                    )
-                                }
-
-                                if (!m.requestReason.isNullOrBlank()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(AmberGlow)
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = "سبب الطلب: ${m.requestReason}",
-                                            fontSize = 11.sp,
-                                            color = WarmAmber
-                                        )
-                                    }
-                                }
-
-                                if (canManage) {
-                                    HorizontalDivider(color = GlassBorderSubtle, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        if (isPending) {
-                                            Button(
-                                                onClick = { onApproveJoin(m.userId) },
-                                                modifier = Modifier.weight(1f).height(28.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                shape = RoundedCornerShape(6.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
-                                            ) {
-                                                Text("قبول ✅", fontSize = 10.sp, color = Color.White)
-                                            }
-                                            Button(
-                                                onClick = { onRejectJoin(m.userId) },
-                                                modifier = Modifier.weight(1f).height(28.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                shape = RoundedCornerShape(6.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = RubyRed)
-                                            ) {
-                                                Text("رفض ❌", fontSize = 10.sp, color = Color.White)
-                                            }
-                                        } else {
-                                            if (m.memberRole == "STUDENT") {
-                                                OutlinedButton(
-                                                    onClick = { onUpdateRole(m.userId, "MODERATOR") },
-                                                    modifier = Modifier.weight(1f).height(28.dp),
-                                                    contentPadding = PaddingValues(0.dp),
-                                                    shape = RoundedCornerShape(6.dp)
-                                                ) {
-                                                    Text("ترقية لمشرف 🛡️", fontSize = 9.sp, color = CyanAccent)
-                                                }
-                                            } else if (m.memberRole == "MODERATOR") {
-                                                OutlinedButton(
-                                                    onClick = { onUpdateRole(m.userId, "STUDENT") },
-                                                    modifier = Modifier.weight(1f).height(28.dp),
-                                                    contentPadding = PaddingValues(0.dp),
-                                                    shape = RoundedCornerShape(6.dp)
-                                                ) {
-                                                    Text("خفض لطالب 👤", fontSize = 9.sp, color = TextSecondary)
-                                                }
-                                            }
-
-                                            OutlinedButton(
-                                                onClick = { onRemove(m.userId, false) },
-                                                modifier = Modifier.weight(0.7f).height(28.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                shape = RoundedCornerShape(6.dp)
-                                            ) {
-                                                Text("إزالة ✕", fontSize = 9.sp, color = RubyRed)
-                                            }
-
-                                            if (!isBanned) {
-                                                OutlinedButton(
-                                                    onClick = { onRemove(m.userId, true) },
-                                                    modifier = Modifier.weight(0.7f).height(28.dp),
-                                                    contentPadding = PaddingValues(0.dp),
-                                                    shape = RoundedCornerShape(6.dp)
-                                                ) {
-                                                    Text("حظر 🚫", fontSize = 9.sp, color = RubyRed)
-                                                }
-                                            }
-                                        }
-                                    }
+                                    GlassPill(text = "محظور 🚫", color = RubyRed, bgColor = RubyRed.copy(alpha = 0.12f))
                                 }
                             }
                         }
