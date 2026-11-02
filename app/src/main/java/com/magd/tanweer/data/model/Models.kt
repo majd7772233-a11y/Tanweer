@@ -461,7 +461,8 @@ data class HomeworkItem(
     val mediaUrls: List<String> = emptyList(),
     val isCompleted: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
-    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val syncStatus: String = "SYNCED", // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val isOfficial: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
@@ -478,7 +479,8 @@ data class ExamItem(
     val colorHex: String = "#FF3366",
     val isCompleted: Boolean = false,
     val examType: String = "MONTHLY",
-    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val syncStatus: String = "SYNCED", // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val isOfficial: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
