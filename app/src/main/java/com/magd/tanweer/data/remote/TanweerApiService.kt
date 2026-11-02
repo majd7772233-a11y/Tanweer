@@ -172,6 +172,44 @@ data class CreateEventRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class UpdateContentRequest(
+    val title: String? = null,
+    val description: String? = null,
+    val type: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateHomeworkRequest(
+    val dueDate: String? = null,
+    val title: String? = null,
+    val details: String? = null,
+    val pageNumbers: String? = null,
+    val questionNumbers: String? = null,
+    val isOfficial: Boolean? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateExamRequest(
+    val examDate: String? = null,
+    val title: String? = null,
+    val requiredChapters: String? = null,
+    val notes: String? = null,
+    val isOfficial: Boolean? = null,
+    val examType: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateEventRequest(
+    val eventDate: String? = null,
+    val timeStr: String? = null,
+    val title: String? = null,
+    val description: String? = null,
+    val category: String? = null,
+    val location: String? = null,
+    val isOfficial: Boolean? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class HomeworksResponse(
     val success: Boolean,
     val homeworks: List<HomeworkItem> = emptyList()
@@ -459,6 +497,15 @@ interface TanweerApiService {
     @POST("api/v1/content")
     suspend fun createContent(@Body req: CreateContentRequest): Response<GenericResponse>
 
+    @PATCH("api/v1/content/{id}")
+    suspend fun updateContent(
+        @Path("id") contentId: String,
+        @Body req: UpdateContentRequest
+    ): Response<GenericResponse>
+
+    @DELETE("api/v1/content/{id}")
+    suspend fun deleteContent(@Path("id") contentId: String): Response<GenericResponse>
+
     @POST("api/v1/content/{id}/useful")
     suspend fun voteUseful(@Path("id") contentId: String): Response<GenericResponse>
 
@@ -509,6 +556,15 @@ interface TanweerApiService {
     @POST("api/v1/homeworks")
     suspend fun createHomework(@Body req: CreateHomeworkRequest): Response<GenericResponse>
 
+    @PATCH("api/v1/homeworks/{id}")
+    suspend fun updateHomework(
+        @Path("id") homeworkId: String,
+        @Body req: UpdateHomeworkRequest
+    ): Response<GenericResponse>
+
+    @DELETE("api/v1/homeworks/{id}")
+    suspend fun deleteHomework(@Path("id") homeworkId: String): Response<GenericResponse>
+
     @POST("api/v1/homeworks/{id}/toggle")
     suspend fun toggleHomework(
         @Path("id") id: String,
@@ -524,6 +580,12 @@ interface TanweerApiService {
     @POST("api/v1/exams")
     suspend fun createExam(@Body req: CreateExamRequest): Response<GenericResponse>
 
+    @PATCH("api/v1/exams/{id}")
+    suspend fun updateExam(
+        @Path("id") examId: String,
+        @Body req: UpdateExamRequest
+    ): Response<GenericResponse>
+
     @DELETE("api/v1/exams/{id}")
     suspend fun deleteExam(@Path("id") id: String): Response<GenericResponse>
 
@@ -538,6 +600,15 @@ interface TanweerApiService {
 
     @POST("api/v1/events")
     suspend fun createEvent(@Body req: CreateEventRequest): Response<GenericResponse>
+
+    @PATCH("api/v1/events/{id}")
+    suspend fun updateEvent(
+        @Path("id") eventId: String,
+        @Body req: UpdateEventRequest
+    ): Response<GenericResponse>
+
+    @DELETE("api/v1/events/{id}")
+    suspend fun deleteEvent(@Path("id") eventId: String): Response<GenericResponse>
 
     @GET("api/v1/issues")
     suspend fun getIssues(@Query("groupId") groupId: String): Response<IssuesResponse>
