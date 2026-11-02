@@ -75,7 +75,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     groupId: body.groupId,
   });
 
-  const isOfficial = (body.isOfficial && canPublishOfficial) || canPublishOfficial ? 1 : 0;
+  const isOfficial = body.isOfficial === true && canPublishOfficial ? 1 : 0;
 
   const hwId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
