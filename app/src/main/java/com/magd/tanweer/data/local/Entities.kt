@@ -1,6 +1,7 @@
 package com.magd.tanweer.data.local
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "cached_user")
