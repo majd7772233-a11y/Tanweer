@@ -343,6 +343,22 @@ class MockD1Database {
       }
     }
 
+    // Server-authoritative group chat policy query (groups + active membership + current global role).
+    if (normalized.includes('SELECT g.chat_policy, gm.role AS member_role, u.role AS global_role')) {
+      const [userId, groupId] = params;
+      const group = (this.tables.groups || []).find(row => row.id === groupId);
+      const membership = (this.tables.group_members || []).find(row =>
+        row.group_id === groupId && row.user_id === userId && row.status === 'ACTIVE'
+      );
+      const account = (this.tables.users || []).find(row => row.id === userId);
+      if (!group || !membership || !account) return [];
+      return [{
+        chat_policy: group.chat_policy || 'MEMBERS',
+        member_role: membership.role || 'STUDENT',
+        global_role: account.role || 'STUDENT',
+      }];
+    }
+
     // SELECT
     if (/^SELECT/i.test(normalized)) {
       const fromMatch = normalized.match(/FROM (\w+)/i);
