@@ -527,9 +527,10 @@ fun ScheduleScreen(
                         newSubjectId = newSubjectId,
                         reason = reason
                     ) { success, msg ->
-                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                         if (success) {
                             activeProposalCell = null
+                        } else {
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         }
                     }
                 }
