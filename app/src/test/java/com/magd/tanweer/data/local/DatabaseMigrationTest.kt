@@ -84,7 +84,8 @@ class DatabaseMigrationTest {
                 TanweerDatabase.MIGRATION_11_12,
                 TanweerDatabase.MIGRATION_12_13,
                 TanweerDatabase.MIGRATION_13_14,
-                TanweerDatabase.MIGRATION_14_15
+                TanweerDatabase.MIGRATION_14_15,
+                TanweerDatabase.MIGRATION_15_16
             )
             .build()
 

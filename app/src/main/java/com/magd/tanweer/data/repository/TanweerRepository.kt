@@ -2335,7 +2335,9 @@ class TanweerRepository(
                     category = it.category,
                     location = it.location,
                     createdAt = it.createdAt,
-                    syncStatus = it.syncStatus
+                    syncStatus = it.syncStatus,
+                    sourceName = it.sourceName,
+                    isOfficial = it.isOfficial
                 )
             }
         }
