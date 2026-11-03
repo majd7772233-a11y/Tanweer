@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - work/release-readiness
     paths-ignore:
       - 'server/**'
       - 'docs/**'
