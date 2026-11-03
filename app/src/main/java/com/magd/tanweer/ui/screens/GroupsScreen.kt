@@ -695,6 +695,7 @@ fun GroupsScreen(
                     }
                 } else {
                     items(discoverGroups, key = { it.id }) { group ->
+                        val hasPendingRequest = group.membershipStatus == "PENDING"
                         GlassCard(
                             modifier = Modifier.fillMaxWidth(),
                             backgroundColor = MidnightSurface,
@@ -736,7 +737,6 @@ fun GroupsScreen(
                                         }
                                     }
 
-                                    val hasPendingRequest = group.membershipStatus == "PENDING"
                                     GlassPill(
                                         text = when {
                                             hasPendingRequest -> "بانتظار الموافقة ⏳"

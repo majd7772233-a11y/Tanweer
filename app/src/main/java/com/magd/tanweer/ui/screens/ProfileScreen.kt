@@ -27,9 +27,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.magd.tanweer.data.model.Role
 import android.content.Intent
 import android.net.Uri
+import com.magd.tanweer.data.model.Role
 import com.magd.tanweer.data.model.SubmitRoleUpgradeResponse
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.data.model.getRoleEnum
@@ -37,6 +37,8 @@ import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.ArabicNameValidator
+import com.magd.tanweer.util.TanweerHapticManager
 
 private fun formatYemeniPhoneForDisplay(rawPhone: String): String {
     val digits = rawPhone.filter { it.isDigit() }
@@ -52,8 +54,6 @@ private fun formatYemeniPhoneForDisplay(rawPhone: String): String {
         rawPhone
     }
 }
-import com.magd.tanweer.util.ArabicNameValidator
-import com.magd.tanweer.util.TanweerHapticManager
 
 data class BadgeDetailInfo(
     val name: String,

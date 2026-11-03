@@ -1829,8 +1829,7 @@ class TanweerRepository(
             if (res.isSuccessful && body?.success == true) {
                 Result.success(body)
             } else {
-                val message = body?.message
-                    ?: res.errorBody()?.string()?.takeIf { it.isNotBlank() }
+                val message = res.errorBody()?.string()?.takeIf { it.isNotBlank() }
                     ?: "تعذر جلب أعضاء المجموعة (HTTP ${res.code()})"
                 Result.failure(Exception(message))
             }
