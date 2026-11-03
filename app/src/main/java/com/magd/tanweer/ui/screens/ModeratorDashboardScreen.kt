@@ -28,7 +28,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.CommunityDecisionItem
 import com.magd.tanweer.data.model.ContentCorrectionItem
 import com.magd.tanweer.data.model.GroupMemberItem
-import com.magd.tanweer.data.model.ScheduleProposalItem
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
@@ -42,14 +41,12 @@ fun ModeratorDashboardScreen(
     val dashboardData by viewModel.moderatorDashboard.collectAsStateWithLifecycle()
     val groupCorrections by viewModel.groupCorrections.collectAsStateWithLifecycle()
     val communityDecisions by viewModel.communityDecisions.collectAsStateWithLifecycle()
-    val scheduleProposals by viewModel.scheduleProposals.collectAsStateWithLifecycle()
     val groupMembers by viewModel.groupMembersState.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.loadModeratorDashboard()
         viewModel.loadGroupCorrections()
         viewModel.loadCommunityDecisions()
-        viewModel.loadScheduleProposals()
         viewModel.loadGroupMembers()
     }
 
@@ -120,7 +117,6 @@ fun ModeratorDashboardScreen(
                                 viewModel.loadModeratorDashboard()
                                 viewModel.loadGroupCorrections()
                                 viewModel.loadCommunityDecisions()
-                                viewModel.loadScheduleProposals()
                                 viewModel.loadGroupMembers()
                                 Toast.makeText(context, "تم تحديث بيانات الإشراف 🔄", Toast.LENGTH_SHORT).show()
                             },
@@ -137,7 +133,9 @@ fun ModeratorDashboardScreen(
 
                     // Summary Stats Row
                     val stats = dashboardData?.stats
-                    val totalDecisionsAndProposals = (scheduleProposals.count { it.status == "PENDING" }) + (communityDecisions.count { it.status == "PENDING" })
+                    // Schedule proposals already exist as unified community decisions.
+                    // Count each record once instead of counting both backing tables.
+                    val totalDecisionsAndProposals = communityDecisions.count { it.status == "PENDING" }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -254,11 +252,17 @@ fun ModeratorDashboardScreen(
             }
 
             1 -> {
-                // Unified Decisions & Schedule Proposals
-                val pendingProposals = scheduleProposals.filter { it.status == "PENDING" }
+                // One authoritative list: schedule proposals are filtered from community_decisions.
                 val decisions = communityDecisions
+                val scheduleDecisions = decisions.filter {
+                    it.requestType == "SCHEDULE" || it.requestType == "SCHEDULE_CHANGE"
+                }
+                val communityOnlyDecisions = decisions.filterNot {
+                    it.requestType == "SCHEDULE" || it.requestType == "SCHEDULE_CHANGE"
+                }
+                val showSchedule = decisionFilter == "ALL" || decisionFilter == "SCHEDULE"
+                val showCommunity = decisionFilter == "ALL" || decisionFilter == "COMMUNITY"
 
-                // Sub-filter chips row
                 item {
                     Row(
                         modifier = Modifier
@@ -267,9 +271,9 @@ fun ModeratorDashboardScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         listOf(
-                            Triple("ALL", "الكل", pendingProposals.size + decisions.size),
-                            Triple("SCHEDULE", "مقترحات الجدول 📅", pendingProposals.size),
-                            Triple("COMMUNITY", "القرارات والتصويت 🗳️", decisions.size)
+                            Triple("ALL", "كل القرارات", decisions.size),
+                            Triple("SCHEDULE", "قرارات الجدول 📅", scheduleDecisions.size),
+                            Triple("COMMUNITY", "القرارات الجماعية 🗳️", communityOnlyDecisions.size)
                         ).forEach { (key, label, count) ->
                             val isSel = decisionFilter == key
                             Box(
@@ -291,12 +295,13 @@ fun ModeratorDashboardScreen(
                     }
                 }
 
-                val showSchedule = decisionFilter == "ALL" || decisionFilter == "SCHEDULE"
-                val showCommunity = decisionFilter == "ALL" || decisionFilter == "COMMUNITY"
+                val visibleCount = when (decisionFilter) {
+                    "SCHEDULE" -> scheduleDecisions.size
+                    "COMMUNITY" -> communityOnlyDecisions.size
+                    else -> decisions.size
+                }
 
-                val isCompletelyEmpty = (showSchedule && pendingProposals.isEmpty()) && (showCommunity && decisions.isEmpty())
-
-                if (isCompletelyEmpty) {
+                if (visibleCount == 0) {
                     item {
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                             Column(
@@ -306,13 +311,13 @@ fun ModeratorDashboardScreen(
                             ) {
                                 Text("🗳️", fontSize = 32.sp)
                                 Text(
-                                    text = "لا توجد قرارات أو مقترحات جدول معلقة",
+                                    text = "لا توجد قرارات في هذا التصنيف",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                                 Text(
-                                    text = "كافة مقترحات الجدول والقرارات الجماعية للشعبة مُعتمدة ومستقرة.",
+                                    text = "تظهر مقترحات الجدول هنا ضمن محرك القرارات الموحد، مع التصويت والحالة والنتيجة في سجل واحد.",
                                     fontSize = 12.sp,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
@@ -321,27 +326,21 @@ fun ModeratorDashboardScreen(
                         }
                     }
                 } else {
-                    // Schedule Proposals
-                    if (showSchedule && pendingProposals.isNotEmpty()) {
+                    if (showSchedule && scheduleDecisions.isNotEmpty()) {
                         item {
                             Text(
-                                text = "📅 مقترحات الجدول الأسبوعي (${pendingProposals.size}):",
+                                text = "📅 قرارات ومقترحات الجدول (${scheduleDecisions.size}):",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = CyanAccent,
                                 modifier = Modifier.padding(top = 4.dp)
                             )
                         }
-                        items(pendingProposals) { prop ->
-                            ScheduleProposalReviewCard(
-                                prop = prop,
-                                onApprove = {
-                                    viewModel.approveScheduleProposal(prop.id) { success, msg ->
-                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                onReject = {
-                                    viewModel.rejectScheduleProposal(prop.id) { success, msg ->
+                        items(scheduleDecisions, key = { it.id }) { decision ->
+                            CommunityDecisionModeratorCard(
+                                decision = decision,
+                                onVote = { choice ->
+                                    viewModel.voteCommunityDecision(decision.id, choice) { _, msg ->
                                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                     }
                                 }
@@ -349,22 +348,21 @@ fun ModeratorDashboardScreen(
                         }
                     }
 
-                    // Community Decisions
-                    if (showCommunity && decisions.isNotEmpty()) {
+                    if (showCommunity && communityOnlyDecisions.isNotEmpty()) {
                         item {
                             Text(
-                                text = "🗳️ القرارات والتصويتات الجماعية (${decisions.size}):",
+                                text = "🗳️ القرارات الجماعية (${communityOnlyDecisions.size}):",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = EmeraldGreen,
                                 modifier = Modifier.padding(top = 8.dp)
                             )
                         }
-                        items(decisions) { decision ->
+                        items(communityOnlyDecisions, key = { it.id }) { decision ->
                             CommunityDecisionModeratorCard(
                                 decision = decision,
                                 onVote = { choice ->
-                                    viewModel.voteCommunityDecision(decision.id, choice) { success, msg ->
+                                    viewModel.voteCommunityDecision(decision.id, choice) { _, msg ->
                                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                     }
                                 }
@@ -503,83 +501,6 @@ fun CorrectionItemCard(
                     )
                     GlassButton(
                         text = "اعتماد وتطبيق ✅",
-                        color = EmeraldGreen,
-                        textColor = TextOnAccent,
-                        onClick = onApprove,
-                        modifier = Modifier.height(34.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun ScheduleProposalReviewCard(
-    prop: ScheduleProposalItem,
-    onApprove: () -> Unit,
-    onReject: () -> Unit
-) {
-    val dayName = when (prop.dayOfWeek) {
-        0 -> "الأحد"
-        1 -> "الإثنين"
-        2 -> "الثلاثاء"
-        3 -> "الأربعاء"
-        4 -> "الخميس"
-        else -> "يوم دراسي"
-    }
-
-    GlassCard(
-        modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MidnightSurface,
-        borderColor = CyanAccent.copy(alpha = 0.4f)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "📅 مقترح تعديل: $dayName — الحصة ${prop.slotOrder}",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = CyanAccent
-                )
-                GlassPill(
-                    text = "${prop.votesFor + prop.votesAgainst} أصوات",
-                    color = CyanAccent,
-                    bgColor = CyanAccent.copy(alpha = 0.15f)
-                )
-            }
-
-            Text(
-                text = "المادة المقترحة: ${prop.newSubjectName} (سبب التغيير: ${prop.reason})",
-                fontSize = 12.sp,
-                color = TextSecondary
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "بواسطة: ${prop.proposerName}",
-                    fontSize = 11.sp,
-                    color = TextMuted
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    GlassOutlinedButton(
-                        text = "رفض ❌",
-                        borderColor = RubyRed,
-                        textColor = RubyRed,
-                        onClick = onReject,
-                        modifier = Modifier.height(34.dp)
-                    )
-                    GlassButton(
-                        text = "اعتماد في الجدول ✅",
                         color = EmeraldGreen,
                         textColor = TextOnAccent,
                         onClick = onApprove,
