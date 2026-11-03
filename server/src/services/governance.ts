@@ -780,7 +780,7 @@ export async function handleGetCommunityDecisions(
           `اليوم: ${dayName} • الحصة: ${d.schedule_slot_order}`,
           `المادة الحالية: ${oldSubject} ← المادة المقترحة: ${newIcon} ${newSubject}`,
           reasonText ? `السبب: ${reasonText}` : '',
-        ].filter(Boolean).join('\\n');
+        ].filter(Boolean).join(' • ');
       }
 
       return {
