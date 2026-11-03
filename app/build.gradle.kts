@@ -70,7 +70,17 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        // Robolectric downloads android-all directly via HttpURLConnection,
+        // so point it at Maven Central's canonical endpoint instead of repo1.
+        it.systemProperty("robolectric.dependency.repo.id", "mavenCentral")
+        it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
