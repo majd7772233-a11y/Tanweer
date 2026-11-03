@@ -735,8 +735,21 @@ export async function handleGetCommunityDecisions(
 
   const decisions = await env.DB.prepare(
     `SELECT cd.*,
-            (SELECT vote_choice FROM community_votes cv WHERE cv.decision_id = cd.id AND cv.user_id = ?) as my_vote
+            (SELECT vote_choice FROM community_votes cv WHERE cv.decision_id = cd.id AND cv.user_id = ?) as my_vote,
+            sp.day_of_week AS schedule_day_of_week,
+            sp.slot_order AS schedule_slot_order,
+            sp.old_subject_id AS schedule_old_subject_id,
+            sp.new_subject_id AS schedule_new_subject_id,
+            COALESCE(s_old.name_ar, sp.old_subject_id) AS schedule_old_subject_name,
+            COALESCE(s_new.name_ar, sp.new_subject_id) AS schedule_new_subject_name,
+            COALESCE(s_new.icon, '📚') AS schedule_new_subject_icon
      FROM community_decisions cd
+     LEFT JOIN schedule_proposals sp
+       ON sp.id = cd.target_id
+      AND sp.group_id = cd.group_id
+      AND cd.request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')
+     LEFT JOIN subjects s_old ON s_old.id = sp.old_subject_id
+     LEFT JOIN subjects s_new ON s_new.id = sp.new_subject_id
      WHERE cd.group_id = ?
      ORDER BY CASE WHEN cd.status = 'PENDING' THEN 0 ELSE 1 END, cd.created_at DESC`
   ).bind(user.userId, groupId).all();
@@ -744,13 +757,31 @@ export async function handleGetCommunityDecisions(
   return jsonResponse({
     success: true,
     decisions: (decisions.results || []).map((d: any) => {
-      let descText = d.description || '';
+      let reasonText = d.description || '';
       try {
-        if (descText.startsWith('{')) {
-          const parsed = JSON.parse(descText);
-          descText = parsed.text || '';
+        if (reasonText.startsWith('{')) {
+          const parsed = JSON.parse(reasonText);
+          reasonText = typeof parsed.text === 'string' ? parsed.text : '';
         }
       } catch {}
+
+      let descText = reasonText;
+      if (
+        (d.request_type === 'SCHEDULE' || d.request_type === 'SCHEDULE_CHANGE') &&
+        d.schedule_slot_order !== null &&
+        d.schedule_slot_order !== undefined
+      ) {
+        const dayNames = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'];
+        const dayName = dayNames[Number(d.schedule_day_of_week)] || 'يوم دراسي';
+        const oldSubject = d.schedule_old_subject_name || d.schedule_old_subject_id || 'فارغة';
+        const newSubject = d.schedule_new_subject_name || d.schedule_new_subject_id || 'مادة غير محددة';
+        const newIcon = d.schedule_new_subject_icon || '📚';
+        descText = [
+          `اليوم: ${dayName} • الحصة: ${d.schedule_slot_order}`,
+          `المادة الحالية: ${oldSubject} ← المادة المقترحة: ${newIcon} ${newSubject}`,
+          reasonText ? `السبب: ${reasonText}` : '',
+        ].filter(Boolean).join('\\n');
+      }
 
       return {
         id: d.id,
