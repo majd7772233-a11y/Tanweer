@@ -445,13 +445,12 @@ async function notifyGroupManagers(
          ON gm.user_id = u.id AND gm.group_id = ? AND gm.status = 'ACTIVE'
        WHERE u.id != ?
          AND (
-           UPPER(u.role) = 'ADMIN'
+           -- Global school managers can review requests even before joining the group.
+           UPPER(u.role) IN ('ADMIN', 'MODERATOR', 'TEACHER', 'VERIFIED_TEACHER')
+           -- Group-level managers can review requests only while their membership is active.
            OR (
              gm.status = 'ACTIVE'
-             AND (
-               UPPER(gm.role) IN ('MODERATOR', 'TEACHER', 'ADMIN')
-               OR UPPER(u.role) IN ('TEACHER', 'VERIFIED_TEACHER')
-             )
+             AND UPPER(gm.role) IN ('MODERATOR', 'TEACHER', 'ADMIN')
            )
          )`
     ).bind(groupId, excludeUserId).all<{ user_id: string }>();

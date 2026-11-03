@@ -597,11 +597,13 @@ describe('Group join request concurrency and state', () => {
     expect(db.messages).toHaveLength(1);
   });
 
-  it('notifies active managers of the requested group and the school admin only', async () => {
+  it('notifies globally authorized teachers/moderators, active group managers, and school admin without duplicates', async () => {
     const db = new GroupJoinDb();
     db.managerUsers = [
       { user_id: 'group-moderator' },
       { user_id: 'group-teacher' },
+      { user_id: 'global-moderator' },
+      { user_id: 'global-teacher' },
       { user_id: 'school-admin' },
     ];
 
@@ -613,14 +615,20 @@ describe('Group join request concurrency and state', () => {
     );
 
     expect(response.status).toBe(200);
+    expect(db.managerQuery).toContain('SELECT DISTINCT u.id AS user_id');
     expect(db.managerQuery).toContain("gm.status = 'ACTIVE'");
-    expect(db.managerQuery).toContain("UPPER(u.role) = 'ADMIN'");
+    expect(db.managerQuery).toContain("UPPER(u.role) IN ('ADMIN', 'MODERATOR', 'TEACHER', 'VERIFIED_TEACHER')");
+    expect(db.managerQuery).toContain("UPPER(gm.role) IN ('MODERATOR', 'TEACHER', 'ADMIN')");
+    expect(db.managerQuery).toContain('u.id != ?');
     expect(db.managerQuery).not.toContain("'SYSTEM_OWNER'");
     expect(db.notifications.map(row => row.user_id).sort()).toEqual([
+      'global-moderator',
+      'global-teacher',
       'group-moderator',
       'group-teacher',
       'school-admin',
     ]);
+    expect(db.notifications).not.toContainEqual(expect.objectContaining({ user_id: student.userId }));
     expect(db.notifications.every(row => row.type === 'GROUP_JOIN_REQUEST')).toBe(true);
   });
 
