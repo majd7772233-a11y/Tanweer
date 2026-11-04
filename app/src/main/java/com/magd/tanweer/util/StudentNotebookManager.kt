@@ -170,6 +170,96 @@ data class LessonCachingResult(
 }
 
     /**
+     * Downloads one protected lesson page to the app-private cache.
+     * Authorization is restricted to the configured Tanweer API origin.
+     */
+    suspend fun cacheLessonPageLocally(
+        context: Context,
+        content: ContentItem,
+        pageIndex: Int
+    ): Result<File> = withContext(Dispatchers.IO) {
+        val mediaItem = content.media.getOrNull(pageIndex)
+            ?: return@withContext Result.failure(IOException("صفحة الدرس المطلوبة غير موجودة"))
+
+        val offlineDir = getOfflineDir(context)
+        val destination = File(offlineDir, "board_" + content.id + "_" + pageIndex + ".jpg")
+        if (destination.exists() && destination.length() > 0) {
+            return@withContext Result.success(destination)
+        }
+
+        val partial = File(offlineDir, destination.name + ".part")
+        var connection: java.net.HttpURLConnection? = null
+        try {
+            partial.delete()
+            val source = mediaItem.url.trim()
+            val remoteUrl = resolveRemoteMediaUrl(source)
+            val localSource = resolveLocalMediaFile(source)
+
+            if (remoteUrl != null) {
+                val preferences = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
+                val token = preferences.getString("auth_token", "") ?: ""
+                connection = openAuthenticatedMediaConnection(remoteUrl, token, content.groupId)
+                val status = connection!!.responseCode
+                if (status !in 200..299) {
+                    throw IOException("تعذر تنزيل صفحة الدرس (HTTP " + status + ")")
+                }
+                val mimeType = connection!!.contentType?.substringBefore(';')?.trim()?.lowercase()
+                if (mimeType != null && !mimeType.startsWith("image/") &&
+                    mimeType != "application/octet-stream"
+                ) {
+                    throw IOException("استجابة الخادم ليست صورة صالحة")
+                }
+                connection!!.inputStream.use { input ->
+                    FileOutputStream(partial).use { output -> input.copyTo(output) }
+                }
+            } else if (localSource != null && localSource.exists() && localSource.length() > 0) {
+                FileInputStream(localSource).use { input ->
+                    FileOutputStream(partial).use { output -> input.copyTo(output) }
+                }
+            } else {
+                throw IOException("مصدر صورة الدرس غير متاح")
+            }
+
+            if (!partial.exists() || partial.length() <= 0) {
+                throw IOException("تم استلام ملف صورة فارغ")
+            }
+            if (destination.exists() && !destination.delete()) {
+                throw IOException("تعذر استبدال نسخة الصورة المحلية")
+            }
+            if (!partial.renameTo(destination)) {
+                partial.copyTo(destination, overwrite = true)
+                partial.delete()
+            }
+            if (!destination.exists() || destination.length() <= 0) {
+                throw IOException("فشل حفظ الصورة في التخزين المحلي")
+            }
+
+            val existing = getLessonRecord(context, content.id) ?: TranscribedLessonRecord(
+                contentId = content.id,
+                subjectId = content.subjectId,
+                subjectName = content.subjectName,
+                title = content.title,
+                studyDate = content.studyDate,
+                totalPages = content.media.size
+            )
+            saveLessonRecord(
+                context,
+                existing.copy(
+                    totalPages = content.media.size,
+                    localImagePaths = existing.localImagePaths + (pageIndex to destination.absolutePath)
+                )
+            )
+            Result.success(destination)
+        } catch (error: Exception) {
+            partial.delete()
+            if (destination.exists() && destination.length() <= 0) destination.delete()
+            Log.w(TAG, "Failed to load lesson page " + pageIndex + " for " + content.id + ": " + error.message, error)
+            Result.failure(error)
+        } finally {
+            connection?.disconnect()
+        }
+    }
+    /**
      * Downloads and permanently caches all whiteboard/lesson captures to local storage.
      * Respects section privacy by attaching the student's Authorization token and Group ID.
      */
@@ -379,13 +469,27 @@ data class LessonCachingResult(
         authToken: String,
         groupId: String
     ): java.net.HttpURLConnection {
-        return (URL(remoteUrl).openConnection() as java.net.HttpURLConnection).apply {
+        val target = URL(remoteUrl)
+        val apiOrigin = URL(NetworkModule.apiBaseUrl)
+        val targetPort = if (target.port >= 0) target.port else target.defaultPort
+        val apiPort = if (apiOrigin.port >= 0) apiOrigin.port else apiOrigin.defaultPort
+        val isTanweerApiOrigin =
+            target.protocol.equals(apiOrigin.protocol, ignoreCase = true) &&
+            target.host.equals(apiOrigin.host, ignoreCase = true) &&
+            targetPort == apiPort
+
+        return (target.openConnection() as java.net.HttpURLConnection).apply {
             connectTimeout = 15000
             readTimeout = 20000
             requestMethod = "GET"
+            useCaches = false
+            // Do not forward bearer credentials to external hosts or through internal redirects.
+            instanceFollowRedirects = !isTanweerApiOrigin
             setRequestProperty("Accept", "image/*")
-            if (authToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $authToken")
-            if (groupId.isNotBlank()) setRequestProperty("X-Group-Id", groupId)
+            if (isTanweerApiOrigin) {
+                if (authToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $authToken")
+                if (groupId.isNotBlank()) setRequestProperty("X-Group-Id", groupId)
+            }
         }
     }
 

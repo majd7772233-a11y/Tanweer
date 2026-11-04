@@ -429,7 +429,8 @@ export async function handleGetMedia(mediaId: string, request: Request, env: Env
     status: 200,
     headers: {
       'Content-Type': row.mime_type || 'image/jpeg',
-      'Cache-Control': 'private, max-age=86400',
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
       'Access-Control-Allow-Origin': '*',
     },
   });

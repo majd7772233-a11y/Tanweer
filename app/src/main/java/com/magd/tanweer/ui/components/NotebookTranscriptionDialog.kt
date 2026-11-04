@@ -35,7 +35,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.magd.tanweer.data.model.ContentItem
-import com.magd.tanweer.data.remote.NetworkModule
 import com.magd.tanweer.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -106,12 +105,39 @@ fun NotebookTranscriptionDialog(
     // Offline caching state
     var isSavingOffline by remember { mutableStateOf(false) }
     var isDownloadingAll by remember { mutableStateOf(false) }
+    var isLoadingCurrentPage by remember(content.id) { mutableStateOf(false) }
+    var currentPageLoadError by remember(content.id) { mutableStateOf<String?>(null) }
     var refreshLocalTrigger by remember { mutableIntStateOf(0) }
 
     val localBoardFile = remember(content.id, currentPageIndex, refreshLocalTrigger) {
         File(com.magd.tanweer.util.StudentNotebookManager.getOfflineDir(context), "board_${content.id}_${currentPageIndex}.jpg")
     }
     val isLocallySaved = localBoardFile.exists() && localBoardFile.length() > 0
+
+    // Fetch only the visible page using the authenticated media endpoint.
+    LaunchedEffect(content.id, currentPageIndex, refreshLocalTrigger, isDownloadingAll) {
+        if (currentMedia == null) return@LaunchedEffect
+        if (isLocallySaved) {
+            currentPageLoadError = null
+            return@LaunchedEffect
+        }
+        if (isDownloadingAll) return@LaunchedEffect
+
+        isLoadingCurrentPage = true
+        currentPageLoadError = null
+        val result = com.magd.tanweer.util.StudentNotebookManager.cacheLessonPageLocally(
+            context = context,
+            content = content,
+            pageIndex = currentPageIndex
+        )
+        result.fold(
+            onSuccess = { refreshLocalTrigger++ },
+            onFailure = { error ->
+                currentPageLoadError = error.message ?: "تعذر تنزيل صورة الدرس"
+            }
+        )
+        isLoadingCurrentPage = false
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -193,26 +219,42 @@ fun NotebookTranscriptionDialog(
                             )
                         } else null
 
-                        val imageModel = if (localBoardFile.exists() && localBoardFile.length() > 0) {
-                            localBoardFile
+                        if (isLocallySaved) {
+                            AsyncImage(
+                                model = localBoardFile,
+                                contentDescription = "لوحة السبورة صفحة ${currentPageIndex + 1}",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer(
+                                        scaleX = scale,
+                                        scaleY = scale,
+                                        translationX = offsetX,
+                                        translationY = offsetY
+                                    ),
+                                contentScale = ContentScale.Fit,
+                                colorFilter = colorFilter
+                            )
                         } else {
-                            NetworkModule.resolveApiUrl(currentMedia.url)
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                if (isLoadingCurrentPage || isDownloadingAll) {
+                                    CircularProgressIndicator(color = CyanAccent, strokeWidth = 2.dp)
+                                    Text("يجري تنزيل صفحة الدرس بأمان...", fontSize = 12.sp, color = TextSecondary)
+                                } else {
+                                    Text(
+                                        currentPageLoadError ?: "الصورة غير محفوظة على هذا الجهاز بعد",
+                                        fontSize = 12.sp,
+                                        color = TextSecondary,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    TextButton(onClick = { refreshLocalTrigger++ }) {
+                                        Text("إعادة محاولة التنزيل", color = CyanAccent)
+                                    }
+                                }
+                            }
                         }
-
-                        AsyncImage(
-                            model = imageModel,
-                            contentDescription = "لوحة السبورة صفحة ${currentPageIndex + 1}",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer(
-                                    scaleX = scale,
-                                    scaleY = scale,
-                                    translationX = offsetX,
-                                    translationY = offsetY
-                                ),
-                            contentScale = ContentScale.Fit,
-                            colorFilter = colorFilter
-                        )
                     } else {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,

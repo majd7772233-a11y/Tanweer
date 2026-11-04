@@ -1,7 +1,7 @@
 {
   "name": "tanweer-server",
   "version": "1.0.0",
-  "description": "Cloudflare Workers + D1 + R2 + Durable Objects backend for Tanweer School Platform",
+  "description": "Cloudflare Workers + D1 + Durable Objects backend for Tanweer School Platform",
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
