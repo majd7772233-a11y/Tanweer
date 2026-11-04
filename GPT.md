@@ -1723,3 +1723,45 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **Workflow safety restored:** `.github/workflows/build-android.yml` is again main-push only (plus PR/manual trigger); `.github/workflows/deploy-staging.yml` is manual-only and retains the `work/release-readiness` branch guard. Final branch head before this GPT.md update: `8b0846f43729b4ddcdce174dfac2c185e4dbab73`. Production main remains unchanged.
 - **Manual acceptance testing remains pending:** CI and Worker smoke tests do not simulate independent signed-in users or physical devices. Next manual validation on Staging accounts/devices: create public and private groups as teacher/moderator/admin; direct join/leave and system join event; private request accept/reject and manager/student notifications; read-only student WebSocket send denial in `staff_official`; schedule proposal details/vote/expiry/application; admin circular publishing and student Home/Events visibility; list position restoration; phone display with stored digits unchanged. Do not claim these account/device tests have already been performed.
 - **Staging data safety:** The existing test accounts and rows remain. Migration 0030 only activates pending rows in the newly public `all` group; no account or content data was purged. Production remains untouched.
+
+
+## Batch 4 — D1 lesson media reliability and School Admin dashboard (2026-11-04)
+
+### Storage decision (R2 is intentionally not used)
+- R2 is not enabled for this Cloudflare account and no R2 bucket or binding was added.
+- The existing media path continues to store small image BLOBs in D1. The upload handler caps a single image at 1,800,000 bytes (under D1's 2,000,000-byte BLOB/row limit).
+- Read-only Staging inspection before this deployment showed 6 media blobs / 107,789 bytes total / 34,303-byte largest blob; database storage was about 675,840 bytes. No media rows or user data were removed.
+- The Worker bundle reports only `DB`, `CHAT`, and `ENVIRONMENT=staging`; it does not bind R2.
+
+### Lesson media defects fixed
+- `ContentMediaJson` is now the single Room codec for lesson media. It reads both historical JSON arrays of URL strings and current JSON arrays of media objects, and retains id, page order, URL, MIME type, size, and checksum.
+- The group-content, cross-group academic archive, and daily-detail sync paths now persist complete media objects instead of converting them into URL-only strings. Added Android tests for full metadata round-trip, legacy cache compatibility, invalid entries, and empty/malformed input.
+- The lesson notebook no longer asks Coil to fetch a protected media URL without authentication. It downloads only the visible page through the authenticated media endpoint, stores it in app-private cache, and then renders the local file. The existing download-all/offline cache action remains.
+- The media HTTP helper attaches bearer and group headers only when the destination origin (scheme, host, and effective port) matches the configured Tanweer API origin; external image hosts do not receive Tanweer credentials.
+- Authenticated media responses now use `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`. The day-detail media query includes checksum metadata as well.
+
+### School Admin dashboard improvements
+- The dashboard API now returns a separate effective-admin directory, account status and activity metadata, active membership totals, disabled account totals, event/announcement/issue counts, and D1 media count/bytes.
+- The Android model now includes the new admin directory and statistics.
+- The screen has horizontally scrollable tabs suitable for narrow phones, a preserved tab/search/list state, searchable teacher/moderator/student/admin directories, visible active/disabled account status, an analytics section, and an expanded school summary.
+- The Owner-only system dashboard was not changed.
+
+### Commits and current refs
+- Media metadata codec + Android regression tests: `4cb070959a49ad9b7a5eb9be2edd0afa3dea00f3`.
+- Authenticated page download + protected-media headers + daily-detail checksum: `ba580d5474c921c3d46ad7b6d1a685e29de79c06`.
+- Admin dashboard server statistics and model: `bf1e470a9b2a1b9ec978c33e16c6087911cbf3ef`.
+- Admin dashboard searchable/mobile UI: `269874d914a5904d107422a4c58750a69cffcf83`.
+- Temporary branch-only CI triggers were committed to start validation, then immediately restored. The current working branch head after restoration is `a6e03282655735770f64af5b136f1fd876844d8a`.
+- Production `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; it was not changed, merged, or deployed.
+- `.github/workflows/build-android.yml` is restored to build on `main` (plus PR/manual); `.github/workflows/deploy-staging.yml` is restored to manual-only with a strict work-branch guard.
+
+### Validation and Staging deployment
+- Server checks: TypeScript passed; 31 Vitest files / 202 tests passed; Wrangler Staging dry-run passed.
+- Staging deploy run: `41798829651` succeeded. Worker `tanweer-staging` version: `502c7c1c-6f3f-46a7-a21e-0567ff4398f8`. Health endpoint returned `{"status":"ok","app":"Tanweer"}`; dashboard login route and unauthenticated redirect smoke tests passed.
+- Android run: `41798829494` succeeded. Android unit tests passed; release keystore preparation and validation passed; signed Staging APK assembly, APK verification, rename, and artifact upload all passed.
+- Artifact: `13306328561`; archive digest: `sha256:b90643a1f08ad54a41ebc3c600533ced5ac652538b49c5255db53867f132dccd`.
+- Extracted APK: `Tanweer-Staging.apk`, size 23,247,178 bytes; SHA-256: `d2a96af58cd32bec89d2262e8e37fef0c90ce9a26a111c1e106784d56ae29a0d`. Gradle flavor config makes this the separate Staging application id `com.magd.tanweer.staging`, version `1.2.0-staging`. Local `jarsigner -verify` reports `jar verified`.
+
+### Remaining acceptance test
+- Automated tests and Staging smoke checks do not simulate two independent signed-in student accounts on physical devices. After installing this Staging APK, still test a teacher publishing a multi-page lesson and a second student account in the same group opening it and downloading pages; also verify a non-member remains denied. Do not claim the physical multi-account test is complete.
+- No Production D1 writes, secrets changes, Worker deployment, branch merge, or user data purge were performed.
