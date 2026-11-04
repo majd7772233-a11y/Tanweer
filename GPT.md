@@ -1765,3 +1765,28 @@ When giving the user a statement about the current state, re-read GitHub if it m
 ### Remaining acceptance test
 - Automated tests and Staging smoke checks do not simulate two independent signed-in student accounts on physical devices. After installing this Staging APK, still test a teacher publishing a multi-page lesson and a second student account in the same group opening it and downloading pages; also verify a non-member remains denied. Do not claim the physical multi-account test is complete.
 - No Production D1 writes, secrets changes, Worker deployment, branch merge, or user data purge were performed.
+
+
+## Batch 5 — Root-cause fix for lesson media HTTP 401 (2026-11-04)
+
+### Root cause
+- Both lesson pages and homework attachments already upload through the same authenticated multipart API: `POST /api/v1/media/upload`, with the image in the `file` form part. The server stores the bytes in `media_blobs`.
+- The records then have different, correct relationship tables: lesson pages use `content_media`; homework attachments use `homework_media` plus the legacy `homeworks.media_urls` JSON field. These relationships are used by the server to authorize group members and should not be collapsed into one table.
+- The 401 was in the Android download path, not the upload path. `StudentNotebookManager` opened a raw `HttpURLConnection` and looked up `tanweer_prefs/auth_token`. Login/session restore never wrote that preference: the actual session token is stored in Room (`UserEntity.token`) and mirrored into `NetworkModule` for Retrofit's auth interceptor. Consequently, page download requests could be sent without `Authorization`; `handleGetMedia` correctly returned HTTP 401 before checking media linkage or group membership.
+
+### Fix
+- `NetworkModule` now exposes a read-only `currentAuthToken()` accessor over the same volatile in-memory token used by Retrofit. `setAuthToken` normalizes blank/whitespace values to null.
+- All protected media download paths in `StudentNotebookManager` now use that live session token: visible-page caching, download-all/offline caching, and saving a page to the Gallery. The unused/non-populated SharedPreferences token key is no longer read.
+- Added a shared media-header builder that attaches `Authorization: Bearer …` and the group header only when scheme, host, and effective port match the configured Tanweer API origin. Internal protected downloads do not follow redirects; external image hosts receive no Tanweer token. A missing internal session token now fails fast with a clear session message rather than making an inevitably unauthenticated request.
+- No R2 bucket/binding was introduced; the existing D1 BLOB media pipeline and the lesson/homework relation model remain unchanged.
+
+### Regression tests and build
+- Added `MediaRequestAuthTest` for correct bearer/group headers on the API origin, no credential leakage to external hosts, missing-token rejection, and default-port origin matching.
+- Android CI run `41856466678` succeeded on trigger commit `6cc86fc10f00e8509d65224e274234a22168a042`: `testStagingDebugUnitTest` reported `BUILD SUCCESSFUL`; signed Staging Release assembly also reported `BUILD SUCCESSFUL`; release keystore validation, APK verification, artifact rename, and upload all passed.
+- The temporary branch-only push trigger used to run CI was restored immediately afterward in commit `4e1ab6a98a4266b4679a208769752d112b09d227`. The final workflow configuration is back to main-push plus PR/manual, and Staging deployment remains manual-only.
+- Staging artifact ID: `13337921608`; APK: `Tanweer-6cc86fc-staging-release.apk`; size 23,247,158 bytes; SHA-256 `d0056bb6b996b1307d2266d55f105d21c7b8f61887ce4c277346c3618b108e42`. Extracted artifact checksum matched and `jarsigner -verify` reported `jar verified` (the signing certificate is self-signed, as expected for sideload distribution).
+- Android app source fix commit: `9005023cf3b06202129dd9c3d8a5fdc44c183a2e`. This notebook update follows the workflow-restoration commit.
+
+### Remaining real-device acceptance
+- The CI run validates Kotlin unit tests and the signed APK, but it does not emulate two separate authenticated student accounts. Still verify on two Staging devices/accounts: publish a multi-page lesson from account A, open it from account B while both are active members of the same group, and open/download pages. Also verify a non-member remains denied (expected 403, not 401). Do not describe this physical cross-account test as complete until performed.
+- Production `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; no merge, Production deployment, Production D1 write, secret change, or data purge occurred.
