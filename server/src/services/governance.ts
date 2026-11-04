@@ -1073,17 +1073,21 @@ export async function handleGetAdminDashboardData(user: UserContext, env: Env): 
     return errorResponse('FORBIDDEN', 'هذا المركز مخصص لمدير المدرسة', 403);
   }
 
-  // Aggregate active memberships first, producing exactly one row for each account.
+  // Resolve one effective school role per account from global role and active group roles.
+  // System Owner is deliberately excluded from all user directories.
   const roleCte = `WITH active_memberships AS (
       SELECT gm.user_id,
              MAX(CASE WHEN UPPER(gm.role) IN ('ADMIN', 'ADMINISTRATOR') THEN 4
                       WHEN UPPER(gm.role) IN ('TEACHER', 'VERIFIED_TEACHER') THEN 3
                       WHEN UPPER(gm.role) = 'MODERATOR' THEN 2 ELSE 1 END) AS group_rank,
              COUNT(DISTINCT gm.group_id) AS active_group_count
-      FROM group_members gm WHERE gm.status = 'ACTIVE' GROUP BY gm.user_id
+      FROM group_members gm
+      WHERE gm.status = 'ACTIVE'
+      GROUP BY gm.user_id
     ),
     scoped_users AS (
       SELECT u.id, u.full_name, u.phone_number, u.grade_id, u.section_id,
+             COALESCE(u.status, 'ACTIVE') AS status, u.last_seen, u.created_at,
              CASE
                WHEN CASE WHEN UPPER(u.role) IN ('ADMIN', 'ADMINISTRATOR') THEN 4
                          WHEN UPPER(u.role) IN ('TEACHER', 'VERIFIED_TEACHER') THEN 3
@@ -1094,53 +1098,111 @@ export async function handleGetAdminDashboardData(user: UserContext, env: Env): 
                ELSE COALESCE(am.group_rank, 1)
              END AS role_rank,
              COALESCE(am.active_group_count, 0) AS active_group_count
-      FROM users u LEFT JOIN active_memberships am ON am.user_id = u.id
+      FROM users u
+      LEFT JOIN active_memberships am ON am.user_id = u.id
       WHERE UPPER(u.role) NOT IN ('SYSTEM_OWNER', 'OWNER')
     )`;
 
-  const [counts, teachersList, moderatorsList, studentsList, totalGroups, totalLessons, totalHomeworks, totalExams] =
-    await Promise.all([
-      env.DB.prepare(`${roleCte}
-        SELECT COUNT(*) AS total_users,
-               SUM(CASE WHEN role_rank = 1 THEN 1 ELSE 0 END) AS total_students,
-               SUM(CASE WHEN role_rank = 2 THEN 1 ELSE 0 END) AS total_moderators,
-               SUM(CASE WHEN role_rank = 3 THEN 1 ELSE 0 END) AS total_teachers,
-               SUM(CASE WHEN role_rank = 4 THEN 1 ELSE 0 END) AS total_admins
-        FROM scoped_users`).first<{
-          total_users: number; total_students: number; total_moderators: number;
-          total_teachers: number; total_admins: number;
-        }>(),
-      env.DB.prepare(`${roleCte}
-        SELECT id, full_name, phone_number, 'TEACHER' AS role, grade_id, section_id, active_group_count
-        FROM scoped_users WHERE role_rank = 3 ORDER BY full_name COLLATE NOCASE LIMIT 200`).all(),
-      env.DB.prepare(`${roleCte}
-        SELECT id, full_name, phone_number, 'MODERATOR' AS role, grade_id, section_id, active_group_count
-        FROM scoped_users WHERE role_rank = 2 ORDER BY full_name COLLATE NOCASE LIMIT 200`).all(),
-      env.DB.prepare(`${roleCte}
-        SELECT id, full_name, phone_number, 'STUDENT' AS role, grade_id, section_id, active_group_count
-        FROM scoped_users WHERE role_rank = 1 ORDER BY full_name COLLATE NOCASE LIMIT 500`).all(),
-      env.DB.prepare(`SELECT COUNT(*) AS count FROM groups`).first<{ count: number }>(),
-      env.DB.prepare(`SELECT COUNT(*) AS count FROM contents`).first<{ count: number }>(),
-      env.DB.prepare(`SELECT COUNT(*) AS count FROM homeworks`).first<{ count: number }>(),
-      env.DB.prepare(`SELECT COUNT(*) AS count FROM exams`).first<{ count: number }>(),
-    ]);
+  const [
+    counts,
+    teachersList,
+    moderatorsList,
+    studentsList,
+    adminsList,
+    totalGroups,
+    totalLessons,
+    totalHomeworks,
+    totalExams,
+    totalEvents,
+    totalAnnouncements,
+    totalIssues,
+    totalActiveMemberships,
+    mediaStats,
+  ] = await Promise.all([
+    env.DB.prepare(`${roleCte}
+      SELECT COUNT(*) AS total_users,
+             SUM(CASE WHEN role_rank = 1 THEN 1 ELSE 0 END) AS total_students,
+             SUM(CASE WHEN role_rank = 2 THEN 1 ELSE 0 END) AS total_moderators,
+             SUM(CASE WHEN role_rank = 3 THEN 1 ELSE 0 END) AS total_teachers,
+             SUM(CASE WHEN role_rank = 4 THEN 1 ELSE 0 END) AS total_admins,
+             SUM(CASE WHEN UPPER(status) = 'DISABLED' THEN 1 ELSE 0 END) AS total_disabled_users
+      FROM scoped_users`).first<{
+        total_users: number;
+        total_students: number;
+        total_moderators: number;
+        total_teachers: number;
+        total_admins: number;
+        total_disabled_users: number;
+      }>(),
+    env.DB.prepare(`${roleCte}
+      SELECT id, full_name, phone_number, 'TEACHER' AS role, grade_id, section_id,
+             active_group_count, status, last_seen, created_at
+      FROM scoped_users
+      WHERE role_rank = 3
+      ORDER BY full_name COLLATE NOCASE
+      LIMIT 500`).all(),
+    env.DB.prepare(`${roleCte}
+      SELECT id, full_name, phone_number, 'MODERATOR' AS role, grade_id, section_id,
+             active_group_count, status, last_seen, created_at
+      FROM scoped_users
+      WHERE role_rank = 2
+      ORDER BY full_name COLLATE NOCASE
+      LIMIT 500`).all(),
+    env.DB.prepare(`${roleCte}
+      SELECT id, full_name, phone_number, 'STUDENT' AS role, grade_id, section_id,
+             active_group_count, status, last_seen, created_at
+      FROM scoped_users
+      WHERE role_rank = 1
+      ORDER BY full_name COLLATE NOCASE
+      LIMIT 1000`).all(),
+    env.DB.prepare(`${roleCte}
+      SELECT id, full_name, phone_number, 'ADMIN' AS role, grade_id, section_id,
+             active_group_count, status, last_seen, created_at
+      FROM scoped_users
+      WHERE role_rank = 4
+      ORDER BY full_name COLLATE NOCASE
+      LIMIT 200`).all(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM groups`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM contents`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM homeworks`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM exams`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM events`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM events
+      WHERE group_id = 'all' AND UPPER(category) = 'ANNOUNCEMENT'`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM issues`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM group_members WHERE status = 'ACTIVE'`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(file_size), 0) AS bytes
+      FROM media_blobs`).first<{ count: number; bytes: number }>(),
+  ]);
 
   return jsonResponse({
     success: true,
-    school: { name: 'مدرسة تنوير النموذجية', adminName: user.fullName, adminPhone: user.phoneNumber },
+    school: {
+      name: 'مدرسة تنوير النموذجية',
+      adminName: user.fullName,
+      adminPhone: user.phoneNumber,
+    },
     stats: {
       totalUsers: counts?.total_users || 0,
       totalStudents: counts?.total_students || 0,
       totalTeachers: counts?.total_teachers || 0,
       totalModerators: counts?.total_moderators || 0,
       totalAdmins: counts?.total_admins || 0,
+      totalDisabledUsers: counts?.total_disabled_users || 0,
       totalGroups: totalGroups?.count || 0,
+      totalActiveMemberships: totalActiveMemberships?.count || 0,
       totalLessons: totalLessons?.count || 0,
       totalHomeworks: totalHomeworks?.count || 0,
       totalExams: totalExams?.count || 0,
+      totalEvents: totalEvents?.count || 0,
+      totalAnnouncements: totalAnnouncements?.count || 0,
+      totalIssues: totalIssues?.count || 0,
+      totalMedia: mediaStats?.count || 0,
+      totalMediaBytes: mediaStats?.bytes || 0,
     },
     teachers: teachersList.results || [],
     moderators: moderatorsList.results || [],
     students: studentsList.results || [],
+    admins: adminsList.results || [],
   });
 }

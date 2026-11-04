@@ -409,7 +409,8 @@ data class AdminDashboardResponse(
     val stats: SchoolStats? = null,
     val teachers: List<UserBrief> = emptyList(),
     val moderators: List<UserBrief> = emptyList(),
-    val students: List<UserBrief> = emptyList()
+    val students: List<UserBrief> = emptyList(),
+    val admins: List<UserBrief> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)
@@ -426,10 +427,17 @@ data class SchoolStats(
     val totalTeachers: Int = 0,
     val totalModerators: Int = 0,
     val totalAdmins: Int = 0,
+    val totalDisabledUsers: Int = 0,
     val totalGroups: Int = 0,
+    val totalActiveMemberships: Int = 0,
     val totalLessons: Int = 0,
     val totalHomeworks: Int = 0,
-    val totalExams: Int = 0
+    val totalExams: Int = 0,
+    val totalEvents: Int = 0,
+    val totalAnnouncements: Int = 0,
+    val totalIssues: Int = 0,
+    val totalMedia: Int = 0,
+    val totalMediaBytes: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)
@@ -440,7 +448,10 @@ data class UserBrief(
     val role: String,
     val grade_id: Int = 0,
     val section_id: String = "",
-    val active_group_count: Int = 0
+    val active_group_count: Int = 0,
+    val status: String = "ACTIVE",
+    val last_seen: Long? = null,
+    val created_at: Long? = null
 )
 
 @JsonClass(generateAdapter = true)
