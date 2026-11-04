@@ -390,7 +390,7 @@ class TanweerRepository(
                 val entities = list.map { item ->
                     val mediaJson = if (item.media.isNotEmpty()) {
                         try {
-                            org.json.JSONArray(item.media.map { media -> media.url }).toString()
+                            ContentMediaJson.serialize(item.media)
                         } catch (_: Exception) { "[]" }
                     } else "[]"
                     ContentEntity(
@@ -444,7 +444,7 @@ class TanweerRepository(
                     val entities = archiveBody.contents.map {
                         val mediaJson = if (it.media.isNotEmpty()) {
                             try {
-                                org.json.JSONArray(it.media.map { media -> media.url }).toString()
+                                ContentMediaJson.serialize(it.media)
                             } catch (_: Exception) { "[]" }
                         } else "[]"
                         ContentEntity(
@@ -677,7 +677,7 @@ class TanweerRepository(
                         val existing = db.contentDao().getContentById(it.id)
                         val mediaJson = if (it.media.isNotEmpty()) {
                             try {
-                                org.json.JSONArray(it.media.map { m -> m.url }).toString()
+                                ContentMediaJson.serialize(it.media)
                             } catch (_: Exception) { existing?.mediaUrlsJson ?: "[]" }
                         } else {
                             existing?.mediaUrlsJson ?: "[]"
@@ -2108,46 +2108,11 @@ class TanweerRepository(
         return array.toString()
     }
 
-    private fun parseMediaJson(jsonStr: String?): List<MediaItem> {
-        if (jsonStr.isNullOrBlank() || jsonStr == "[]") return emptyList()
-        return try {
-            val array = JSONArray(jsonStr)
-            val list = mutableListOf<MediaItem>()
-            for (i in 0 until array.length()) {
-                val obj = array.optJSONObject(i)
-                if (obj != null) {
-                    list.add(
-                        MediaItem(
-                            id = obj.optString("id", "media_$i"),
-                            pageOrder = obj.optInt("pageOrder", i + 1),
-                            url = obj.optString("url", ""),
-                            mimeType = obj.optString("mimeType", "image/jpeg"),
-                            fileSize = obj.optInt("fileSize", 0)
-                        )
-                    )
-                }
-            }
-            list
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
+    private fun parseMediaJson(jsonStr: String?): List<MediaItem> =
+        ContentMediaJson.parse(jsonStr)
 
-    private fun serializeMediaList(media: List<MediaItem>): String {
-        if (media.isEmpty()) return "[]"
-        val array = JSONArray()
-        for (m in media) {
-            val obj = JSONObject().apply {
-                put("id", m.id)
-                put("pageOrder", m.pageOrder)
-                put("url", m.url)
-                put("mimeType", m.mimeType)
-                put("fileSize", m.fileSize)
-            }
-            array.put(obj)
-        }
-        return array.toString()
-    }
+    private fun serializeMediaList(media: List<MediaItem>): String =
+        ContentMediaJson.serialize(media)
 
     private fun mapContentEntityToItem(it: ContentEntity): ContentItem {
         return ContentItem(
