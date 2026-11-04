@@ -6,15 +6,19 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,7 +46,9 @@ fun AdminDashboardScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val communityDecisions by viewModel.communityDecisions.collectAsStateWithLifecycle()
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Operations & Governance, 1: Teachers, 2: Moderators & Users, 3: Analytics
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var userSearch by rememberSaveable { mutableStateOf("") }
+    val adminListState = rememberLazyListState()
 
     var showBroadcastDialog by remember { mutableStateOf(false) }
     var broadcastTitle by remember { mutableStateOf("") }
@@ -55,6 +61,7 @@ fun AdminDashboardScreen(
     }
 
     LazyColumn(
+        state = adminListState,
         modifier = Modifier
             .fillMaxSize()
             .background(MidnightBackground)
@@ -223,20 +230,54 @@ fun AdminDashboardScreen(
                                 color = EmeraldGreen,
                                 modifier = Modifier.weight(1f)
                             )
-                            Spacer(modifier = Modifier.weight(1f))
+                            TeacherStatCard(
+                                title = "المدراء",
+                                count = "${stats?.totalAdmins ?: 0}",
+                                icon = "👑",
+                                color = Color(0xFFFFD700),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            TeacherStatCard(
+                                title = "الفعاليات",
+                                count = "${stats?.totalEvents ?: 0}",
+                                icon = "📅",
+                                color = CyanAccent,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TeacherStatCard(
+                                title = "التعاميم",
+                                count = "${stats?.totalAnnouncements ?: 0}",
+                                icon = "📢",
+                                color = WarmAmber,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TeacherStatCard(
+                                title = "الاستفسارات",
+                                count = "${stats?.totalIssues ?: 0}",
+                                icon = "💬",
+                                color = EmeraldGreen,
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
                 }
             }
         }
 
-        // Navigation Tabs
+        // Scrollable navigation keeps all administration sections accessible on narrow phones.
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(GlassSurface)
+                    .horizontalScroll(rememberScrollState())
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -245,16 +286,20 @@ fun AdminDashboardScreen(
                     "المعلمون 🎓",
                     "المشرفون 🛡️",
                     "الطلاب 🎒",
+                    "المدراء 👑",
+                    "التحليلات 📊",
                     "السياسات 🏛️"
                 ).forEachIndexed { index, title ->
                     val isSelected = selectedTab == index
                     Box(
                         modifier = Modifier
-                            .weight(1f)
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (isSelected) Color(0xFFFFD700) else Color.Transparent)
-                            .clickable { selectedTab = index }
-                            .padding(vertical = 8.dp),
+                            .clickable {
+                                selectedTab = index
+                                userSearch = ""
+                            }
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -262,10 +307,21 @@ fun AdminDashboardScreen(
                             fontSize = 11.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) MidnightBackground else TextSecondary,
-                            textAlign = TextAlign.Center
+                            textAlign = TextAlign.Center,
+                            maxLines = 1
                         )
                     }
                 }
+            }
+        }
+
+        if (isLoading) {
+            item {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = CyanAccent,
+                    trackColor = GlassSurface
+                )
             }
         }
 
@@ -415,112 +471,247 @@ fun AdminDashboardScreen(
             }
 
             1 -> {
-                // Tab 1: Teachers List & Management
                 val teachers = dashboardData?.teachers ?: emptyList()
-                if (teachers.isEmpty()) {
-                    item {
-                        GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text("🎓", fontSize = 32.sp)
-                                Text(
-                                    text = "لا يوجد معلمون مسجلون حالياً",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
-                                Text(
-                                    text = "يُصدر رمز الاعتماد الفعلي من مسار طلبات الترقية الرسمي في Dashboard، ثم يفعّله الأستاذ من خيار «تفعيل رمز» في ملفه الشخصي.",
-                                    fontSize = 12.sp,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    items(teachers) { teacher ->
-                        AdminUserManageCard(
-                            user = teacher,
-                            roleBadge = "أستاذ معتمد 🎓",
-                            roleColor = EmeraldGreen
+                val filteredTeachers = teachers.filter { it.matchesAdminSearch(userSearch) }
+                item {
+                    AdminDirectorySearchField(
+                        query = userSearch,
+                        onQueryChange = { userSearch = it },
+                        resultCount = filteredTeachers.size,
+                        totalCount = teachers.size
+                    )
+                }
+                when {
+                    teachers.isEmpty() -> item {
+                        EmptyStateGlass(
+                            title = "لا يوجد معلمون مسجلون",
+                            subtitle = "سيظهر هنا كل حساب لديه صلاحية معلم فعّالة على مستوى المدرسة أو إحدى الشعب.",
+                            icon = "🎓"
                         )
+                    }
+                    filteredTeachers.isEmpty() -> item {
+                        EmptyStateGlass(
+                            title = "لا توجد نتائج مطابقة",
+                            subtitle = "جرّب اسماً أو رقم هاتف أو صفاً أو شعبة أخرى.",
+                            icon = "🔎"
+                        )
+                    }
+                    else -> items(filteredTeachers, key = { it.id }) { teacher ->
+                        AdminUserManageCard(user = teacher, roleBadge = "أستاذ معتمد 🎓", roleColor = EmeraldGreen)
                     }
                 }
             }
 
             2 -> {
-                // Tab 2: Moderators List & Direct User Promotion
                 val moderators = dashboardData?.moderators ?: emptyList()
-                if (moderators.isEmpty()) {
-                    item {
-                        GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text("🛡️", fontSize = 32.sp)
-                                Text(
-                                    text = "لا يوجد مشرفون معينون حالياً",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
-                                Text(
-                                    text = "ستظهر هنا الحسابات التي لديها عضوية إشراف نشطة في شعبة واحدة أو أكثر، دون تكرار الحساب.",
-                                    fontSize = 12.sp,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    items(moderators) { mod ->
-                        AdminUserManageCard(
-                            user = mod,
-                            roleBadge = "مشرف الشعبة 🛡️",
-                            roleColor = WarmAmber
+                val filteredModerators = moderators.filter { it.matchesAdminSearch(userSearch) }
+                item {
+                    AdminDirectorySearchField(
+                        query = userSearch,
+                        onQueryChange = { userSearch = it },
+                        resultCount = filteredModerators.size,
+                        totalCount = moderators.size
+                    )
+                }
+                when {
+                    moderators.isEmpty() -> item {
+                        EmptyStateGlass(
+                            title = "لا يوجد مشرفون معينون حالياً",
+                            subtitle = "ستظهر هنا الحسابات التي لديها عضوية إشراف نشطة في شعبة واحدة أو أكثر.",
+                            icon = "🛡️"
                         )
+                    }
+                    filteredModerators.isEmpty() -> item {
+                        EmptyStateGlass(
+                            title = "لا توجد نتائج مطابقة",
+                            subtitle = "جرّب اسماً أو رقم هاتف أو صفاً أو شعبة أخرى.",
+                            icon = "🔎"
+                        )
+                    }
+                    else -> items(filteredModerators, key = { it.id }) { moderator ->
+                        AdminUserManageCard(user = moderator, roleBadge = "مشرف الشعبة 🛡️", roleColor = WarmAmber)
                     }
                 }
             }
 
             3 -> {
                 val students = dashboardData?.students ?: emptyList()
-                if (students.isEmpty()) {
-                    item {
+                val filteredStudents = students.filter { it.matchesAdminSearch(userSearch) }
+                item {
+                    AdminDirectorySearchField(
+                        query = userSearch,
+                        onQueryChange = { userSearch = it },
+                        resultCount = filteredStudents.size,
+                        totalCount = students.size
+                    )
+                }
+                when {
+                    students.isEmpty() -> item {
                         EmptyStateGlass(
                             title = "لا يوجد طلاب مسجلون",
                             subtitle = "ستظهر هنا حسابات الطلاب الفريدة مع صفوفهم وشعبهم وعضوياتهم النشطة.",
                             icon = "🎒"
                         )
                     }
-                } else {
-                    item {
-                        Text(
-                            "الطلاب المسجلون (${dashboardData?.stats?.totalStudents ?: students.size})",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextSecondary
+                    filteredStudents.isEmpty() -> item {
+                        EmptyStateGlass(
+                            title = "لا توجد نتائج مطابقة",
+                            subtitle = "جرّب اسماً أو رقم هاتف أو صفاً أو شعبة أخرى.",
+                            icon = "🔎"
                         )
                     }
-                    items(students, key = { it.id }) { student ->
-                        AdminUserManageCard(
-                            user = student,
-                            roleBadge = "طالب 🎒",
-                            roleColor = CyanAccent
-                        )
+                    else -> items(filteredStudents, key = { it.id }) { student ->
+                        AdminUserManageCard(user = student, roleBadge = "طالب 🎒", roleColor = CyanAccent)
                     }
                 }
             }
 
             4 -> {
-                // Tab 4: School Policies & Guidelines
+                val admins = dashboardData?.admins ?: emptyList()
+                val filteredAdmins = admins.filter { it.matchesAdminSearch(userSearch) }
+                item {
+                    AdminDirectorySearchField(
+                        query = userSearch,
+                        onQueryChange = { userSearch = it },
+                        resultCount = filteredAdmins.size,
+                        totalCount = admins.size
+                    )
+                }
+                when {
+                    admins.isEmpty() -> item {
+                        EmptyStateGlass(
+                            title = "لا توجد حسابات مدير مدرسة أخرى",
+                            subtitle = "يُعرض هنا أصحاب الصلاحيات الإدارية، مع استبعاد مالك المنظومة.",
+                            icon = "👑"
+                        )
+                    }
+                    filteredAdmins.isEmpty() -> item {
+                        EmptyStateGlass(
+                            title = "لا توجد نتائج مطابقة",
+                            subtitle = "جرّب اسماً أو رقم هاتف أو صفاً أو شعبة أخرى.",
+                            icon = "🔎"
+                        )
+                    }
+                    else -> items(filteredAdmins, key = { it.id }) { admin ->
+                        AdminUserManageCard(user = admin, roleBadge = "إدارة المدرسة 👑", roleColor = Color(0xFFFFD700))
+                    }
+                }
+            }
+
+            5 -> {
+                val stats = dashboardData?.stats
+                item {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("📊 مؤشرات أداء المدرسة", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                            Text(
+                                "الأرقام التالية تأتي من قاعدة بيانات المدرسة مباشرة، وليست بيانات تجريبية.",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                TeacherStatCard(
+                                    title = "عضويات نشطة",
+                                    count = "${stats?.totalActiveMemberships ?: 0}",
+                                    icon = "👥",
+                                    color = CyanAccent,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TeacherStatCard(
+                                    title = "حسابات موقوفة",
+                                    count = "${stats?.totalDisabledUsers ?: 0}",
+                                    icon = "⛔",
+                                    color = WarmAmber,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TeacherStatCard(
+                                    title = "المدراء",
+                                    count = "${stats?.totalAdmins ?: 0}",
+                                    icon = "👑",
+                                    color = Color(0xFFFFD700),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                TeacherStatCard(
+                                    title = "الدروس",
+                                    count = "${stats?.totalLessons ?: 0}",
+                                    icon = "📚",
+                                    color = CyanAccent,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TeacherStatCard(
+                                    title = "الواجبات",
+                                    count = "${stats?.totalHomeworks ?: 0}",
+                                    icon = "📝",
+                                    color = WarmAmber,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TeacherStatCard(
+                                    title = "الاختبارات",
+                                    count = "${stats?.totalExams ?: 0}",
+                                    icon = "📋",
+                                    color = EmeraldGreen,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                TeacherStatCard(
+                                    title = "الفعاليات",
+                                    count = "${stats?.totalEvents ?: 0}",
+                                    icon = "📅",
+                                    color = CyanAccent,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TeacherStatCard(
+                                    title = "التعاميم",
+                                    count = "${stats?.totalAnnouncements ?: 0}",
+                                    icon = "📢",
+                                    color = WarmAmber,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TeacherStatCard(
+                                    title = "الاستفسارات",
+                                    count = "${stats?.totalIssues ?: 0}",
+                                    icon = "💬",
+                                    color = EmeraldGreen,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                TeacherStatCard(
+                                    title = "الصور المخزنة",
+                                    count = "${stats?.totalMedia ?: 0}",
+                                    icon = "🖼️",
+                                    color = CyanAccent,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TeacherStatCard(
+                                    title = "حجم الصور",
+                                    count = android.text.format.Formatter.formatShortFileSize(context, stats?.totalMediaBytes ?: 0L),
+                                    icon = "💾",
+                                    color = TextPrimary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+                item {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("توزيع الحسابات حسب الصلاحية", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("طلاب: ${stats?.totalStudents ?: 0}", fontSize = 12.sp, color = CyanAccent)
+                            Text("معلمون: ${stats?.totalTeachers ?: 0}", fontSize = 12.sp, color = EmeraldGreen)
+                            Text("مشرفون: ${stats?.totalModerators ?: 0}", fontSize = 12.sp, color = WarmAmber)
+                            Text("مدراء: ${stats?.totalAdmins ?: 0}", fontSize = 12.sp, color = Color(0xFFFFD700))
+                        }
+                    }
+                }
+            }
+
+            6 -> {
                 item {
                     GlassCard(
                         modifier = Modifier.fillMaxWidth(),
@@ -626,6 +817,49 @@ fun AdminDashboardScreen(
 
 }
 
+
+private fun UserBrief.matchesAdminSearch(query: String): Boolean {
+    val value = query.trim()
+    if (value.isBlank()) return true
+    return full_name.contains(value, ignoreCase = true) ||
+        phone_number.contains(value, ignoreCase = true) ||
+        grade_id.toString().contains(value, ignoreCase = true) ||
+        section_id.contains(value, ignoreCase = true) ||
+        status.contains(value, ignoreCase = true)
+}
+
+@Composable
+private fun AdminDirectorySearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    resultCount: Int,
+    totalCount: Int
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("بحث بالاسم أو الهاتف أو الصف أو الشعبة") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث") },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(Icons.Default.Close, contentDescription = "مسح البحث")
+                    }
+                }
+            }
+        )
+        Text(
+            text = "عرض " + resultCount + " من " + totalCount + " حساب",
+            fontSize = 10.sp,
+            color = TextMuted,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
 @Composable
 fun AdminUserManageCard(
     user: UserBrief,
@@ -679,14 +913,28 @@ fun AdminUserManageCard(
                         fontSize = 10.sp,
                         color = TextMuted
                     )
+                    val isDisabled = user.status.equals("DISABLED", ignoreCase = true)
+                    Text(
+                        text = if (isDisabled) "الحساب موقوف" else "الحساب نشط",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDisabled) WarmAmber else EmeraldGreen
+                    )
                 }
             }
 
-            GlassPill(
-                text = roleBadge,
-                color = roleColor,
-                bgColor = roleColor.copy(alpha = 0.15f)
-            )
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                GlassPill(
+                    text = roleBadge,
+                    color = roleColor,
+                    bgColor = roleColor.copy(alpha = 0.15f)
+                )
+                GlassPill(
+                    text = if (user.status.equals("DISABLED", ignoreCase = true)) "موقوف" else "نشط",
+                    color = if (user.status.equals("DISABLED", ignoreCase = true)) WarmAmber else EmeraldGreen,
+                    bgColor = if (user.status.equals("DISABLED", ignoreCase = true)) WarmAmber.copy(alpha = 0.15f) else EmeraldGreen.copy(alpha = 0.12f)
+                )
+            }
         }
     }
 }
