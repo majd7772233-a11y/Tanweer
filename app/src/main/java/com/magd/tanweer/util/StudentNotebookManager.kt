@@ -196,9 +196,7 @@ data class LessonCachingResult(
             val localSource = resolveLocalMediaFile(source)
 
             if (remoteUrl != null) {
-                val preferences = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
-                val token = preferences.getString("auth_token", "") ?: ""
-                connection = openAuthenticatedMediaConnection(remoteUrl, token, content.groupId)
+                connection = openAuthenticatedMediaConnection(remoteUrl, content.groupId)
                 val status = connection!!.responseCode
                 if (status !in 200..299) {
                     throw IOException("تعذر تنزيل صفحة الدرس (HTTP " + status + ")")
@@ -277,8 +275,6 @@ data class LessonCachingResult(
         val pathsMap = existing.localImagePaths.toMutableMap()
         var newlyDownloadedCount = 0
         var failedCount = 0
-        val prefs = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
-        val authToken = prefs.getString("auth_token", "") ?: ""
 
         content.media.forEachIndexed { index, mediaItem ->
             val source = mediaItem.url.trim()
@@ -297,7 +293,6 @@ data class LessonCachingResult(
                 if (remoteUrl != null) {
                     val connection = openAuthenticatedMediaConnection(
                         remoteUrl = remoteUrl,
-                        authToken = authToken,
                         groupId = content.groupId
                     )
                     try {
@@ -404,9 +399,7 @@ data class LessonCachingResult(
             resolver.openOutputStream(uri, "w")?.use { output ->
                 val remoteUrl = resolveRemoteMediaUrl(imageSource.trim())
                 if (remoteUrl != null) {
-                    val prefs = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
-                    val authToken = prefs.getString("auth_token", "") ?: ""
-                    connection = openAuthenticatedMediaConnection(remoteUrl, authToken, groupId)
+                    connection = openAuthenticatedMediaConnection(remoteUrl, groupId)
                     val statusCode = connection!!.responseCode
                     if (statusCode !in 200..299) {
                         throw IOException("تعذر تنزيل الصورة (HTTP $statusCode)")
@@ -466,19 +459,19 @@ data class LessonCachingResult(
 
     private fun openAuthenticatedMediaConnection(
         remoteUrl: String,
-        authToken: String,
         groupId: String
     ): java.net.HttpURLConnection {
-        val target = URL(remoteUrl)
-        val apiOrigin = URL(NetworkModule.apiBaseUrl)
-        val targetPort = if (target.port >= 0) target.port else target.defaultPort
-        val apiPort = if (apiOrigin.port >= 0) apiOrigin.port else apiOrigin.defaultPort
-        val isTanweerApiOrigin =
-            target.protocol.equals(apiOrigin.protocol, ignoreCase = true) &&
-            target.host.equals(apiOrigin.host, ignoreCase = true) &&
-            targetPort == apiPort
+        // Use the same live in-memory session token as Retrofit's auth interceptor.
+        // The token is stored in Room and mirrored into NetworkModule, not SharedPreferences.
+        val requestHeaders = buildMediaRequestHeaders(
+            remoteUrl = remoteUrl,
+            apiBaseUrl = NetworkModule.apiBaseUrl,
+            authToken = NetworkModule.currentAuthToken(),
+            groupId = groupId
+        )
+        val isTanweerApiOrigin = requestHeaders.containsKey("Authorization")
 
-        return (target.openConnection() as java.net.HttpURLConnection).apply {
+        return (URL(remoteUrl).openConnection() as java.net.HttpURLConnection).apply {
             connectTimeout = 15000
             readTimeout = 20000
             requestMethod = "GET"
@@ -486,10 +479,7 @@ data class LessonCachingResult(
             // Do not forward bearer credentials to external hosts or through internal redirects.
             instanceFollowRedirects = !isTanweerApiOrigin
             setRequestProperty("Accept", "image/*")
-            if (isTanweerApiOrigin) {
-                if (authToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $authToken")
-                if (groupId.isNotBlank()) setRequestProperty("X-Group-Id", groupId)
-            }
+            requestHeaders.forEach { (name, value) -> setRequestProperty(name, value) }
         }
     }
 

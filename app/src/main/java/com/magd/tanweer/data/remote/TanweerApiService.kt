@@ -700,7 +700,7 @@ interface GitHubApiService {
 object NetworkModule {
     private val BASE_URL = BuildConfig.API_BASE_URL
     private const val GITHUB_BASE_URL = "https://api.github.com/"
-    private var authToken: String? = null
+    @Volatile private var authToken: String? = null
     @Volatile private var installationDeviceId: String? = null
 
     val deviceId: String
@@ -711,8 +711,14 @@ object NetworkModule {
     }
 
     fun setAuthToken(token: String?) {
-        authToken = token
+        authToken = token?.trim()?.takeIf { it.isNotEmpty() }
     }
+
+    /**
+     * Returns the active session token used by the API auth interceptor.
+     * Media downloads outside Retrofit must use this same source of truth.
+     */
+    fun currentAuthToken(): String? = authToken
 
     val apiBaseUrl: String
         get() = BASE_URL
