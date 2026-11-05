@@ -88,8 +88,15 @@ fun ExamsScreen(
     }
 
     // Grouping by Month (Point 17: Monthly structure & organization)
-    val examsByMonth = remember(filteredExams) {
-        filteredExams.groupBy { getMonthKey(it.examDate) }.toSortedMap(compareByDescending { it })
+    // Oral tests are intentionally kept outside the monthly calendar.
+    val oralExams = remember(filteredExams) {
+        filteredExams.filter { it.examType == "ORAL" }.sortedByDescending { it.examDate }
+    }
+    val calendarExams = remember(filteredExams) {
+        filteredExams.filter { it.examType != "ORAL" }
+    }
+    val examsByMonth = remember(calendarExams) {
+        calendarExams.groupBy { getMonthKey(it.examDate) }.toSortedMap(compareByDescending { it })
     }
     val allMonthKeys = remember(examsByMonth) { examsByMonth.keys.toList() }
     var selectedMonthFilter by remember { mutableStateOf<String?>(null) } // null = "جميع الأشهر"
@@ -292,7 +299,10 @@ fun ExamsScreen(
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(if (isTypeSelected) chipColor.copy(alpha = 0.25f) else MidnightSurface)
                                     .border(1.dp, if (isTypeSelected) chipColor else GlassBorderSubtle, RoundedCornerShape(12.dp))
-                                    .clickable { selectedTypeFilter = typeKey }
+                                    .clickable {
+                                        selectedTypeFilter = typeKey
+                                        if (typeKey == "ORAL") selectedMonthFilter = null
+                                    }
                                     .padding(horizontal = 12.dp, vertical = 7.dp)
                             ) {
                                 Text(
@@ -350,6 +360,116 @@ fun ExamsScreen(
                                     onClick = { selectedMonthFilter = null }
                                 )
                             }
+                        }
+                    }
+                }
+
+                if (selectedTypeFilter == "ORAL" || selectedTypeFilter == null) {
+                    if (oralExams.isNotEmpty()) {
+                        item(key = "oral_exams_header") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "الاختبارات الشفوية المرنة",
+                                        fontSize = tanweerTextSize(14f),
+                                        fontWeight = FontWeight.Bold,
+                                        color = CyanAccent
+                                    )
+                                    Text(
+                                        text = "تُسجل عند الحاجة ولا تدخل في جدول الأشهر.",
+                                        fontSize = tanweerTextSize(11f),
+                                        color = TextSecondary
+                                    )
+                                }
+                                GlassPill(
+                                    text = "${oralExams.size} شفهي",
+                                    color = CyanAccent,
+                                    bgColor = CyanGlow
+                                )
+                            }
+                        }
+
+                        items(
+                            items = oralExams,
+                            key = { "oral_${it.id}" }
+                        ) { oralExam ->
+                            GlassCard(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedExamForDetail = oralExam },
+                                backgroundColor = MidnightSurface,
+                                borderColor = GlassBorderSubtle
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(CyanGlow),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("🗣️", fontSize = tanweerTextSize(18f))
+                                    }
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        Text(
+                                            text = oralExam.subjectName,
+                                            fontSize = tanweerTextSize(13f),
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary
+                                        )
+                                        Text(
+                                            text = oralExam.title,
+                                            fontSize = tanweerTextSize(12f),
+                                            color = TextSecondary,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "مسجل في ${oralExam.examDate}",
+                                            fontSize = tanweerTextSize(10f),
+                                            color = TextMuted
+                                        )
+                                    }
+                                    if (canDeleteExams) {
+                                        IconButton(
+                                            onClick = { examToDelete = oralExam },
+                                            modifier = Modifier.size(34.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.DeleteOutline,
+                                                contentDescription = "حذف الاختبار الشفهي",
+                                                tint = RubyRed,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if (selectedTypeFilter == "ORAL") {
+                        item(key = "oral_exams_empty") {
+                            EmptyStateGlass(
+                                title = "لا توجد اختبارات شفوية مسجلة",
+                                subtitle = "يمكن إضافة الاختبار الشفهي عند الحاجة دون ربطه بجدول شهري.",
+                                icon = "🗣️",
+                                actionButtonText = "إضافة اختبار شفهي",
+                                onActionClick = { isLocalAddExamModalOpen = true }
+                            )
                         }
                     }
                 }
