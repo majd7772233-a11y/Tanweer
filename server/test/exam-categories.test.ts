@@ -61,7 +61,7 @@ class MonthlyExamDb {
           const duplicate = db.exams.find(exam =>
             exam.group_id === groupId &&
             exam.subject_id === subjectId &&
-            exam.exam_type === 'MONTHLY' &&
+            ['MONTHLY', 'QUIZ'].includes(exam.exam_type) &&
             exam.exam_date.slice(0, 7) === monthKey
           );
           return duplicate ? ({ id: duplicate.id } as T) : null;
@@ -82,7 +82,7 @@ class MonthlyExamDb {
           const duplicate = examType === 'MONTHLY' && db.exams.some(exam =>
             exam.group_id === groupId &&
             exam.subject_id === subjectId &&
-            exam.exam_type === 'MONTHLY' &&
+            ['MONTHLY', 'QUIZ'].includes(exam.exam_type) &&
             exam.exam_date.slice(0, 7) === examDate.slice(0, 7)
           );
           if (duplicate) {
@@ -172,6 +172,30 @@ describe('Supported school exam categories', () => {
     expect(firstBody.success).toBe(true);
     expect(duplicate.status).toBe(409);
     expect(duplicateBody.error?.code).toBe('MONTHLY_EXAM_EXISTS');
+    expect(db.exams).toHaveLength(1);
+  });
+
+  it('treats historical QUIZ rows as monthly exams for duplicate protection', async () => {
+    const db = new MonthlyExamDb();
+    db.exams.push({
+      id: 'legacy-quiz-math-nov',
+      group_id: 'class_10_A',
+      exam_date: '2026-11-05',
+      subject_id: 'math',
+      title: 'اختبار شهري قديم',
+      exam_type: 'QUIZ',
+      is_official: 0,
+      created_by: student.userId,
+    });
+
+    const response = await handleCreateExam(
+      student,
+      createExamRequest({ id: 'new-monthly-math-nov' }),
+      envFor(db)
+    );
+
+    expect(response.status).toBe(409);
+    expect((await response.json() as any).error?.code).toBe('MONTHLY_EXAM_EXISTS');
     expect(db.exams).toHaveLength(1);
   });
 
