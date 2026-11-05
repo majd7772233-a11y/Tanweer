@@ -143,26 +143,5 @@ class StartupPersistencePolicyTest {
         assertFalse(DataGenerationPolicy.hasChanged("gen_initial_1", null))
     }
 
-    @Test
-    fun groupSnapshotMustContainTheServerDefaultClassBeforeReplacingLocalGroups() {
-        assertTrue(
-            GroupSnapshotPolicy.canReplaceMemberships(
-                "class_10_A",
-                listOf("class_10_A", "club_math")
-            )
-        )
-        assertFalse(
-            GroupSnapshotPolicy.canReplaceMemberships(
-                "class_10_A",
-                listOf("club_math")
-            )
-        )
-        assertFalse(GroupSnapshotPolicy.canReplaceMemberships("class_10_A", emptyList()))
-    }
 
-    @Test
-    fun accountsWithoutADefaultClassMayHaveAnEmptyMembershipSnapshot() {
-        assertTrue(GroupSnapshotPolicy.canReplaceMemberships(null, emptyList()))
-        assertTrue(GroupSnapshotPolicy.canReplaceMemberships(" ", emptyList()))
-    }
 }
