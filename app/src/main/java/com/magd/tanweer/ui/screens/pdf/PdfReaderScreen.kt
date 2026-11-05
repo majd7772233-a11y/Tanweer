@@ -371,6 +371,16 @@ fun PdfReaderScreen(
         }
     }
 
+    fun stopAudioPlayback() {
+        activeSpeechRequestId = null
+        activeSpeechFinalUtteranceId = null
+        isExtractingAudioText = false
+        try {
+            ttsEngine?.stop()
+        } catch (_: Exception) {}
+        isAudioPlaying = false
+    }
+
     // Queue one utterance and track the full request rather than each individual chunk.
     fun enqueueSpeech(
         text: String,
@@ -506,16 +516,6 @@ fun PdfReaderScreen(
             enqueueSpeech(textToRead, TextToSpeech.QUEUE_FLUSH, "$requestId:0", requestId)
             com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         }
-    }
-
-    fun stopAudioPlayback() {
-        activeSpeechRequestId = null
-        activeSpeechFinalUtteranceId = null
-        isExtractingAudioText = false
-        try {
-            ttsEngine?.stop()
-        } catch (_: Exception) {}
-        isAudioPlaying = false
     }
 
     // Save Reading State on exit or state changes
