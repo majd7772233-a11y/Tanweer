@@ -180,20 +180,22 @@ fun ExamsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        IconButton(
-                            onClick = { showMonthPicker = true },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(GlassSurface)
-                                .border(1.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
-                        ) {
-                            Icon(
-                                Icons.Default.DateRange,
-                                contentDescription = "اختيار شهر جدول الاختبارات",
-                                tint = CyanAccent,
-                                modifier = Modifier.size(20.dp)
-                            )
+                        if (selectedTypeFilter != "ORAL") {
+                            IconButton(
+                                onClick = { showMonthPicker = true },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(GlassSurface)
+                                    .border(1.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
+                            ) {
+                                Icon(
+                                    Icons.Default.DateRange,
+                                    contentDescription = "اختيار شهر جدول الاختبارات",
+                                    tint = CyanAccent,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                         GlassButton(
                             text = "إضافة اختبار ＋",
