@@ -1119,6 +1119,34 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun setSchoolStudentStatus(
+        userId: String,
+        status: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            repository.updateSchoolStudentStatus(userId, status)
+                .onSuccess { message ->
+                    loadAdminDashboard()
+                    onResult(true, message)
+                }
+                .onFailure { error -> onResult(false, error.message ?: "تعذر تحديث حساب الطالب") }
+        }
+    }
+
+    fun removeStudentFromClass(
+        userId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            repository.removeSchoolStudentFromClass(userId)
+                .onSuccess { message ->
+                    loadAdminDashboard()
+                    onResult(true, message)
+                }
+                .onFailure { error -> onResult(false, error.message ?: "تعذر فصل الطالب من شعبته") }
+        }
+    }
     fun loadMyNotifications() {
         viewModelScope.launch {
             repository.getMyNotifications().onSuccess { notifications ->
