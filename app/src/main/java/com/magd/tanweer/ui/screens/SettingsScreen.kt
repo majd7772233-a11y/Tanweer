@@ -40,10 +40,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 enum class FontSizeOption(val label: String, val sizeSp: Int, val scale: Float, val badge: String) {
-    COMPACT_11("صغير جداً", 11, 0.88f, "11sp"),
+    COMPACT_11("صغير جداً", 11, 0.9167f, "11sp"),
     DEFAULT_12("افتراضي تنوير", 12, 1.0f, "12sp ✨"),
-    MEDIUM_14("متوسط", 14, 1.15f, "14sp"),
-    LARGE_16("كبير", 16, 1.30f, "16sp"),
+    MEDIUM_14("متوسط", 14, 1.1667f, "14sp"),
+    LARGE_16("كبير", 16, 1.3333f, "16sp"),
     XLARGE_18("ضخم", 18, 1.50f, "18sp")
 }
 
@@ -310,7 +310,7 @@ fun SettingsScreen(
                                 text = "منصة تنوير التعليمية — متابعة الدروس والواجبات المدرسية للشعب والصفوف الدراسية بأعلى سرعة وكفاءة.",
                                 fontSize = tanweerTextSize(12f),
                                 color = TextPrimary,
-                                lineHeight = tanweerTextSize(18f)
+                                lineHeight = tanweerLineHeight(18f)
                             )
                         }
                     }
