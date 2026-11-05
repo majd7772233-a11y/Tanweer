@@ -40,11 +40,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 enum class FontSizeOption(val label: String, val sizeSp: Int, val scale: Float, val badge: String) {
-    COMPACT_11("صغير جداً", 11, 0.9167f, "11sp"),
     DEFAULT_12("افتراضي تنوير", 12, 1.0f, "12sp ✨"),
-    MEDIUM_14("متوسط", 14, 1.1667f, "14sp"),
-    LARGE_16("كبير", 16, 1.3333f, "16sp"),
-    XLARGE_18("ضخم", 18, 1.50f, "18sp")
+    MEDIUM_14("متوسط", 14, 14f / 12f, "14sp"),
+    LARGE_16("كبير", 16, 16f / 12f, "16sp")
 }
 
 @Composable
@@ -266,7 +264,7 @@ fun SettingsScreen(
                                     Column {
                                         Text(
                                             text = option.label,
-                                            fontSize = tanweerTextSize(option.sizeSp.toFloat()),
+                                            fontSize = option.sizeSp.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                             color = if (isSelected) CyanAccent else TextPrimary
                                         )
