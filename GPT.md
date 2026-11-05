@@ -1877,3 +1877,12 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - The data-loss protection remains at the correct boundary: `syncGroups()` only replaces `cached_groups`; it does not clear the independent lesson/homework/exam/event tables or notebook files. Added a Robolectric Room regression test proving cached lesson, homework and exam rows survive membership metadata refresh.
 - Retained malformed snapshot protection for blank or duplicate group IDs.
 - Correction commits: `fdbcd1d450dd55e7c06b72de6f03cc0a234c609d`, `02b7be6a90c07223b4c4af3af34903d392d43559`, `753639831de2436daab1f98821f3a9a4c02dd90f`, `dfc4335190182a71b9422e8531742e272f11c019`.
+
+
+### Batch 1 — Cloudflare read-only verification follow-up (2026-11-05)
+- Rechecked the current branch and PR after the previous checkpoint: `work/release-readiness` is at `032cef01b22807582eee5aea439a4ee0e54ce559`; draft PR #6 remains open against `main`, not merged. Production `main` is still `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- Read-only Cloudflare inspection confirmed the configured D1 databases: Production `tanweer-db` (`c937c1d8-77dd-4292-a27c-43cf4bd78eae`) and Staging `tanweer-staging-db` (`603edee6-c5f7-4158-8256-24b109110ec0`).
+- Production aggregate counts remain: users 12, group_members 12, contents 9, homeworks 3, exams 5, events 2, issues 2, media_blobs 11. Each query was SELECT-only; Cloudflare returned `rows_written: 0` and `changed_db: false`. No user-level rows or personal details were fetched.
+- Staging's latest tracked migration is `0030_activate_existing_public_school_group_requests.sql`; migration `0031_user_dismissed_school_announcements.sql` is not applied. Production also does not have `user_dismissed_announcements`. Do not deploy the updated Worker before applying migration 0031 to the chosen target D1.
+- Verified CI run metadata: server run `42070665376` and Android run `42070665717` both completed successfully on source commit `dfc4335190182a71b9422e8531742e272f11c019`; the two commits after that source build only correct documentation/checksum metadata.
+- No Worker deployment, D1 migration, D1 write, secret change, merge, or Production change was made during this follow-up. Physical two-account/two-device acceptance remains outstanding.
