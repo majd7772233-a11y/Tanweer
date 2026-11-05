@@ -52,7 +52,7 @@ import {
   handleGetAdminDashboardData,
 } from './services/governance';
 import { handleGetGroupMessages, handlePostGroupMessage, handleDeleteGroupMessage } from './services/chat';
-import { handleGetProfile, handleUpdateProfile } from './services/users';
+import { handleGetProfile, handleUpdateProfile, handleUpdateSchoolStudentStatus, handleRemoveSchoolStudentFromClass } from './services/users';
 import { handleGetMedia, handleUploadMedia } from './services/media';
 import { handleGetMyDevices, handleRevokeMyDevice, handleLogoutCurrentDevice } from './services/devices';
 import { handleCreateRoleRequest, handleGetMyRoleRequests, handleGetRoleMetadata, handleRedeemRoleCode } from './services/roleRequests';
@@ -199,6 +199,15 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   const { user, error } = await authenticateRequest(request, env);
   if (error || !user) return error!;
 
+  // School Admin: intentionally limited to student accounts and class membership.
+  if (path.startsWith('/api/v1/admin/users/') && path.endsWith('/status') && method === 'PATCH') {
+    const targetUserId = path.split('/')[5];
+    return handleUpdateSchoolStudentStatus(targetUserId, user, request, env);
+  }
+  if (path.startsWith('/api/v1/admin/students/') && path.endsWith('/class-membership') && method === 'DELETE') {
+    const targetUserId = path.split('/')[5];
+    return handleRemoveSchoolStudentFromClass(targetUserId, user, env);
+  }
   // Account-owned active device management. These endpoints never use the Owner Dashboard.
   if (path === '/api/v1/auth/devices' && method === 'GET') {
     return handleGetMyDevices(user, env);
