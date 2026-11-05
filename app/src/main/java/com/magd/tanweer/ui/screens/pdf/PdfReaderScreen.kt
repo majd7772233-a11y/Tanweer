@@ -337,6 +337,29 @@ fun PdfReaderScreen(
         }
     }
 
+    // Submit speech only when Android's TTS engine confirms that it accepted the utterance.
+    fun enqueueSpeech(text: String, queueMode: Int, utteranceId: String): Boolean {
+        val engine = ttsEngine
+        if (engine == null || text.isBlank()) return false
+
+        val result = try {
+            engine.setSpeechRate(audioSpeed)
+            engine.speak(text, queueMode, null, utteranceId)
+        } catch (error: Exception) {
+            android.util.Log.e("PdfReaderScreen", "TTS request failed", error)
+            TextToSpeech.ERROR
+        }
+
+        if (result != TextToSpeech.SUCCESS) {
+            isAudioPlaying = false
+            Toast.makeText(context, "تعذر على محرك الصوت بدء القراءة. تحقق من تثبيت الصوت العربي في إعدادات تحويل النص إلى كلام.", Toast.LENGTH_LONG).show()
+            return false
+        }
+
+        isAudioPlaying = true
+        return true
+    }
+
     // TTS Control Functions (المساعد الصوتي لنص الكتاب الفعلي وملاحظات ومصطلحات الصفحة)
     fun speakCurrentPage(customText: String? = null) {
         if (!isTtsReady || ttsEngine == null) {
@@ -348,9 +371,7 @@ fun PdfReaderScreen(
             return
         }
         if (customText != null) {
-            ttsEngine?.setSpeechRate(audioSpeed)
-            ttsEngine?.speak(customText, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
-            isAudioPlaying = true
+            if (!enqueueSpeech(customText, TextToSpeech.QUEUE_FLUSH, "page_${currentPageIndex}")) return
             com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
             return
         }
@@ -377,22 +398,22 @@ fun PdfReaderScreen(
                     val notesRead = listOf(pageNotes, pageVocab)
                         .filter { it.isNotBlank() }
                         .joinToString(". ")
-                    ttsEngine?.setSpeechRate(audioSpeed)
-                    ttsEngine?.speak(notesRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
-                    isAudioPlaying = true
+                    enqueueSpeech(notesRead, TextToSpeech.QUEUE_FLUSH, "page_${currentPageIndex}")
                 } else {
-                    ttsEngine?.setSpeechRate(audioSpeed)
                     val maxLen = 3000
-                    if (pageText.length <= maxLen) {
-                        ttsEngine?.speak(pageText, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
-                    } else {
-                        val chunks = pageText.chunked(maxLen)
-                        chunks.forEachIndexed { idx, chunk ->
-                            val queueMode = if (idx == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                            ttsEngine?.speak(chunk, queueMode, null, "page_${currentPageIndex}_$idx")
+                    val chunks = pageText.chunked(maxLen)
+                    var acceptedAllChunks = true
+                    chunks.forEachIndexed { idx, chunk ->
+                        val queueMode = if (idx == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                        if (!enqueueSpeech(chunk, queueMode, "page_${currentPageIndex}_$idx")) {
+                            acceptedAllChunks = false
+                            return@forEachIndexed
                         }
                     }
-                    isAudioPlaying = true
+                    if (!acceptedAllChunks) {
+                        ttsEngine?.stop()
+                        isAudioPlaying = false
+                    }
                     com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                 }
             }
@@ -412,9 +433,7 @@ fun PdfReaderScreen(
                 parts.add("لم تقم بإضافة ملاحظات أو مصطلحات لهذه الصفحة بعد.")
             }
             val textToRead = parts.joinToString(". ")
-            ttsEngine?.setSpeechRate(audioSpeed)
-            ttsEngine?.speak(textToRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
-            isAudioPlaying = true
+            enqueueSpeech(textToRead, TextToSpeech.QUEUE_FLUSH, "page_${currentPageIndex}")
             com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         }
     }
