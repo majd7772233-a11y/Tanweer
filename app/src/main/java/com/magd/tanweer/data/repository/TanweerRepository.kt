@@ -2046,10 +2046,11 @@ class TanweerRepository(
     suspend fun getAdminDashboard(): Result<com.magd.tanweer.data.model.AdminDashboardResponse> = withContext(Dispatchers.IO) {
         try {
             val res = api.getAdminDashboard()
-            if (res.isSuccessful && res.body() != null) {
-                Result.success(res.body()!!)
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true) {
+                Result.success(body)
             } else {
-                Result.failure(Exception("تعذر جلب بيانات إدارة المدرسة"))
+                Result.failure(Exception(body?.let { "الخادم لم يؤكد بيانات إدارة المدرسة" } ?: "تعذر جلب بيانات إدارة المدرسة (HTTP ${res.code()})"))
             }
         } catch (e: Exception) {
             Result.failure(e)
