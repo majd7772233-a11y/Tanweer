@@ -117,6 +117,8 @@ fun PdfReaderScreen(
     var audioSpeed by remember { mutableFloatStateOf(1.0f) }
     var audioReadMode by remember { mutableStateOf(AudioReadMode.BOOK_TEXT) }
     var isExtractingAudioText by remember { mutableStateOf(false) }
+    var activeSpeechRequestId by remember { mutableStateOf<String?>(null) }
+    var activeSpeechFinalUtteranceId by remember { mutableStateOf<String?>(null) }
 
     // Study Stopwatch & Real Reading Time (Point 47.5)
     var sessionReadingSeconds by remember { mutableLongStateOf(0L) }
@@ -170,13 +172,45 @@ fun PdfReaderScreen(
                     }
                     tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                         override fun onStart(utteranceId: String?) {
-                            coroutineScope.launch { isAudioPlaying = true }
+                            coroutineScope.launch {
+                                val requestId = activeSpeechRequestId
+                                if (requestId != null && utteranceId?.startsWith("${requestId}:") == true) {
+                                    isAudioPlaying = true
+                                }
+                            }
                         }
+
                         override fun onDone(utteranceId: String?) {
-                            coroutineScope.launch { isAudioPlaying = false }
+                            coroutineScope.launch {
+                                if (utteranceId != null && utteranceId == activeSpeechFinalUtteranceId) {
+                                    isAudioPlaying = false
+                                    activeSpeechRequestId = null
+                                    activeSpeechFinalUtteranceId = null
+                                }
+                            }
                         }
+
                         override fun onError(utteranceId: String?) {
-                            coroutineScope.launch { isAudioPlaying = false }
+                            coroutineScope.launch {
+                                val requestId = activeSpeechRequestId
+                                if (requestId != null && utteranceId?.startsWith("${requestId}:") == true) {
+                                    tts?.stop()
+                                    isAudioPlaying = false
+                                    activeSpeechRequestId = null
+                                    activeSpeechFinalUtteranceId = null
+                                }
+                            }
+                        }
+
+                        override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                            coroutineScope.launch {
+                                val requestId = activeSpeechRequestId
+                                if (requestId != null && utteranceId?.startsWith("${requestId}:") == true) {
+                                    isAudioPlaying = false
+                                    activeSpeechRequestId = null
+                                    activeSpeechFinalUtteranceId = null
+                                }
+                            }
                         }
                     })
                     isTtsReady = languageReady
@@ -337,10 +371,24 @@ fun PdfReaderScreen(
         }
     }
 
-    // Submit speech only when Android's TTS engine confirms that it accepted the utterance.
-    fun enqueueSpeech(text: String, queueMode: Int, utteranceId: String): Boolean {
+    // Queue one utterance and track the full request rather than each individual chunk.
+    fun enqueueSpeech(
+        text: String,
+        queueMode: Int,
+        utteranceId: String,
+        requestId: String = utteranceId,
+        isFinalUtterance: Boolean = true
+    ): Boolean {
         val engine = ttsEngine
         if (engine == null || text.isBlank()) return false
+
+        if (queueMode == TextToSpeech.QUEUE_FLUSH) {
+            activeSpeechRequestId = requestId
+            activeSpeechFinalUtteranceId = null
+        }
+        if (isFinalUtterance) {
+            activeSpeechFinalUtteranceId = utteranceId
+        }
 
         val result = try {
             engine.setSpeechRate(audioSpeed)
@@ -351,6 +399,10 @@ fun PdfReaderScreen(
         }
 
         if (result != TextToSpeech.SUCCESS) {
+            if (activeSpeechRequestId == requestId) {
+                activeSpeechRequestId = null
+                activeSpeechFinalUtteranceId = null
+            }
             isAudioPlaying = false
             Toast.makeText(context, "تعذر على محرك الصوت بدء القراءة. تحقق من تثبيت الصوت العربي في إعدادات تحويل النص إلى كلام.", Toast.LENGTH_LONG).show()
             return false
@@ -371,21 +423,30 @@ fun PdfReaderScreen(
             return
         }
         if (customText != null) {
-            if (!enqueueSpeech(customText, TextToSpeech.QUEUE_FLUSH, "page_${currentPageIndex}")) return
+            val requestId = "reader-${java.util.UUID.randomUUID()}"
+            if (!enqueueSpeech(customText, TextToSpeech.QUEUE_FLUSH, "$requestId:0", requestId)) return
             com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
             return
         }
 
         if (audioReadMode == AudioReadMode.BOOK_TEXT) {
+            val requestedPageIndex = currentPageIndex
             coroutineScope.launch {
                 isExtractingAudioText = true
                 val bookFile = pdfManager.getCachedFile(book.id)
-                val pageText = repository.getOrExtractPageText(book.id, currentPageIndex, bookFile)
-                isExtractingAudioText = false
+                val pageText = try {
+                    repository.getOrExtractPageText(book.id, requestedPageIndex, bookFile)
+                } finally {
+                    isExtractingAudioText = false
+                }
+
+                // A slow PDF extraction must never start reading a page the user has left.
+                if (requestedPageIndex != currentPageIndex) return@launch
+                val requestId = "reader-${java.util.UUID.randomUUID()}"
 
                 if (pageText.isBlank()) {
-                    val pageNotes = notesList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { it.noteText }
-                    val pageVocab = vocabList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { "${it.word}: ${it.meaning}" }
+                    val pageNotes = notesList.filter { it.pageIndex == requestedPageIndex }.joinToString(". ") { it.noteText }
+                    val pageVocab = vocabList.filter { it.pageIndex == requestedPageIndex }.joinToString(". ") { "${it.word}: ${it.meaning}" }
                     if (pageNotes.isBlank() && pageVocab.isBlank()) {
                         Toast.makeText(
                             context,
@@ -398,21 +459,27 @@ fun PdfReaderScreen(
                     val notesRead = listOf(pageNotes, pageVocab)
                         .filter { it.isNotBlank() }
                         .joinToString(". ")
-                    enqueueSpeech(notesRead, TextToSpeech.QUEUE_FLUSH, "page_${currentPageIndex}")
+                    enqueueSpeech(notesRead, TextToSpeech.QUEUE_FLUSH, "$requestId:0", requestId)
                 } else {
-                    val maxLen = 3000
-                    val chunks = pageText.chunked(maxLen)
+                    val chunks = pageText.chunked(3000)
                     var acceptedAllChunks = true
                     for ((idx, chunk) in chunks.withIndex()) {
                         val queueMode = if (idx == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                        if (!enqueueSpeech(chunk, queueMode, "page_${currentPageIndex}_$idx")) {
+                        val utteranceId = "$requestId:$idx"
+                        if (!enqueueSpeech(
+                                text = chunk,
+                                queueMode = queueMode,
+                                utteranceId = utteranceId,
+                                requestId = requestId,
+                                isFinalUtterance = idx == chunks.lastIndex
+                            )
+                        ) {
                             acceptedAllChunks = false
                             break
                         }
                     }
                     if (!acceptedAllChunks) {
-                        ttsEngine?.stop()
-                        isAudioPlaying = false
+                        stopAudioPlayback()
                     }
                     com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                 }
@@ -433,12 +500,16 @@ fun PdfReaderScreen(
                 parts.add("لم تقم بإضافة ملاحظات أو مصطلحات لهذه الصفحة بعد.")
             }
             val textToRead = parts.joinToString(". ")
-            enqueueSpeech(textToRead, TextToSpeech.QUEUE_FLUSH, "page_${currentPageIndex}")
+            val requestId = "reader-${java.util.UUID.randomUUID()}"
+            enqueueSpeech(textToRead, TextToSpeech.QUEUE_FLUSH, "$requestId:0", requestId)
             com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         }
     }
 
     fun stopAudioPlayback() {
+        activeSpeechRequestId = null
+        activeSpeechFinalUtteranceId = null
+        isExtractingAudioText = false
         try {
             ttsEngine?.stop()
         } catch (_: Exception) {}
