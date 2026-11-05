@@ -17,11 +17,22 @@ class FocusNoisePlayer {
     @Volatile
     private var running = false
 
+    @Volatile
     private var audioTrack: AudioTrack? = null
+
     private var worker: Thread? = null
 
     fun start(): Boolean = synchronized(lock) {
-        if (running && audioTrack?.state == AudioTrack.STATE_INITIALIZED) return true
+        if (
+            running &&
+            audioTrack?.state == AudioTrack.STATE_INITIALIZED &&
+            worker?.isAlive == true
+        ) return true
+
+        // Recover from an audio device change or a worker that exited unexpectedly.
+        if (audioTrack != null || worker != null || running) {
+            stopLocked()
+        }
 
         val sampleRate = 22_050
         val minBufferBytes = AudioTrack.getMinBufferSize(
@@ -95,10 +106,15 @@ class FocusNoisePlayer {
                         samples.size,
                         AudioTrack.WRITE_BLOCKING
                     )
-                    if (written < 0) break
+                    if (written <= 0) break
                 }
             } catch (_: Exception) {
                 // stop() can interrupt a blocking write while releasing the track.
+            } finally {
+                // Do not let an old worker mark a newer playback session as stopped.
+                if (audioTrack === activeTrack) {
+                    running = false
+                }
             }
         }, "Tanweer-Focus-Ambience").apply {
             isDaemon = true
@@ -109,8 +125,13 @@ class FocusNoisePlayer {
     }
 
     fun stop() = synchronized(lock) {
+        stopLocked()
+    }
+
+    private fun stopLocked() {
         running = false
         val activeTrack = audioTrack
+        val activeWorker = worker
 
         try {
             activeTrack?.pause()
@@ -120,9 +141,9 @@ class FocusNoisePlayer {
             // The track may already have stopped after an audio-device change.
         }
 
-        worker?.interrupt()
+        activeWorker?.interrupt()
         try {
-            worker?.join(150)
+            activeWorker?.join(250)
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
