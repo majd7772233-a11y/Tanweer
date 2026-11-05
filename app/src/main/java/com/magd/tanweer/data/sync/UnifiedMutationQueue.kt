@@ -228,7 +228,7 @@ class UnifiedMutationQueue private constructor(
                     val text = obj.optString("text", "")
                     val groupId = obj.optString("groupId", "")
                     val res = api.postGroupMessage(groupId, PostMessageRequest(id = item.entityId, text = text))
-                    if (res.isSuccessful) {
+                    if (res.isSuccessful && res.body()?.success == true) {
                         db.chatDao().updateMessageStatus(item.entityId, "SENT")
                         outboxDao.deleteOutbox(item.id)
                         true
@@ -366,7 +366,7 @@ class UnifiedMutationQueue private constructor(
 
                     if (req != null && req.groupId.isNotBlank() && req.title.isNotBlank()) {
                         val res = api.createExam(req)
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             val serverId = res.body()?.examId ?: res.body()?.id
                             val resolvedId = serverId?.takeIf { it.isNotBlank() } ?: item.entityId
                             if (resolvedId != item.entityId) {
@@ -384,7 +384,10 @@ class UnifiedMutationQueue private constructor(
                             true
                         } else if (!isRetryableHttpStatus(res.code())) {
                             db.examDao().updateSyncStatus(item.entityId, "FAILED")
-                            handleMutationFailure(item, "رفض الخادم رفع الاختبار (${res.code()})")
+                            val body = res.body()
+                            val message = body?.error?.message ?: body?.message
+                                ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ الاختبار (success=false)" else "رفض الخادم رفع الاختبار (${res.code()})"
+                            handleMutationFailure(item, message)
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
@@ -413,12 +416,15 @@ class UnifiedMutationQueue private constructor(
                                 location = ev.location
                             )
                         )
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             db.eventDao().updateSyncStatus(ev.id, "SYNCED")
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else if (!isRetryableHttpStatus(res.code())) {
-                            handleMutationFailure(item, "رفض الخادم إنشاء الفعالية (HTTP __CODE__)".replace("__CODE__", res.code().toString()))
+                            val body = res.body()
+                            val message = body?.error?.message ?: body?.message
+                                ?: if (res.isSuccessful) "الخادم لم يؤكد نشر الفعالية (success=false)" else "رفض الخادم إنشاء الفعالية (HTTP ${res.code()})"
+                            handleMutationFailure(item, message)
                             outboxDao.deleteOutbox(item.id)
                             db.eventDao().updateSyncStatus(ev.id, "FAILED")
                             true
@@ -446,12 +452,12 @@ class UnifiedMutationQueue private constructor(
                                 description = issue.description
                             )
                         )
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             db.issueDao().updateSyncStatus(issue.id, "SYNCED")
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, "فشل رفع السؤال إلى الخادم (${res.code()})")
+                            handleMutationFailure(item, res.body()?.error?.message ?: res.body()?.message ?: if (res.isSuccessful) "الخادم لم يؤكد نشر السؤال (success=false)" else "فشل رفع السؤال إلى الخادم (${res.code()})")
                             false
                         }
                     } else {
@@ -466,7 +472,7 @@ class UnifiedMutationQueue private constructor(
                             issueId = comment.issueId,
                             req = com.magd.tanweer.data.remote.AddCommentRequest(id = comment.id, comment = comment.comment)
                         )
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             db.issueDao().updateCommentSyncStatus(comment.id, "SYNCED")
                             outboxDao.deleteOutbox(item.id)
                             true
@@ -485,7 +491,7 @@ class UnifiedMutationQueue private constructor(
                                     outboxDao.deleteOutbox(item.id)
                                     true
                                 } else {
-                                    handleMutationFailure(item, "فشل إرسال التعليق (${res.code()})")
+                                    handleMutationFailure(item, res.body()?.error?.message ?: res.body()?.message ?: if (res.isSuccessful) "الخادم لم يؤكد إرسال التعليق (success=false)" else "فشل إرسال التعليق (${res.code()})")
                                     false
                                 }
                             } else {
@@ -510,11 +516,11 @@ class UnifiedMutationQueue private constructor(
                                 reason = corr.reason
                             )
                         )
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, "فشل رفع طلب التصحيح (${res.code()})")
+                            handleMutationFailure(item, res.body()?.error?.message ?: res.body()?.message ?: if (res.isSuccessful) "الخادم لم يؤكد استلام طلب التصحيح (success=false)" else "فشل رفع طلب التصحيح (${res.code()})")
                             false
                         }
                     } else {
@@ -644,14 +650,14 @@ class UnifiedMutationQueue private constructor(
 
                     if (req != null && gId.isNotBlank()) {
                         val res = api.createScheduleSlot(groupId = gId, req = req)
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             if (slot != null) {
                                 db.scheduleDao().insertSlots(listOf(slot.copy(syncStatus = "SYNCED")))
                             }
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, "فشل حفظ الحصة في الخادم (${res.code()})")
+                            handleMutationFailure(item, res.body()?.error?.message ?: res.body()?.message ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ الحصة (success=false)" else "فشل حفظ الحصة في الخادم (${res.code()})")
                             false
                         }
                     } else {
