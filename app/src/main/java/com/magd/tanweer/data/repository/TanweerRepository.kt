@@ -615,8 +615,11 @@ class TanweerRepository(
                 if (serverMyGroupIds.any { it.isBlank() } || serverMyGroupIds.toSet().size != serverMyGroupIds.size) {
                     return@withContext SyncResult.Error("أعاد الخادم قائمة مجموعات غير مكتملة أو مكررة؛ احتُفظ بالمجموعات المحلية")
                 }
-                val expectedDefaultGroupId = db.userDao().getUserSync()?.defaultGroupId
-                if (!GroupSnapshotPolicy.canReplaceMemberships(expectedDefaultGroupId, serverMyGroupIds)) {
+                val currentAccount = db.userDao().getUserSync()
+                val expectedDefaultGroupId = currentAccount?.defaultGroupId
+                val isStudentAccount = currentAccount?.role.equals("STUDENT", ignoreCase = true) ||
+                    currentAccount?.role.equals("MEMBER", ignoreCase = true)
+                if (isStudentAccount && !GroupSnapshotPolicy.canReplaceMemberships(expectedDefaultGroupId, serverMyGroupIds)) {
                     return@withContext SyncResult.Error("لم يؤكد الخادم عضوية الشعبة الرئيسية لهذا الحساب؛ احتُفظ بالمجموعات والبيانات المحلية بدلاً من إخفائها")
                 }
                 db.withTransaction {
