@@ -1825,13 +1825,48 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - 16c3969beb44ea6ae8f998b13e92e8bb3442dbc3, b2949e64aa4485668645c82be8a576ee2b829a4d, 279a2c93c287eb08254c27b4efb64f4fdfb64c35 — new server regression tests and test mock correction.
 
 ### CI / current state
-- Server TypeScript passed. Initial Vitest run found one test-mock issue: the fake D1 did not recognize the group-membership SELECT used by handleGetEvents. Corrected the mock; all tests then passed.
-- Latest server PR workflow run 42059269717 succeeded at commit 360ff6b52d1a606879f1ad72b55fceb0f30674be. Wrangler production and Staging dry-run steps passed; no deployment occurred.
-- Draft PR #6 was opened only to trigger PR validation: https://github.com/majd7772233-a11y/Tanweer/pull/6. It remains a draft and has not been merged.
-- Android PR build/unit tests are still running at this checkpoint; record the final build result and artifact details after completion.
+- The initial CI run identified a stale test double for the new per-account role lookup; the mock was corrected to include group roles and model the effective role query. The latest server workflow run 42069054233 then passed: TypeScript, 34/34 Vitest files, dependency audit, Wrangler Production dry-run, and Wrangler Staging dry-run. No Worker was deployed.
+- Android workflow run 42068605626 passed its unit tests and Staging Debug APK assembly. The PR workflow intentionally skips release keystore preparation and signed Release assembly; this artifact is a test/debug build, not a production or signed release APK.
+- Draft PR #6: https://github.com/majd7772233-a11y/Tanweer/pull/6. It remains a draft, points to main, and has not been merged.
+- Debug artifact ID 13433149827, source commit 4cd62fcfbdbded344d9bcc28de05ec5de052db98; archive SHA-256 f027f12446d470a25613f7923e7b8ffa42a0edb2b34949d7caeb62a20aa7bba2. Extracted APK `app-staging-debug.apk` SHA-256 ec735ed8f8dd3aa9bfeacbe475019d308b45508ba09d747b7dab8e2bd2ecfd9b. The later branch update 4ecede693125dc2517b5ff5582351e28a90c9a89 changed only a server test mock; Android application sources were unchanged.
 
 ### Remaining work / safety
 - Batch 1 still needs successful Android CI and physical two-account acceptance: test per-user announcement dismissal, student disable/reactivate and class removal, then repeat the original affected-device sync/publish test. Do not claim physical testing complete.
 - Batch 2: comprehensive PDF viewer and study-tools reengineering; correct system bars/navigation insets; pinch zoom distinct from single-finger page navigation; preserve good page-turn behavior; typography follows app font-size preference with modest main-title emphasis.
 - Batch 3: monthly exam calendar/history and one exam per subject per month; oral tests remain random; midterm/final stay as-is but browsable; direct schedule editing for authorized staff with immediate sync; fresh sync at app start and section entry; open lessons/homework/exams from subject timeline; academic archive and year rollover; groups/cards, always-active groups, visibility and join-reason fixes.
 - R2 is not enabled and is not required. Continue the existing D1 media BLOB design. Production main remains 64143994070bcdc410cf044379fe2801da8f9a3c; no Production D1 writes, Production deployment, secret changes, merge, or data purge.
+
+
+## Batch 1 — final implementation checkpoint (2026-11-05)
+
+### Data-loss / sync safety
+- Confirmed read-only aggregate counts still exist in Production D1: users 12, group_members 12, contents 9, homeworks 3, exams 5, events 2, issues 2, media_blobs 11. No records were fetched by name, and no D1 rows were written.
+- Server data-generation metadata is now a refresh signal only. Android stores the marker per API origin + account ID; a generation mismatch cannot call `clearAllTables()`, clear the auth token, or remove notebook data/outbox entries.
+- A student group snapshot is rejected as incomplete when it omits the current account's server-confirmed default class, contains blank IDs, or has duplicate membership IDs. The previous local groups remain intact.
+- Lesson/homework/exam/event create and retry paths, and all lesson/homework media upload/retry paths, now require HTTP success plus response `success: true` before marking an item `SYNCED`. Added focused Android regression tests for generation handling, safe group snapshots, and application-level write confirmation.
+
+### School Admin
+- Replaced the overloaded dashboard with one compact screen: D1-backed school counters, searchable student directory, explicit loading/error states, official school announcement composer, and two verified student actions.
+- A manager can disable/reactivate an actual student account; disabling revokes active sessions. Reactivation requires the student to sign in again.
+- A manager can remove the student from their current class membership. The account, authored lessons and academic history remain intact.
+- Server-side checks calculate each target's highest role across active group memberships. Accounts with teacher, moderator, or admin roles in any group cannot be treated as ordinary students by these actions. Only the global ADMIN role can invoke this limited management API; SYSTEM_OWNER's infrastructure powers remain separate.
+
+### School announcements
+- Added migration `0031_user_dismissed_school_announcements.sql` and an account/event dismissal relation.
+- A small X on each official announcement calls the authenticated dismissal endpoint. The server suppresses that announcement only for the requesting account; other students continue to receive the shared event. The local Room row is removed only after the server confirms success.
+- Migration is committed but has not been applied to Production or Staging because no Worker/D1 deployment was performed.
+
+### Tests / deliverables
+- Added server tests for per-account announcement dismissal and school-admin actions, including elevated group-role protection, session revocation, and preserving student content.
+- Latest server CI: run `42069054233`, passed TypeScript, all 34 Vitest files, security audit and both Wrangler dry-runs.
+- Android CI: run `42068605626`, Android unit tests and Staging Debug APK assembly passed. This PR run did not perform signed Release assembly.
+- Staging Debug artifact: `13433149827`; zip SHA-256 `f027f12446d470a25613f7923e7b8ffa42a0edb2b34949d7caeb62a20aa7bba2`; extracted APK SHA-256 `ec735ed8f8dd3aa9bfeacbe475019d308b45508ba09d747b7dab8e2bd2ecfd9b`.
+- PR #6 remains a draft. Current branch head at this checkpoint: `4ecede693125dc2517b5ff5582351e28a90c9a89`. Production main remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
+
+### Acceptance still pending
+- Physical two-account/two-device validation remains necessary: publish and dismiss an official school announcement on account A, confirm it stays visible to B; disable/reactivate a student and remove a test student from a class; repeat the original affected-device content refresh/publish scenario. The test APK is a debug staging build; do not claim real-device acceptance or production behavior verified until these checks are performed.
+- No staging or production D1 migration was applied, no Worker was deployed, no secrets changed, no merge occurred, and no user data was intentionally deleted.
+
+### Remaining batches
+- Batch 2: re-engineer the PDF reader and study-tools hub, retain the acceptable page-turn animation, correct excess page height, isolate two-finger pinch zoom from one-finger page navigation, fix reader text extraction/rendering, ruler overlay and close control, focus audio, responsive tool cards, system-bar and bottom-navigation insets.
+- Batch 3: unify typography around the app's 12/14/16 settings with modest title emphasis; monthly exam calendars and unique subject/month exams while leaving midterm/final and random oral behavior intact; direct schedule editing plus immediate server sync; sync on startup and entering each section; clickable timeline/archive lesson/homework navigation; dynamic academic year history; and groups/clubs card, messaging, visibility and join-reason fixes.
