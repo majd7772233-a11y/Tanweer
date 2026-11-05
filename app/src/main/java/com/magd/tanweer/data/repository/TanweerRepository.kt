@@ -2861,7 +2861,10 @@ class TanweerRepository(
                 Result.success(PublicationResult(finalId, PublicationState.SYNCED, "تم توثيق ونشر الدرس على الخادم بنجاح 🚀"))
             } else {
                 db.contentDao().updateMediaAndSyncStatus(id, serializeMediaList(uploadedMediaItems), "FAILED")
-                Result.failure(Exception(res.message() ?: "فشل تسجيل الدرس على السيرفر"))
+                val body = res.body()
+                val message = body?.error?.message ?: body?.message
+                    ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ الدرس (success=false)" else "فشل تسجيل الدرس على السيرفر (HTTP ${res.code()})"
+                Result.failure(Exception(message))
             }
         } catch (e: Exception) {
             val payload = JSONObject().apply {
@@ -3056,7 +3059,10 @@ class TanweerRepository(
                 }
             } else {
                 db.homeworkDao().updateSyncStatus(id, "FAILED")
-                Result.failure(Exception(res.message() ?: "فشل حفظ الواجب في السيرفر"))
+                val body = res.body()
+                val message = body?.error?.message ?: body?.message
+                    ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ الواجب (success=false)" else "فشل حفظ الواجب في السيرفر (HTTP ${res.code()})"
+                Result.failure(Exception(message))
             }
         } catch (e: Exception) {
             // Queue in Outbox for offline synchronization
@@ -3209,7 +3215,10 @@ class TanweerRepository(
                     syncStatus = "FAILED"
                 )
                 db.homeworkDao().insertHomework(updatedEntity)
-                Result.failure(Exception("فشل إرسال الواجب للسيرفر"))
+                val body = res.body()
+                val message = body?.error?.message ?: body?.message
+                    ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ الواجب (success=false)" else "فشل إرسال الواجب للسيرفر (HTTP ${res.code()})"
+                Result.failure(Exception(message))
             }
         } catch (e: Exception) {
             val updatedEntity = entity.copy(
