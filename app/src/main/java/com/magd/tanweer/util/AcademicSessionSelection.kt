@@ -47,8 +47,13 @@ internal object AcademicSessionSelection {
  * marker, not that its user's cached database is stale.
  */
 internal object DataGenerationPolicy {
-    fun shouldPurgeLocalCache(previousGeneration: String?, serverGeneration: String?): Boolean {
-        if (serverGeneration.isNullOrBlank()) return false
-        return !previousGeneration.isNullOrBlank() && previousGeneration != serverGeneration
+    /**
+     * A generation mismatch is useful as a refresh signal, never as permission to erase
+     * the local database. The server snapshot is reconciled without destroying offline
+     * work, cached lessons, notebook state, or the current authenticated session.
+     */
+    fun hasChanged(previousGeneration: String?, serverGeneration: String?): Boolean {
+        if (serverGeneration.isNullOrBlank() || previousGeneration.isNullOrBlank()) return false
+        return previousGeneration != serverGeneration
     }
 }
