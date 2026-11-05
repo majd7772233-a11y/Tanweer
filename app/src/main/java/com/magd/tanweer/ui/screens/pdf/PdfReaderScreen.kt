@@ -1805,32 +1805,31 @@ fun StudyToolsHubSheet(
 ) {
     val scrollState = rememberScrollState()
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 680.dp)
-            .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Sheet Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = minOf(maxHeight * 0.88f, 720.dp))
+                .verticalScroll(scrollState)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "⚡ مركز أدوات المذاكرة الاحترافية", fontSize = 17.sp, fontWeight = FontWeight.Black, color = CyanAccent)
-                Spacer(modifier = Modifier.width(8.dp))
-                GlassPill(text = "20 أداة متصلة", color = WarmAmber, bgColor = AmberGlow)
+            // Compact header that remains readable on narrow phones.
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = "أدوات المذاكرة",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = CyanAccent
+                )
+                Text(
+                    text = "الصفحة ${currentPageIndex + 1} من $totalPages • اختر ما تحتاجه الآن",
+                    fontSize = 11.sp,
+                    color = TextSecondary,
+                    fontWeight = FontWeight.Medium
+                )
             }
-            Text(
-                text = "صفحة ${currentPageIndex + 1} من $totalPages",
-                fontSize = 11.sp,
-                color = TextSecondary,
-                fontWeight = FontWeight.Medium
-            )
-        }
 
         // TOOL 1 & 2: Daily Reading Goal & Live Velocity Calculator
         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface) {
@@ -2080,7 +2079,7 @@ fun StudyToolsHubSheet(
                             fontWeight = FontWeight.Bold,
                             color = tagColor,
                             textAlign = TextAlign.Center,
-                            maxLines = 1
+                            maxLines = 2
                         )
                     }
                 }
@@ -2250,6 +2249,7 @@ fun StudyToolsHubSheet(
                     Text(text = "تفاصيل ومعلومات الكتاب", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
+        }
         }
     }
 }
