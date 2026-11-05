@@ -93,11 +93,11 @@ class SchoolAdminAndAnnouncementDb {
           );
           return row ? { id: row.id } as T : null;
         }
-        if (normalized.includes('SELECT role FROM group_members WHERE group_id = ? AND user_id = ?')) {
+        if (normalized.includes('SELECT role, status FROM group_members WHERE group_id = ? AND user_id = ?')) {
           const member = db.members.find(row =>
-            row.group_id === params[0] && row.user_id === params[1]
+            row.group_id === params[0] && row.user_id === params[1] && row.status === 'ACTIVE'
           );
-          return member ? { role: 'STUDENT' } as T : null;
+          return member ? { role: 'STUDENT', status: 'ACTIVE' } as T : null;
         }
         return null;
       },
