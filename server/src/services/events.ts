@@ -16,10 +16,18 @@ export async function handleGetEvents(groupId: string, user: UserContext, env: E
             u.full_name AS source_name
      FROM events e
      LEFT JOIN users u ON u.id = e.created_by
-     WHERE e.group_id = ? OR e.group_id = 'all'
+     WHERE (e.group_id = ? OR e.group_id = 'all')
+       AND NOT (
+         e.group_id = 'all'
+         AND UPPER(e.category) = 'ANNOUNCEMENT'
+         AND EXISTS (
+           SELECT 1 FROM user_dismissed_announcements d
+           WHERE d.user_id = ? AND d.event_id = e.id
+         )
+       )
      ORDER BY CASE WHEN e.group_id = 'all' AND e.category = 'ANNOUNCEMENT' THEN 0 ELSE 1 END,
               e.is_official DESC, e.event_date ASC`
-  ).bind(groupId).all();
+  ).bind(groupId, user.userId).all();
 
   return jsonResponse({
     success: true,
@@ -308,5 +316,32 @@ export async function handleDeleteEvent(
   return jsonResponse({
     success: true,
     message: 'تم حذف الفعالية بنجاح',
+  });
+}
+
+/**
+ * Dismiss one official school announcement for the authenticated account only.
+ * This never edits or deletes the shared event row, so other students keep seeing it.
+ */
+export async function handleDismissSchoolAnnouncement(
+  eventId: string,
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  const event = await env.DB.prepare(
+    "SELECT id FROM events WHERE id = ? AND group_id = 'all' AND UPPER(category) = 'ANNOUNCEMENT'"
+  ).bind(eventId).first<{ id: string }>();
+
+  if (!event) {
+    return errorResponse('ANNOUNCEMENT_NOT_FOUND', 'التعميم المدرسي غير موجود أو لم يعد متاحاً', 404);
+  }
+
+  await env.DB.prepare(
+    'INSERT OR IGNORE INTO user_dismissed_announcements (user_id, event_id, dismissed_at) VALUES (?, ?, ?)'
+  ).bind(user.userId, eventId, Date.now()).run();
+
+  return jsonResponse({
+    success: true,
+    message: 'تم إخفاء التعميم من حسابك فقط',
   });
 }
