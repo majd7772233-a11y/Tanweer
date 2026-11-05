@@ -89,10 +89,12 @@ fun ExamsScreen(
 
     // Grouping by Month (Point 17: Monthly structure & organization)
     val examsByMonth = remember(filteredExams) {
-        filteredExams.groupBy { getMonthKey(it.examDate) }.toSortedMap()
+        filteredExams.groupBy { getMonthKey(it.examDate) }.toSortedMap(compareByDescending { it })
     }
     val allMonthKeys = remember(examsByMonth) { examsByMonth.keys.toList() }
     var selectedMonthFilter by remember { mutableStateOf<String?>(null) } // null = "جميع الأشهر"
+    var showMonthPicker by remember { mutableStateOf(false) }
+    val monthPickerState = rememberDatePickerState(initialSelectedDateMillis = System.currentTimeMillis())
 
     var pendingExamForReminder by remember { mutableStateOf<ExamItem?>(null) }
     var showExactAlarmDialog by remember { mutableStateOf(false) }
@@ -167,14 +169,33 @@ fun ExamsScreen(
                         )
                     }
 
-                    // Single Add Button
-                    GlassButton(
-                        text = "إضافة اختبار ＋",
-                        color = RubyRed,
-                        textColor = Color.White,
-                        onClick = { isLocalAddExamModalOpen = true },
-                        modifier = Modifier.height(40.dp)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        IconButton(
+                            onClick = { showMonthPicker = true },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(GlassSurface)
+                                .border(1.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
+                        ) {
+                            Icon(
+                                Icons.Default.DateRange,
+                                contentDescription = "اختيار شهر جدول الاختبارات",
+                                tint = CyanAccent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        GlassButton(
+                            text = "إضافة اختبار ＋",
+                            color = RubyRed,
+                            textColor = Color.White,
+                            onClick = { isLocalAddExamModalOpen = true },
+                            modifier = Modifier.height(40.dp)
+                        )
+                    }
                 }
             }
 
@@ -290,6 +311,47 @@ fun ExamsScreen(
                     examsByMonth.filterKeys { it == selectedMonthFilter }
                 } else {
                     examsByMonth
+                }
+
+                if (selectedMonthFilter != null && examsByMonth[selectedMonthFilter].isNullOrEmpty()) {
+                    item(key = "empty_month_${selectedMonthFilter}") {
+                        GlassCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = MidnightSurface,
+                            borderColor = GlassBorderSubtle
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(18.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.EventBusy,
+                                    contentDescription = null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(30.dp)
+                                )
+                                Text(
+                                    text = "لا توجد اختبارات مسجلة في ${getArabicMonthTitle(selectedMonthFilter)}",
+                                    fontSize = tanweerTextSize(13f),
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary,
+                                    textAlign = TextAlign.Center
+                                )
+                                Text(
+                                    text = "يمكنك الرجوع إلى شهر آخر من التقويم.",
+                                    fontSize = tanweerTextSize(11f),
+                                    color = TextSecondary
+                                )
+                                GlassOutlinedButton(
+                                    text = "عرض جميع الأشهر",
+                                    onClick = { selectedMonthFilter = null }
+                                )
+                            }
+                        }
+                    }
                 }
 
                 displayedMonths.forEach { (monthKey, monthExams) ->
@@ -487,6 +549,44 @@ fun ExamsScreen(
                 containerColor = MidnightSurface,
                 shape = RoundedCornerShape(18.dp)
             )
+        }
+
+        if (showMonthPicker) {
+            DatePickerDialog(
+                onDismissRequest = { showMonthPicker = false },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            monthPickerState.selectedDateMillis?.let { selectedMillis ->
+                                val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.US).apply {
+                                    timeInMillis = selectedMillis
+                                }
+                                selectedMonthFilter = String.format(
+                                    Locale.US,
+                                    "%04d-%02d",
+                                    calendar.get(Calendar.YEAR),
+                                    calendar.get(Calendar.MONTH) + 1
+                                )
+                            }
+                            showMonthPicker = false
+                        }
+                    ) {
+                        Text("الانتقال إلى الشهر", color = CyanAccent)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showMonthPicker = false }) {
+                        Text("إلغاء", color = TextSecondary)
+                    }
+                }
+            ) {
+                DatePicker(
+                    state = monthPickerState,
+                    title = { Text("اختر شهراً من سجل الاختبارات", modifier = Modifier.padding(16.dp)) },
+                    headline = { Text("يتم عرض جدول الشهر المختار", modifier = Modifier.padding(horizontal = 16.dp)) },
+                    showModeToggle = false
+                )
+            }
         }
 
         // Exact Alarm Permission Recovery Dialog
