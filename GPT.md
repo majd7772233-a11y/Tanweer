@@ -1859,7 +1859,7 @@ When giving the user a statement about the current state, re-read GitHub if it m
 ### Tests / deliverables
 - Added server tests for per-account announcement dismissal and school-admin actions, including elevated group-role protection, session revocation, and preserving student content.
 - Latest server CI: run `42069054233`, passed TypeScript, all 34 Vitest files, security audit and both Wrangler dry-runs.
-- Android CI: run `42068605626`, Android unit tests and Staging Debug APK assembly passed. This PR run did not perform signed Release assembly.
+- Android CI: run `42068605626`, Android unit tests and Staging Debug APK assembly passed. This PR run did not perform signed Release assembly. The APK targets `https://tanweer-staging.magd.workers.dev/`; do not use it as end-to-end evidence until the Staging Worker and migration 0031 are deployed.
 - Staging Debug artifact: `13433149827`; zip SHA-256 `f027f12446d470a25613f7923e7b8ffa42a0edb2b34949d7caeb62a20aa7bba2`; extracted APK SHA-256 `ec735ed8f8dd3aa9bfeacbe475019d308b45508ba09d747b7dab8e2bd2ecfd9b`.
 - PR #6 remains a draft. Current branch head at this checkpoint: `4ecede693125dc2517b5ff5582351e28a90c9a89`. Production main remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
 
