@@ -80,6 +80,8 @@ fun CanvasPageCurlViewer(
     onTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val coroutineScope = rememberCoroutineScope()
+
     // 3D Curl State (-1f = prev page curled, 0f = neutral, 1f = next page curled)
     val curlProgress = remember { Animatable(0f) }
     // Keep gesture processing alive while Compose state changes during a pinch or pan.
@@ -146,8 +148,9 @@ fun CanvasPageCurlViewer(
                         var totalDrag = Offset.Zero
                         var didMove = false
                         var didPinch = false
-                        var didRulerDrag = latestFocusRulerY != null && kotlin.math.abs(
-                            down.position.y - (if (latestFocusRulerY < 0f) size.height / 2f else latestFocusRulerY)
+                        val rulerYAtGestureStart = latestFocusRulerY
+                        var didRulerDrag = rulerYAtGestureStart != null && kotlin.math.abs(
+                            down.position.y - (if (rulerYAtGestureStart < 0f) size.height / 2f else rulerYAtGestureStart)
                         ) <= 36f
                         var previousPinchSpan = 0f
                         var previousPinchCentroid = Offset.Zero
@@ -229,15 +232,21 @@ fun CanvasPageCurlViewer(
                                 } else if (!didPinch && !didRulerDrag && latestZoomScale <= 1.05f) {
                                     val progress = curlProgress.value
                                     if (progress > 0.20f && hasNextPage) {
-                                        curlProgress.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
-                                        onNextPage()
-                                        curlProgress.snapTo(0f)
+                                        coroutineScope.launch {
+                                            curlProgress.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
+                                            onNextPage()
+                                            curlProgress.snapTo(0f)
+                                        }
                                     } else if (progress < -0.20f && hasPrevPage) {
-                                        curlProgress.animateTo(-1f, tween(200, easing = FastOutSlowInEasing))
-                                        onPrevPage()
-                                        curlProgress.snapTo(0f)
+                                        coroutineScope.launch {
+                                            curlProgress.animateTo(-1f, tween(200, easing = FastOutSlowInEasing))
+                                            onPrevPage()
+                                            curlProgress.snapTo(0f)
+                                        }
                                     } else {
-                                        curlProgress.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                        coroutineScope.launch {
+                                            curlProgress.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                        }
                                     }
                                 }
                                 break
@@ -276,7 +285,7 @@ fun CanvasPageCurlViewer(
                                         val minProgress = if (hasPrevPage) -1f else 0f
                                         val maxProgress = if (hasNextPage) 1f else 0f
                                         val target = (curlProgress.value + progressDelta).coerceIn(minProgress, maxProgress)
-                                        curlProgress.snapTo(target)
+                                        coroutineScope.launch { curlProgress.snapTo(target) }
                                         change.consume()
                                     }
                                 }
