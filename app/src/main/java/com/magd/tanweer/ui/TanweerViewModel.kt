@@ -1072,7 +1072,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     val moderatorDashboard: StateFlow<ModeratorDashboardResponse?> = _moderatorDashboard.asStateFlow()
 
     private val _adminDashboard = MutableStateFlow<AdminDashboardResponse?>(null)
-    val adminDashboard: StateFlow<AdminDashboardResponse?> = _adminDashboard.asStateFlow()
+    val adminDashboard: StateFlow<AdminDashboard?> = _adminDashboard.asStateFlow()
+    private val _adminDashboardError = MutableStateFlow<String?>(null)
+    val adminDashboardError: StateFlow<String?> = _adminDashboardError.asStateFlow()
 
     private val _myNotifications = MutableStateFlow<List<AppNotification>>(emptyList())
     val myNotifications: StateFlow<List<AppNotification>> = _myNotifications.asStateFlow()
@@ -1111,10 +1113,23 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun loadAdminDashboard() {
         viewModelScope.launch {
             _isDashboardLoading.value = true
-            val res = repository.getAdminDashboard()
-            _isDashboardLoading.value = false
-            res.onSuccess { data ->
-                _adminDashboard.value = data
+            _adminDashboardError.value = null
+            try {
+                repository.getAdminDashboard()
+                    .onSuccess { data ->
+                        if (data.success) {
+                            _adminDashboard.value = data
+                        } else {
+                            _adminDashboard.value = null
+                            _adminDashboardError.value = "رد الخادم لم يؤكد صلاحية بيانات لوحة الإدارة"
+                        }
+                    }
+                    .onFailure { error ->
+                        _adminDashboard.value = null
+                        _adminDashboardError.value = error.message ?: "تعذر تحميل بيانات لوحة الإدارة"
+                    }
+            } finally {
+                _isDashboardLoading.value = false
             }
         }
     }
