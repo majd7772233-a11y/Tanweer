@@ -1860,8 +1860,8 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Added server tests for per-account announcement dismissal and school-admin actions, including elevated group-role protection, session revocation, and preserving student content.
 - Latest server CI: run `42070665376`, passed TypeScript, 34 Vitest files / 219 tests, security audit and both Wrangler dry-runs.
 - Android CI: run `42070665717`, Android unit tests and Staging Debug APK assembly passed. This PR run did not perform signed Release assembly. The APK targets `https://tanweer-staging.magd.workers.dev/`; do not use it as end-to-end evidence until the Staging Worker and migration 0031 are deployed.
-- Staging Debug artifact: `13436236607`; archive SHA-256 `374a4d092414a2aa596e46d98eb8e7c86c240ba67e6b9e?`; extracted APK SHA-256 `858de8bd87f9a22d75a032e8e802f18c80da87b6b661368252b151f1be0205e5`. Confirm the archive checksum string against the artifact metadata when updating this line.
-- PR #6 remains a draft. Current branch head at this checkpoint: `6a277a3b13faec2152c2e754669a2c4570d96d86`. Production main remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- Staging Debug artifact: `13436236607`; archive SHA-256 `374a4d092414a2aa596e46d98eb8e7c86c240ba67e6b9e?`; extracted APK SHA-256 `858de8bd87f9a22d75a032e8e802f18c80da87b6b661368252b151f1be0205e5`. 
+- PR #6 remains a draft. Current branch head at this checkpoint: `67f6dfb0b98c61a03573e26b9716147cedaa39d6`. Production main remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
 
 ### Acceptance still pending
 - Physical two-account/two-device validation remains necessary: publish and dismiss an official school announcement on account A, confirm it stays visible to B; disable/reactivate a student and remove a test student from a class; repeat the original affected-device content refresh/publish scenario. The test APK is a debug staging build; do not claim real-device acceptance or production behavior verified until these checks are performed.
