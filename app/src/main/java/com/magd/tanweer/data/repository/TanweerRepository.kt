@@ -2970,10 +2970,11 @@ class TanweerRepository(
                 Result.success(Unit)
             } else {
                 val statusCode = res.code()
-                val message = if (statusCode in listOf(401, 403)) {
-                    "لا تملك صلاحية نشر هذا الدرس (HTTP $statusCode)"
-                } else {
-                    "رفض الخادم نشر الدرس (HTTP $statusCode)"
+                val responseBody = res.body()
+                val message = responseBody?.error?.message ?: responseBody?.message ?: when {
+                    res.isSuccessful -> "الخادم لم يؤكد الحفظ (success=false)"
+                    statusCode in listOf(401, 403) -> "لا تملك صلاحية النشر (HTTP $statusCode)"
+                    else -> "رفض الخادم النشر (HTTP $statusCode)"
                 }
                 db.contentDao().updateSyncStatus(
                     contentId,
@@ -3351,10 +3352,11 @@ class TanweerRepository(
                 Result.success(Unit)
             } else {
                 val statusCode = res.code()
-                val message = if (statusCode in listOf(401, 403)) {
-                    "لا تملك صلاحية نشر هذا الواجب (HTTP $statusCode)"
-                } else {
-                    "رفض الخادم نشر الواجب (HTTP $statusCode)"
+                val responseBody = res.body()
+                val message = responseBody?.error?.message ?: responseBody?.message ?: when {
+                    res.isSuccessful -> "الخادم لم يؤكد الحفظ (success=false)"
+                    statusCode in listOf(401, 403) -> "لا تملك صلاحية النشر (HTTP $statusCode)"
+                    else -> "رفض الخادم النشر (HTTP $statusCode)"
                 }
                 db.homeworkDao().updateSyncStatus(
                     homeworkId,
@@ -3508,7 +3510,10 @@ class TanweerRepository(
                 }
             } else if (!isRetryableHttpStatus(res.code())) {
                 db.examDao().updateSyncStatus(id, "FAILED")
-                val message = if (res.code() in listOf(401, 403)) {
+                val body = res.body()
+                val message = body?.error?.message ?: body?.message ?: if (res.isSuccessful) {
+                    "الخادم لم يؤكد حفظ الاختبار (success=false)"
+                } else if (res.code() in listOf(401, 403)) {
                     "لا تملك صلاحية حفظ هذا الاختبار (HTTP ${res.code()})"
                 } else {
                     "رفض الخادم حفظ الاختبار بسبب بيانات غير مقبولة (HTTP ${res.code()})"
@@ -3695,7 +3700,10 @@ class TanweerRepository(
                 } else {
                     db.eventDao().updateSyncStatus(id, "FAILED")
                 }
-                val message = if (res.code() in listOf(401, 403)) {
+                val body = res.body()
+                val message = body?.error?.message ?: body?.message ?: if (res.isSuccessful) {
+                    "الخادم لم يؤكد نشر الفعالية (success=false)"
+                } else if (res.code() in listOf(401, 403)) {
                     "لا تملك صلاحية نشر هذه الفعالية (HTTP ${res.code()})"
                 } else {
                     "رفض الخادم إنشاء الفعالية بسبب بيانات غير مقبولة (HTTP ${res.code()})"
