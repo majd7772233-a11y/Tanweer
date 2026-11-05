@@ -487,7 +487,7 @@ class UnifiedMutationQueue private constructor(
                             val commentText = obj.optString("comment", "")
                             if (issueId.isNotBlank() && commentText.isNotBlank()) {
                                 val res = api.addIssueComment(issueId, com.magd.tanweer.data.remote.AddCommentRequest(id = item.entityId, comment = commentText))
-                                if (res.isSuccessful) {
+                                if (res.isSuccessful && res.body()?.success == true) {
                                     outboxDao.deleteOutbox(item.id)
                                     true
                                 } else {
@@ -719,7 +719,7 @@ class UnifiedMutationQueue private constructor(
                 // If message has exceeded 15s in SENDING, try fallback HTTP send or mark as FAILED
                 try {
                     val res = api.postGroupMessage(msg.groupId, PostMessageRequest(id = msg.id, text = msg.text))
-                    if (res.isSuccessful) {
+                    if (res.isSuccessful && res.body()?.success == true) {
                         db.chatDao().updateMessageStatus(msg.id, "SENT")
                     } else {
                         db.chatDao().updateMessageStatus(msg.id, "FAILED")
