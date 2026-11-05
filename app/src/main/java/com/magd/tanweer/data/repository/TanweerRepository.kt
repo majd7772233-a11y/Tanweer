@@ -9,7 +9,6 @@ import com.magd.tanweer.data.sync.UnifiedMutationQueue
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
 import com.magd.tanweer.util.DataGenerationPolicy
-import com.magd.tanweer.util.GroupSnapshotPolicy
 import com.magd.tanweer.util.isConfirmedServerWrite
 import com.magd.tanweer.util.ServerSnapshotReconciliation
 import kotlinx.coroutines.CoroutineScope
@@ -615,13 +614,9 @@ class TanweerRepository(
                 if (serverMyGroupIds.any { it.isBlank() } || serverMyGroupIds.toSet().size != serverMyGroupIds.size) {
                     return@withContext SyncResult.Error("أعاد الخادم قائمة مجموعات غير مكتملة أو مكررة؛ احتُفظ بالمجموعات المحلية")
                 }
-                val currentAccount = db.userDao().getUserSync()
-                val expectedDefaultGroupId = currentAccount?.defaultGroupId
-                val isStudentAccount = currentAccount?.role.equals("STUDENT", ignoreCase = true) ||
-                    currentAccount?.role.equals("MEMBER", ignoreCase = true)
-                if (isStudentAccount && !GroupSnapshotPolicy.canReplaceMemberships(expectedDefaultGroupId, serverMyGroupIds)) {
-                    return@withContext SyncResult.Error("لم يؤكد الخادم عضوية الشعبة الرئيسية لهذا الحساب؛ احتُفظ بالمجموعات والبيانات المحلية بدلاً من إخفائها")
-                }
+                // The authenticated server snapshot is authoritative for active memberships.
+                // Replacing group metadata does not delete academic caches: lesson, homework,
+                // exam, and archive data live in independent Room tables.
                 db.withTransaction {
                     db.groupDao().clearGroups()
                     if (allEntities.isNotEmpty()) db.groupDao().insertGroups(allEntities)
