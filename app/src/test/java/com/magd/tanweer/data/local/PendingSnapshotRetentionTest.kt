@@ -165,6 +165,35 @@ class PendingSnapshotRetentionTest {
     }
 
     @Test
+    fun refreshingMembershipMetadataDoesNotDeleteTheAcademicCache() = runBlocking {
+        database.groupDao().insertGroups(
+            listOf(
+                GroupEntity(
+                    id = groupId,
+                    name = "شعبة ب",
+                    type = "CLASS",
+                    description = null,
+                    icon = "🏫",
+                    role = "MEMBER",
+                    memberCount = 20
+                )
+            )
+        )
+        database.contentDao().insertContent(content("cached_lesson", "SYNCED"))
+        database.homeworkDao().insertHomework(homework("cached_homework", "SYNCED"))
+        database.examDao().insertExam(exam("cached_exam", "SYNCED"))
+
+        // A valid server membership snapshot can remove a class, but that must not
+        // delete the independent offline academic records for the former class.
+        database.groupDao().clearGroups()
+
+        assertEquals(emptyList<GroupEntity>(), database.groupDao().getMyGroupsSync())
+        assertEquals("cached_lesson", database.contentDao().getContentById("cached_lesson")?.id)
+        assertEquals("cached_homework", database.homeworkDao().getHomeworkById("cached_homework")?.id)
+        assertEquals("cached_exam", database.examDao().getExamById("cached_exam")?.id)
+    }
+
+    @Test
     fun insertingLatestServerChatHistoryKeepsOlderCachedMessagesAndConfirmsEchoes() = runBlocking {
         val olderCached = ChatMessageEntity(
             id = "older_cached_message",
