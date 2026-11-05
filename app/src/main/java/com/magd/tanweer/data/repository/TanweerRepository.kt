@@ -3719,30 +3719,29 @@ class TanweerRepository(
         if (serverGeneration.isNullOrBlank()) return@withContext false
 
         val prefs = context.getSharedPreferences("tanweer_prefs", android.content.Context.MODE_PRIVATE)
-        val lastGen = prefs.getString("data_generation", null)
+        val accountId = db.userDao().getUserSync()?.id?.takeIf { it.isNotBlank() } ?: "anonymous"
+        val serverScope = NetworkModule.apiBaseUrl.trim().trimEnd('/').lowercase(java.util.Locale.ROOT)
+        // A Staging/Production switch or a different signed-in account must never be
+        // interpreted as proof that this installation's Room database is disposable.
+        val markerKey = "data_generation|$serverScope|$accountId"
+        val previousGeneration = prefs.getString(markerKey, null)
 
-        if (lastGen.isNullOrBlank()) {
-            // This is usually an upgrade from a version that did not record data_generation.
-            // Adopt the server marker without deleting the existing Room database or logging
-            // the user out; a missing local marker is not evidence of stale or foreign data.
-            Log.i("TanweerRepo", "Initializing local data generation to $serverGeneration without purging existing user data.")
-            prefs.edit().putString("data_generation", serverGeneration).apply()
-            return@withContext false
+        if (previousGeneration.isNullOrBlank()) {
+            Log.i(
+                "TanweerRepo",
+                "Initializing generation marker for account $accountId at $serverScope; retaining all local data."
+            )
+        } else if (DataGenerationPolicy.hasChanged(previousGeneration, serverGeneration)) {
+            Log.w(
+                "TanweerRepo",
+                "Server generation changed from $previousGeneration to $serverGeneration for account $accountId. " +
+                    "Keeping Room, notebook files, auth session, and pending outbox; the next server snapshot will reconcile data."
+            )
         }
 
-        if (DataGenerationPolicy.shouldPurgeLocalCache(lastGen, serverGeneration)) {
-            Log.w("TanweerRepo", "Server data generation explicitly changed from $lastGen to $serverGeneration. Purging local data.")
-            return@withContext try {
-                db.clearAllTables()
-                NetworkModule.setAuthToken(null)
-                prefs.edit().putString("data_generation", serverGeneration).apply()
-                true
-            } catch (e: Exception) {
-                Log.e("TanweerRepo", "Error clearing tables on explicit data generation change", e)
-                false
-            }
-        }
-
+        // Generation values are synchronization metadata only. They must never trigger
+        // clearAllTables(), token removal, logout, or deletion of pending mutations.
+        prefs.edit().putString(markerKey, serverGeneration).apply()
         false
     }
 
