@@ -529,10 +529,22 @@ private fun DrawScope.drawPageCurlEffect(
         }
         canvas.clipPath(clipPath)
 
+        // Use the same aspect-fit bounds as the resting page. Stretching
+        // the bitmap to the whole viewport here made pages look abnormally
+        // tall during the curl animation, even though the static page was correct.
+        val pageScale = minOf(
+            width / imageBitmap.width.toFloat(),
+            height / imageBitmap.height.toFloat()
+        )
+        val pageWidth = (imageBitmap.width * pageScale).toInt().coerceAtLeast(1)
+        val pageHeight = (imageBitmap.height * pageScale).toInt().coerceAtLeast(1)
+        val pageLeft = ((width - pageWidth) / 2f).toInt()
+        val pageTop = ((height - pageHeight) / 2f).toInt()
+
         drawImage(
             image = imageBitmap,
-            dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
-            dstSize = androidx.compose.ui.unit.IntSize(width.toInt(), height.toInt())
+            dstOffset = androidx.compose.ui.unit.IntOffset(pageLeft, pageTop),
+            dstSize = androidx.compose.ui.unit.IntSize(pageWidth, pageHeight)
         )
 
         // Draw page strokes deformed/clipped synchronously with the curled paper
