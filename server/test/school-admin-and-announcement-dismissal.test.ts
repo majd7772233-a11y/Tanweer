@@ -39,10 +39,10 @@ class SchoolAdminAndAnnouncementDb {
     { id: 'teacher-1', role: 'TEACHER', status: 'ACTIVE', grade_id: 10, section_id: 'B' },
   ];
   members = [
-    { group_id: 'class_10_B', user_id: 'student-1', status: 'ACTIVE' },
-    { group_id: 'class_10_B', user_id: 'teacher-1', status: 'ACTIVE' },
-    { group_id: 'class_10_B', user_id: 'student-a', status: 'ACTIVE' },
-    { group_id: 'class_10_B', user_id: 'student-b', status: 'ACTIVE' },
+    { group_id: 'class_10_B', user_id: 'student-1', role: 'MEMBER', status: 'ACTIVE' },
+    { group_id: 'class_10_B', user_id: 'teacher-1', role: 'TEACHER', status: 'ACTIVE' },
+    { group_id: 'class_10_B', user_id: 'student-a', role: 'STUDENT', status: 'ACTIVE' },
+    { group_id: 'class_10_B', user_id: 'student-b', role: 'STUDENT', status: 'ACTIVE' },
   ];
   sessions = [
     { user_id: 'student-1', device_id: 'phone-a' },
@@ -78,6 +78,24 @@ class SchoolAdminAndAnnouncementDb {
       },
       async first<T = unknown>(): Promise<T | null> {
         db.statements.push(normalized);
+        if (normalized.includes('SELECT MAX(CASE') && normalized.includes('FROM users u')) {
+          const target = db.users.find(user => user.id === params[0]);
+          if (!target) return null;
+          const rank = (role: string) => {
+            switch (role.toUpperCase()) {
+              case 'ADMIN':
+              case 'ADMINISTRATOR': return 4;
+              case 'TEACHER':
+              case 'VERIFIED_TEACHER': return 3;
+              case 'MODERATOR': return 2;
+              default: return 1;
+            }
+          };
+          const membershipRanks = db.members
+            .filter(member => member.user_id === target.id && member.status === 'ACTIVE')
+            .map(member => rank(member.role));
+          return { role_rank: Math.max(rank(target.role), ...membershipRanks, 1) } as T;
+        }
         if (normalized.includes("COALESCE(status, 'ACTIVE') AS status FROM users")) {
           const row = db.users.find(user => user.id === params[0]);
           return row ? { id: row.id, role: row.role, status: row.status } as T : null;
