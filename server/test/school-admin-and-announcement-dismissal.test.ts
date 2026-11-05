@@ -41,6 +41,8 @@ class SchoolAdminAndAnnouncementDb {
   members = [
     { group_id: 'class_10_B', user_id: 'student-1', status: 'ACTIVE' },
     { group_id: 'class_10_B', user_id: 'teacher-1', status: 'ACTIVE' },
+    { group_id: 'class_10_B', user_id: 'student-a', status: 'ACTIVE' },
+    { group_id: 'class_10_B', user_id: 'student-b', status: 'ACTIVE' },
   ];
   sessions = [
     { user_id: 'student-1', device_id: 'phone-a' },
