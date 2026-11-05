@@ -334,7 +334,7 @@ fun ExamsScreen(
                                     modifier = Modifier.size(30.dp)
                                 )
                                 Text(
-                                    text = "لا توجد اختبارات مسجلة في ${getArabicMonthTitle(selectedMonthFilter)}",
+                                    text = "لا توجد اختبارات مسجلة في ${getArabicMonthTitle(selectedMonthFilter.orEmpty())}",
                                     fontSize = tanweerTextSize(13f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary,
