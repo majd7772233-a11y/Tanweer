@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,6 +37,7 @@ import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -43,6 +45,7 @@ import java.util.*
 fun HomeScreen(
     viewModel: TanweerViewModel
 ) {
+    val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     var activeViewingContent by remember { mutableStateOf<ContentItem?>(null) }
@@ -480,12 +483,34 @@ fun HomeScreen(
                         schoolAnnouncements.forEachIndexed { index, announcement ->
                             if (index > 0) HorizontalDivider(color = GlassBorderSubtle, thickness = 0.5.dp)
                             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text(
-                                    text = announcement.title,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = announcement.title,
+                                        modifier = Modifier.weight(1f),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            viewModel.dismissSchoolAnnouncement(announcement.id) { success, message ->
+                                                if (!success) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        modifier = Modifier.size(26.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "إخفاء التعميم من حسابي",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
                                 if (!announcement.description.isNullOrBlank()) {
                                     Text(
                                         text = announcement.description,
