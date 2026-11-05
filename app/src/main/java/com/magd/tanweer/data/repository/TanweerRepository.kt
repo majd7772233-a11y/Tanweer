@@ -3696,6 +3696,21 @@ class TanweerRepository(
         }
     }
 
+    suspend fun dismissSchoolAnnouncement(eventId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.dismissSchoolAnnouncement(eventId)
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true) {
+                // Remove only this local copy after the server confirms the account-scoped dismissal.
+                db.eventDao().deleteEventById(eventId)
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(body?.error?.message ?: body?.message ?: "تعذر إخفاء التعميم من حسابك"))
+            }
+        } catch (error: Exception) {
+            Result.failure(Exception(error.localizedMessage ?: "تعذر الاتصال بالخادم لإخفاء التعميم"))
+        }
+    }
     suspend fun createHoliday(
         groupId: String,
         eventDate: String,
