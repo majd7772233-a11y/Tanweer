@@ -2784,7 +2784,7 @@ class TanweerRepository(
                     val reqFile = page.file.asRequestBody("image/jpeg".toMediaTypeOrNull())
                     val part = MultipartBody.Part.createFormData("file", "page_${index + 1}_${page.file.name}", reqFile)
                     val uploadRes = api.uploadMedia(part)
-                    if (uploadRes.isSuccessful && uploadRes.body() != null) {
+                    if (uploadRes.isSuccessful && uploadRes.body()?.success == true) {
                         val body = uploadRes.body()!!
                         remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
                             if (rel.startsWith("http")) rel else NetworkModule.resolveApiUrl(rel)
@@ -2841,7 +2841,7 @@ class TanweerRepository(
                     media = uploadedMediaItems
                 )
             )
-            if (res.isSuccessful) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val body = res.body()
                 val serverId = body?.contentId ?: body?.id
                 if (body?.isDuplicate == true && serverId != null && serverId != id) {
@@ -2905,7 +2905,7 @@ class TanweerRepository(
                         val reqFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
                         val part = MultipartBody.Part.createFormData("file", "retry_${file.name}", reqFile)
                         val uploadRes = api.uploadMedia(part)
-                        if (uploadRes.isSuccessful && uploadRes.body() != null) {
+                        if (uploadRes.isSuccessful && uploadRes.body()?.success == true) {
                             val body = uploadRes.body()!!
                             val remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
                                 if (rel.startsWith("http")) rel else NetworkModule.resolveApiUrl(rel)
@@ -2951,7 +2951,7 @@ class TanweerRepository(
                     media = updatedMediaItems
                 )
             )
-            if (res.isSuccessful) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val body = res.body()
                 if (body?.isDuplicate == true && body.contentId != null && body.contentId != contentId) {
                     db.contentDao().deleteContentById(contentId)
@@ -3044,7 +3044,7 @@ class TanweerRepository(
                     isOfficial = isOfficial
                 )
             )
-            if (res.isSuccessful) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val serverId = res.body()?.homeworkId ?: res.body()?.id
                 if (serverId != null && serverId != id) {
                     val updatedEntity = entity.copy(id = serverId, syncStatus = "SYNCED")
@@ -3137,7 +3137,7 @@ class TanweerRepository(
                     val reqFile = page.file.asRequestBody("image/jpeg".toMediaTypeOrNull())
                     val part = MultipartBody.Part.createFormData("file", "hw_${index + 1}_${page.file.name}", reqFile)
                     val uploadRes = api.uploadMedia(part)
-                    if (uploadRes.isSuccessful && uploadRes.body() != null) {
+                    if (uploadRes.isSuccessful && uploadRes.body()?.success == true) {
                         val body = uploadRes.body()!!
                         remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
                             if (rel.startsWith("http")) rel else NetworkModule.resolveApiUrl(rel)
@@ -3183,7 +3183,7 @@ class TanweerRepository(
                     isOfficial = isOfficial
                 )
             )
-            if (res.isSuccessful) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val serverId = res.body()?.homeworkId ?: res.body()?.id
                 val finalId = if (serverId != null && serverId != id) {
                     val updatedEntity = entity.copy(
@@ -3261,7 +3261,7 @@ class TanweerRepository(
                         val reqFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
                         val part = MultipartBody.Part.createFormData("file", "retry_hw_${file.name}", reqFile)
                         val uploadRes = api.uploadMedia(part)
-                        if (uploadRes.isSuccessful && uploadRes.body() != null) {
+                        if (uploadRes.isSuccessful && uploadRes.body()?.success == true) {
                             val body = uploadRes.body()!!
                             val remoteUrl = body.url ?: body.relativeUrl?.let { rel ->
                                 if (rel.startsWith("http")) rel else NetworkModule.resolveApiUrl(rel)
@@ -3316,7 +3316,7 @@ class TanweerRepository(
                     isOfficial = hw.isOfficial
                 )
             )
-            if (res.isSuccessful) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val serverId = res.body()?.homeworkId ?: res.body()?.id
                 if (serverId != null && serverId != hw.id) {
                     val updated = hw.copy(
@@ -3486,7 +3486,7 @@ class TanweerRepository(
                     isOfficial = isOfficial
                 )
             )
-            if (res.isSuccessful) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val serverId = res.body()?.examId ?: res.body()?.id
                 if (serverId != null && serverId != id) {
                     val updatedEntity = entity.copy(id = serverId, syncStatus = "SYNCED")
@@ -3669,7 +3669,7 @@ class TanweerRepository(
                     location = location
                 )
             )
-            if (res.isSuccessful) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val serverId = res.body()?.eventId ?: res.body()?.id
                 if (serverId != null && serverId != id) {
                     val updatedEntity = entity.copy(id = serverId, syncStatus = "SYNCED")
