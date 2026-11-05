@@ -174,7 +174,7 @@ fun PdfReaderScreen(
                         override fun onStart(utteranceId: String?) {
                             coroutineScope.launch {
                                 val requestId = activeSpeechRequestId
-                                if (requestId != null && utteranceId?.startsWith("${requestId}:") == true) {
+                                if (requestId != null && (utteranceId == requestId || utteranceId?.startsWith("${requestId}:") == true)) {
                                     isAudioPlaying = true
                                 }
                             }
@@ -193,7 +193,7 @@ fun PdfReaderScreen(
                         override fun onError(utteranceId: String?) {
                             coroutineScope.launch {
                                 val requestId = activeSpeechRequestId
-                                if (requestId != null && utteranceId?.startsWith("${requestId}:") == true) {
+                                if (requestId != null && (utteranceId == requestId || utteranceId?.startsWith("${requestId}:") == true)) {
                                     tts?.stop()
                                     isAudioPlaying = false
                                     activeSpeechRequestId = null
@@ -205,7 +205,7 @@ fun PdfReaderScreen(
                         override fun onStop(utteranceId: String?, interrupted: Boolean) {
                             coroutineScope.launch {
                                 val requestId = activeSpeechRequestId
-                                if (requestId != null && utteranceId?.startsWith("${requestId}:") == true) {
+                                if (requestId != null && (utteranceId == requestId || utteranceId?.startsWith("${requestId}:") == true)) {
                                     isAudioPlaying = false
                                     activeSpeechRequestId = null
                                     activeSpeechFinalUtteranceId = null
@@ -430,6 +430,8 @@ fun PdfReaderScreen(
         }
 
         if (audioReadMode == AudioReadMode.BOOK_TEXT) {
+            // Stop the previous page immediately; extraction for this page may take time.
+            stopAudioPlayback()
             val requestedPageIndex = currentPageIndex
             coroutineScope.launch {
                 isExtractingAudioText = true
