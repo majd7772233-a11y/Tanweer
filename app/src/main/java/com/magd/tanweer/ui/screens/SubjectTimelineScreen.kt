@@ -164,13 +164,13 @@ fun SubjectTimelineScreen(
                     Column {
                         Text(
                             text = "🗺️ رحلة المادة والخط الزمني",
-                            fontSize = 18.sp,
+                            fontSize = tanweerTextSize(18f),
                             fontWeight = FontWeight.Black,
                             color = CyanAccent
                         )
                         Text(
                             text = "التسلسل الزمني الكامل للدروس والواجبات والاختبارات",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary
                         )
                     }
@@ -209,10 +209,10 @@ fun SubjectTimelineScreen(
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(text = subj.icon, fontSize = 16.sp)
+                            Text(text = subj.icon, fontSize = tanweerTextSize(16f))
                             Text(
                                 text = subj.name,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) CyanAccent else TextPrimary,
                                 maxLines = 1,
@@ -237,18 +237,18 @@ fun SubjectTimelineScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(selectedSubject.icon, fontSize = 24.sp)
+                        Text(selectedSubject.icon, fontSize = tanweerTextSize(24f))
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
                                 text = selectedSubject.name,
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             Text(
                                 text = "${subjectContents.size} دروس • ${homeworks.filter { it.subjectId == selectedSubject.id }.size} واجبات • ${exams.filter { it.subjectId == selectedSubject.id }.size} اختبارات",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                         }
@@ -328,7 +328,7 @@ fun SubjectTimelineScreen(
                             ) {
                                 Text(
                                     text = event.title,
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
@@ -352,7 +352,7 @@ fun SubjectTimelineScreen(
                             }
                             Text(
                                 text = event.description,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextSecondary,
                                 modifier = Modifier.padding(top = 4.dp)
                             )
@@ -365,12 +365,12 @@ fun SubjectTimelineScreen(
                             ) {
                                 Text(
                                     text = "بواسطة: ${event.author}",
-                                    fontSize = 10.sp,
+                                    fontSize = tanweerTextSize(10f),
                                     color = TextMuted
                                 )
                                 Text(
                                     text = event.formattedDate,
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = if (isToday) CyanAccent else TextSecondary,
                                     fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal
                                 )
