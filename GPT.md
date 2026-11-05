@@ -1842,8 +1842,8 @@ When giving the user a statement about the current state, re-read GitHub if it m
 ### Data-loss / sync safety
 - Confirmed read-only aggregate counts still exist in Production D1: users 12, group_members 12, contents 9, homeworks 3, exams 5, events 2, issues 2, media_blobs 11. No records were fetched by name, and no D1 rows were written.
 - Server data-generation metadata is now a refresh signal only. Android stores the marker per API origin + account ID; a generation mismatch cannot call `clearAllTables()`, clear the auth token, or remove notebook data/outbox entries.
-- A student group snapshot is rejected as incomplete when it omits the current account's server-confirmed default class, contains blank IDs, or has duplicate membership IDs. The previous local groups remain intact.
-- Lesson/homework/exam/event create and retry paths, and all lesson/homework media upload/retry paths, now require HTTP success plus response `success: true` before marking an item `SYNCED`. Added focused Android regression tests for generation handling, safe group snapshots, and application-level write confirmation.
+- A valid authenticated group-membership snapshot is authoritative, so removing a student from a class is reflected in the group list. The reconciliation only replaces group metadata; lesson, homework, exam, event, notebook and archive records live in separate Room tables and are not cleared by this operation. Blank or duplicate group IDs still cause the snapshot to be rejected.
+- Lesson/homework/exam/event create and retry paths, and all lesson/homework media upload/retry paths, now require HTTP success plus response `success: true` before marking an item `SYNCED`. Android regression tests cover generation markers, application-level write confirmation, and retention of cached academic records when group membership metadata changes.
 
 ### School Admin
 - Replaced the overloaded dashboard with one compact screen: D1-backed school counters, searchable student directory, explicit loading/error states, official school announcement composer, and two verified student actions.
@@ -1870,3 +1870,10 @@ When giving the user a statement about the current state, re-read GitHub if it m
 ### Remaining batches
 - Batch 2: re-engineer the PDF reader and study-tools hub, retain the acceptable page-turn animation, correct excess page height, isolate two-finger pinch zoom from one-finger page navigation, fix reader text extraction/rendering, ruler overlay and close control, focus audio, responsive tool cards, system-bar and bottom-navigation insets.
 - Batch 3: unify typography around the app's 12/14/16 settings with modest title emphasis; monthly exam calendars and unique subject/month exams while leaving midterm/final and random oral behavior intact; direct schedule editing plus immediate server sync; sync on startup and entering each section; clickable timeline/archive lesson/homework navigation; dynamic academic year history; and groups/clubs card, messaging, visibility and join-reason fixes.
+
+
+### Membership-snapshot design review correction (2026-11-05)
+- Removed the default-class gate from `syncGroups()`: it could have blocked a legitimate school-admin class removal and preserved a stale active-group entry. A successful authenticated group list is now the source of truth for current memberships.
+- The data-loss protection remains at the correct boundary: `syncGroups()` only replaces `cached_groups`; it does not clear the independent lesson/homework/exam/event tables or notebook files. Added a Robolectric Room regression test proving cached lesson, homework and exam rows survive membership metadata refresh.
+- Retained malformed snapshot protection for blank or duplicate group IDs.
+- Correction commits: `fdbcd1d450dd55e7c06b72de6f03cc0a234c609d`, `02b7be6a90c07223b4c4af3af34903d392d43559`, `753639831de2436daab1f98821f3a9a4c02dd90f`, `dfc4335190182a71b9422e8531742e272f11c019`.
