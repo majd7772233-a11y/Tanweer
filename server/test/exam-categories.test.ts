@@ -24,11 +24,12 @@ type StoredExam = {
 
 class MonthlyExamDb {
   exams: StoredExam[] = [];
+  skipNextDuplicatePreflight = false;
 
   prepare(sql: string) {
     const db = this;
     let params: unknown[] = [];
-    const normalized = sql.trim().replace(/\\s+/g, ' ');
+    const normalized = sql.trim().replace(/\s+/g, ' ');
     const statement = {
       bind(...values: unknown[]) {
         params = values;
@@ -52,6 +53,10 @@ class MonthlyExamDb {
         }
 
         if (normalized.startsWith('SELECT id FROM exams')) {
+          if (db.skipNextDuplicatePreflight) {
+            db.skipNextDuplicatePreflight = false;
+            return null;
+          }
           const [groupId, subjectId, monthKey] = params.map(String);
           const duplicate = db.exams.find(exam =>
             exam.group_id === groupId &&
@@ -205,6 +210,7 @@ describe('Supported school exam categories', () => {
 
   it('converts a concurrent database uniqueness rejection into a useful conflict response', async () => {
     const db = new MonthlyExamDb();
+    db.skipNextDuplicatePreflight = true;
     db.exams.push({
       id: 'existing-monthly',
       group_id: 'class_10_A',
