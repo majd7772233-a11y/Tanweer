@@ -103,7 +103,7 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
     const monthKey = examDate.slice(0, 7);
     const duplicate = await env.DB.prepare(
       `SELECT id FROM exams
-       WHERE group_id = ? AND subject_id = ? AND exam_type = 'MONTHLY'
+       WHERE group_id = ? AND subject_id = ? AND exam_type IN ('MONTHLY', 'QUIZ')
          AND substr(exam_date, 1, 7) = ?
        LIMIT 1`
     ).bind(body.groupId, body.subjectId, monthKey).first<{ id: string }>();
@@ -228,7 +228,7 @@ export async function handleUpdateExam(
   if (targetExamType === 'MONTHLY') {
     const duplicate = await env.DB.prepare(
       `SELECT id FROM exams
-       WHERE group_id = ? AND subject_id = ? AND exam_type = 'MONTHLY'
+       WHERE group_id = ? AND subject_id = ? AND exam_type IN ('MONTHLY', 'QUIZ')
          AND substr(exam_date, 1, 7) = ? AND id <> ?
        LIMIT 1`
     ).bind(exam.group_id, targetSubjectId, targetExamDate.slice(0, 7), examId).first<{ id: string }>();
