@@ -2056,6 +2056,36 @@ class TanweerRepository(
         }
     }
  
+    suspend fun updateSchoolStudentStatus(userId: String, status: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.updateSchoolStudentStatus(
+                userId,
+                com.magd.tanweer.data.model.UpdateStudentStatusRequest(status = status)
+            )
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true) {
+                Result.success(body.message ?: "تم تحديث حالة حساب الطالب")
+            } else {
+                Result.failure(Exception(body?.error?.message ?: body?.message ?: "تعذر تحديث حالة حساب الطالب (HTTP ${response.code()})"))
+            }
+        } catch (error: Exception) {
+            Result.failure(Exception(error.localizedMessage ?: "تعذر الاتصال بالخادم لتحديث الحساب"))
+        }
+    }
+
+    suspend fun removeSchoolStudentFromClass(userId: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.removeSchoolStudentFromClass(userId)
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true) {
+                Result.success(body.message ?: "تم فصل الطالب من شعبته")
+            } else {
+                Result.failure(Exception(body?.error?.message ?: body?.message ?: "تعذر فصل الطالب من شعبته (HTTP ${response.code()})"))
+            }
+        } catch (error: Exception) {
+            Result.failure(Exception(error.localizedMessage ?: "تعذر الاتصال بالخادم لفصل الطالب"))
+        }
+    }
     suspend fun getMyNotifications(): Result<List<com.magd.tanweer.data.model.AppNotification>> = withContext(Dispatchers.IO) {
         try {
             val res = api.getMyNotifications()
