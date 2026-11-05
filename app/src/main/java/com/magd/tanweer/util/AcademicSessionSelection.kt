@@ -57,3 +57,19 @@ internal object DataGenerationPolicy {
         return previousGeneration != serverGeneration
     }
 }
+
+/**
+ * A server group snapshot may replace the cached memberships only when it still
+ * contains the account's server-confirmed default class. A missing default class
+ * is treated as an incomplete/changed snapshot, not as permission to erase the
+ * local navigation state and make every section appear empty.
+ */
+internal object GroupSnapshotPolicy {
+    fun canReplaceMemberships(
+        expectedDefaultGroupId: String?,
+        serverGroupIds: Collection<String>
+    ): Boolean {
+        val expected = expectedDefaultGroupId?.trim()?.takeIf { it.isNotEmpty() } ?: return true
+        return serverGroupIds.any { it == expected }
+    }
+}
