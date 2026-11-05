@@ -403,11 +403,11 @@ fun PdfReaderScreen(
                     val maxLen = 3000
                     val chunks = pageText.chunked(maxLen)
                     var acceptedAllChunks = true
-                    chunks.forEachIndexed { idx, chunk ->
+                    for ((idx, chunk) in chunks.withIndex()) {
                         val queueMode = if (idx == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
                         if (!enqueueSpeech(chunk, queueMode, "page_${currentPageIndex}_$idx")) {
                             acceptedAllChunks = false
-                            return@forEachIndexed
+                            break
                         }
                     }
                     if (!acceptedAllChunks) {
