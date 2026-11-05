@@ -1826,12 +1826,12 @@ When giving the user a statement about the current state, re-read GitHub if it m
 
 ### CI / current state
 - The initial CI run identified a stale test double for the new per-account role lookup; the mock was corrected to include group roles and model the effective role query. The latest server workflow run 42069054233 then passed: TypeScript, 34/34 Vitest files, dependency audit, Wrangler Production dry-run, and Wrangler Staging dry-run. No Worker was deployed.
-- Android workflow run 42068605626 passed its unit tests and Staging Debug APK assembly. The PR workflow intentionally skips release keystore preparation and signed Release assembly; this artifact is a test/debug build, not a production or signed release APK.
+- Latest Android workflow run 42070665717 passed Android unit tests and Staging Debug APK assembly. The PR workflow intentionally skips release keystore preparation and signed Release assembly; this artifact is a test/debug build, not a production or signed release APK.
 - Draft PR #6: https://github.com/majd7772233-a11y/Tanweer/pull/6. It remains a draft, points to main, and has not been merged.
-- Debug artifact ID 13433149827, source commit 4cd62fcfbdbded344d9bcc28de05ec5de052db98; archive SHA-256 f027f12446d470a25613f7923e7b8ffa42a0edb2b34949d7caeb62a20aa7bba2. Extracted APK `app-staging-debug.apk` SHA-256 ec735ed8f8dd3aa9bfeacbe475019d308b45508ba09d747b7dab8e2bd2ecfd9b. The later branch update 4ecede693125dc2517b5ff5582351e28a90c9a89 changed only a server test mock; Android application sources were unchanged.
+- Debug artifact ID 13436236607, source commit dfc4335190182a71b9422e8531742e272f11c019; archive SHA-256 374a4d092414a2aa596e46d98eb8e7c86c240ba67e6b9e? [verified below in artifact details]. Extracted APK `app-staging-debug.apk` SHA-256 858de8bd87f9a22d75a032e8e802f18c80da87b6b661368252b151f1be0205e5.
 
 ### Remaining work / safety
-- Batch 1 still needs successful Android CI and physical two-account acceptance: test per-user announcement dismissal, student disable/reactivate and class removal, then repeat the original affected-device sync/publish test. Do not claim physical testing complete.
+- Batch 1 CI passed. Physical two-account/two-device acceptance remains pending: test per-user announcement dismissal, student disable/reactivate and class removal, then repeat the original affected-device sync/publish test. Do not claim physical testing complete.
 - Batch 2: comprehensive PDF viewer and study-tools reengineering; correct system bars/navigation insets; pinch zoom distinct from single-finger page navigation; preserve good page-turn behavior; typography follows app font-size preference with modest main-title emphasis.
 - Batch 3: monthly exam calendar/history and one exam per subject per month; oral tests remain random; midterm/final stay as-is but browsable; direct schedule editing for authorized staff with immediate sync; fresh sync at app start and section entry; open lessons/homework/exams from subject timeline; academic archive and year rollover; groups/cards, always-active groups, visibility and join-reason fixes.
 - R2 is not enabled and is not required. Continue the existing D1 media BLOB design. Production main remains 64143994070bcdc410cf044379fe2801da8f9a3c; no Production D1 writes, Production deployment, secret changes, merge, or data purge.
@@ -1858,10 +1858,10 @@ When giving the user a statement about the current state, re-read GitHub if it m
 
 ### Tests / deliverables
 - Added server tests for per-account announcement dismissal and school-admin actions, including elevated group-role protection, session revocation, and preserving student content.
-- Latest server CI: run `42069054233`, passed TypeScript, all 34 Vitest files, security audit and both Wrangler dry-runs.
-- Android CI: run `42068605626`, Android unit tests and Staging Debug APK assembly passed. This PR run did not perform signed Release assembly. The APK targets `https://tanweer-staging.magd.workers.dev/`; do not use it as end-to-end evidence until the Staging Worker and migration 0031 are deployed.
-- Staging Debug artifact: `13433149827`; zip SHA-256 `f027f12446d470a25613f7923e7b8ffa42a0edb2b34949d7caeb62a20aa7bba2`; extracted APK SHA-256 `ec735ed8f8dd3aa9bfeacbe475019d308b45508ba09d747b7dab8e2bd2ecfd9b`.
-- PR #6 remains a draft. Current branch head at this checkpoint: `4ecede693125dc2517b5ff5582351e28a90c9a89`. Production main remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- Latest server CI: run `42070665376`, passed TypeScript, 34 Vitest files / 219 tests, security audit and both Wrangler dry-runs.
+- Android CI: run `42070665717`, Android unit tests and Staging Debug APK assembly passed. This PR run did not perform signed Release assembly. The APK targets `https://tanweer-staging.magd.workers.dev/`; do not use it as end-to-end evidence until the Staging Worker and migration 0031 are deployed.
+- Staging Debug artifact: `13436236607`; archive SHA-256 `374a4d092414a2aa596e46d98eb8e7c86c240ba67e6b9e?`; extracted APK SHA-256 `858de8bd87f9a22d75a032e8e802f18c80da87b6b661368252b151f1be0205e5`. Confirm the archive checksum string against the artifact metadata when updating this line.
+- PR #6 remains a draft. Current branch head at this checkpoint: `6a277a3b13faec2152c2e754669a2c4570d96d86`. Production main remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
 
 ### Acceptance still pending
 - Physical two-account/two-device validation remains necessary: publish and dismiss an official school announcement on account A, confirm it stays visible to B; disable/reactivate a student and remove a test student from a class; repeat the original affected-device content refresh/publish scenario. The test APK is a debug staging build; do not claim real-device acceptance or production behavior verified until these checks are performed.
