@@ -1790,3 +1790,48 @@ When giving the user a statement about the current state, re-read GitHub if it m
 ### Remaining real-device acceptance
 - The CI run validates Kotlin unit tests and the signed APK, but it does not emulate two separate authenticated student accounts. Still verify on two Staging devices/accounts: publish a multi-page lesson from account A, open it from account B while both are active members of the same group, and open/download pages. Also verify a non-member remains denied (expected 403, not 401). Do not describe this physical cross-account test as complete until performed.
 - Production `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; no merge, Production deployment, Production D1 write, secret change, or data purge occurred.
+
+
+## Batch 6 — Protect local data, truthful publishing, compact School Admin, and per-user announcements (2026-11-05)
+
+### Data loss root cause and fix
+- Found a destructive Android startup path: any mismatch between the single global SharedPreferences data_generation marker and the Worker value called clearAllTables(), cleared the auth token, and triggered ViewModel logout. This could erase Room cache/outbox when switching API environment or account.
+- Generation markers are now namespaced by normalized API origin and signed-in account id. A generation change is only a refresh signal; it never clears Room, the outbox, notebook files, token, or session. Explicit user logout remains the only normal local full-clear path.
+- Added Android regression tests for missing and changed generation markers. Profile endpoint now returns defaultGroupId, which Android sync previously expected but the response omitted.
+
+### Publishing confirmation fix
+- Lesson, homework (with or without pages), exam, and event create/retry paths now require HTTP success plus explicit response success=true before marking rows SYNCED or showing a published confirmation.
+- All four media upload/retry locations require upload response success=true and a returned remote URL; local file paths are never treated as remote uploads.
+- Unified outbox replay now applies the same confirmation to queued exams, events, issues, comments, corrections, schedule slot creates, and chat. Server error/message content is shown on rejected writes; false success flags are not acknowledged.
+
+### Compact school-admin dashboard
+- Replaced the broad multi-tab screen with a focused dashboard: actual server statistics, searchable school-wide student directory, school announcement publishing, account status actions, and class membership removal.
+- Dashboard model success now defaults to false; repository and ViewModel require explicit success=true. Errors clear stale dashboard data and are shown as errors.
+- New admin-only handlers disable/reactivate student accounts (disabling revokes that student's sessions) and remove only the student's current class membership. They refuse to modify staff/admin/owner roles and preserve the account and academic contributions.
+- The screen explicitly shows returned students versus total students when the API list is capped.
+
+### Per-account school-announcement dismissal
+- Added migration 0031 user_dismissed_school_announcements and POST /api/v1/events/{eventId}/dismiss.
+- Dismissal is stored by user_id + event_id. The shared school event is not edited or deleted; only the dismissing account is excluded from subsequent event snapshots.
+- Home screen has a small X per announcement; its local card disappears only after the server confirms the dismissal. Other students retain the card.
+
+### Main commits in this batch
+- 80cfed7b5db9ac0143272cce09ae24e2a6917ac1, f2b109ab242458e22a571f22e2af600cc73c47c4, 35e009754ddb955c568a88650be45b2ae4146cb1 — non-destructive generation policy, account/origin scoping, Android tests.
+- 268ac5d93747952de6f03e744a7557b440d20d1e, f549f1bc8b4c0ae329ff92e561b6e4de16373233, a17a104801f3936300eeee8e36050479895a4773 — per-user dismissal migration, event service, router.
+- 543fb65a931f661239a70c4dc99c43d62ca2ccbb, ad9df4d6a7ea75dbe1d87c4d15853070112409cd, 5953286851b40f335050f323c00a018eb00845a8, 4b9e087c8c9c1c14b05778e71ab9c4f4acded71e — Android dismissal API, repository, ViewModel, Home UI.
+- 5e35c4321e6a1dbb733f96bd991442cac2eceb71, f18d7f87a44618553178783bacee1d7a2da33be6, 1e0f9ff8e48b1e141f7ae3020356c0c99c438592, 41e4c64a6808fa90ea52963892ba0a26371e801f, 01c0b824b4e6731e0e690df267e78e1ed8d705c9, 8e9e880ff8e554d15187ce4c281bbaa423636aaf — safe server/API/Android student-admin actions.
+- 277c01e3a0a84ca9efed4b762bfa6ea18ba20a5d, cfe0e5481484bb165b2f01bebe5f68334b8e0376, 2abef4b2dfdc869bbc149f243ac783a840390f54, f8addcc777c18009d9dddad91ee479dca929b115, 6de9f2198f71a3dcb69c9b824e79abe5859c33b5 — truthful dashboard state and compact UI.
+- f4ce0680cee3184065121cb786c44f21defd81a1, 1957697a9aa53373268ae2c41efb57cad3b1d4e1, 5222bea62ab2a5d4e9e0723f18527fa23615eeaa, 28807457f64473e7e127f2112999b7aca10680bf, 360ff6b52d1a606879f1ad72b55fceb0f30674be — direct and queued publish confirmation fixes.
+- 16c3969beb44ea6ae8f998b13e92e8bb3442dbc3, b2949e64aa4485668645c82be8a576ee2b829a4d, 279a2c93c287eb08254c27b4efb64f4fdfb64c35 — new server regression tests and test mock correction.
+
+### CI / current state
+- Server TypeScript passed. Initial Vitest run found one test-mock issue: the fake D1 did not recognize the group-membership SELECT used by handleGetEvents. Corrected the mock; all tests then passed.
+- Latest server PR workflow run 42059269717 succeeded at commit 360ff6b52d1a606879f1ad72b55fceb0f30674be. Wrangler production and Staging dry-run steps passed; no deployment occurred.
+- Draft PR #6 was opened only to trigger PR validation: https://github.com/majd7772233-a11y/Tanweer/pull/6. It remains a draft and has not been merged.
+- Android PR build/unit tests are still running at this checkpoint; record the final build result and artifact details after completion.
+
+### Remaining work / safety
+- Batch 1 still needs successful Android CI and physical two-account acceptance: test per-user announcement dismissal, student disable/reactivate and class removal, then repeat the original affected-device sync/publish test. Do not claim physical testing complete.
+- Batch 2: comprehensive PDF viewer and study-tools reengineering; correct system bars/navigation insets; pinch zoom distinct from single-finger page navigation; preserve good page-turn behavior; typography follows app font-size preference with modest main-title emphasis.
+- Batch 3: monthly exam calendar/history and one exam per subject per month; oral tests remain random; midterm/final stay as-is but browsable; direct schedule editing for authorized staff with immediate sync; fresh sync at app start and section entry; open lessons/homework/exams from subject timeline; academic archive and year rollover; groups/cards, always-active groups, visibility and join-reason fixes.
+- R2 is not enabled and is not required. Continue the existing D1 media BLOB design. Production main remains 64143994070bcdc410cf044379fe2801da8f9a3c; no Production D1 writes, Production deployment, secret changes, merge, or data purge.
