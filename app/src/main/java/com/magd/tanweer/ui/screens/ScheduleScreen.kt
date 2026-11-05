@@ -228,7 +228,6 @@ fun ScheduleScreen(
                                 Text(
                                     text = if (allSlots.isEmpty()) "🌟 المساهمة في بناء الجدول"
                                            else if (isStaffWithDirectEdit) "🛠️ تحرير مباشر (معلم / إدارة)"
-                                           else if (isStaffWithDirectEdit) "🛠️ تحرير مباشر (معلم / إدارة)"
                                            else "👁️ جدول الشعبة التشاركي",
                                     fontSize = tanweerTextSize(13f),
                                     fontWeight = FontWeight.Bold,
@@ -242,8 +241,7 @@ fun ScheduleScreen(
                             }
                             Text(
                                 text = if (allSlots.isEmpty()) "الجدول غير معبأ بعد: يمكن لجميع الطلاب والمعلمين إدخال الحصص الأولى مباشرة!"
-                                       else if (isStaffWithDirectEdit) "وضع التحرير المباشر مفعل: تعديلاتك على أي حصة تُحفظ مباشرة في الخادم دون تصويت."
-                                       else if (isStaffWithDirectEdit) "بصفتك معلماً أو مديراً، اضغط على أي حصة لتعديلها مباشرة؛ وتتم مزامنة التعديل بعد حفظه."
+                                       else if (isStaffWithDirectEdit) "بصفتك معلماً أو مديراً، يمكنك الضغط على أي حصة لتعديلها مباشرة؛ ويُحدّث الجدول من الخادم بعد الحفظ."
                                        else "قاعدة الجدول: الخانة الفارغة تُملأ مباشرة؛ والخانة المشغولة ينقلك الضغط عليها لتقديم مقترح تعديل مع سبب للتصويت 🗳️.",
                                 fontSize = tanweerTextSize(11f),
                                 color = TextSecondary,
