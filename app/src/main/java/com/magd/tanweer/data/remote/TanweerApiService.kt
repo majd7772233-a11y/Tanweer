@@ -595,6 +595,15 @@ interface TanweerApiService {
     @GET("api/v1/dashboards/admin")
     suspend fun getAdminDashboard(): Response<com.magd.tanweer.data.model.AdminDashboardResponse>
 
+    @PATCH("api/v1/admin/users/{userId}/status")
+    suspend fun updateSchoolStudentStatus(
+        @Path("userId") userId: String,
+        @Body req: com.magd.tanweer.data.model.UpdateStudentStatusRequest
+    ): Response<GenericResponse>
+
+    @DELETE("api/v1/admin/students/{userId}/class-membership")
+    suspend fun removeSchoolStudentFromClass(@Path("userId") userId: String): Response<GenericResponse>
+
     @GET("api/v1/homeworks")
     suspend fun getHomeworks(@Query("groupId") groupId: String): Response<HomeworksResponse>
 
