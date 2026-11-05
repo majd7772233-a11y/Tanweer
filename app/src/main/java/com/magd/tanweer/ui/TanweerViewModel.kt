@@ -1072,7 +1072,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     val moderatorDashboard: StateFlow<ModeratorDashboardResponse?> = _moderatorDashboard.asStateFlow()
 
     private val _adminDashboard = MutableStateFlow<AdminDashboardResponse?>(null)
-    val adminDashboard: StateFlow<AdminDashboard?> = _adminDashboard.asStateFlow()
+    val adminDashboard: StateFlow<AdminDashboardResponse?> = _adminDashboard.asStateFlow()
     private val _adminDashboardError = MutableStateFlow<String?>(null)
     val adminDashboardError: StateFlow<String?> = _adminDashboardError.asStateFlow()
 
