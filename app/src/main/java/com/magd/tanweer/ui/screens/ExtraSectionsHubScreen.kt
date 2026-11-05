@@ -89,18 +89,18 @@ fun ExtraSectionsHubScreen(
                                 .border(1.5.dp, CyanAccent, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("✨", fontSize = 22.sp)
+                            Text("✨", fontSize = tanweerTextSize(22f))
                         }
                         Column {
                             Text(
                                 text = "أقسام تـنـويـر والخدمات",
-                                fontSize = 18.sp,
+                                fontSize = tanweerTextSize(18f),
                                 fontWeight = FontWeight.Black,
                                 color = CyanAccent
                             )
                             Text(
                                 text = "بوابة الخدمات التعليمية، الحوكمة، الإدارة والملفات",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextSecondary
                             )
                         }
@@ -110,7 +110,7 @@ fun ExtraSectionsHubScreen(
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("ابحث في أقسام المنظومة...", fontSize = 12.sp, color = TextMuted) },
+                        placeholder = { Text("ابحث في أقسام المنظومة...", fontSize = tanweerTextSize(12f), color = TextMuted) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث", tint = CyanAccent) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
@@ -144,7 +144,7 @@ fun ExtraSectionsHubScreen(
                             FilterChip(
                                 selected = isSelected,
                                 onClick = { selectedCategoryFilter = catKey },
-                                label = { Text(catLabel, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                label = { Text(catLabel, fontSize = tanweerTextSize(11f), fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = CyanAccent,
                                     selectedLabelColor = TextOnAccent
@@ -402,7 +402,7 @@ private fun HubCategoryHeader(title: String, color: Color) {
         )
         Text(
             text = title,
-            fontSize = 15.sp,
+            fontSize = tanweerTextSize(15f),
             fontWeight = FontWeight.Bold,
             color = color
         )
@@ -464,7 +464,7 @@ private fun HubActionCard(
 
                     Text(
                         text = title,
-                        fontSize = 14.sp,
+                        fontSize = tanweerTextSize(14f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
                         maxLines = 1,
@@ -487,9 +487,9 @@ private fun HubActionCard(
             ) {
                 Text(
                     text = subtitle,
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     color = TextSecondary,
-                    lineHeight = 17.sp,
+                    lineHeight = tanweerLineHeight(17f),
                     modifier = Modifier.weight(1f)
                 )
 

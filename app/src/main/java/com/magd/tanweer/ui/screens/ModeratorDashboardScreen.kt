@@ -87,13 +87,13 @@ fun ModeratorDashboardScreen(
                                     .border(1.5.dp, WarmAmber, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("🛡️", fontSize = 26.sp)
+                                Text("🛡️", fontSize = tanweerTextSize(26f))
                             }
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(
                                         text = "مركز إشراف الشعبة",
-                                        fontSize = 17.sp,
+                                        fontSize = tanweerTextSize(17f),
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
@@ -106,7 +106,7 @@ fun ModeratorDashboardScreen(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "تدقيق المحتوى، فض النزاعات، وإدارة حوكمة الشعبة",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary
                                 )
                             }
@@ -193,7 +193,7 @@ fun ModeratorDashboardScreen(
                     ) {
                         Text(
                             text = title,
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) TextOnAccent else TextSecondary,
                             textAlign = TextAlign.Center
@@ -216,16 +216,16 @@ fun ModeratorDashboardScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("✨", fontSize = 32.sp)
+                                Text("✨", fontSize = tanweerTextSize(32f))
                                 Text(
                                     text = "لا توجد طلبات تصحيح معلقة حالياً",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                                 Text(
                                     text = "جميع الدروس والشروحات مدققة ومحدثة في الشعبة.",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
                                 )
@@ -286,7 +286,7 @@ fun ModeratorDashboardScreen(
                             ) {
                                 Text(
                                     text = "$label ($count)",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSel) EmeraldGreen else TextSecondary
                                 )
@@ -309,16 +309,16 @@ fun ModeratorDashboardScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("🗳️", fontSize = 32.sp)
+                                Text("🗳️", fontSize = tanweerTextSize(32f))
                                 Text(
                                     text = "لا توجد قرارات في هذا التصنيف",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                                 Text(
                                     text = "تظهر مقترحات الجدول هنا ضمن محرك القرارات الموحد، مع التصويت والحالة والنتيجة في سجل واحد.",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
                                 )
@@ -330,7 +330,7 @@ fun ModeratorDashboardScreen(
                         item {
                             Text(
                                 text = "📅 قرارات ومقترحات الجدول (${scheduleDecisions.size}):",
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 fontWeight = FontWeight.Bold,
                                 color = CyanAccent,
                                 modifier = Modifier.padding(top = 4.dp)
@@ -352,7 +352,7 @@ fun ModeratorDashboardScreen(
                         item {
                             Text(
                                 text = "🗳️ القرارات الجماعية (${communityOnlyDecisions.size}):",
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 fontWeight = FontWeight.Bold,
                                 color = EmeraldGreen,
                                 modifier = Modifier.padding(top = 8.dp)
@@ -386,17 +386,17 @@ fun ModeratorDashboardScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("👥", fontSize = 24.sp)
+                                Text("👥", fontSize = tanweerTextSize(24f))
                                 Column {
                                     Text(
                                         text = "إدارة صلاحيات ورتب أعضاء الشعبة",
-                                        fontSize = 14.sp,
+                                        fontSize = tanweerTextSize(14f),
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
                                     Text(
                                         text = "الترقيات، معالجة طلبات الانضمام، وحظر الحسابات المسيئة",
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         color = TextSecondary
                                     )
                                 }
@@ -428,10 +428,10 @@ fun CorrectionItemCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("✍️", fontSize = 18.sp)
+                    Text("✍️", fontSize = tanweerTextSize(18f))
                     Text(
                         text = "طلب تصويب: ${corr.fieldName}",
-                        fontSize = 14.sp,
+                        fontSize = tanweerTextSize(14f),
                         fontWeight = FontWeight.Bold,
                         color = WarmAmber
                     )
@@ -446,7 +446,7 @@ fun CorrectionItemCard(
             if (!corr.contentTitle.isNullOrBlank()) {
                 Text(
                     text = "📚 على الدرس: ${corr.contentTitle}",
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     fontWeight = FontWeight.SemiBold,
                     color = CyanAccent
                 )
@@ -462,19 +462,19 @@ fun CorrectionItemCard(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = "القيمة المصوبة المقترحة:",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         color = TextMuted
                     )
                     Text(
                         text = corr.proposedValue,
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "سبب التصويب: ${corr.reason}",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         color = TextSecondary
                     )
                 }
@@ -487,7 +487,7 @@ fun CorrectionItemCard(
             ) {
                 Text(
                     text = "بواسطة: ${corr.authorName ?: "طالب في الشعبة"}",
-                    fontSize = 11.sp,
+                    fontSize = tanweerTextSize(11f),
                     color = TextMuted
                 )
 
@@ -550,7 +550,7 @@ fun CommunityDecisionModeratorCard(
             ) {
                 Text(
                     text = reqTypeLabel,
-                    fontSize = 14.sp,
+                    fontSize = tanweerTextSize(14f),
                     fontWeight = FontWeight.Bold,
                     color = WarmAmber
                 )
@@ -572,7 +572,7 @@ fun CommunityDecisionModeratorCard(
 
             Text(
                 text = decision.title,
-                fontSize = 13.sp,
+                fontSize = tanweerTextSize(13f),
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary
             )
@@ -580,9 +580,9 @@ fun CommunityDecisionModeratorCard(
             if (!decision.description.isNullOrBlank()) {
                 Text(
                     text = decision.description,
-                    fontSize = 11.sp,
+                    fontSize = tanweerTextSize(11f),
                     color = TextSecondary,
-                    lineHeight = 15.sp
+                    lineHeight = tanweerLineHeight(15f)
                 )
             }
 
@@ -594,19 +594,19 @@ fun CommunityDecisionModeratorCard(
                 ) {
                     Text(
                         text = "مؤيد 👍 ${decision.votesFor}",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         color = EmeraldGreen,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "معارض 👎 ${decision.votesAgainst}",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         color = RubyRed,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "الإجمالي $totalVotes / ${decision.totalEligibleVoters}",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         color = TextMuted
                     )
                 }
@@ -616,12 +616,12 @@ fun CommunityDecisionModeratorCard(
                 ) {
                     Text(
                         text = "النصاب المطلوب: $requiredVotes صوت موافق",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         color = CyanAccent
                     )
                     Text(
                         text = "نسبة النصاب: ${(progress * 100).toInt()}%",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         color = TextMuted
                     )
                 }

@@ -171,18 +171,18 @@ fun GroupsScreen(
                                     tint = CyanAccent
                                 )
                             }
-                            Text(text = activeChatGroup?.icon ?: "💬", fontSize = 22.sp)
+                            Text(text = activeChatGroup?.icon ?: "💬", fontSize = tanweerTextSize(22f))
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
                                     text = activeChatGroup?.name ?: "نقاش المجموعة",
-                                    fontSize = 15.sp,
+                                    fontSize = tanweerTextSize(15f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                                 Text(
                                     text = "نقاشات مباشرة ولن تضيع الدروس والواجبات",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextSecondary
                                 )
                             }
@@ -263,7 +263,7 @@ fun GroupsScreen(
                                     if (!isMe) {
                                         Text(
                                             text = "${msg.senderName} (${msg.senderGradeSection})",
-                                            fontSize = 11.sp,
+                                            fontSize = tanweerTextSize(11f),
                                             fontWeight = FontWeight.Bold,
                                             color = WarmAmber
                                         )
@@ -271,7 +271,7 @@ fun GroupsScreen(
 
                                     Text(
                                         text = msg.text,
-                                        fontSize = 13.sp,
+                                        fontSize = tanweerTextSize(13f),
                                         color = TextPrimary,
                                         modifier = Modifier.padding(top = 2.dp)
                                     )
@@ -287,10 +287,10 @@ fun GroupsScreen(
                                         ) {
                                             when (msg.status) {
                                                 "SENDING" -> {
-                                                    Text("⏳ جاري الإرسال...", fontSize = 9.sp, color = TextMuted)
+                                                    Text("⏳ جاري الإرسال...", fontSize = tanweerTextSize(9f), color = TextMuted)
                                                 }
                                                 "SENT" -> {
-                                                    Text("✓✓ تم الإرسال", fontSize = 9.sp, color = CyanAccent)
+                                                    Text("✓✓ تم الإرسال", fontSize = tanweerTextSize(9f), color = CyanAccent)
                                                 }
                                                 "FAILED" -> {
                                                     Row(
@@ -300,7 +300,7 @@ fun GroupsScreen(
                                                             Toast.makeText(context, "إعادة إرسال الرسالة...", Toast.LENGTH_SHORT).show()
                                                         }
                                                     ) {
-                                                        Text("⚠️ فشل الإرسال (اضغط للإعادة)", fontSize = 9.sp, color = Color(0xFFFF5252), fontWeight = FontWeight.Bold)
+                                                        Text("⚠️ فشل الإرسال (اضغط للإعادة)", fontSize = tanweerTextSize(9f), color = Color(0xFFFF5252), fontWeight = FontWeight.Bold)
                                                     }
                                                 }
                                             }
@@ -366,7 +366,7 @@ fun GroupsScreen(
                     Text(
                         text = "🔒 هذه المجموعة للقراءة فقط للطلاب. الإرسال متاح للأساتذة وإدارة المدرسة.",
                         color = WarmAmber,
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
                     )
                 }
@@ -394,13 +394,13 @@ fun GroupsScreen(
             item {
                 Text(
                     text = "👥 المجموعات والشعب الدراسية",
-                    fontSize = 22.sp,
+                    fontSize = tanweerTextSize(22f),
                     fontWeight = FontWeight.Black,
                     color = CyanAccent
                 )
                 Text(
                     text = "شعبتك الرسمية المعتمدة والمجموعات الدراسية المشتركة",
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     color = TextSecondary
                 )
             }
@@ -429,7 +429,7 @@ fun GroupsScreen(
                         ) {
                             Text(
                                 text = tab.label,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) TextOnAccent else TextSecondary
                             )
@@ -456,10 +456,10 @@ fun GroupsScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 modifier = Modifier.padding(bottom = 6.dp)
                             ) {
-                                Text("👑", fontSize = 16.sp)
+                                Text("👑", fontSize = tanweerTextSize(16f))
                                 Text(
                                     text = "الشعبة الرسمية الأساسية المعتمدة",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     fontWeight = FontWeight.Black,
                                     color = WarmAmber
                                 )
@@ -484,19 +484,19 @@ fun GroupsScreen(
                                                     .background(WarmAmber.copy(alpha = 0.2f)),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Text(text = officialClassGroup.icon ?: "🏫", fontSize = 24.sp)
+                                                Text(text = officialClassGroup.icon ?: "🏫", fontSize = tanweerTextSize(24f))
                                             }
                                             Spacer(modifier = Modifier.width(12.dp))
                                             Column {
                                                 Text(
                                                     text = officialClassGroup.name,
-                                                    fontSize = 16.sp,
+                                                    fontSize = tanweerTextSize(16f),
                                                     fontWeight = FontWeight.Black,
                                                     color = TextPrimary
                                                 )
                                                 Text(
                                                     text = "${officialClassGroup.memberCount} طالب وطالبة • الصف والشعبة الرسمية",
-                                                    fontSize = 12.sp,
+                                                    fontSize = tanweerTextSize(12f),
                                                     color = WarmAmber
                                                 )
                                             }
@@ -509,7 +509,7 @@ fun GroupsScreen(
 
                                     Text(
                                         text = officialClassGroup.description ?: "الشعبة الرسمية المرتبطة بمدرستك والتي يُنشر فيها الجدول والواجبات والاختبارات المعتمدة.",
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         color = TextSecondary,
                                         modifier = Modifier.padding(top = 8.dp)
                                     )
@@ -554,7 +554,7 @@ fun GroupsScreen(
                 item {
                     Text(
                         text = "المجموعات المشتركة والأندية (${sharedGroups.size}):",
-                        fontSize = 14.sp,
+                        fontSize = tanweerTextSize(14f),
                         fontWeight = FontWeight.Bold,
                         color = TextSecondary,
                         modifier = Modifier.padding(top = 6.dp)
@@ -591,19 +591,19 @@ fun GroupsScreen(
                                                 .background(CyanGlow),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(text = group.icon ?: "👥", fontSize = 18.sp)
+                                            Text(text = group.icon ?: "👥", fontSize = tanweerTextSize(18f))
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Column {
                                             Text(
                                                 text = group.name,
-                                                fontSize = 14.sp,
+                                                fontSize = tanweerTextSize(14f),
                                                 fontWeight = FontWeight.Bold,
                                                 color = TextPrimary
                                             )
                                             Text(
                                                 text = "${group.memberCount} طالب • مجموعة مشتركة",
-                                                fontSize = 11.sp,
+                                                fontSize = tanweerTextSize(11f),
                                                 color = TextSecondary
                                             )
                                         }
@@ -617,7 +617,7 @@ fun GroupsScreen(
                                 if (!group.description.isNullOrBlank()) {
                                     Text(
                                         text = group.description,
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         color = TextMuted,
                                         modifier = Modifier.padding(top = 6.dp)
                                     )
@@ -715,13 +715,13 @@ fun GroupsScreen(
                                                 .background(CyanGlow),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(text = group.icon ?: "🌐", fontSize = 20.sp)
+                                            Text(text = group.icon ?: "🌐", fontSize = tanweerTextSize(20f))
                                         }
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Column {
                                             Text(
                                                 text = group.name,
-                                                fontSize = 15.sp,
+                                                fontSize = tanweerTextSize(15f),
                                                 fontWeight = FontWeight.Bold,
                                                 color = TextPrimary
                                             )
@@ -731,7 +731,7 @@ fun GroupsScreen(
                                             }
                                             Text(
                                                 text = "${group.memberCount} عضو • $groupTypeLabel",
-                                                fontSize = 12.sp,
+                                                fontSize = tanweerTextSize(12f),
                                                 color = CyanAccent
                                             )
                                         }
@@ -751,7 +751,7 @@ fun GroupsScreen(
                                 if (!group.description.isNullOrBlank()) {
                                     Text(
                                         text = group.description,
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         color = TextSecondary,
                                         modifier = Modifier.padding(top = 8.dp)
                                     )
@@ -821,19 +821,19 @@ fun GroupsScreen(
             AlertDialog(
                 onDismissRequest = { if (!isSubmittingJoin) joinRequestGroup = null },
                 title = {
-                    Text("طلب الانضمام إلى ${targetGroup.name}", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("طلب الانضمام إلى ${targetGroup.name}", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = tanweerTextSize(16f))
                 },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             "هذه مجموعة خاصة أو شعبة تتطلب موافقة. اكتب سبب الانضمام ليتمكن مشرفو وأساتذة المجموعة من مراجعة طلبك:",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             color = TextSecondary
                         )
                         OutlinedTextField(
                             value = joinReasonText,
                             onValueChange = { joinReasonText = it },
-                            label = { Text("سبب طلب الانضمام (مثلاً: طالب منقول أو متابعة مواد)", fontSize = 11.sp) },
+                            label = { Text("سبب طلب الانضمام (مثلاً: طالب منقول أو متابعة مواد)", fontSize = tanweerTextSize(11f)) },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -908,11 +908,11 @@ fun GroupsScreen(
             AlertDialog(
                 onDismissRequest = { if (!isCreating) showCreateGroupDialog = false },
                 title = {
-                    Text("إنشاء مجموعة جديدة 👥", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("إنشاء مجموعة جديدة 👥", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = tanweerTextSize(16f))
                 },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("اختر أيقونة للمجموعة:", fontSize = 12.sp, color = TextSecondary)
+                        Text("اختر أيقونة للمجموعة:", fontSize = tanweerTextSize(12f), color = TextSecondary)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -927,7 +927,7 @@ fun GroupsScreen(
                                         .clickable { newGroupIcon = ic },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(ic, fontSize = 18.sp)
+                                    Text(ic, fontSize = tanweerTextSize(18f))
                                 }
                             }
                         }
@@ -935,7 +935,7 @@ fun GroupsScreen(
                         OutlinedTextField(
                             value = newGroupName,
                             onValueChange = { newGroupName = it },
-                            label = { Text("اسم المجموعة *", fontSize = 11.sp) },
+                            label = { Text("اسم المجموعة *", fontSize = tanweerTextSize(11f)) },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -947,7 +947,7 @@ fun GroupsScreen(
                             singleLine = true
                         )
 
-                        Text("نوع المجموعة:", fontSize = 12.sp, color = TextSecondary)
+                        Text("نوع المجموعة:", fontSize = tanweerTextSize(12f), color = TextSecondary)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                             listOf(
                                 "PUBLIC" to "عامة • دخول مباشر",
@@ -965,7 +965,7 @@ fun GroupsScreen(
                                         onClick = { newGroupVisibility = value },
                                         colors = RadioButtonDefaults.colors(selectedColor = CyanAccent)
                                     )
-                                    Text(label, fontSize = 10.sp, color = TextPrimary)
+                                    Text(label, fontSize = tanweerTextSize(10f), color = TextPrimary)
                                 }
                             }
                         }
@@ -973,7 +973,7 @@ fun GroupsScreen(
                         OutlinedTextField(
                             value = newGroupDesc,
                             onValueChange = { newGroupDesc = it },
-                            label = { Text("وصف المجموعة وأهدافها", fontSize = 11.sp) },
+                            label = { Text("وصف المجموعة وأهدافها", fontSize = tanweerTextSize(11f)) },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -1095,18 +1095,18 @@ fun GroupMembersManagementDialog(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(group.icon ?: "👥", fontSize = 22.sp)
+                Text(group.icon ?: "👥", fontSize = tanweerTextSize(22f))
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = "إدارة أعضاء ${group.name}",
                         color = CyanAccent,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp
+                        fontSize = tanweerTextSize(17f)
                     )
                     Text(
                         text = "${activeMembers.size} عضو معتمد • ${pendingMembers.size} طلب معلق",
                         color = TextSecondary,
-                        fontSize = 11.sp
+                        fontSize = tanweerTextSize(11f)
                     )
                 }
             }
@@ -1131,7 +1131,7 @@ fun GroupMembersManagementDialog(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(9.dp)
                     ) {
-                        Text(errorMessage, color = RubyRed, fontSize = 12.sp)
+                        Text(errorMessage, color = RubyRed, fontSize = tanweerTextSize(12f))
                         GlassButton(text = "إعادة المحاولة", onClick = onRetry)
                     }
                 }
@@ -1139,7 +1139,7 @@ fun GroupMembersManagementDialog(
                     Text(
                         "لم تُحمّل قائمة الأعضاء بعد.",
                         color = TextSecondary,
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         modifier = Modifier.padding(18.dp)
                     )
                 }
@@ -1150,7 +1150,7 @@ fun GroupMembersManagementDialog(
                     ) {
                         Text(
                             "لا يوجد أعضاء أو طلبات انضمام حالياً.",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             color = TextSecondary
                         )
                     }
@@ -1171,7 +1171,7 @@ fun GroupMembersManagementDialog(
                                         Text(
                                             "طلبات الانضمام المعلقة",
                                             color = WarmAmber,
-                                            fontSize = 13.sp,
+                                            fontSize = tanweerTextSize(13f),
                                             fontWeight = FontWeight.Bold
                                         )
                                         GlassPill(
@@ -1183,7 +1183,7 @@ fun GroupMembersManagementDialog(
                                     Text(
                                         "راجع سبب كل طلب ثم وافق أو ارفض. سيصل إشعار للطالب بالنتيجة.",
                                         color = TextSecondary,
-                                        fontSize = 10.sp
+                                        fontSize = tanweerTextSize(10f)
                                     )
                                 }
                             }
@@ -1205,16 +1205,16 @@ fun GroupMembersManagementDialog(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 member.fullName,
-                                                fontSize = 13.sp,
+                                                fontSize = tanweerTextSize(13f),
                                                 color = TextPrimary,
                                                 fontWeight = FontWeight.Bold
                                             )
                                             member.phoneNumber?.let {
-                                                Text(it, fontSize = 10.sp, color = TextMuted)
+                                                Text(it, fontSize = tanweerTextSize(10f), color = TextMuted)
                                             }
                                             Text(
                                                 "الصف ${member.gradeId} • الشعبة ${member.sectionId}",
-                                                fontSize = 10.sp,
+                                                fontSize = tanweerTextSize(10f),
                                                 color = TextSecondary
                                             )
                                         }
@@ -1227,7 +1227,7 @@ fun GroupMembersManagementDialog(
                                     if (!member.requestReason.isNullOrBlank()) {
                                         Text(
                                             text = "سبب الطلب: ${member.requestReason}",
-                                            fontSize = 11.sp,
+                                            fontSize = tanweerTextSize(11f),
                                             color = WarmAmber,
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -1238,7 +1238,7 @@ fun GroupMembersManagementDialog(
                                     } else {
                                         Text(
                                             "لم يضف الطالب سبباً للانضمام.",
-                                            fontSize = 10.sp,
+                                            fontSize = tanweerTextSize(10f),
                                             color = TextMuted
                                         )
                                     }
@@ -1250,7 +1250,7 @@ fun GroupMembersManagementDialog(
                                             shape = RoundedCornerShape(8.dp),
                                             colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
                                         ) {
-                                            Text("قبول الطلب ✓", fontSize = 11.sp, color = Color.White)
+                                            Text("قبول الطلب ✓", fontSize = tanweerTextSize(11f), color = Color.White)
                                         }
                                         OutlinedButton(
                                             onClick = { onRejectJoin(member.userId) },
@@ -1259,7 +1259,7 @@ fun GroupMembersManagementDialog(
                                             shape = RoundedCornerShape(8.dp),
                                             border = BorderStroke(1.dp, RubyRed.copy(alpha = 0.7f))
                                         ) {
-                                            Text("رفض الطلب", fontSize = 11.sp, color = RubyRed)
+                                            Text("رفض الطلب", fontSize = tanweerTextSize(11f), color = RubyRed)
                                         }
                                     }
                                 }
@@ -1273,7 +1273,7 @@ fun GroupMembersManagementDialog(
                                     Text(
                                         "الأعضاء المعتمدون (${activeMembers.size})",
                                         color = CyanAccent,
-                                        fontSize = 13.sp,
+                                        fontSize = tanweerTextSize(13f),
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(top = 5.dp)
                                     )
@@ -1297,12 +1297,12 @@ fun GroupMembersManagementDialog(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 member.fullName,
-                                                fontSize = 13.sp,
+                                                fontSize = tanweerTextSize(13f),
                                                 fontWeight = FontWeight.Bold,
                                                 color = TextPrimary
                                             )
                                             member.phoneNumber?.let {
-                                                Text(it, fontSize = 10.sp, color = TextMuted)
+                                                Text(it, fontSize = tanweerTextSize(10f), color = TextMuted)
                                             }
                                         }
                                         val roleLabel = when (member.memberRole) {
@@ -1330,7 +1330,7 @@ fun GroupMembersManagementDialog(
                                                     contentPadding = PaddingValues(horizontal = 3.dp),
                                                     shape = RoundedCornerShape(7.dp)
                                                 ) {
-                                                    Text("ترقية لمشرف", fontSize = 9.sp, color = CyanAccent)
+                                                    Text("ترقية لمشرف", fontSize = tanweerTextSize(9f), color = CyanAccent)
                                                 }
                                             } else if (member.memberRole == "MODERATOR") {
                                                 OutlinedButton(
@@ -1339,7 +1339,7 @@ fun GroupMembersManagementDialog(
                                                     contentPadding = PaddingValues(horizontal = 3.dp),
                                                     shape = RoundedCornerShape(7.dp)
                                                 ) {
-                                                    Text("خفض لطالب", fontSize = 9.sp, color = TextSecondary)
+                                                    Text("خفض لطالب", fontSize = tanweerTextSize(9f), color = TextSecondary)
                                                 }
                                             }
                                             OutlinedButton(
@@ -1348,7 +1348,7 @@ fun GroupMembersManagementDialog(
                                                 contentPadding = PaddingValues(horizontal = 3.dp),
                                                 shape = RoundedCornerShape(7.dp)
                                             ) {
-                                                Text("إزالة", fontSize = 9.sp, color = RubyRed)
+                                                Text("إزالة", fontSize = tanweerTextSize(9f), color = RubyRed)
                                             }
                                             OutlinedButton(
                                                 onClick = { onRemove(member.userId, true) },
@@ -1356,7 +1356,7 @@ fun GroupMembersManagementDialog(
                                                 contentPadding = PaddingValues(horizontal = 3.dp),
                                                 shape = RoundedCornerShape(7.dp)
                                             ) {
-                                                Text("حظر", fontSize = 9.sp, color = RubyRed)
+                                                Text("حظر", fontSize = tanweerTextSize(9f), color = RubyRed)
                                             }
                                         }
                                     }
@@ -1369,7 +1369,7 @@ fun GroupMembersManagementDialog(
                                 Text(
                                     "الحسابات المحظورة (${bannedMembers.size})",
                                     color = RubyRed,
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(top = 7.dp)
                                 )
@@ -1386,8 +1386,8 @@ fun GroupMembersManagementDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(member.fullName, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        member.phoneNumber?.let { Text(it, color = TextMuted, fontSize = 10.sp) }
+                                        Text(member.fullName, color = TextPrimary, fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold)
+                                        member.phoneNumber?.let { Text(it, color = TextMuted, fontSize = tanweerTextSize(10f)) }
                                     }
                                     GlassPill(text = "محظور 🚫", color = RubyRed, bgColor = RubyRed.copy(alpha = 0.12f))
                                 }
