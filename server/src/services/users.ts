@@ -186,6 +186,28 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
 }
 
 /**
+ * Resolve the highest active school role for one account, across its global role and
+ * all active group memberships. This mirrors the ranking used by the admin directory.
+ */
+async function getEffectiveSchoolRoleRank(targetUserId: string, env: Env): Promise<number | null> {
+  const result = await env.DB.prepare(
+    `SELECT MAX(CASE
+        WHEN UPPER(u.role) IN ('ADMIN', 'ADMINISTRATOR') THEN 4
+        WHEN UPPER(u.role) IN ('TEACHER', 'VERIFIED_TEACHER') THEN 3
+        WHEN UPPER(u.role) = 'MODERATOR' THEN 2
+        WHEN UPPER(gm.role) IN ('ADMIN', 'ADMINISTRATOR') THEN 4
+        WHEN UPPER(gm.role) IN ('TEACHER', 'VERIFIED_TEACHER') THEN 3
+        WHEN UPPER(gm.role) = 'MODERATOR' THEN 2
+        ELSE 1
+      END) AS role_rank
+     FROM users u
+     LEFT JOIN group_members gm ON gm.user_id = u.id AND gm.status = 'ACTIVE'
+     WHERE u.id = ?
+     GROUP BY u.id`
+  ).bind(targetUserId).first<{ role_rank: number }>();
+  return result ? Number(result.role_rank) : null;
+}
+/**
  * School admins may freeze or reactivate student accounts. Staff, admins, and the
  * concealed system owner are deliberately outside this lower-privilege operation.
  */
@@ -217,8 +239,9 @@ export async function handleUpdateSchoolStudentStatus(
     "SELECT id, role, COALESCE(status, 'ACTIVE') AS status FROM users WHERE id = ?"
   ).bind(targetUserId).first<{ id: string; role: string; status: string }>();
   if (!target) return errorResponse('USER_NOT_FOUND', 'الطالب غير موجود', 404);
-  if (normalizeRole(target.role) !== Role.STUDENT) {
-    return errorResponse('ROLE_PROTECTED', 'هذه العملية مخصصة لحسابات الطلاب فقط، ولا تغيّر رتب المعلمين أو الإدارة', 403);
+  const effectiveRoleRank = await getEffectiveSchoolRoleRank(targetUserId, env);
+  if (effectiveRoleRank !== 1) {
+    return errorResponse('ROLE_PROTECTED', 'لا يمكن إيقاف حساب يملك رتبة معلم أو مشرف أو مدير في أي مجموعة', 403);
   }
 
   if (target.status.toUpperCase() === requestedStatus) {
@@ -226,7 +249,14 @@ export async function handleUpdateSchoolStudentStatus(
   }
 
   const update = await env.DB.prepare(
-    "UPDATE users SET status = ?, updated_at = ? WHERE id = ? AND UPPER(role) NOT IN ('ADMIN', 'SYSTEM_OWNER', 'OWNER')"
+    `UPDATE users SET status = ?, updated_at = ?
+     WHERE id = ?
+       AND UPPER(role) NOT IN ('ADMIN', 'ADMINISTRATOR', 'SYSTEM_OWNER', 'OWNER', 'TEACHER', 'VERIFIED_TEACHER', 'MODERATOR')
+       AND NOT EXISTS (
+         SELECT 1 FROM group_members gm
+         WHERE gm.user_id = users.id AND gm.status = 'ACTIVE'
+           AND UPPER(gm.role) IN ('ADMIN', 'ADMINISTRATOR', 'TEACHER', 'VERIFIED_TEACHER', 'MODERATOR')
+       )`
   ).bind(requestedStatus, Date.now(), targetUserId).run();
   if (update.meta?.changes !== 1) {
     return errorResponse('USER_STATE_CHANGED', 'تغيرت حالة الحساب قبل إتمام العملية. حدّث لوحة الإدارة وحاول مجدداً.', 409);
@@ -266,13 +296,14 @@ export async function handleRemoveSchoolStudentFromClass(
     'SELECT id, role, grade_id, section_id FROM users WHERE id = ?'
   ).bind(targetUserId).first<{ id: string; role: string; grade_id: number; section_id: string }>();
   if (!target) return errorResponse('USER_NOT_FOUND', 'الطالب غير موجود', 404);
-  if (normalizeRole(target.role) !== Role.STUDENT) {
-    return errorResponse('ROLE_PROTECTED', 'فصل العضوية بهذه الطريقة مخصص لحسابات الطلاب فقط', 403);
+  const effectiveRoleRank = await getEffectiveSchoolRoleRank(targetUserId, env);
+  if (effectiveRoleRank !== 1) {
+    return errorResponse('ROLE_PROTECTED', 'لا يمكن فصل حساب يملك رتبة معلم أو مشرف أو مدير في أي مجموعة', 403);
   }
 
   const groupId = `class_${target.grade_id}_${target.section_id}`;
   const removal = await env.DB.prepare(
-    "DELETE FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'ACTIVE'"
+    "DELETE FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'ACTIVE' AND UPPER(role) IN ('STUDENT', 'MEMBER')"
   ).bind(groupId, targetUserId).run();
   if (removal.meta?.changes !== 1) {
     return errorResponse('CLASS_MEMBERSHIP_NOT_FOUND', 'لم نعثر على عضوية نشطة لهذا الطالب في شعبته الحالية', 404);
