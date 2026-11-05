@@ -106,7 +106,6 @@ fun ScheduleScreen(
     val canManageSchedule = remember(currentUser, allSlots.size, scheduleMeta, isStaffWithDirectEdit) {
         isStaffWithDirectEdit || (scheduleMeta?.isInitialSetup == true) || allSlots.isEmpty()
     }
-    var isDirectEditMode by remember { mutableStateOf(false) }
 
     val filledSlotsCount = allSlots.size
     val currentGradeName = SchoolHierarchy.getGradeName(currentUser?.gradeId ?: 10)
@@ -215,7 +214,7 @@ fun ScheduleScreen(
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = MidnightSurface,
-                    borderColor = if (isStaffWithDirectEdit && isDirectEditMode) CyanAccent else GlassBorderSubtle
+                    borderColor = if (isStaffWithDirectEdit) CyanAccent else GlassBorderSubtle
                 ) {
                     Row(
                         modifier = Modifier
@@ -228,12 +227,12 @@ fun ScheduleScreen(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = if (allSlots.isEmpty()) "🌟 المساهمة في بناء الجدول"
-                                           else if (isStaffWithDirectEdit && isDirectEditMode) "🛠️ تحرير مباشر (معلم / إدارة)"
-                                           else if (isStaffWithDirectEdit) "👁️ وضع العرض (مصرّح بالإدارة)"
+                                           else if (isStaffWithDirectEdit) "🛠️ تحرير مباشر (معلم / إدارة)"
+                                           else if (isStaffWithDirectEdit) "🛠️ تحرير مباشر (معلم / إدارة)"
                                            else "👁️ جدول الشعبة التشاركي",
                                     fontSize = tanweerTextSize(13f),
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isStaffWithDirectEdit && isDirectEditMode) CyanAccent else TextPrimary
+                                    color = if (isStaffWithDirectEdit) CyanAccent else TextPrimary
                                 )
                                 GlassPill(
                                     text = "${userRole.badgeIcon} ${userRole.displayNameAr}",
@@ -243,8 +242,8 @@ fun ScheduleScreen(
                             }
                             Text(
                                 text = if (allSlots.isEmpty()) "الجدول غير معبأ بعد: يمكن لجميع الطلاب والمعلمين إدخال الحصص الأولى مباشرة!"
-                                       else if (isStaffWithDirectEdit && isDirectEditMode) "وضع التحرير المباشر مفعل: تعديلاتك على أي حصة تُحفظ مباشرة في الخادم دون تصويت."
-                                       else if (isStaffWithDirectEdit) "بصفتك أستاذاً أو مديراً: يمكنك الضغط على زر التحرير لتعديل الحصص مباشرة دون تصويت."
+                                       else if (isStaffWithDirectEdit) "وضع التحرير المباشر مفعل: تعديلاتك على أي حصة تُحفظ مباشرة في الخادم دون تصويت."
+                                       else if (isStaffWithDirectEdit) "بصفتك معلماً أو مديراً، اضغط على أي حصة لتعديلها مباشرة؛ وتتم مزامنة التعديل بعد حفظه."
                                        else "قاعدة الجدول: الخانة الفارغة تُملأ مباشرة؛ والخانة المشغولة ينقلك الضغط عليها لتقديم مقترح تعديل مع سبب للتصويت 🗳️.",
                                 fontSize = tanweerTextSize(11f),
                                 color = TextSecondary,
@@ -254,21 +253,11 @@ fun ScheduleScreen(
 
                         if (isStaffWithDirectEdit && allSlots.isNotEmpty()) {
                             Spacer(modifier = Modifier.width(8.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isDirectEditMode) CyanAccent else GlassSurface)
-                                    .border(1.dp, if (isDirectEditMode) CyanAccent else GlassBorderSubtle, RoundedCornerShape(10.dp))
-                                    .clickable { isDirectEditMode = !isDirectEditMode }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = if (isDirectEditMode) "إنهاء التحرير ✓" else "تفعيل التحرير ✏️",
-                                    fontSize = tanweerTextSize(11f),
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isDirectEditMode) TextOnAccent else CyanAccent
-                                )
-                            }
+                            GlassPill(
+                                text = "تحرير مباشر مفعل",
+                                color = CyanAccent,
+                                bgColor = CyanGlow
+                            )
                         }
                     }
                 }
@@ -318,8 +307,8 @@ fun ScheduleScreen(
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = if (isStaffWithDirectEdit && isDirectEditMode)
-                                "وضع التحرير المباشر مفعل: اضغط على أي خانة لتعديل المادة مباشرة وحفظها دون تصويت:"
+                            text = if (isStaffWithDirectEdit)
+                                "اضغط على أي خانة لتعديل الحصة مباشرة وحفظها ومزامنتها دون تصويت:"
                             else
                                 "قاعدة الحصص: الخانات الفارغة تُملأ مباشرة ＋، والحصص القائمة يُطرح عليها مقترح تصويت 💡:",
                             fontSize = tanweerTextSize(12f),
@@ -332,7 +321,7 @@ fun ScheduleScreen(
                             allSlots = allSlots,
                             onCellClick = { dayIndex, slotOrder ->
                                 val slot = allSlots.find { it.dayOfWeek == dayIndex && it.slotOrder == slotOrder }
-                                val isStaffDirect = (isStaffWithDirectEdit && isDirectEditMode) || allSlots.isEmpty()
+                                val isStaffDirect = (isStaffWithDirectEdit) || allSlots.isEmpty()
                                 if (isStaffDirect) {
                                     activeEditingCell = Pair(dayIndex, slotOrder)
                                 } else {
@@ -427,7 +416,7 @@ fun ScheduleScreen(
                 items((1..6).toList()) { periodOrder ->
                     val slot = allSlots.find { it.dayOfWeek == selectedDayForList && it.slotOrder == periodOrder }
                     val defaultTime = com.magd.tanweer.util.AcademicTimeEngine.getDefaultPeriodTime(periodOrder)
-                    val isStaffDirect = (isStaffWithDirectEdit && isDirectEditMode) || allSlots.isEmpty()
+                    val isStaffDirect = (isStaffWithDirectEdit) || allSlots.isEmpty()
 
                     SinglePeriodSlotCard(
                         dayOfWeek = selectedDayForList,
