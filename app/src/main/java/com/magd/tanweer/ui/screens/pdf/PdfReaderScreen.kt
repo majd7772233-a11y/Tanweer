@@ -58,6 +58,7 @@ import com.magd.tanweer.data.pdf.PdfDownloadState
 import com.magd.tanweer.data.repository.TanweerRepository
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.FocusNoisePlayer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -104,6 +105,11 @@ fun PdfReaderScreen(
     val pdfManager = remember { PdfBookManager(context) }
     val db = remember { TanweerDatabase.getInstance(context) }
     val repository = remember { TanweerRepository(db) }
+    val focusNoisePlayer = remember { FocusNoisePlayer() }
+
+    DisposableEffect(focusNoisePlayer) {
+        onDispose { focusNoisePlayer.stop() }
+    }
 
     // Real Audio Reader State (TTS Assistant)
     var isAudioPlaying by remember { mutableStateOf(false) }
@@ -121,20 +127,21 @@ fun PdfReaderScreen(
     var pomodoroSecondsLeft by remember { mutableIntStateOf(25 * 60) }
     var isPomodoroBreak by remember { mutableStateOf(false) }
 
-    // Fullscreen Immersive Sticky Mode (Point 47.7: Hide system navigation bars)
+    // Keep system bars visible and reserve their insets for reader content.
     val activity = context as? Activity
-    DisposableEffect(Unit) {
+    DisposableEffect(activity) {
         val window = activity?.window
         if (window != null) {
             val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
-            insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+            insetsController.systemBarsBehavior =
+                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+            insetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
         }
         onDispose {
-            val win = activity?.window
-            if (win != null) {
-                val insetsController = androidx.core.view.WindowCompat.getInsetsController(win, win.decorView)
-                insetsController.show(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+            val window = activity?.window
+            if (window != null) {
+                androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+                    .show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             }
         }
     }
@@ -148,9 +155,17 @@ fun PdfReaderScreen(
         try {
             tts = TextToSpeech(context) { status ->
                 if (status == TextToSpeech.SUCCESS) {
-                    val result = tts?.setLanguage(Locale("ar"))
-                    if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        tts?.setLanguage(Locale.getDefault())
+                    val arabicResult = tts?.setLanguage(Locale("ar"))
+                        ?: TextToSpeech.LANG_NOT_SUPPORTED
+                    val languageReady = if (
+                        arabicResult == TextToSpeech.LANG_MISSING_DATA ||
+                        arabicResult == TextToSpeech.LANG_NOT_SUPPORTED
+                    ) {
+                        val fallbackResult = tts?.setLanguage(Locale.getDefault())
+                            ?: TextToSpeech.LANG_NOT_SUPPORTED
+                        fallbackResult >= TextToSpeech.LANG_AVAILABLE
+                    } else {
+                        arabicResult >= TextToSpeech.LANG_AVAILABLE
                     }
                     tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                         override fun onStart(utteranceId: String?) {
@@ -163,7 +178,10 @@ fun PdfReaderScreen(
                             coroutineScope.launch { isAudioPlaying = false }
                         }
                     })
-                    isTtsReady = true
+                    isTtsReady = languageReady
+                    if (!languageReady) {
+                        Toast.makeText(context, "لا تتوفر لغة قراءة مدعومة في محرك تحويل النص إلى كلام على هذا الجهاز.", Toast.LENGTH_LONG).show()
+                    }
                 }
             }
             ttsEngine = tts
@@ -321,7 +339,12 @@ fun PdfReaderScreen(
     // TTS Control Functions (المساعد الصوتي لنص الكتاب الفعلي وملاحظات ومصطلحات الصفحة)
     fun speakCurrentPage(customText: String? = null) {
         if (!isTtsReady || ttsEngine == null) {
-            Toast.makeText(context, "جاري تهيئة المساعد الصوتي...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                if (ttsEngine == null) "محرك القراءة الصوتية ما زال قيد التهيئة." else "لا توجد لغة صوتية مدعومة على هذا الجهاز.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
         }
         if (customText != null) {
             ttsEngine?.setSpeechRate(audioSpeed)
@@ -339,15 +362,20 @@ fun PdfReaderScreen(
                 isExtractingAudioText = false
 
                 if (pageText.isBlank()) {
-                    Toast.makeText(context, "هذه الصفحة لا تحتوي على نص رقمي قابل للاستخراج. يجري قراءة ملخص وملاحظات الصفحة.", Toast.LENGTH_SHORT).show()
                     val pageNotes = notesList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { it.noteText }
                     val pageVocab = vocabList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { "${it.word}: ${it.meaning}" }
-                    val intro = "كتاب ${book.title}، الصفحة ${currentPageIndex + 1}. هذه الصفحة مصورة أو لا تحتوي على طبقة نصية رقمية. "
-                    val notesRead = if (pageNotes.isNotBlank() || pageVocab.isNotBlank()) {
-                        intro + listOf(pageNotes, pageVocab).filter { it.isNotBlank() }.joinToString(". ")
-                    } else {
-                        intro + "لم تقم بتسجيل ملاحظات دراسية على هذه الصفحة."
+                    if (pageNotes.isBlank() && pageVocab.isBlank()) {
+                        Toast.makeText(
+                            context,
+                            "لم يعثر القارئ على طبقة نصية في هذه الصفحة. قد تكون الصفحة صورة ممسوحة ضوئياً؛ لا يتوفر OCR في القارئ حالياً.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@launch
                     }
+                    Toast.makeText(context, "لا يوجد نص رقمي قابل للاستخراج؛ ستتم قراءة ملاحظاتك ومفرداتك فقط.", Toast.LENGTH_LONG).show()
+                    val notesRead = listOf(pageNotes, pageVocab)
+                        .filter { it.isNotBlank() }
+                        .joinToString(". ")
                     ttsEngine?.setSpeechRate(audioSpeed)
                     ttsEngine?.speak(notesRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
                     isAudioPlaying = true
@@ -665,6 +693,7 @@ fun PdfReaderScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(readingTheme.backgroundColor)
+            .systemBarsPadding()
     ) {
         val isTablet = maxWidth > 600.dp
 
@@ -805,11 +834,14 @@ fun PdfReaderScreen(
                     currentPenColor = currentPenColor,
                     currentPenWidth = currentPenWidth,
                     isHighlighter = isHighlighter,
-                    focusRulerY = if (isFocusRulerActive) focusRulerY ?: 400f else null,
+                    focusRulerY = if (isFocusRulerActive) focusRulerY ?: -1f else null,
                     isWatermarkEnabled = isWatermarkEnabled,
                     onZoomChange = { scale, pan ->
                         zoomScale = scale
                         panOffset = pan
+                    },
+                    onFocusRulerYChange = { rulerY ->
+                        focusRulerY = rulerY
                     },
                     onNextPage = {
                         if (currentPageIndex < totalPages - 1) {
@@ -834,6 +866,43 @@ fun PdfReaderScreen(
                         }
                     }
                 )
+
+                if (isFocusRulerActive) {
+                    val density = LocalDensity.current
+                    val rulerCenterPx = focusRulerY ?: with(density) { maxHeight.toPx() / 2f }
+                    val rulerTop = with(density) { (rulerCenterPx - 32f).coerceAtLeast(0f).toDp() }
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(y = rulerTop)
+                            .padding(end = 12.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xE6121D2D))
+                            .border(1.dp, WarmAmber.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
+                            .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "اسحب الشريط لتحريك المسطرة",
+                            fontSize = 10.sp,
+                            color = TextPrimary
+                        )
+                        IconButton(
+                            onClick = {
+                                isFocusRulerActive = false
+                                focusRulerY = null
+                            },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "إخفاء مسطرة التركيز",
+                                tint = WarmAmber,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
 
                 // Blue Light Filter Overlay (Warmth Tint)
                 if (blueLightFilterWarmth > 0f) {
@@ -1213,12 +1282,19 @@ fun PdfReaderScreen(
                                 isAutoScrollActive = !isAutoScrollActive
                             },
                             onToggleWhiteNoise = {
-                                isWhiteNoiseActive = !isWhiteNoiseActive
-                                Toast.makeText(
-                                    context,
-                                    if (isWhiteNoiseActive) "🎧 تم تفعيل بيئة التركيز الهادئة (صوت أمواج ومطر)" else "🔇 تم إيقاف أصوات التركيز",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                if (isWhiteNoiseActive) {
+                                    focusNoisePlayer.stop()
+                                    isWhiteNoiseActive = false
+                                    Toast.makeText(context, "تم إيقاف صوت التركيز.", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val started = focusNoisePlayer.start()
+                                    if (started) {
+                                        isWhiteNoiseActive = true
+                                        Toast.makeText(context, "تم تشغيل صوت التركيز الهادئ. استخدم زر الإيقاف عند الانتهاء.", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "تعذر تشغيل الصوت على هذا الجهاز.", Toast.LENGTH_LONG).show()
+                                    }
+                                }
                             },
                             onToggleEyeBreak = {
                                 isEyeBreakActive = !isEyeBreakActive
