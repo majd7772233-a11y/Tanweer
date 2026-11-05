@@ -409,7 +409,7 @@ data class RecoveryCodeResponse(
 
 @JsonClass(generateAdapter = true)
 data class AdminDashboardResponse(
-    val success: Boolean = true,
+    val success: Boolean = false,
     val school: SchoolAdminInfo? = null,
     val stats: SchoolStats? = null,
     val teachers: List<UserBrief> = emptyList(),
