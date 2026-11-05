@@ -148,16 +148,27 @@ object AppTypography {
 
 
 /**
+ * Keeps persisted legacy font settings aligned with the supported 12/14/16sp presets.
+ * Old 11sp values fall back to 12sp; old 18sp values fall back to 16sp.
+ */
+fun normalizeTanweerFontScale(scale: Float): Float {
+    val safeScale = if (scale.isFinite()) scale else 1f
+    return listOf(1f, 14f / 12f, 16f / 12f)
+        .minByOrNull { kotlin.math.abs(it - safeScale) }
+        ?: 1f
+}
+
+/**
  * Maps screen-specific sizes to Tanweer's shared typography roles.
  * User-selected font size is applied once by TanweerTheme's LocalDensity.
+ * Main titles use only a modest 18sp emphasis over the 12/14/16sp content scale.
  */
 fun tanweerTextSize(sourceSp: Float): TextUnit = when {
     sourceSp <= 10f -> 10.sp
     sourceSp <= 12.5f -> 12.sp
-    sourceSp <= 15.5f -> 13.sp
-    sourceSp <= 18.5f -> 14.sp
-    sourceSp <= 22.5f -> 15.sp
-    else -> 16.sp
+    sourceSp <= 15.5f -> 14.sp
+    sourceSp <= 22.5f -> 16.sp
+    else -> 18.sp
 }
 
 fun tanweerLineHeight(sourceSp: Float): TextUnit =
