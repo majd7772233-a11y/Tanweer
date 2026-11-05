@@ -171,7 +171,7 @@ fun ExamsScreen(
                             color = RubyRed
                         )
                         Text(
-                            text = "${exams.size} اختبارات مسجلة موزعة على ${examsByMonth.size} أشهر",
+                            text = "${exams.size} اختبار مسجل • ${examsByMonth.size} شهر في التقويم • ${oralExams.size} شفهي مرن",
                             fontSize = tanweerTextSize(12f),
                             color = TextSecondary
                         )
@@ -240,7 +240,7 @@ fun ExamsScreen(
                                     .padding(horizontal = 14.dp, vertical = 8.dp)
                             ) {
                                 Text(
-                                    text = "جميع الأشهر (${exams.size})",
+                                    text = "جميع الأشهر (${calendarExams.size})",
                                     fontSize = tanweerTextSize(12f),
                                     fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isAllSelected) Color.White else TextSecondary
