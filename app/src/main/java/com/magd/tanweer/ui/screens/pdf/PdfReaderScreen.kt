@@ -437,7 +437,7 @@ fun PdfReaderScreen(
                 isExtractingAudioText = true
                 val bookFile = pdfManager.getCachedFile(book.id)
                 val pageText = try {
-                    repository.getOrExtractPageText(book.id, requestedPageIndex, bookFile)
+                    repository.getOrExtractPageText(context.applicationContext, book.id, requestedPageIndex, bookFile)
                 } finally {
                     isExtractingAudioText = false
                 }
