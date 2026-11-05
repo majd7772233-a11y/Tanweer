@@ -996,7 +996,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 onSuccess = { mutation ->
                     when (mutation) {
                         is com.magd.tanweer.data.local.ScheduleMutationResult.SavedDirectly -> {
-                            _scheduleSyncState.value = SyncState.Success()
+                            _scheduleSyncState.value = SyncState.Refreshing
+                            when (val syncResult = repository.syncSchedule(groupId)) {
+                                is SyncResult.Success -> _scheduleSyncState.value = SyncState.Success()
+                                is SyncResult.Offline -> _scheduleSyncState.value = SyncState.OfflineCached()
+                                is SyncResult.Error -> _scheduleSyncState.value =
+                                    SyncState.Error(syncResult.message, syncResult.isNetworkError)
+                            }
                         }
                         is com.magd.tanweer.data.local.ScheduleMutationResult.QueuedOffline -> {
                             _scheduleSyncState.value = SyncState.OfflineCached()
@@ -1027,7 +1033,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 onSuccess = { deleteRes ->
                     triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                     if (deleteRes.isSynced) {
-                        _scheduleSyncState.value = SyncState.Success()
+                        _scheduleSyncState.value = SyncState.Refreshing
+                        when (val syncResult = repository.syncSchedule(groupId)) {
+                            is SyncResult.Success -> _scheduleSyncState.value = SyncState.Success()
+                            is SyncResult.Offline -> _scheduleSyncState.value = SyncState.OfflineCached()
+                            is SyncResult.Error -> _scheduleSyncState.value =
+                                SyncState.Error(syncResult.message, syncResult.isNetworkError)
+                        }
                     } else {
                         _scheduleSyncState.value = SyncState.OfflineCached(message = deleteRes.message)
                     }
