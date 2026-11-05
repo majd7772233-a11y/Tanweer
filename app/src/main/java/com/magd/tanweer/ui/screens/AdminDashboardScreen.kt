@@ -1,5 +1,8 @@
 package com.magd.tanweer.ui.screens
 
+import com.magd.tanweer.ui.theme.tanweerTextSize
+import com.magd.tanweer.ui.theme.tanweerLineHeight
+
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -121,19 +124,19 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
                             Text(
                                 text = dashboardData?.school?.name ?: "إدارة المدرسة",
                                 color = WarmAmber,
-                                fontSize = 17.sp,
+                                fontSize = tanweerTextSize(17f),
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = "لوحة الإدارة المدرسية",
                                 color = TextPrimary,
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
                                 text = currentUser?.fullName?.let { "مرحباً، $it" } ?: "إدارة حسابات الطلاب والتعاميم",
                                 color = TextSecondary,
-                                fontSize = 10.sp
+                                fontSize = tanweerTextSize(10f)
                             )
                         }
                         IconButton(
@@ -210,7 +213,7 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
                         Text(
                             text = "إدارة الطلاب",
                             color = TextPrimary,
-                            fontSize = 15.sp,
+                            fontSize = tanweerTextSize(15f),
                             fontWeight = FontWeight.Bold
                         )
                         GlassPill(
@@ -229,7 +232,7 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
                     Text(
                         text = "يمكنك إيقاف حساب الطالب مؤقتاً أو فصله من شعبته دون حذف حسابه أو مساهماته.",
                         color = TextSecondary,
-                        fontSize = 10.sp
+                        fontSize = tanweerTextSize(10f)
                     )
                 }
             }
@@ -255,7 +258,7 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("تعذر تحميل بيانات الإدارة", color = WarmAmber, fontWeight = FontWeight.Bold)
-                        Text(dashboardError ?: "", color = TextSecondary, fontSize = 11.sp)
+                        Text(dashboardError ?: "", color = TextSecondary, fontSize = tanweerTextSize(11f))
                         OutlinedButton(onClick = { viewModel.loadAdminDashboard() }) {
                             Text("إعادة المحاولة")
                         }
@@ -271,7 +274,7 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
                         modifier = Modifier.fillMaxWidth().padding(12.dp),
                         color = TextSecondary,
                         textAlign = TextAlign.Center,
-                        fontSize = 12.sp
+                        fontSize = tanweerTextSize(12f)
                     )
                 }
             }
@@ -300,7 +303,7 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
                     Text(
                         text = "يعرض الخادم أول ${allStudents.size} طالباً من أصل $totalStudents. استخدم البحث ضمن القائمة المحمّلة.",
                         color = TextMuted,
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                         textAlign = TextAlign.Center
                     )
@@ -401,7 +404,7 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
                         else -> "سيُعاد تفعيل حساب ${action.student.full_name}. وسيحتاج الطالب إلى تسجيل الدخول من جديد."
                     },
                     color = TextSecondary,
-                    fontSize = 12.sp
+                    fontSize = tanweerTextSize(12f)
                 )
             },
             confirmButton = {
@@ -462,8 +465,8 @@ private fun AdminStatCard(
         backgroundColor = GlassSurface
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, color = TextSecondary, fontSize = 10.sp)
-            Text(value, color = accent, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = TextSecondary, fontSize = tanweerTextSize(10f))
+            Text(value, color = accent, fontSize = tanweerTextSize(19f), fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -496,18 +499,18 @@ private fun AdminStudentCard(
                         text = student.full_name.take(1),
                         color = CyanAccent,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
+                        fontSize = tanweerTextSize(16f)
                     )
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(student.full_name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("هاتف: ${student.phone_number}", color = TextSecondary, fontSize = 10.sp)
+                    Text(student.full_name, color = TextPrimary, fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold)
+                    Text("هاتف: ${student.phone_number}", color = TextSecondary, fontSize = tanweerTextSize(10f))
                     Text(
                         text = if (student.grade_id > 0 && student.section_id.isNotBlank())
                             "الصف ${student.grade_id} • شعبة ${student.section_id}"
                         else "البيانات الدراسية غير مكتملة",
                         color = TextMuted,
-                        fontSize = 10.sp
+                        fontSize = tanweerTextSize(10f)
                     )
                 }
                 GlassPill(
@@ -527,7 +530,7 @@ private fun AdminStudentCard(
                         contentColor = if (isDisabled) EmeraldGreen else WarmAmber
                     )
                 ) {
-                    Text(if (isDisabled) "إعادة التفعيل" else "إيقاف الحساب", fontSize = 11.sp)
+                    Text(if (isDisabled) "إعادة التفعيل" else "إيقاف الحساب", fontSize = tanweerTextSize(11f))
                 }
                 OutlinedButton(
                     onClick = onRemoveFromClass,
@@ -535,7 +538,7 @@ private fun AdminStudentCard(
                     enabled = student.grade_id > 0 && student.section_id.isNotBlank(),
                     contentPadding = PaddingValues(horizontal = 7.dp, vertical = 3.dp)
                 ) {
-                    Text("فصل من الشعبة", fontSize = 11.sp)
+                    Text("فصل من الشعبة", fontSize = tanweerTextSize(11f))
                 }
             }
         }
