@@ -1450,12 +1450,17 @@ class TanweerRepository(
         db.bookReadingDao().clearDrawingForPage(bookId, pageIndex)
     }
 
-    suspend fun getOrExtractPageText(bookId: String, pageIndex: Int, pdfFile: java.io.File): String = withContext(Dispatchers.IO) {
+    suspend fun getOrExtractPageText(
+        context: android.content.Context,
+        bookId: String,
+        pageIndex: Int,
+        pdfFile: java.io.File
+    ): String = withContext(Dispatchers.IO) {
         val cached = db.bookReadingDao().getExtractedPage(bookId, pageIndex)
         if (cached != null && cached.extractedText.isNotBlank()) {
             return@withContext cached.extractedText
         }
-        val extracted = com.magd.tanweer.util.PdfTextExtractor.extractPageText(pdfFile, pageIndex)
+        val extracted = com.magd.tanweer.util.PdfTextExtractor.extractPageText(context, pdfFile, pageIndex)
         if (extracted.isNotBlank()) {
             db.bookReadingDao().insertExtractedPage(
                 BookExtractedPageEntity(
