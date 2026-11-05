@@ -131,15 +131,15 @@ class StartupPersistencePolicyTest {
     }
 
     @Test
-    fun missingGenerationMarkerNeverPurgesExistingLocalData() {
-        assertFalse(DataGenerationPolicy.shouldPurgeLocalCache(null, "gen_initial_1"))
-        assertFalse(DataGenerationPolicy.shouldPurgeLocalCache("", "gen_initial_1"))
+    fun missingGenerationMarkerDoesNotPretendAChangeOccurred() {
+        assertFalse(DataGenerationPolicy.hasChanged(null, "gen_initial_1"))
+        assertFalse(DataGenerationPolicy.hasChanged("", "gen_initial_1"))
     }
 
     @Test
-    fun onlyAnExplicitGenerationChangeRequestsPurge() {
-        assertFalse(DataGenerationPolicy.shouldPurgeLocalCache("gen_initial_1", "gen_initial_1"))
-        assertTrue(DataGenerationPolicy.shouldPurgeLocalCache("gen_initial_1", "gen_initial_2"))
-        assertFalse(DataGenerationPolicy.shouldPurgeLocalCache("gen_initial_1", null))
+    fun explicitGenerationChangeIsDetectedOnlyAsARefreshSignal() {
+        assertFalse(DataGenerationPolicy.hasChanged("gen_initial_1", "gen_initial_1"))
+        assertTrue(DataGenerationPolicy.hasChanged("gen_initial_1", "gen_initial_2"))
+        assertFalse(DataGenerationPolicy.hasChanged("gen_initial_1", null))
     }
 }
