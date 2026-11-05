@@ -2075,6 +2075,16 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun dismissSchoolAnnouncement(
+        eventId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            repository.dismissSchoolAnnouncement(eventId)
+                .onSuccess { onResult(true, "تم إخفاء التعميم من هذا الحساب فقط") }
+                .onFailure { error -> onResult(false, error.message ?: "تعذر إخفاء التعميم") }
+        }
+    }
     fun publishSchoolAnnouncement(
         title: String,
         content: String,
