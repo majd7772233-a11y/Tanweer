@@ -9,6 +9,7 @@ import com.magd.tanweer.data.sync.UnifiedMutationQueue
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
 import com.magd.tanweer.util.DataGenerationPolicy
+import com.magd.tanweer.util.GroupSnapshotPolicy
 import com.magd.tanweer.util.ServerSnapshotReconciliation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -609,6 +610,14 @@ class TanweerRepository(
                     )
                 }
                 val allEntities = myEntities + discoverEntities
+                val serverMyGroupIds = myEntities.map { it.id }
+                if (serverMyGroupIds.any { it.isBlank() } || serverMyGroupIds.toSet().size != serverMyGroupIds.size) {
+                    return@withContext SyncResult.Error("أعاد الخادم قائمة مجموعات غير مكتملة أو مكررة؛ احتُفظ بالمجموعات المحلية")
+                }
+                val expectedDefaultGroupId = db.userDao().getUserSync()?.defaultGroupId
+                if (!GroupSnapshotPolicy.canReplaceMemberships(expectedDefaultGroupId, serverMyGroupIds)) {
+                    return@withContext SyncResult.Error("لم يؤكد الخادم عضوية الشعبة الرئيسية لهذا الحساب؛ احتُفظ بالمجموعات والبيانات المحلية بدلاً من إخفائها")
+                }
                 db.withTransaction {
                     db.groupDao().clearGroups()
                     if (allEntities.isNotEmpty()) db.groupDao().insertGroups(allEntities)
