@@ -132,7 +132,7 @@ fun SyncStatusBar(
                     Text(
                         text = labelText,
                         color = textColor,
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis

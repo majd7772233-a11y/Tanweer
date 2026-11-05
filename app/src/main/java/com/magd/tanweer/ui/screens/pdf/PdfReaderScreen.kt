@@ -738,7 +738,7 @@ fun PdfReaderScreen(
 
                         Text(
                             text = "جاري تحميل وتجهيز الكتاب للمطالعة بدون إنترنت...",
-                            fontSize = 15.sp,
+                            fontSize = tanweerTextSize(15f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
                             textAlign = TextAlign.Center
@@ -746,7 +746,7 @@ fun PdfReaderScreen(
 
                         Text(
                             text = "$downloadedMb MB من أصل $totalMb MB (${(progress * 100).toInt()}%)",
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             color = CyanAccent,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(top = 6.dp)
@@ -781,17 +781,17 @@ fun PdfReaderScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.padding(16.dp)
                         ) {
-                            Text(text = "⚠️", fontSize = 42.sp)
+                            Text(text = "⚠️", fontSize = tanweerTextSize(42f))
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = "تعذر فتح ملف الكتاب",
-                                fontSize = 18.sp,
+                                fontSize = tanweerTextSize(18f),
                                 fontWeight = FontWeight.Bold,
                                 color = RubyRed
                             )
                             Text(
                                 text = state.message,
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.padding(vertical = 8.dp)
@@ -884,7 +884,7 @@ fun PdfReaderScreen(
                     ) {
                         Text(
                             text = "اسحب الشريط لتحريك المسطرة",
-                            fontSize = 10.sp,
+                            fontSize = tanweerTextSize(10f),
                             color = TextPrimary
                         )
                         IconButton(
@@ -982,7 +982,7 @@ fun PdfReaderScreen(
                             Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
                             Text(
                                 text = if (isExtractingAudioText) "جاري استخراج النص..." else if (audioReadMode == AudioReadMode.BOOK_TEXT) "📖 نص الكتاب (${currentPageIndex + 1})" else "📝 ملاحظاتي (${currentPageIndex + 1})",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold
                             )
@@ -1001,7 +1001,7 @@ fun PdfReaderScreen(
                             ) {
                                 Text(
                                     text = if (audioReadMode == AudioReadMode.BOOK_TEXT) "نص الكتاب" else "ملاحظاتي",
-                                    fontSize = 10.sp,
+                                    fontSize = tanweerTextSize(10f),
                                     fontWeight = FontWeight.Bold,
                                     color = if (audioReadMode == AudioReadMode.BOOK_TEXT) CyanAccent else WarmAmber
                                 )
@@ -1020,7 +1020,7 @@ fun PdfReaderScreen(
                                 },
                                 modifier = Modifier.size(28.dp)
                             ) {
-                                Text(text = "${audioSpeed}x", fontSize = 11.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                                Text(text = "${audioSpeed}x", fontSize = tanweerTextSize(11f), color = WarmAmber, fontWeight = FontWeight.Bold)
                             }
                             IconButton(
                                 onClick = { stopAudioPlayback() },
@@ -1052,8 +1052,8 @@ fun PdfReaderScreen(
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(text = if (isPomodoroBreak) "☕ استراحة" else "🍅 تركيز", fontSize = 11.sp, color = TextOnAccent, fontWeight = FontWeight.Bold)
-                            Text(text = timeStr, fontSize = 11.sp, color = TextOnAccent, fontWeight = FontWeight.Black)
+                            Text(text = if (isPomodoroBreak) "☕ استراحة" else "🍅 تركيز", fontSize = tanweerTextSize(11f), color = TextOnAccent, fontWeight = FontWeight.Bold)
+                            Text(text = timeStr, fontSize = tanweerTextSize(11f), color = TextOnAccent, fontWeight = FontWeight.Black)
                         }
                     }
                 }
@@ -1492,7 +1492,7 @@ fun TopReaderBar(
                 ) {
                     Text(
                         text = book.title,
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
                         maxLines = 1,
@@ -1504,14 +1504,14 @@ fun TopReaderBar(
                     ) {
                         Text(
                             text = "صفحة $currentPage من $totalPages",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = CyanAccent,
                             fontWeight = FontWeight.Medium
                         )
-                        Text(text = "•", fontSize = 11.sp, color = TextMuted)
+                        Text(text = "•", fontSize = tanweerTextSize(11f), color = TextMuted)
                         Text(
                             text = "⏱️ $timeFormatted",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = WarmAmber
                         )
                     }
@@ -1533,7 +1533,7 @@ fun TopReaderBar(
                         .clip(CircleShape)
                         .background(WarmAmber.copy(alpha = 0.15f))
                 ) {
-                    Text(text = "⚡", fontSize = 15.sp)
+                    Text(text = "⚡", fontSize = tanweerTextSize(15f))
                 }
 
                 // Drawing Pen Toggle
@@ -1696,7 +1696,7 @@ fun BottomReaderBar(
                 ) {
                     Text(
                         text = "📖 $currentPage / $totalPages",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent
                     )
@@ -1714,7 +1714,7 @@ fun BottomReaderBar(
                                 .clickable { onResetZoom() }
                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                         ) {
-                            Text(text = "🔍 ${(zoomScale * 100).toInt()}% (إعادة)", fontSize = 11.sp, color = CyanAccent, fontWeight = FontWeight.Bold)
+                            Text(text = "🔍 ${(zoomScale * 100).toInt()}% (إعادة)", fontSize = tanweerTextSize(11f), color = CyanAccent, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -1819,13 +1819,13 @@ fun StudyToolsHubSheet(
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     text = "أدوات المذاكرة",
-                    fontSize = 14.sp,
+                    fontSize = tanweerTextSize(14f),
                     fontWeight = FontWeight.Bold,
                     color = CyanAccent
                 )
                 Text(
                     text = "الصفحة ${currentPageIndex + 1} من $totalPages • اختر ما تحتاجه الآن",
-                    fontSize = 11.sp,
+                    fontSize = tanweerTextSize(11f),
                     color = TextSecondary,
                     fontWeight = FontWeight.Medium
                 )
@@ -1840,12 +1840,12 @@ fun StudyToolsHubSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(text = "🎯 هدف القراءة اليومي وسرعة التحصيل", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text(text = "أنجزت $pagesRead من أصل $targetGoal صفحة اليوم", fontSize = 11.sp, color = TextSecondary)
+                        Text(text = "🎯 هدف القراءة اليومي وسرعة التحصيل", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(text = "أنجزت $pagesRead من أصل $targetGoal صفحة اليوم", fontSize = tanweerTextSize(11f), color = TextSecondary)
                     }
                     Text(
                         text = "${((pagesRead.toFloat() / targetGoal.coerceAtLeast(1)) * 100).toInt()}%",
-                        fontSize = 18.sp,
+                        fontSize = tanweerTextSize(18f),
                         fontWeight = FontWeight.Black,
                         color = EmeraldGreen
                     )
@@ -1863,13 +1863,13 @@ fun StudyToolsHubSheet(
                 ) {
                     Text(
                         text = "⚡ سرعة القراءة: $velocityPerHour ص/ساعة",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         color = CyanAccent,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
                         text = "⏱️ جلسة اليوم: ${sessionSeconds / 60} دقيقة (إجمالي: ${totalStudySeconds / 3600}س)",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         color = WarmAmber,
                         fontWeight = FontWeight.Medium
                     )
@@ -1878,7 +1878,7 @@ fun StudyToolsHubSheet(
         }
 
         // SECTION 1: Focus & Flow (Tools 3, 4, 5, 6)
-        Text(text = "⏳ التركيز والانسيابية الذهنية", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+        Text(text = "⏳ التركيز والانسيابية الذهنية", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = WarmAmber)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             // TOOL 3: Pomodoro Timer
             GlassCard(
@@ -1892,11 +1892,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "🍅", fontSize = 22.sp)
+                    Text(text = "🍅", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isPomodoroActive) "بومودورو: ${String.format(Locale.US, "%02d:%02d", pomodoroSecondsLeft / 60, pomodoroSecondsLeft % 60)}" else "مؤقت بومودورو (25د)",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Bold,
                         color = if (isPomodoroActive) RubyRed else TextPrimary,
                         textAlign = TextAlign.Center
@@ -1916,11 +1916,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "🎙️", fontSize = 22.sp)
+                    Text(text = "🎙️", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isAudioPlaying) "إيقاف القارئ الصوتي ⏹️" else "قارئ نص الكتاب والملاحظات 🎙️",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Bold,
                         color = if (isAudioPlaying) CyanAccent else TextPrimary,
                         textAlign = TextAlign.Center
@@ -1942,11 +1942,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "📏", fontSize = 22.sp)
+                    Text(text = "📏", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isFocusRulerActive) "إخفاء مسطرة السطور" else "مسطرة التركيز القرائي",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Bold,
                         color = if (isFocusRulerActive) EmeraldGreen else TextPrimary,
                         textAlign = TextAlign.Center
@@ -1966,11 +1966,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "⏱️", fontSize = 22.sp)
+                    Text(text = "⏱️", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isAutoScrollActive) "إيقاف التمرير التلقائي" else "التقليب التلقائي الذاتي",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Bold,
                         color = if (isAutoScrollActive) WarmAmber else TextPrimary,
                         textAlign = TextAlign.Center
@@ -1980,7 +1980,7 @@ fun StudyToolsHubSheet(
         }
 
         // SECTION 2: Memory & Knowledge Mastery (Tools 7, 8, 9, 10)
-        Text(text = "🧠 استذكار وتثبيت المعلومات", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+        Text(text = "🧠 استذكار وتثبيت المعلومات", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = CyanAccent)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             // TOOL 7: Vocabulary & Lexicon
             GlassCard(
@@ -1993,9 +1993,9 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "📖", fontSize = 22.sp)
+                    Text(text = "📖", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = "معجم المفردات والمصطلحات", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                    Text(text = "معجم المفردات والمصطلحات", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
                 }
             }
 
@@ -2010,9 +2010,9 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "📝", fontSize = 22.sp)
+                    Text(text = "📝", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = "مسودة القوانين والملاحظات", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                    Text(text = "مسودة القوانين والملاحظات", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
                 }
             }
         }
@@ -2029,9 +2029,9 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "🔖", fontSize = 22.sp)
+                    Text(text = "🔖", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = "فهرس الفواصل المرجعية", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                    Text(text = "فهرس الفواصل المرجعية", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
                 }
             }
 
@@ -2046,16 +2046,16 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "✏️", fontSize = 22.sp)
+                    Text(text = "✏️", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = "أقلام التظليل والتدوين الحر", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                    Text(text = "أقلام التظليل والتدوين الحر", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
                 }
             }
         }
 
         // TOOL 11: Quick Exam & Ministerial Question Tagger
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(text = "🏷️ وسم الصفحة السريع للامتحانات:", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
+            Text(text = "🏷️ وسم الصفحة السريع للامتحانات:", fontSize = tanweerTextSize(12f), color = TextSecondary, fontWeight = FontWeight.Medium)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(
                     "مهم للاختبار 📌" to RubyRed,
@@ -2075,7 +2075,7 @@ fun StudyToolsHubSheet(
                     ) {
                         Text(
                             text = tag,
-                            fontSize = 9.sp,
+                            fontSize = tanweerTextSize(9f),
                             fontWeight = FontWeight.Bold,
                             color = tagColor,
                             textAlign = TextAlign.Center,
@@ -2087,7 +2087,7 @@ fun StudyToolsHubSheet(
         }
 
         // SECTION 3: Export & Sharing (Tools 12, 13, 14, 15)
-        Text(text = "📤 التصدير والمشاركة السريعة", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+        Text(text = "📤 التصدير والمشاركة السريعة", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = EmeraldGreen)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             // TOOL 12: Snapshot Share
             GlassCard(
@@ -2101,9 +2101,9 @@ fun StudyToolsHubSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(text = "📸", fontSize = 18.sp)
+                    Text(text = "📸", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "مشاركة لقطة الصفحة", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "مشاركة لقطة الصفحة", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
 
@@ -2119,15 +2119,15 @@ fun StudyToolsHubSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(text = "📋", fontSize = 18.sp)
+                    Text(text = "📋", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "تصدير الملاحظات Markdown", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "تصدير الملاحظات Markdown", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
         }
 
         // SECTION 4: Reading Themes & Eye Health (Tools 14, 15, 16, 17, 18)
-        Text(text = "🌙 أنماط القراءة وصحة العين والبيئة", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFB74D))
+        Text(text = "🌙 أنماط القراءة وصحة العين والبيئة", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = Color(0xFFFFB74D))
 
         // TOOL 14: Six Reading Paper Themes
         Row(
@@ -2148,7 +2148,7 @@ fun StudyToolsHubSheet(
                 ) {
                     Text(
                         text = theme.title.substringBefore(" "),
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         color = theme.textColor
                     )
@@ -2177,11 +2177,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "👁️", fontSize = 18.sp)
+                    Text(text = "👁️", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (isEyeBreakActive) "تنبيه العين (مفعّل)" else "قاعدة 20-20-20 لراحة العين",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         fontWeight = FontWeight.Bold,
                         color = if (isEyeBreakActive) EmeraldGreen else TextPrimary
                     )
@@ -2200,11 +2200,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "🎧", fontSize = 18.sp)
+                    Text(text = "🎧", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (isWhiteNoiseActive) "أصوات التركيز (شغالة)" else "أصوات خلفية وبيئة هادئة",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         fontWeight = FontWeight.Bold,
                         color = if (isWhiteNoiseActive) CyanAccent else TextPrimary
                     )
@@ -2226,9 +2226,9 @@ fun StudyToolsHubSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(text = "🚀", fontSize = 18.sp)
+                    Text(text = "🚀", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "انتقال مباشر لرقم الصفحة", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "انتقال مباشر لرقم الصفحة", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
 
@@ -2244,9 +2244,9 @@ fun StudyToolsHubSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(text = "ℹ️", fontSize = 18.sp)
+                    Text(text = "ℹ️", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "تفاصيل ومعلومات الكتاب", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "تفاصيل ومعلومات الكتاب", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
         }
@@ -2392,7 +2392,7 @@ fun ThumbnailsGridSheet(
         ) {
             Text(
                 text = "📑 معاينة وفهرس الصفحات المصغرة",
-                fontSize = 16.sp,
+                fontSize = tanweerTextSize(16f),
                 fontWeight = FontWeight.Bold,
                 color = CyanAccent
             )
@@ -2457,7 +2457,7 @@ fun ThumbnailsGridSheet(
 
                     Text(
                         text = "صفحة ${pageIdx + 1}",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
                         color = if (isCurrent) CyanAccent else TextPrimary
                     )
@@ -2496,7 +2496,7 @@ fun ReaderSettingsSheet(
         item {
             Text(
                 text = "🎨 ثيمات وإعدادات القراءة والمطالعة",
-                fontSize = 17.sp,
+                fontSize = tanweerTextSize(17f),
                 fontWeight = FontWeight.Bold,
                 color = CyanAccent
             )
@@ -2504,7 +2504,7 @@ fun ReaderSettingsSheet(
 
         // Themes
         item {
-            Text(text = "وضع القراءة واللون المريح للعين:", fontSize = 13.sp, color = TextSecondary)
+            Text(text = "وضع القراءة واللون المريح للعين:", fontSize = tanweerTextSize(13f), color = TextSecondary)
             Spacer(modifier = Modifier.height(8.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(ReadingTheme.values()) { theme ->
@@ -2519,7 +2519,7 @@ fun ReaderSettingsSheet(
                     ) {
                         Text(
                             text = theme.title,
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             color = if (isSelected) CyanAccent else TextPrimary
                         )
@@ -2530,7 +2530,7 @@ fun ReaderSettingsSheet(
 
         // Page Turn Transition Mode
         item {
-            Text(text = "نمط تقليب الصفحات والانتقال:", fontSize = 13.sp, color = TextSecondary)
+            Text(text = "نمط تقليب الصفحات والانتقال:", fontSize = tanweerTextSize(13f), color = TextSecondary)
             Spacer(modifier = Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(
@@ -2543,7 +2543,7 @@ fun ReaderSettingsSheet(
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "✨ 3D تقليب واقعي", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "✨ 3D تقليب واقعي", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
                 Box(
                     modifier = Modifier
@@ -2555,7 +2555,7 @@ fun ReaderSettingsSheet(
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "↔️ تمرير أفقي", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "↔️ تمرير أفقي", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
         }
@@ -2564,8 +2564,8 @@ fun ReaderSettingsSheet(
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(text = "🛡️ فلتر الضوء الأزرق (حماية العين):", fontSize = 13.sp, color = TextSecondary)
-                    Text(text = "${(blueLightFilter * 200).toInt()}%", fontSize = 13.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Text(text = "🛡️ فلتر الضوء الأزرق (حماية العين):", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                    Text(text = "${(blueLightFilter * 200).toInt()}%", fontSize = tanweerTextSize(13f), color = WarmAmber, fontWeight = FontWeight.Bold)
                 }
                 Slider(
                     value = blueLightFilter,
@@ -2580,8 +2580,8 @@ fun ReaderSettingsSheet(
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(text = "💡 التحكم بالسطوع الداخلي:", fontSize = 13.sp, color = TextSecondary)
-                    Text(text = "${(brightnessOverlay * 100).toInt()}%", fontSize = 13.sp, color = CyanAccent, fontWeight = FontWeight.Bold)
+                    Text(text = "💡 التحكم بالسطوع الداخلي:", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                    Text(text = "${(brightnessOverlay * 100).toInt()}%", fontSize = tanweerTextSize(13f), color = CyanAccent, fontWeight = FontWeight.Bold)
                 }
                 Slider(
                     value = brightnessOverlay,
@@ -2595,7 +2595,7 @@ fun ReaderSettingsSheet(
         // Keep Screen Awake & Watermark Toggles
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "📱 تثبيت تشغيل الشاشة (منع القفل):", fontSize = 13.sp, color = TextPrimary)
+                Text(text = "📱 تثبيت تشغيل الشاشة (منع القفل):", fontSize = tanweerTextSize(13f), color = TextPrimary)
                 Switch(
                     checked = isKeepScreenAwake,
                     onCheckedChange = onKeepScreenAwakeChange,
@@ -2606,7 +2606,7 @@ fun ReaderSettingsSheet(
 
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "🔖 إظهار الختم والعلامة المائية:", fontSize = 13.sp, color = TextPrimary)
+                Text(text = "🔖 إظهار الختم والعلامة المائية:", fontSize = tanweerTextSize(13f), color = TextPrimary)
                 Switch(
                     checked = isWatermarkEnabled,
                     onCheckedChange = onWatermarkChange,
@@ -2636,7 +2636,7 @@ fun BookmarksSheet(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = "🔖 الإشارات المرجعية المحفوظة", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+            Text(text = "🔖 الإشارات المرجعية المحفوظة", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold, color = WarmAmber)
             GlassPill(text = "${bookmarks.size} إشارة", color = WarmAmber, bgColor = AmberGlow)
         }
 
@@ -2665,11 +2665,11 @@ fun BookmarksSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = "🔖", fontSize = 18.sp)
+                                Text(text = "🔖", fontSize = tanweerTextSize(18f))
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
-                                    Text(text = bm.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                    Text(text = "الانتقال المباشر لصفحة ${bm.pageIndex + 1}", fontSize = 11.sp, color = CyanAccent)
+                                    Text(text = bm.title, fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                                    Text(text = "الانتقال المباشر لصفحة ${bm.pageIndex + 1}", fontSize = tanweerTextSize(11f), color = CyanAccent)
                                 }
                             }
                             IconButton(onClick = { onDeleteBookmark(bm.id) }) {
@@ -2707,7 +2707,7 @@ fun StudyNotesSheet(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = "📝 ملاحظات صفحة ${currentPage + 1}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+            Text(text = "📝 ملاحظات صفحة ${currentPage + 1}", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold, color = CyanAccent)
             GlassPill(text = "${currentPageNotes.size} ملاحظات", color = CyanAccent, bgColor = CyanGlow)
         }
 
@@ -2749,7 +2749,7 @@ fun StudyNotesSheet(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Top
                         ) {
-                            Text(text = note.noteText, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.weight(1f))
+                            Text(text = note.noteText, fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.weight(1f))
                             IconButton(onClick = { onDeleteNote(note.id) }, modifier = Modifier.size(28.dp)) {
                                 Icon(Icons.Default.DeleteOutline, contentDescription = "حذف", tint = RubyRed, modifier = Modifier.size(16.dp))
                             }
@@ -2781,7 +2781,7 @@ fun VocabularySheet(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(text = "📖 معجم المفردات والمصطلحات", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+            Text(text = "📖 معجم المفردات والمصطلحات", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold, color = CyanAccent)
             GlassPill(text = "${vocabList.size} كلمة", color = WarmAmber, bgColor = AmberGlow)
         }
 
@@ -2811,8 +2811,8 @@ fun VocabularySheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(text = item.word, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-                            Text(text = item.meaning, fontSize = 12.sp, color = TextPrimary)
+                            Text(text = item.word, fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = CyanAccent)
+                            Text(text = item.meaning, fontSize = tanweerTextSize(12f), color = TextPrimary)
                         }
                         IconButton(onClick = { onDeleteVocab(item.id) }) {
                             Icon(Icons.Default.DeleteOutline, contentDescription = "حذف", tint = RubyRed)
@@ -2839,11 +2839,11 @@ fun JumpToPageDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "🚀 الانتقال السريع إلى صفحة", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+            Text(text = "🚀 الانتقال السريع إلى صفحة", fontSize = tanweerTextSize(17f), fontWeight = FontWeight.Bold, color = CyanAccent)
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(text = "أدخل رقم الصفحة من 1 إلى $totalPages:", fontSize = 13.sp, color = TextSecondary)
+                Text(text = "أدخل رقم الصفحة من 1 إلى $totalPages:", fontSize = tanweerTextSize(13f), color = TextSecondary)
                 GlassTextField(
                     value = targetPageText,
                     onValueChange = { targetPageText = it.filter { char -> char.isDigit() } },
@@ -2885,17 +2885,17 @@ fun BookInfoDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "ℹ️ تفاصيل الكتاب وبيانات المنهج", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+            Text(text = "ℹ️ تفاصيل الكتاب وبيانات المنهج", fontSize = tanweerTextSize(17f), fontWeight = FontWeight.Bold, color = CyanAccent)
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(text = "العنوان: ${book.title}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Text(text = "المادة: ${book.subjectName}", fontSize = 13.sp, color = CyanAccent)
-                Text(text = "الصف الدراسي: ${SchoolHierarchy.getGradeName(book.gradeId)}", fontSize = 13.sp, color = TextSecondary)
-                Text(text = "الإصدار: ${book.edition ?: "إصدار رسمي معتمد"}", fontSize = 13.sp, color = TextSecondary)
-                Text(text = "عدد الصفحات الكلي: $totalPages صفحة", fontSize = 13.sp, color = TextSecondary)
-                Text(text = "حجم الملف: ${book.fileSizeMb} MB", fontSize = 13.sp, color = TextSecondary)
-                Text(text = "الوقت المستغرق في المذاكرة: $timeFormatted", fontSize = 13.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                Text(text = "العنوان: ${book.title}", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                Text(text = "المادة: ${book.subjectName}", fontSize = tanweerTextSize(13f), color = CyanAccent)
+                Text(text = "الصف الدراسي: ${SchoolHierarchy.getGradeName(book.gradeId)}", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                Text(text = "الإصدار: ${book.edition ?: "إصدار رسمي معتمد"}", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                Text(text = "عدد الصفحات الكلي: $totalPages صفحة", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                Text(text = "حجم الملف: ${book.fileSizeMb} MB", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                Text(text = "الوقت المستغرق في المذاكرة: $timeFormatted", fontSize = tanweerTextSize(13f), color = WarmAmber, fontWeight = FontWeight.Bold)
             }
         },
         confirmButton = {
