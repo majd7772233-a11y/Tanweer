@@ -643,6 +643,9 @@ interface TanweerApiService {
     @GET("api/v1/events")
     suspend fun getEvents(@Query("groupId") groupId: String): Response<EventsResponse>
 
+    @POST("api/v1/events/{eventId}/dismiss")
+    suspend fun dismissSchoolAnnouncement(@Path("eventId") eventId: String): Response<GenericResponse>
+
     @POST("api/v1/events")
     suspend fun createEvent(@Body req: CreateEventRequest): Response<GenericResponse>
 
