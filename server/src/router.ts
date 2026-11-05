@@ -27,7 +27,7 @@ import { handleGetCalendarOverview, handleGetDayDetail } from './services/calend
 import { handleCreateContent, handleVoteUseful, handleUpdateContent, handleDeleteContent, handleGetContents, handleGetAcademicArchive } from './services/content';
 import { handleCreateHomework, handleGetHomeworks, handleToggleHomeworkCompletion, handleUpdateHomework, handleDeleteHomework } from './services/homework';
 import { handleCreateExam, handleGetExams, handleUpdateExam, handleDeleteExam, handleToggleExamCompletion } from './services/exams';
-import { handleCreateEvent, handleGetEvents, handleUpdateEvent, handleDeleteEvent } from './services/events';
+import { handleCreateEvent, handleGetEvents, handleUpdateEvent, handleDeleteEvent, handleDismissSchoolAnnouncement } from './services/events';
 import {
   handleAddIssueComment,
   handleCreateIssue,
@@ -444,6 +444,10 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
   if (path === '/api/v1/events' && method === 'POST') {
     return handleCreateEvent(user, request, env);
+  }
+  if (path.startsWith('/api/v1/events/') && path.endsWith('/dismiss') && method === 'POST') {
+    const eventId = path.split('/')[4];
+    return handleDismissSchoolAnnouncement(eventId, user, env);
   }
   if (path.startsWith('/api/v1/events/')) {
     const eventId = path.split('/')[4];
