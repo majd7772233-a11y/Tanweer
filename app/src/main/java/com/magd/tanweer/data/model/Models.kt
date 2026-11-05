@@ -38,6 +38,11 @@ data class ApiError(
     val message: String
 )
 
+@JsonClass(generateAdapter = true)
+data class UpdateStudentStatusRequest(
+    val status: String
+)
+
 data class GradeInfo(
     val id: Int,
     val name: String,
