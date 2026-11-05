@@ -156,13 +156,13 @@ fun ExamsScreen(
                     Column {
                         Text(
                             text = "🧪 جدول الاختبارات المركزي",
-                            fontSize = 20.sp,
+                            fontSize = tanweerTextSize(20f),
                             fontWeight = FontWeight.Black,
                             color = RubyRed
                         )
                         Text(
                             text = "${exams.size} اختبارات مسجلة موزعة على ${examsByMonth.size} أشهر",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             color = TextSecondary
                         )
                     }
@@ -210,7 +210,7 @@ fun ExamsScreen(
                             ) {
                                 Text(
                                     text = "جميع الأشهر (${exams.size})",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isAllSelected) Color.White else TextSecondary
                                 )
@@ -232,7 +232,7 @@ fun ExamsScreen(
                                 ) {
                                     Text(
                                         text = "$monthTitle (${monthExams.size})",
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                         color = if (isSelected) Color.White else TextSecondary
                                     )
@@ -276,7 +276,7 @@ fun ExamsScreen(
                             ) {
                                 Text(
                                     text = displayLabel,
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     fontWeight = if (isTypeSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isTypeSelected) chipColor else TextSecondary
                                 )
@@ -319,18 +319,18 @@ fun ExamsScreen(
                                             .border(1.dp, RubyRed.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(text = "📅", fontSize = 16.sp)
+                                        Text(text = "📅", fontSize = tanweerTextSize(16f))
                                     }
                                     Column {
                                         Text(
                                             text = fullMonthTitle,
-                                            fontSize = 14.sp,
+                                            fontSize = tanweerTextSize(14f),
                                             fontWeight = FontWeight.Bold,
                                             color = TextPrimary
                                         )
                                         Text(
                                             text = "تمت مراجعة $completedCount من ${monthExams.size} اختبارات",
-                                            fontSize = 11.sp,
+                                            fontSize = tanweerTextSize(11f),
                                             color = if (completedCount == monthExams.size) EmeraldGreen else TextSecondary
                                         )
                                     }
@@ -498,7 +498,7 @@ fun ExamsScreen(
                     Text(
                         "يتطلب إرسال تذكير الاختبار في موعده الدقيق السماح للتطبيق بجدولة التنبيهات والمنبهات (Alarms & Reminders) من إعدادات الهاتف.",
                         color = TextPrimary,
-                        fontSize = 13.sp
+                        fontSize = tanweerTextSize(13f)
                     )
                 },
                 confirmButton = {
@@ -552,7 +552,7 @@ fun ExamsScreen(
                     Text(
                         "لتذكيرك بموعد الاختبار والمراجعة، يحتاج تنوير إلى تفعيل إذن الإشعارات من إعدادات الهاتف.",
                         color = TextPrimary,
-                        fontSize = 13.sp
+                        fontSize = tanweerTextSize(13f)
                     )
                 },
                 confirmButton = {
@@ -626,14 +626,14 @@ fun CanvasExamsTableBoard(
                     .padding(horizontal = 10.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = "#", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(32.dp))
-                Text(text = "المادة والنوع", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(145.dp))
-                Text(text = "اليوم والتاريخ", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(130.dp))
-                Text(text = "الأستاذ / القاعة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(120.dp))
-                Text(text = "الفصول المقررة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(140.dp))
-                Text(text = "المراجعة", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, textAlign = TextAlign.Center, modifier = Modifier.width(85.dp))
+                Text(text = "#", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(32.dp))
+                Text(text = "المادة والنوع", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(145.dp))
+                Text(text = "اليوم والتاريخ", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(130.dp))
+                Text(text = "الأستاذ / القاعة", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(120.dp))
+                Text(text = "الفصول المقررة", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent, modifier = Modifier.width(140.dp))
+                Text(text = "المراجعة", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent, textAlign = TextAlign.Center, modifier = Modifier.width(85.dp))
                 if (canDelete) {
-                    Text(text = "حذف", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent, textAlign = TextAlign.Center, modifier = Modifier.width(44.dp))
+                    Text(text = "حذف", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent, textAlign = TextAlign.Center, modifier = Modifier.width(44.dp))
                 }
             }
 
@@ -685,7 +685,7 @@ fun CanvasExamsTableBoard(
                         // # Order
                         Text(
                             text = "${index + 1}",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Bold,
                             color = if (isReviewed) EmeraldGreen else TextSecondary,
                             modifier = Modifier.width(32.dp)
@@ -696,13 +696,13 @@ fun CanvasExamsTableBoard(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.width(145.dp)
                         ) {
-                            Text(text = exam.subjectIcon, fontSize = 16.sp)
+                            Text(text = exam.subjectIcon, fontSize = tanweerTextSize(16f))
                             Spacer(modifier = Modifier.width(6.dp))
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(
                                         text = exam.subjectName,
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         fontWeight = FontWeight.Bold,
                                         color = if (isReviewed) EmeraldGreen else TextPrimary,
                                         maxLines = 1,
@@ -713,7 +713,7 @@ fun CanvasExamsTableBoard(
                                 }
                                 Text(
                                     text = exam.title,
-                                    fontSize = 10.sp,
+                                    fontSize = tanweerTextSize(10f),
                                     color = TextMuted,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -721,7 +721,7 @@ fun CanvasExamsTableBoard(
                                 if (exam.isOfficial) {
                                     Text(
                                         text = "اختبار رسمي • صادر من الأستاذ 🎓",
-                                        fontSize = 8.sp,
+                                        fontSize = tanweerTextSize(8f),
                                         fontWeight = FontWeight.Bold,
                                         color = CyanAccent,
                                         maxLines = 1,
@@ -731,7 +731,7 @@ fun CanvasExamsTableBoard(
                                 if (exam.syncStatus == "DELETE_PENDING") {
                                     Text(
                                         text = "طلب الحذف بانتظار الاتصال",
-                                        fontSize = 8.sp,
+                                        fontSize = tanweerTextSize(8f),
                                         fontWeight = FontWeight.SemiBold,
                                         color = WarmAmber,
                                         maxLines = 1,
@@ -746,7 +746,7 @@ fun CanvasExamsTableBoard(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(
                                     text = dayName,
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     fontWeight = FontWeight.SemiBold,
                                     color = when {
                                         isToday -> WarmAmber
@@ -766,14 +766,14 @@ fun CanvasExamsTableBoard(
                                 }
                                 Text(
                                     text = statusLabel,
-                                    fontSize = 8.sp,
+                                    fontSize = tanweerTextSize(8f),
                                     fontWeight = FontWeight.Bold,
                                     color = statusColor
                                 )
                             }
                             Text(
                                 text = exam.examDate,
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 color = TextMuted
                             )
                         }
@@ -781,7 +781,7 @@ fun CanvasExamsTableBoard(
                         // Teacher / Hall
                         Text(
                             text = teacherOrHall,
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -791,7 +791,7 @@ fun CanvasExamsTableBoard(
                         // Required Chapters
                         Text(
                             text = chapters,
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = CyanAccent,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -806,7 +806,7 @@ fun CanvasExamsTableBoard(
                             if (exam.syncStatus == "DELETE_PENDING") {
                                 Text(
                                     text = "قيد الحذف",
-                                    fontSize = 9.sp,
+                                    fontSize = tanweerTextSize(9f),
                                     fontWeight = FontWeight.Bold,
                                     color = WarmAmber
                                 )
@@ -854,7 +854,7 @@ fun ExamTypePill(examType: String) {
             .border(0.5.dp, color.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
             .padding(horizontal = 4.dp, vertical = 1.dp)
     ) {
-        Text(text = label, fontSize = 8.sp, fontWeight = FontWeight.Bold, color = color)
+        Text(text = label, fontSize = tanweerTextSize(8f), fontWeight = FontWeight.Bold, color = color)
     }
 }
 
@@ -940,7 +940,7 @@ fun CanvasSmartStatusBadge(
 
             Text(
                 text = if (isDone) "مكتمل ✓" else "قادم ⏳",
-                fontSize = 10.sp,
+                fontSize = tanweerTextSize(10f),
                 fontWeight = FontWeight.Bold,
                 color = if (isDone) EmeraldGreen else RubyRed,
                 maxLines = 1,
@@ -1039,7 +1039,7 @@ fun AddExamSheet(
             ) {
                 Text(
                     text = "جدولة وتثبيت اختبار رسمي 🧪",
-                    fontSize = 18.sp,
+                    fontSize = tanweerTextSize(18f),
                     fontWeight = FontWeight.Black,
                     color = RubyRed
                 )
@@ -1079,7 +1079,7 @@ fun AddExamSheet(
                     ) {
                         Text(
                             text = label,
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) Color.White else TextSecondary
                         )
@@ -1089,7 +1089,7 @@ fun AddExamSheet(
 
             // Subject Selector Horizontal Row
             Column {
-                Text("اختر المادة:", fontSize = 12.sp, color = TextSecondary)
+                Text("اختر المادة:", fontSize = tanweerTextSize(12f), color = TextSecondary)
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier
@@ -1108,10 +1108,10 @@ fun AddExamSheet(
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(text = subj.icon, fontSize = 16.sp)
+                                Text(text = subj.icon, fontSize = tanweerTextSize(16f))
                                 Text(
                                     text = subj.name,
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) RubyRed else TextPrimary,
                                     maxLines = 1,
@@ -1133,7 +1133,7 @@ fun AddExamSheet(
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "تاريخ الاختبار (تاريخ تقويمي معتمد) *",
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     color = TextSecondary
                 )
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1160,7 +1160,7 @@ fun AddExamSheet(
                         )
                         Text(
                             text = examDate,
-                            fontSize = 14.sp,
+                            fontSize = tanweerTextSize(14f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
@@ -1239,14 +1239,14 @@ fun ExamDetailModal(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = exam.subjectIcon, fontSize = 26.sp)
+                    Text(text = exam.subjectIcon, fontSize = tanweerTextSize(26f))
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(text = "اختبار ${exam.subjectName}", fontSize = 16.sp, fontWeight = FontWeight.Black, color = TextPrimary)
+                            Text(text = "اختبار ${exam.subjectName}", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Black, color = TextPrimary)
                             ExamTypePill(exam.examType)
                         }
-                        Text(text = exam.title, fontSize = 13.sp, color = TextSecondary)
+                        Text(text = exam.title, fontSize = tanweerTextSize(13f), color = TextSecondary)
                     }
                 }
 
@@ -1269,8 +1269,8 @@ fun ExamDetailModal(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(text = "موعد الاختبار:", fontSize = 11.sp, color = TextSecondary)
-                        Text(text = "$dayName • ${exam.examDate}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+                        Text(text = "موعد الاختبار:", fontSize = tanweerTextSize(11f), color = TextSecondary)
+                        Text(text = "$dayName • ${exam.examDate}", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = WarmAmber)
                     }
 
                     // Toggle review completion button (Point 19)
@@ -1287,8 +1287,8 @@ fun ExamDetailModal(
             if (!exam.requiredChapters.isNullOrBlank()) {
                 GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text(text = "الفصول والموضوعات المقررة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-                        Text(text = exam.requiredChapters, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
+                        Text(text = "الفصول والموضوعات المقررة:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
+                        Text(text = exam.requiredChapters, fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
@@ -1296,8 +1296,8 @@ fun ExamDetailModal(
             if (!exam.notes.isNullOrBlank()) {
                 GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text(text = "الأستاذ والقاعة المخصصة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
-                        Text(text = exam.notes, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
+                        Text(text = "الأستاذ والقاعة المخصصة:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = WarmAmber)
+                        Text(text = exam.notes, fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }

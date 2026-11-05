@@ -78,12 +78,12 @@ fun TanweerApp(
                 ) {
                     Text(
                         text = "📚",
-                        fontSize = 34.sp
+                        fontSize = tanweerTextSize(34f)
                     )
                 }
                 Text(
                     text = "تنوير",
-                    fontSize = 22.sp,
+                    fontSize = tanweerTextSize(22f),
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
@@ -205,7 +205,7 @@ fun TanweerApp(
                                         SubScreen.STORAGE_MANAGER -> "إدارة تخزين ومساحة الكتب 💾"
                                         else -> ""
                                     },
-                                    fontSize = 17.sp,
+                                    fontSize = tanweerTextSize(17f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
@@ -267,14 +267,14 @@ fun TanweerApp(
                                 text = "🔑 رقمك السري ورمز الاسترداد (هام جداً)",
                                 color = WarmAmber,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp
+                                fontSize = tanweerTextSize(17f)
                             )
                         },
                         text = {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text(
                                     text = "احتفظ بهذا الرقم السري! يمكنك استخدامه لتسجيل الدخول مباشرة إلى حسابك من أي مكان، أو استعادة حسابك إذا نسيت كلمة المرور:",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     color = TextSecondary
                                 )
                                 Box(
@@ -288,7 +288,7 @@ fun TanweerApp(
                                 ) {
                                     Text(
                                         text = codeToCopy,
-                                        fontSize = 17.sp,
+                                        fontSize = tanweerTextSize(17f),
                                         fontWeight = FontWeight.Black,
                                         color = WarmAmber,
                                         textAlign = TextAlign.Center
@@ -390,7 +390,7 @@ fun GlassBottomNavigationBar(
                 label = {
                     Text(
                         text = label,
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     )
                 },
@@ -437,7 +437,7 @@ fun GlassBottomNavigationBar(
                 ) { targetLabel ->
                     Text(
                         text = targetLabel,
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         fontWeight = if (isMoreSelected) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1
                     )

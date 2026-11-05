@@ -226,7 +226,7 @@ fun SettingsScreen(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "اختر حجم الخط الأساسي في التطبيق:",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
@@ -266,13 +266,13 @@ fun SettingsScreen(
                                     Column {
                                         Text(
                                             text = option.label,
-                                            fontSize = (option.sizeSp).sp,
+                                            fontSize = tanweerTextSize(option.sizeSp.toFloat()),
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                             color = if (isSelected) CyanAccent else TextPrimary
                                         )
                                         Text(
                                             text = "حجم Base Font: ${option.sizeSp}sp",
-                                            fontSize = 11.sp,
+                                            fontSize = tanweerTextSize(11f),
                                             color = TextSecondary
                                         )
                                     }
@@ -301,16 +301,16 @@ fun SettingsScreen(
                         Column {
                             Text(
                                 text = "معاينة حية للخط:",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextMuted,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "منصة تنوير التعليمية — متابعة الدروس والواجبات المدرسية للشعب والصفوف الدراسية بأعلى سرعة وكفاءة.",
-                                fontSize = (12 * selectedFontScale).sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextPrimary,
-                                lineHeight = (18 * selectedFontScale).sp
+                                lineHeight = tanweerTextSize(18f)
                             )
                         }
                     }
@@ -441,17 +441,17 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(bannerIcon, fontSize = 14.sp)
+                                Text(bannerIcon, fontSize = tanweerTextSize(14f))
                                 Text(
                                     text = bannerTitle,
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     fontWeight = FontWeight.Bold,
                                     color = bannerTextColor
                                 )
                             }
                             Text(
                                 text = bannerSubtitle,
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                         }
@@ -494,8 +494,8 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("إعادة المزامنة الشاملة الآن", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تحديث كل البيانات والتحقق من نتيجة كل قسم", fontSize = 11.sp, color = TextSecondary)
+                            Text("إعادة المزامنة الشاملة الآن", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("تحديث كل البيانات والتحقق من نتيجة كل قسم", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                         GlassButton(
                             text = if (isSyncingComprehensive) "جاري الفحص..." else "مزامنة الكل ⚡",
@@ -533,7 +533,7 @@ fun SettingsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         text = "مستوى ضغط الصور المرفوعة:",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
@@ -561,11 +561,11 @@ fun SettingsScreen(
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
                                         text = name,
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                         color = if (isSelected) CyanAccent else TextPrimary
                                     )
-                                    Text(text = cap, fontSize = 9.sp, color = TextSecondary)
+                                    Text(text = cap, fontSize = tanweerTextSize(9f), color = TextSecondary)
                                 }
                             }
                         }
@@ -594,17 +594,17 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("⚠️", fontSize = 14.sp)
+                            Text("⚠️", fontSize = tanweerTextSize(14f))
                             Text(
                                 text = "إذن الإشعارات معطل في الهاتف",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = FontWeight.Bold,
                                 color = RubyRed
                             )
                         }
                         Text(
                             text = "التنبيهات المدرسية وتذكيرات الواجبات والجدول متوقفة حالياً. فعّل الإذن لتصلك التنبيهات.",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary
                         )
                     }
@@ -687,15 +687,15 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("الملفات المؤقتة والذاكرة المخبئية", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("الملفات المؤقتة والذاكرة المخبئية", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
                         Text(
                             text = "الحجم الحالي: ${(cacheSizeBytes / (1024 * 1024.0)).let { "%.2f".format(it) }} ميجابايت",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = CyanAccent
                         )
                         Text(
                             text = "تنظيف الكاش يحذف ملفات التصفح والصور المؤقتة فقط، دون المساس بالدروس أو المحتوى المحفوظ للاستخدام دون اتصال.",
-                            fontSize = 10.sp,
+                            fontSize = tanweerTextSize(10f),
                             color = TextSecondary
                         )
                     }
@@ -756,8 +756,8 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("خادم Cloudflare Workers", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("tanweer.magd.workers.dev", fontSize = 11.sp, color = TextSecondary)
+                            Text("خادم Cloudflare Workers", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("tanweer.magd.workers.dev", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
 
                         GlassButton(
@@ -804,7 +804,7 @@ fun SettingsScreen(
                         ) {
                             Text(
                                 text = serverPingStatus!!,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = if (serverPingStatus!!.contains("✅")) EmeraldGreen else Color(0xFFFF5252),
                                 fontWeight = FontWeight.Bold
                             )
@@ -838,13 +838,13 @@ fun SettingsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "الأجهزة النشطة: $activeDevicesCount / $maxActiveDevices",
-                                fontSize = 14.sp,
+                                fontSize = tanweerTextSize(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = if (activeDevicesCount >= maxActiveDevices) WarmAmber else CyanAccent
                             )
                             Text(
                                 text = "يمكنك إزالة جهاز قديم لإضافة جهاز جديد. إعادة الدخول من الجهاز نفسه لا تستهلك خانة إضافية.",
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 color = TextSecondary
                             )
                         }
@@ -868,12 +868,12 @@ fun SettingsScreen(
                                 color = CyanAccent
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("جارٍ تحميل الأجهزة...", fontSize = 11.sp, color = TextSecondary)
+                            Text("جارٍ تحميل الأجهزة...", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                     } else if (deviceLoadError != null && registeredDevices.isEmpty()) {
                         Text(
                             text = deviceLoadError ?: "تعذر تحميل الأجهزة",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = RubyRed
                         )
                         GlassOutlinedButton(
@@ -883,7 +883,7 @@ fun SettingsScreen(
                     } else if (registeredDevices.isEmpty()) {
                         Text(
                             text = "لا توجد أجهزة نشطة مسجلة لهذا الحساب.",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary
                         )
                     } else {
@@ -907,13 +907,13 @@ fun SettingsScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = device.platform.ifBlank { "Android" },
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
                                     Text(
                                         text = if (device.appVersion.isBlank()) "إصدار التطبيق غير محدد" else "الإصدار ${device.appVersion}",
-                                        fontSize = 10.sp,
+                                        fontSize = tanweerTextSize(10f),
                                         color = TextSecondary
                                     )
                                     Text(
@@ -923,7 +923,7 @@ fun SettingsScreen(
                                                 java.util.Locale.getDefault()
                                             ).format(java.util.Date(device.lastSeen))
                                         } else "غير معروف",
-                                        fontSize = 9.sp,
+                                        fontSize = tanweerTextSize(9f),
                                         color = TextMuted
                                     )
                                 }
@@ -939,7 +939,7 @@ fun SettingsScreen(
                                         onClick = { deviceToRemove = device },
                                         enabled = !isRemovingDevice
                                     ) {
-                                        Text("إزالة", color = RubyRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text("إزالة", color = RubyRed, fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -967,10 +967,10 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("🚀", fontSize = 22.sp)
+                        Text("🚀", fontSize = tanweerTextSize(22f))
                         Column {
-                            Text("فحص التحديثات والإصدار (${BuildConfig.VERSION_NAME})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("التحقق من توافق النسخة مع الخادم وما الجديد", fontSize = 11.sp, color = TextSecondary)
+                            Text("فحص التحديثات والإصدار (${BuildConfig.VERSION_NAME})", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("التحقق من توافق النسخة مع الخادم وما الجديد", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                     }
                     GlassPill(text = "محدث ✓", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
@@ -987,10 +987,10 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "تـنـويـر ✨", fontSize = 20.sp, fontWeight = FontWeight.Black, color = CyanAccent)
+                    Text(text = "تـنـويـر ✨", fontSize = tanweerTextSize(20f), fontWeight = FontWeight.Black, color = CyanAccent)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "المنصة التعليمية للطلاب والمعلمين", fontSize = 12.sp, color = TextSecondary)
-                    Text(text = "الإصدار ${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE}) • معمارية Cloudflare Workers + SQLite Room", fontSize = 11.sp, color = TextMuted)
+                    Text(text = "المنصة التعليمية للطلاب والمعلمين", fontSize = tanweerTextSize(12f), color = TextSecondary)
+                    Text(text = "الإصدار ${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE}) • معمارية Cloudflare Workers + SQLite Room", fontSize = tanweerTextSize(11f), color = TextMuted)
                 }
             }
         }
@@ -1007,7 +1007,7 @@ fun SettingsScreen(
                 Text(
                     "سيتم إنهاء جلسات هذا الجهاز وإزالته من حسابك. يمكنك تسجيل الدخول منه مجدداً بعد توفر خانة نشطة.",
                     color = TextPrimary,
-                    fontSize = 13.sp
+                    fontSize = tanweerTextSize(13f)
                 )
             },
             confirmButton = {
@@ -1054,7 +1054,7 @@ fun SettingsScreen(
             title = {
                 Text(
                     text = if (report.isAllSucceeded) "تقرير المزامنة الشاملة ✅" else "نتيجة المزامنة الشاملة ⚠️",
-                    fontSize = 17.sp,
+                    fontSize = tanweerTextSize(17f),
                     color = if (report.isAllSucceeded) EmeraldGreen else WarmAmber,
                     fontWeight = FontWeight.Bold
                 )
@@ -1063,34 +1063,34 @@ fun SettingsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         text = report.summaryMessage,
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         color = TextPrimary
                     )
                     HorizontalDivider(color = GlassBorderSubtle)
                     if (report.succeededSections.isNotEmpty()) {
                         Text(
                             text = "الأقسام المكتملة بنجاح (${report.succeededSections.size}):",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Bold,
                             color = EmeraldGreen
                         )
                         Text(
                             text = report.succeededSections.joinToString(" • "),
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary
                         )
                     }
                     if (report.failedSections.isNotEmpty()) {
                         Text(
                             text = "الأقسام المتعذرة (${report.failedSections.size}):",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Bold,
                             color = RubyRed
                         )
                         report.failedSections.forEach { (sec, err) ->
                             Text(
                                 text = "• $sec: $err",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextMuted
                             )
                         }
@@ -1098,34 +1098,34 @@ fun SettingsScreen(
                     if (report.offlineSections.isNotEmpty()) {
                         Text(
                             text = "أقسام تعمل بالوضع المحلي المؤقت (${report.offlineSections.size}):",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Bold,
                             color = WarmAmber
                         )
                         Text(
                             text = report.offlineSections.joinToString(" • "),
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary
                         )
                     }
                     if (report.processedOutboxCount > 0) {
                         Text(
                             text = "تم رفع ومعالجة ${report.processedOutboxCount} عمليات كانت معلقة في الطابور بنجاح ✓",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = EmeraldGreen
                         )
                     }
                     if (report.outboxError != null) {
                         Text(
                             text = "تعذر رفع بعض عمليات الطابور: ${report.outboxError}",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = RubyRed
                         )
                     }
                     if (report.pendingOutboxCount > 0) {
                         Text(
                             text = "عمليات محفوظة في جهازك بانتظار الرفع: ${report.pendingOutboxCount}",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = WarmAmber
                         )
                     }
@@ -1145,8 +1145,8 @@ fun SettingsScreen(
 @Composable
 private fun SettingsSectionHeader(title: String, subtitle: String) {
     Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
-        Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-        Text(text = subtitle, fontSize = 11.sp, color = TextSecondary)
+        Text(text = title, fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = CyanAccent)
+        Text(text = subtitle, fontSize = tanweerTextSize(11f), color = TextSecondary)
     }
 }
 
@@ -1169,15 +1169,15 @@ private fun ThemeButton(
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text = icon, fontSize = 20.sp)
+            Text(text = icon, fontSize = tanweerTextSize(20f))
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = title,
-                fontSize = 12.sp,
+                fontSize = tanweerTextSize(12f),
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 color = if (isSelected) CyanAccent else TextPrimary
             )
-            Text(text = subtitle, fontSize = 9.sp, color = TextSecondary)
+            Text(text = subtitle, fontSize = tanweerTextSize(9f), color = TextSecondary)
         }
     }
 }
@@ -1207,8 +1207,8 @@ private fun SettingsToggleRow(
             }
             Spacer(modifier = Modifier.width(10.dp))
             Column {
-                Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Text(text = subtitle, fontSize = 11.sp, color = TextSecondary)
+                Text(text = title, fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                Text(text = subtitle, fontSize = tanweerTextSize(11f), color = TextSecondary)
             }
         }
 
