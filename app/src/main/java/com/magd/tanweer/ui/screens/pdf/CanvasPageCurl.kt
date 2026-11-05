@@ -648,19 +648,27 @@ private fun DrawScope.drawFocusRuler(rulerY: Float, size: Size) {
         )
     }
 
+    // Slightly brighten the reading band so it behaves like a usable ruler,
+    // not just two disconnected guide lines.
+    drawRect(
+        color = Color(0x18FFD54F),
+        topLeft = Offset(0f, topDimHeight),
+        size = Size(size.width, (bottomDimTop - topDimHeight).coerceAtLeast(0f))
+    )
+
     // Highlight band borders
     drawLine(
         color = Color(0xFFFFD54F),
         start = Offset(0f, topDimHeight),
         end = Offset(size.width, topDimHeight),
-        strokeWidth = 3f
+        strokeWidth = 2.dp.toPx()
     )
 
     drawLine(
         color = Color(0xFFFFD54F),
         start = Offset(0f, bottomDimTop),
         end = Offset(size.width, bottomDimTop),
-        strokeWidth = 3f
+        strokeWidth = 2.dp.toPx()
     )
 
     // Dim bottom area
