@@ -211,6 +211,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Tanweer-debug-${{ github.sha }}
-          path: app/build/outputs/apk/${BUILD_FLAVOR,,}/debug/app-${BUILD_FLAVOR,,}-debug.apk
+          path: app/build/outputs/apk/staging/debug/app-staging-debug.apk
           if-no-files-found: error
           retention-days: 7
