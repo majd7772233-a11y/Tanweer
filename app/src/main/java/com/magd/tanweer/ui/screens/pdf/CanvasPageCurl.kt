@@ -82,6 +82,11 @@ fun CanvasPageCurlViewer(
 ) {
     // 3D Curl State (-1f = prev page curled, 0f = neutral, 1f = next page curled)
     val curlProgress = remember { Animatable(0f) }
+    // Keep gesture processing alive while Compose state changes during a pinch or pan.
+    val latestZoomScale by rememberUpdatedState(zoomScale)
+    val latestPanOffset by rememberUpdatedState(panOffset)
+    val latestFocusRulerY by rememberUpdatedState(focusRulerY)
+
     // Live drawing points for active stroke
     val activeStrokePoints = remember { mutableStateListOf<Offset>() }
 
@@ -127,9 +132,6 @@ fun CanvasPageCurlViewer(
             // Two or more fingers can only zoom; a single finger can only turn or pan.
             .pointerInput(
                 isDrawingMode,
-                zoomScale,
-                panOffset,
-                focusRulerY,
                 currentPageIndex,
                 totalPages,
                 pageTurnMode
@@ -144,8 +146,8 @@ fun CanvasPageCurlViewer(
                         var totalDrag = Offset.Zero
                         var didMove = false
                         var didPinch = false
-                        var didRulerDrag = focusRulerY != null && kotlin.math.abs(
-                            down.position.y - (if (focusRulerY < 0f) size.height / 2f else focusRulerY)
+                        var didRulerDrag = latestFocusRulerY != null && kotlin.math.abs(
+                            down.position.y - (if (latestFocusRulerY < 0f) size.height / 2f else latestFocusRulerY)
                         ) <= 36f
                         var previousPinchSpan = 0f
                         var previousPinchCentroid = Offset.Zero
@@ -166,10 +168,12 @@ fun CanvasPageCurlViewer(
 
                                 if (previousPinchSpan > 0f && span > 0f) {
                                     val requestedZoom = span / previousPinchSpan
-                                    val newScale = (zoomScale * requestedZoom).coerceIn(1f, 5f)
-                                    val appliedZoom = newScale / zoomScale.coerceAtLeast(1f)
+                                    val currentScale = latestZoomScale
+                                    val currentPan = latestPanOffset
+                                    val newScale = (currentScale * requestedZoom).coerceIn(1f, 5f)
+                                    val appliedZoom = newScale / currentScale.coerceAtLeast(1f)
                                     val center = Offset(size.width / 2f, size.height / 2f)
-                                    val focus = centroid - center - panOffset
+                                    val focus = centroid - center - currentPan
                                     val focalCorrection = Offset(
                                         x = focus.x * (1f - appliedZoom),
                                         y = focus.y * (1f - appliedZoom)
@@ -181,8 +185,8 @@ fun CanvasPageCurlViewer(
                                         Offset.Zero
                                     } else {
                                         Offset(
-                                            x = (panOffset.x + centroidPan.x + focalCorrection.x).coerceIn(-maxPanX, maxPanX),
-                                            y = (panOffset.y + centroidPan.y + focalCorrection.y).coerceIn(-maxPanY, maxPanY)
+                                            x = (currentPan.x + centroidPan.x + focalCorrection.x).coerceIn(-maxPanX, maxPanX),
+                                            y = (currentPan.y + centroidPan.y + focalCorrection.y).coerceIn(-maxPanY, maxPanY)
                                         )
                                     }
                                     onZoomChange(newScale, newPan)
@@ -201,14 +205,14 @@ fun CanvasPageCurlViewer(
                                         (tapPosition - lastTapPosition).getDistance() <= 56f
 
                                     if (isDoubleTap) {
-                                        if (zoomScale > 1.15f) {
+                                        if (latestZoomScale > 1.15f) {
                                             onZoomChange(1f, Offset.Zero)
                                         } else {
                                             onZoomChange(2.2f, Offset.Zero)
                                         }
                                         lastTapUptime = 0L
                                     } else {
-                                        if (zoomScale <= 1.05f) {
+                                        if (latestZoomScale <= 1.05f) {
                                             if (tapPosition.x > size.width * 0.88f && hasNextPage) {
                                                 onNextPage()
                                             } else if (tapPosition.x < size.width * 0.12f && hasPrevPage) {
@@ -222,7 +226,7 @@ fun CanvasPageCurlViewer(
                                         lastTapUptime = tapTime
                                         lastTapPosition = tapPosition
                                     }
-                                } else if (!didPinch && !didRulerDrag && zoomScale <= 1.05f) {
+                                } else if (!didPinch && !didRulerDrag && latestZoomScale <= 1.05f) {
                                     val progress = curlProgress.value
                                     if (progress > 0.20f && hasNextPage) {
                                         curlProgress.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
@@ -253,14 +257,16 @@ fun CanvasPageCurlViewer(
                                             change.position.y.coerceIn(rulerHeight / 2f, size.height - rulerHeight / 2f)
                                         )
                                         change.consume()
-                                    } else if (zoomScale > 1.05f) {
-                                        val maxPanX = (size.width * (zoomScale - 1f)) / 2f
-                                        val maxPanY = (size.height * (zoomScale - 1f)) / 2f
+                                    } else if (latestZoomScale > 1.05f) {
+                                        val currentScale = latestZoomScale
+                                        val currentPan = latestPanOffset
+                                        val maxPanX = (size.width * (currentScale - 1f)) / 2f
+                                        val maxPanY = (size.height * (currentScale - 1f)) / 2f
                                         onZoomChange(
-                                            zoomScale,
+                                            currentScale,
                                             Offset(
-                                                x = (panOffset.x + delta.x).coerceIn(-maxPanX, maxPanX),
-                                                y = (panOffset.y + delta.y).coerceIn(-maxPanY, maxPanY)
+                                                x = (currentPan.x + delta.x).coerceIn(-maxPanX, maxPanX),
+                                                y = (currentPan.y + delta.y).coerceIn(-maxPanY, maxPanY)
                                             )
                                         )
                                         change.consume()
