@@ -555,28 +555,57 @@ export async function handleCreatePublicGroup(request: Request, user: UserContex
     return errorResponse('FORBIDDEN', 'إنشاء المجموعات العامة متاح للمشرفين والمعلمين والإدارة فقط', 403);
   }
 
-  const body = await request.json() as {
-    name?: string;
-    description?: string;
-    icon?: string;
-    visibility?: string;
-    chatPolicy?: string;
+  let body: {
+    name?: unknown;
+    description?: unknown;
+    icon?: unknown;
+    visibility?: unknown;
+    chatPolicy?: unknown;
   };
-  if (!body.name || !body.name.trim() || body.name.trim().length > 80) {
+  try {
+    body = await request.json() as typeof body;
+  } catch {
+    return errorResponse('INVALID_INPUT', 'بيانات إنشاء المجموعة غير صالحة');
+  }
+
+  if (typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 80) {
     return errorResponse('INVALID_INPUT', 'يرجى إدخال اسم مجموعة لا يتجاوز 80 حرفاً');
   }
-  const visibility = (body.visibility || 'PUBLIC').trim().toUpperCase();
+  const name = body.name.trim();
+
+  if (body.description !== undefined && body.description !== null && typeof body.description !== 'string') {
+    return errorResponse('INVALID_INPUT', 'وصف المجموعة يجب أن يكون نصاً');
+  }
+  const description = typeof body.description === 'string' ? body.description.trim() : null;
+  if (description && description.length > 500) {
+    return errorResponse('INVALID_INPUT', 'وصف المجموعة طويل جداً');
+  }
+
+  if (body.icon !== undefined && body.icon !== null && typeof body.icon !== 'string') {
+    return errorResponse('INVALID_INPUT', 'أيقونة المجموعة غير صالحة');
+  }
+  const icon = typeof body.icon === 'string' && body.icon.trim() ? body.icon.trim() : '👥';
+
+  const rawVisibility = body.visibility === undefined || body.visibility === null
+    ? 'PUBLIC'
+    : body.visibility;
+  if (typeof rawVisibility !== 'string') {
+    return errorResponse('INVALID_VISIBILITY', 'نوع المجموعة يجب أن يكون عامة أو خاصة');
+  }
+  const visibility = rawVisibility.trim().toUpperCase();
   if (visibility !== 'PUBLIC' && visibility !== 'PRIVATE') {
     return errorResponse('INVALID_VISIBILITY', 'نوع المجموعة يجب أن يكون عامة أو خاصة');
   }
 
-  const chatPolicy = (body.chatPolicy || 'MEMBERS').trim().toUpperCase();
+  const rawChatPolicy = body.chatPolicy === undefined || body.chatPolicy === null
+    ? 'MEMBERS'
+    : body.chatPolicy;
+  if (typeof rawChatPolicy !== 'string') {
+    return errorResponse('INVALID_CHAT_POLICY', 'سياسة النقاش غير صالحة');
+  }
+  const chatPolicy = rawChatPolicy.trim().toUpperCase();
   if (chatPolicy !== 'MEMBERS' && chatPolicy !== 'STAFF_ONLY') {
     return errorResponse('INVALID_CHAT_POLICY', 'سياسة النقاش يجب أن تكون للأعضاء أو للهيئة التعليمية والإدارة فقط');
-  }
-
-  if ((body.description || '').length > 500) {
-    return errorResponse('INVALID_INPUT', 'وصف المجموعة طويل جداً');
   }
 
   const groupId = generateId('grp');
@@ -595,7 +624,7 @@ export async function handleCreatePublicGroup(request: Request, user: UserContex
            id, name, type, description, icon, academic_year_id, created_at,
            is_official, is_discoverable, created_by, updated_at, visibility, chat_policy
          ) VALUES (?, ?, 'OPTIONAL', ?, ?, 'default', ?, 0, 1, ?, ?, ?, ?, ?)`
-      ).bind(groupId, body.name.trim(), body.description?.trim() || null, body.icon || '👥', now, user.userId, now, visibility, chatPolicy),
+      ).bind(groupId, name, description, icon, now, user.userId, now, visibility, chatPolicy),
       env.DB.prepare(
         `INSERT INTO group_members (group_id, user_id, role, status, joined_at)
          VALUES (?, ?, ?, 'ACTIVE', ?)`
