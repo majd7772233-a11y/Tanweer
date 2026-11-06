@@ -1,0 +1,56 @@
+name: Temporary Two-Branch Cleanup
+
+on:
+  push:
+    branches:
+      - work/release-readiness
+    paths:
+      - .github/workflows/temporary-two-branch-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: Keep only main and work/release-readiness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release-readiness
+        uses: actions/checkout@v4
+        with:
+          ref: work/release-readiness
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Delete every other branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t branches < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name'
+          )
+
+          for branch in "${branches[@]}"; do
+            case "${branch}" in
+              main|work/release-readiness)
+                echo "KEEP: ${branch}"
+                continue
+                ;;
+            esac
+
+            echo "DELETE: ${branch}"
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}"
+          done
+
+      - name: Remove this one-time cleanup workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/temporary-two-branch-cleanup.yml
+          git commit -m "chore: remove temporary branch cleanup workflow"
+          git push origin HEAD:refs/heads/work/release-readiness
