@@ -43,11 +43,8 @@ fun AcademicHistoryScreen(
         viewModel.navigateBack()
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.repository.syncStudentAcademicArchive()
-    }
-
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val archiveSyncState by viewModel.academicArchiveSyncState.collectAsStateWithLifecycle()
     val selectedYear by viewModel.selectedAcademicYear.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
@@ -73,15 +70,32 @@ fun AcademicHistoryScreen(
 
     val todayStr = remember { TanweerViewModel.getTodayDateString() }
 
-    val allRecordedDates = remember(allHistoricalContents, allHistoricalHomeworks, allHistoricalExams, activeGroupContents) {
-        val dates = mutableListOf<String>()
-        allHistoricalContents.forEach { dates.add(it.studyDate) }
-        allHistoricalHomeworks.forEach { 
-            if (it.dueDate.isNotBlank()) dates.add(it.dueDate)
-            if (it.studyDate.isNotBlank()) dates.add(it.studyDate)
+    val allRecordedDates = remember(
+        allHistoricalContents,
+        allHistoricalHomeworks,
+        allHistoricalExams,
+        activeGroupContents,
+        activeGroupHomeworks,
+        activeGroupExams
+    ) {
+        buildList {
+            allHistoricalContents.forEach { add(it.studyDate) }
+            allHistoricalHomeworks.forEach {
+                if (it.dueDate.isNotBlank()) add(it.dueDate)
+                if (it.studyDate.isNotBlank()) add(it.studyDate)
+            }
+            allHistoricalExams.forEach { add(it.examDate) }
+
+            // Include active-group snapshots as well. This keeps the year selector
+            // accurate even when a current-group item has not yet appeared in the
+            // account-wide historical endpoint.
+            activeGroupContents.forEach { add(it.studyDate) }
+            activeGroupHomeworks.forEach {
+                if (it.dueDate.isNotBlank()) add(it.dueDate)
+                if (it.studyDate.isNotBlank()) add(it.studyDate)
+            }
+            activeGroupExams.forEach { add(it.examDate) }
         }
-        allHistoricalExams.forEach { dates.add(it.examDate) }
-        dates
     }
 
     val academicYears = remember(todayStr, allRecordedDates) {
@@ -184,7 +198,7 @@ fun AcademicHistoryScreen(
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "الأرشيف الأكاديمي 🏛️",
                     fontSize = tanweerTextSize(17f),
@@ -195,6 +209,39 @@ fun AcademicHistoryScreen(
                     text = "السجل التراكمي للإنجازات والدروس والمواد",
                     fontSize = tanweerTextSize(12f),
                     color = TextSecondary
+                )
+                if (archiveSyncState.isBusy()) {
+                    Text(
+                        text = "جارٍ تحديث أرشيفك من الخادم…",
+                        fontSize = tanweerTextSize(10f),
+                        color = CyanAccent
+                    )
+                } else if (archiveSyncState is com.magd.tanweer.data.model.SyncState.OfflineCached) {
+                    Text(
+                        text = "تعرض السجلات المحفوظة محلياً حتى عودة الاتصال.",
+                        fontSize = tanweerTextSize(10f),
+                        color = WarmAmber
+                    )
+                } else if (archiveSyncState is com.magd.tanweer.data.model.SyncState.Error) {
+                    Text(
+                        text = (archiveSyncState as com.magd.tanweer.data.model.SyncState.Error).message,
+                        fontSize = tanweerTextSize(10f),
+                        color = RubyRed,
+                        maxLines = 2
+                    )
+                }
+            }
+            IconButton(
+                onClick = { viewModel.syncAcademicArchive(isRefresh = true) },
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(GlassSurface)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "تحديث الأرشيف الأكاديمي",
+                    tint = CyanAccent
                 )
             }
         }
@@ -315,7 +362,7 @@ fun AcademicHistoryScreen(
                                 color = CyanAccent
                             )
                             Text(
-                                text = if (selectedYear == "2026-2027") "العام الدراسي النشط حالياً" else "سجل مؤرشف ومحفوظ للرجوع إليه",
+                                text = if (selectedYear == currentAcademicYear) "العام الدراسي النشط حالياً" else "سجل مؤرشف ومحفوظ للرجوع إليه",
                                 fontSize = tanweerTextSize(12f),
                                 color = TextSecondary
                             )
@@ -413,7 +460,7 @@ fun AcademicHistoryScreen(
                                 textAlign = TextAlign.Center
                             )
                             Text(
-                                text = "يتم حفظ السجلات وأرشفتها تلقائياً مع انتهاء الفصول والأعوام الدراسية. يمكنك استعراض العام الدراسي الحالي (2026-2027).",
+                                text = "تُعرض الأعوام التي تحتوي على سجلات فعلية، ويظل العام الحالي ${currentAcademicYear} متاحاً حتى قبل تسجيل أول نشاط.",
                                 fontSize = tanweerTextSize(12f),
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center
