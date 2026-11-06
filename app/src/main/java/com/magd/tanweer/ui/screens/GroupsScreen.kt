@@ -62,6 +62,21 @@ fun GroupsScreen(
     }
 
     var activeTab by remember { mutableStateOf(GroupsTab.MY_GROUPS) }
+    var groupSearchQuery by remember { mutableStateOf("") }
+    val visibleMyGroups = remember(myGroups, groupSearchQuery) {
+        val query = groupSearchQuery.trim()
+        if (query.isBlank()) myGroups else myGroups.filter {
+            it.name.contains(query, ignoreCase = true) ||
+                it.description.orEmpty().contains(query, ignoreCase = true)
+        }
+    }
+    val visibleDiscoverGroups = remember(discoverGroups, groupSearchQuery) {
+        val query = groupSearchQuery.trim()
+        if (query.isBlank()) discoverGroups else discoverGroups.filter {
+            it.name.contains(query, ignoreCase = true) ||
+                it.description.orEmpty().contains(query, ignoreCase = true)
+        }
+    }
     var activeChatGroup by remember { mutableStateOf<GroupItem?>(null) }
     var managingGroup by remember { mutableStateOf<GroupItem?>(null) }
     var joinRequestGroup by remember { mutableStateOf<GroupItem?>(null) }
@@ -438,12 +453,47 @@ fun GroupsScreen(
                 }
             }
 
+            // Search applies to both joined clubs and discoverable groups.
+            item(key = "groups-search") {
+                OutlinedTextField(
+                    value = groupSearchQuery,
+                    onValueChange = { groupSearchQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = CyanAccent)
+                    },
+                    trailingIcon = {
+                        if (groupSearchQuery.isNotEmpty()) {
+                            IconButton(onClick = { groupSearchQuery = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "مسح البحث", tint = TextSecondary)
+                            }
+                        }
+                    },
+                    placeholder = {
+                        Text(
+                            if (activeTab == GroupsTab.MY_GROUPS) "ابحث في مجموعاتك وأنديتك…" else "ابحث عن مجموعة أو نادٍ…",
+                            fontSize = tanweerTextSize(11f),
+                            color = TextMuted
+                        )
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyanAccent,
+                        unfocusedBorderColor = GlassBorderSubtle,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = CyanAccent
+                    ),
+                    shape = RoundedCornerShape(13.dp)
+                )
+            }
+
             if (activeTab == GroupsTab.MY_GROUPS) {
                 // Tab 1: MY GROUPS
-                val officialClassGroup = myGroups.find {
+                val officialClassGroup = visibleMyGroups.find {
                     it.type == "CLASS" || it.id.startsWith("class_") || it.role == "OFFICIAL"
                 }
-                val sharedGroups = myGroups.filter { it.id != officialClassGroup?.id }
+                val sharedGroups = visibleMyGroups.filter { it.id != officialClassGroup?.id }
 
                 // 1. Official Section Group (الشعبة الرسمية الأساسية) - Distinguished Hero Card
                 if (officialClassGroup != null) {
@@ -602,9 +652,14 @@ fun GroupsScreen(
                                                 color = TextPrimary
                                             )
                                             Text(
-                                                text = "${group.memberCount} طالب • مجموعة مشتركة",
+                                                text = "${group.memberCount} عضو • ${if (group.visibility == "PRIVATE") "خاصة بموافقة" else "عامة"}",
                                                 fontSize = tanweerTextSize(11f),
                                                 color = TextSecondary
+                                            )
+                                            Text(
+                                                text = if (group.chatPolicy == "STAFF_ONLY") "🔒 الرسائل للهيئة التعليمية والإدارة فقط" else "💬 النقاش متاح للأعضاء",
+                                                fontSize = tanweerTextSize(10f),
+                                                color = TextMuted
                                             )
                                         }
                                     }
@@ -644,30 +699,29 @@ fun GroupsScreen(
                                             },
                                             modifier = Modifier.weight(1f)
                                         )
-                                    }
-                                    if (!isSelected) {
+                                    } else if (!isSelected) {
                                         GlassOutlinedButton(
                                             text = "تفعيل المجموعة",
                                             onClick = { viewModel.setSelectedGroup(group.id) },
                                             modifier = Modifier.weight(1f)
                                         )
+                                    } else {
+                                        Spacer(modifier = Modifier.weight(1f))
                                     }
-                                    GlassOutlinedButton(
-                                        text = "مغادرة",
-                                        onClick = {
-                                            viewModel.leaveGroup(group.id) { success, message ->
-                                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                                                if (success) {
-                                                    if (activeChatGroup?.id == group.id) activeChatGroup = null
-                                                    if (selectedGroupId == group.id) {
-                                                        activeTab = GroupsTab.MY_GROUPS
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    )
                                 }
+                                GlassOutlinedButton(
+                                    text = "مغادرة المجموعة",
+                                    onClick = {
+                                        viewModel.leaveGroup(group.id) { success, message ->
+                                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                            if (success) {
+                                                if (activeChatGroup?.id == group.id) activeChatGroup = null
+                                                if (selectedGroupId == group.id) activeTab = GroupsTab.MY_GROUPS
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                         }
                     }
@@ -685,7 +739,7 @@ fun GroupsScreen(
                     }
                 }
 
-                if (discoverGroups.isEmpty()) {
+                if (visibleDiscoverGroups.isEmpty()) {
                     item {
                         EmptyStateGlass(
                             title = "لا توجد مجموعات جديدة",
@@ -694,7 +748,7 @@ fun GroupsScreen(
                         )
                     }
                 } else {
-                    items(discoverGroups, key = { it.id }) { group ->
+                    items(visibleDiscoverGroups, key = { it.id }) { group ->
                         val hasPendingRequest = group.membershipStatus == "PENDING"
                         GlassCard(
                             modifier = Modifier.fillMaxWidth(),
@@ -726,13 +780,18 @@ fun GroupsScreen(
                                                 color = TextPrimary
                                             )
                                             val groupTypeLabel = when (group.visibility) {
-                                                "PRIVATE" -> "مجموعة خاصة • تتطلب موافقة"
+                                                "PRIVATE" -> "خاصة • ظاهرة للاكتشاف وتتطلب موافقة"
                                                 else -> if (group.chatPolicy == "STAFF_ONLY") "مجموعة الهيئة التعليمية • قراءة للطلاب" else "مجموعة عامة • دخول مباشر"
                                             }
                                             Text(
                                                 text = "${group.memberCount} عضو • $groupTypeLabel",
                                                 fontSize = tanweerTextSize(12f),
                                                 color = CyanAccent
+                                            )
+                                            Text(
+                                                text = if (group.chatPolicy == "STAFF_ONLY") "🔒 الرسائل للمعلمين والإدارة فقط" else "💬 النقاش متاح للأعضاء",
+                                                fontSize = tanweerTextSize(10f),
+                                                color = TextSecondary
                                             )
                                         }
                                     }
