@@ -1300,61 +1300,26 @@ class TanweerRepository(
     // =========================================================================
 
     fun getGroups(): Flow<List<GroupItem>> {
-        return db.groupDao().getGroups().map { list ->
-            list.map {
-                GroupItem(
-                    id = it.id,
-                    name = it.name,
-                    type = it.type,
-                    description = it.description,
-                    icon = it.icon,
-                    role = it.role,
-                    memberCount = it.memberCount
-                )
-            }
-        }
+        return db.groupDao().getGroups().map { list -> list.map { it.toGroupItem() } }
     }
 
     fun getMyGroups(): Flow<List<GroupItem>> {
-        return db.groupDao().getMyGroups().map { list ->
-            list.map {
-                GroupItem(
-                    id = it.id,
-                    name = it.name,
-                    type = it.type,
-                    description = it.description,
-                    icon = it.icon,
-                    role = it.role,
-                    memberCount = it.memberCount
-                )
-            }
-        }
+        return db.groupDao().getMyGroups().map { list -> list.map { it.toGroupItem() } }
     }
 
     fun getDiscoverGroups(): Flow<List<GroupItem>> {
-        return db.groupDao().getDiscoverGroups().map { list ->
-            list.map {
-                GroupItem(
-                    id = it.id,
-                    name = it.name,
-                    type = it.type,
-                    description = it.description,
-                    icon = it.icon,
-                    role = it.role,
-                    memberCount = it.memberCount
-                )
-            }
-        }
+        return db.groupDao().getDiscoverGroups().map { list -> list.map { it.toGroupItem() } }
     }
 
     suspend fun joinGroup(groupId: String, reason: String? = null): Result<GenericResponse> = withContext(Dispatchers.IO) {
         try {
             val res = api.joinGroupRequest(groupId, com.magd.tanweer.data.model.JoinGroupBody(reason = reason))
-            if (res.isSuccessful && res.body() != null) {
-                val body = res.body()!!
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true) {
                 Result.success(body)
             } else {
-                val errorMsg = res.body()?.error?.message ?: res.body()?.message ?: "تعذر إتمام طلب الانضمام"
+                val errorMsg = body?.error?.message ?: body?.message
+                    ?: if (res.isSuccessful) "الخادم لم يؤكد طلب الانضمام (success=false)" else "تعذر إتمام طلب الانضمام (HTTP ${res.code()})"
                 Result.failure(Exception(errorMsg))
             }
         } catch (e: Exception) {
@@ -2679,7 +2644,7 @@ class TanweerRepository(
             // Fallback to HTTP REST endpoint if WebSocket is not connected
             try {
                 val res = api.postGroupMessage(groupId, PostMessageRequest(id = msgId, text = cleanText))
-                if (res.isSuccessful) {
+                if (res.isSuccessful && res.body()?.success == true) {
                     db.chatDao().updateMessageStatus(msgId, "SENT")
                     true
                 } else {
@@ -2699,7 +2664,7 @@ class TanweerRepository(
                 if (current.any { it.id == msgId }) {
                     try {
                         val res = api.postGroupMessage(groupId, PostMessageRequest(id = msgId, text = cleanText))
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             db.chatDao().updateMessageStatus(msgId, "SENT")
                         } else {
                             db.chatDao().updateMessageStatus(msgId, "FAILED")
@@ -2728,7 +2693,7 @@ class TanweerRepository(
         if (!wsSent) {
             try {
                 val res = api.postGroupMessage(msg.groupId, PostMessageRequest(id = msg.id, text = msg.text))
-                if (res.isSuccessful) {
+                if (res.isSuccessful && res.body()?.success == true) {
                     db.chatDao().updateMessageStatus(msg.id, "SENT")
                 } else {
                     db.chatDao().updateMessageStatus(msg.id, "FAILED")
