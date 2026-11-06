@@ -2172,6 +2172,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val result = repository.joinGroup(groupId, reason)
             result.onSuccess { response ->
+                syncGroups(isRefresh = true)
                 val status = response.status ?: "ACTIVE"
                 val msg = response.message ?: if (status == "ACTIVE") "تم الانضمام إلى المجموعة بنجاح" else "تم إرسال طلب الانضمام، بانتظار موافقة المشرف"
                 onResult(true, status, msg)
