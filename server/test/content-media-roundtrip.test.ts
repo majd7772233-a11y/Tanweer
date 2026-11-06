@@ -194,6 +194,73 @@ describe('Lesson media cross-device contract', () => {
     expect(db.tables.content_media).toHaveLength(2);
   });
 
+  it('repairs only missing media rows when retrying a legacy partial publication', async () => {
+    const db = new ContentMediaDb();
+    db.tables.group_members.push(
+      { group_id: 'class_10_A', user_id: author.userId, status: 'ACTIVE' }
+    );
+    db.tables.media_blobs.push(
+      { id: 'med_blob_1', uploaded_by: author.userId, mime_type: 'image/jpeg', file_size: 1024 },
+      { id: 'med_blob_2', uploaded_by: author.userId, mime_type: 'image/jpeg', file_size: 2048 },
+    );
+    db.tables.contents.push({
+      id: 'content_legacy_partial',
+      group_id: 'class_10_A',
+      created_by: author.userId,
+      study_date: '2026-11-02',
+      subject_id: 'math',
+      title: 'درس قديم بمرفق ناقص',
+      status: 'PUBLISHED',
+    });
+    db.tables.content_media.push({
+      id: 'med_existing_page_1',
+      content_id: 'content_legacy_partial',
+      page_order: 1,
+      object_key: '',
+      url: 'https://tanweer-staging.magd.workers.dev/api/v1/media/med_blob_1',
+      mime_type: 'image/jpeg',
+      file_size: 1024,
+      checksum: 'sha256:legacy_page_1',
+      is_primary: 1,
+      created_at: 1762041600000,
+    });
+
+    const request = new Request('https://tanweer-staging.magd.workers.dev/api/v1/contents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'content_legacy_partial',
+        groupId: 'class_10_A',
+        studyDate: '2026-11-02',
+        subjectId: 'math',
+        title: 'درس قديم بمرفق ناقص',
+        media: [
+          {
+            pageOrder: 1,
+            url: 'https://tanweer-staging.magd.workers.dev/api/v1/media/med_blob_1',
+            mimeType: 'image/jpeg',
+            fileSize: 1024,
+            checksum: 'sha256:legacy_page_1',
+          },
+          {
+            pageOrder: 2,
+            url: 'https://tanweer-staging.magd.workers.dev/api/v1/media/med_blob_2',
+            mimeType: 'image/jpeg',
+            fileSize: 2048,
+            checksum: 'sha256:legacy_page_2',
+          },
+        ],
+      }),
+    });
+
+    const response = await handleCreateContent(author, request, { DB: db as any } as Env);
+    expect(response.status).toBe(200);
+    expect(db.tables.contents).toHaveLength(1);
+    expect(db.tables.content_media).toHaveLength(2);
+    expect(db.tables.content_media.map(row => row.page_order).sort()).toEqual([1, 2]);
+    expect(db.tables.content_media.filter(row => row.page_order === 1)).toHaveLength(1);
+  });
+
   it('returns uploaded lesson pages to another active member of the same group', async () => {
     const db = new ContentMediaDb();
     db.tables.group_members.push(
