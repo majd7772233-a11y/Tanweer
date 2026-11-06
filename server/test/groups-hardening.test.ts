@@ -656,6 +656,80 @@ describe('Group join request concurrency and state', () => {
     expect(db.messages).toHaveLength(0);
   });
 
+  it('rejects an approval-based request when the reason is missing', async () => {
+    const db = new GroupJoinDb();
+    const response = await handleJoinGroupRequest(
+      'private-group',
+      student,
+      new Request('https://tanweer.test/api/v1/groups/private-group/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json() as any).error.code).toBe('JOIN_REASON_REQUIRED');
+    expect(db.members).toHaveLength(0);
+    expect(db.notifications).toHaveLength(0);
+  });
+
+  it('rejects a whitespace-only reason for a class join request', async () => {
+    const db = new GroupJoinDb();
+    const response = await handleJoinGroupRequest(
+      'class-group',
+      student,
+      new Request('https://tanweer.test/api/v1/groups/class-group/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: '   \\n  ' }),
+      }),
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json() as any).error.code).toBe('JOIN_REASON_REQUIRED');
+    expect(db.members).toHaveLength(0);
+  });
+
+  it('rejects join reasons longer than 500 characters before creating a request', async () => {
+    const db = new GroupJoinDb();
+    const response = await handleJoinGroupRequest(
+      'private-group',
+      student,
+      new Request('https://tanweer.test/api/v1/groups/private-group/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'س'.repeat(501) }),
+      }),
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json() as any).error.code).toBe('INVALID_JOIN_REASON');
+    expect(db.members).toHaveLength(0);
+  });
+
+  it('still allows a direct public-group join without an approval reason', async () => {
+    const db = new GroupJoinDb();
+    const response = await handleJoinGroupRequest(
+      'optional-group',
+      student,
+      new Request('https://tanweer.test/api/v1/groups/optional-group/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json() as any).status).toBe('ACTIVE');
+    expect(db.members).toHaveLength(1);
+    expect(db.members[0]).toMatchObject({ status: 'ACTIVE', request_reason: null });
+  });
+
   it('creates a pending request for a private discoverable group', async () => {
     const db = new GroupJoinDb();
     const response = await handleJoinGroupRequest(
