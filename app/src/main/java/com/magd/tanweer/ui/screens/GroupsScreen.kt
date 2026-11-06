@@ -614,8 +614,8 @@ fun GroupsScreen(
                 if (sharedGroups.isEmpty()) {
                     item {
                         EmptyStateGlass(
-                            title = "لا توجد مجموعات مشتركة بعد",
-                            subtitle = "يمكنك استكشاف المجموعات العامة والأندية المدرسية من تبويب 'اكتشف المجموعات'.",
+                            title = if (groupSearchQuery.isBlank()) "لا توجد مجموعات مشتركة بعد" else "لا توجد مجموعات تطابق البحث",
+                            subtitle = if (groupSearchQuery.isBlank()) "يمكنك استكشاف المجموعات العامة والأندية المدرسية من تبويب 'اكتشف المجموعات'." else "جرّب كلمة أخرى أو امسح البحث لعرض جميع مجموعاتك.",
                             icon = "👥"
                         )
                     }
@@ -741,8 +741,8 @@ fun GroupsScreen(
                 if (visibleDiscoverGroups.isEmpty()) {
                     item {
                         EmptyStateGlass(
-                            title = "لا توجد مجموعات جديدة",
-                            subtitle = "أنت منضم بالفعل إلى كل المجموعات المتاحة لك حالياً.",
+                            title = if (groupSearchQuery.isBlank()) "لا توجد مجموعات جديدة" else "لا توجد نتائج مطابقة",
+                            subtitle = if (groupSearchQuery.isBlank()) "أنت منضم بالفعل إلى كل المجموعات المتاحة لك حالياً." else "غيّر عبارة البحث أو امسحها لاستعراض المجموعات المتاحة.",
                             icon = "🔍"
                         )
                     }
