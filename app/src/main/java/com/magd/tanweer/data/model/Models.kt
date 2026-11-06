@@ -262,7 +262,8 @@ data class CreateGroupRequest(
     val name: String,
     val description: String? = null,
     val icon: String? = "👥",
-    val visibility: String = "PUBLIC"
+    val visibility: String = "PUBLIC",
+    val chatPolicy: String = "MEMBERS"
 )
 
 @JsonClass(generateAdapter = true)
