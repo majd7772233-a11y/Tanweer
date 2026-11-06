@@ -90,10 +90,6 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
     var pendingAction by remember { mutableStateOf<AdminStudentAction?>(null) }
     var isActionInProgress by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        viewModel.loadAdminDashboard()
-    }
-
     val allStudents = dashboardData?.students.orEmpty()
     val filteredStudents = remember(allStudents, searchQuery) {
         allStudents.filter { student -> student.matchesAdminSearch(searchQuery) }
