@@ -83,13 +83,13 @@ fun TeacherDashboardScreen(
                                     .border(1.5.dp, CyanAccent, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("🎓", fontSize = 26.sp)
+                                Text("🎓", fontSize = tanweerTextSize(26f))
                             }
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(
                                         text = dashboardData?.teacher?.fullName ?: currentUser?.fullName ?: "الأستاذ المعتمد",
-                                        fontSize = 17.sp,
+                                        fontSize = tanweerTextSize(17f),
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
@@ -102,7 +102,7 @@ fun TeacherDashboardScreen(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "مركز التعليم وإدارة المحتوى الأكاديمي الرسمي",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary
                                 )
                             }
@@ -199,7 +199,7 @@ fun TeacherDashboardScreen(
                     ) {
                         Text(
                             text = title,
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) TextOnAccent else TextSecondary,
                             textAlign = TextAlign.Center
@@ -221,7 +221,7 @@ fun TeacherDashboardScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
                                 text = "💡 سلطات وصلاحيات الأستاذ في المنظومة:",
-                                fontSize = 14.sp,
+                                fontSize = tanweerTextSize(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = WarmAmber
                             )
@@ -252,7 +252,7 @@ fun TeacherDashboardScreen(
                 item {
                     Text(
                         text = "آخر الواجبات الرسمية المسجلة:",
-                        fontSize = 14.sp,
+                        fontSize = tanweerTextSize(14f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
@@ -264,7 +264,7 @@ fun TeacherDashboardScreen(
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                             Text(
                                 text = "لم تقم بإضافة واجبات بعد، اضغط على زر إضافة واجب للبدء.",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextMuted,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(12.dp)
@@ -286,7 +286,7 @@ fun TeacherDashboardScreen(
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                             Text(
                                 text = "لا توجد واجبات رسمية مضافة حالياً.",
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 color = TextMuted,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(16.dp)
@@ -308,7 +308,7 @@ fun TeacherDashboardScreen(
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                             Text(
                                 text = "لا توجد اختبارات رسمية مسجلة حالياً.",
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 color = TextMuted,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(16.dp)
@@ -367,16 +367,16 @@ fun TeacherStatCard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(icon, fontSize = 20.sp)
+            Text(icon, fontSize = tanweerTextSize(20f))
             Text(
                 text = count,
-                fontSize = 18.sp,
+                fontSize = tanweerTextSize(18f),
                 fontWeight = FontWeight.Black,
                 color = color
             )
             Text(
                 text = title,
-                fontSize = 10.sp,
+                fontSize = tanweerTextSize(10f),
                 color = TextSecondary,
                 textAlign = TextAlign.Center
             )
@@ -395,10 +395,10 @@ fun TeacherGuidelineItem(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.Top
     ) {
-        Text(icon, fontSize = 16.sp, modifier = Modifier.padding(top = 2.dp))
+        Text(icon, fontSize = tanweerTextSize(16f), modifier = Modifier.padding(top = 2.dp))
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-            Text(text = desc, fontSize = 11.sp, color = TextSecondary, lineHeight = 15.sp)
+            Text(text = title, fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
+            Text(text = desc, fontSize = tanweerTextSize(11f), color = TextSecondary, lineHeight = tanweerLineHeight(15f))
         }
     }
 }
@@ -417,10 +417,10 @@ fun OfficialHomeworkCard(hw: HomeworkItem) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(hw.subjectIcon, fontSize = 18.sp)
+                    Text(hw.subjectIcon, fontSize = tanweerTextSize(18f))
                     Text(
                         text = hw.subjectName.ifBlank { "واجب مدرسي" },
-                        fontSize = 14.sp,
+                        fontSize = tanweerTextSize(14f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent
                     )
@@ -434,7 +434,7 @@ fun OfficialHomeworkCard(hw: HomeworkItem) {
 
             Text(
                 text = hw.title,
-                fontSize = 13.sp,
+                fontSize = tanweerTextSize(13f),
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary
             )
@@ -442,9 +442,9 @@ fun OfficialHomeworkCard(hw: HomeworkItem) {
             if (!hw.details.isNullOrBlank()) {
                 Text(
                     text = hw.details,
-                    fontSize = 11.sp,
+                    fontSize = tanweerTextSize(11f),
                     color = TextSecondary,
-                    lineHeight = 15.sp
+                    lineHeight = tanweerLineHeight(15f)
                 )
             }
 
@@ -454,13 +454,13 @@ fun OfficialHomeworkCard(hw: HomeworkItem) {
             ) {
                 Text(
                     text = "📅 التسليم: ${hw.dueDate}",
-                    fontSize = 10.sp,
+                    fontSize = tanweerTextSize(10f),
                     color = WarmAmber
                 )
                 if (!hw.pageNumbers.isNullOrBlank()) {
                     Text(
                         text = "📖 ص: ${hw.pageNumbers}",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         color = TextMuted
                     )
                 }
@@ -483,10 +483,10 @@ fun OfficialExamCard(exam: ExamItem) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(exam.subjectIcon, fontSize = 18.sp)
+                    Text(exam.subjectIcon, fontSize = tanweerTextSize(18f))
                     Text(
                         text = exam.subjectName.ifBlank { "اختبار رسمي" },
-                        fontSize = 14.sp,
+                        fontSize = tanweerTextSize(14f),
                         fontWeight = FontWeight.Bold,
                         color = WarmAmber
                     )
@@ -500,7 +500,7 @@ fun OfficialExamCard(exam: ExamItem) {
 
             Text(
                 text = exam.title,
-                fontSize = 13.sp,
+                fontSize = tanweerTextSize(13f),
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary
             )
@@ -508,15 +508,15 @@ fun OfficialExamCard(exam: ExamItem) {
             if (!exam.requiredChapters.isNullOrBlank()) {
                 Text(
                     text = "📚 الفصول المطلوبة: ${exam.requiredChapters}",
-                    fontSize = 11.sp,
+                    fontSize = tanweerTextSize(11f),
                     color = TextSecondary,
-                    lineHeight = 15.sp
+                    lineHeight = tanweerLineHeight(15f)
                 )
             }
 
             Text(
                 text = "📅 الموعد: ${exam.examDate}",
-                fontSize = 10.sp,
+                fontSize = tanweerTextSize(10f),
                 color = CyanAccent
             )
         }
@@ -644,10 +644,10 @@ fun CreateOfficialExamSheet(
         },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("📑", fontSize = 22.sp)
+                Text("📑", fontSize = tanweerTextSize(22f))
                 Column {
-                    Text("إدراج اختبار رسمي معتمد", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("تثبيت الاختبار في جدول التقييمات للشعبة", fontSize = 11.sp, color = WarmAmber)
+                    Text("إدراج اختبار رسمي معتمد", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("تثبيت الاختبار في جدول التقييمات للشعبة", fontSize = tanweerTextSize(11f), color = WarmAmber)
                 }
             }
         },
@@ -659,7 +659,7 @@ fun CreateOfficialExamSheet(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // Subject selector
-                Text("اختر المادة:", fontSize = 12.sp, color = TextMuted)
+                Text("اختر المادة:", fontSize = tanweerTextSize(12f), color = TextMuted)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -677,7 +677,7 @@ fun CreateOfficialExamSheet(
                         ) {
                             Text(
                                 text = "${subj.icon} ${subj.name}",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = if (isSelected) TextOnAccent else TextSecondary,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             )
@@ -686,7 +686,7 @@ fun CreateOfficialExamSheet(
                 }
 
                 // Exam Type Selector
-                Text("نوع الاختبار:", fontSize = 12.sp, color = TextMuted)
+                Text("نوع الاختبار:", fontSize = tanweerTextSize(12f), color = TextMuted)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -704,7 +704,7 @@ fun CreateOfficialExamSheet(
                         ) {
                             Text(
                                 text = typeLabel,
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = if (isSelected) TextOnAccent else TextSecondary,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             )

@@ -99,10 +99,29 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
     });
   }
 
-  await env.DB.prepare(
-    `INSERT INTO exams (id, group_id, exam_date, subject_id, title, required_chapters, notes, is_official, created_by, created_at, exam_type)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
+  if (examType === 'MONTHLY') {
+    const monthKey = examDate.slice(0, 7);
+    const duplicate = await env.DB.prepare(
+      `SELECT id FROM exams
+       WHERE group_id = ? AND subject_id = ? AND exam_type IN ('MONTHLY', 'QUIZ')
+         AND substr(exam_date, 1, 7) = ?
+       LIMIT 1`
+    ).bind(body.groupId, body.subjectId, monthKey).first<{ id: string }>();
+
+    if (duplicate) {
+      return errorResponse(
+        'MONTHLY_EXAM_EXISTS',
+        'يوجد بالفعل اختبار شهري لهذه المادة في هذا الشهر. يمكنك تعديل الاختبار الموجود أو اختيار شهر آخر.',
+        409
+      );
+    }
+  }
+
+  try {
+    await env.DB.prepare(
+      `INSERT INTO exams (id, group_id, exam_date, subject_id, title, required_chapters, notes, is_official, created_by, created_at, exam_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
     examId,
     body.groupId,
     examDate,
@@ -113,8 +132,18 @@ export async function handleCreateExam(user: UserContext, request: Request, env:
     isOfficial,
     user.userId,
     Date.now(),
-    examType
-  ).run();
+      examType
+    ).run();
+  } catch (error) {
+    if (String(error).includes('MONTHLY_EXAM_DUPLICATE')) {
+      return errorResponse(
+        'MONTHLY_EXAM_EXISTS',
+        'يوجد بالفعل اختبار شهري لهذه المادة في هذا الشهر. يمكنك تعديل الاختبار الموجود أو اختيار شهر آخر.',
+        409
+      );
+    }
+    throw error;
+  }
 
   const msg = isOfficial === 1
     ? 'تم اعتماد وتثبيت موعد الاختبار الرسمي في التقويم الدراسي 🔴'
@@ -139,6 +168,9 @@ export async function handleUpdateExam(
     id: string;
     group_id: string;
     created_by: string;
+    exam_date: string;
+    subject_id: string;
+    exam_type: string;
   }>();
 
   if (!exam) {
@@ -166,6 +198,7 @@ export async function handleUpdateExam(
     notes?: string;
     isOfficial?: boolean;
     examType?: string;
+    subjectId?: string;
   };
 
   if (body.examDate !== undefined && !isValidIsoDate(body.examDate)) {
@@ -188,24 +221,58 @@ export async function handleUpdateExam(
     return errorResponse('INVALID_EXAM_TYPE', 'أنواع الاختبارات المتاحة هي: شهري، شفهي، نصفي، نهائي فقط');
   }
 
-  await env.DB.prepare(
-    `UPDATE exams
-     SET exam_date = COALESCE(?, exam_date),
-         title = COALESCE(?, title),
-         required_chapters = COALESCE(?, required_chapters),
-         notes = COALESCE(?, notes),
-         is_official = COALESCE(?, is_official),
-         exam_type = COALESCE(?, exam_type)
-     WHERE id = ?`
-  ).bind(
-    body.examDate || null,
-    body.title?.trim() || null,
-    body.requiredChapters?.trim() || null,
-    body.notes?.trim() || null,
-    officialVal,
-    examTypeVal,
-    examId
-  ).run();
+  const targetExamDate = body.examDate || exam.exam_date;
+  const targetSubjectId = body.subjectId?.trim() || exam.subject_id;
+  const targetExamType = examTypeVal || exam.exam_type || 'MONTHLY';
+
+  if (targetExamType === 'MONTHLY') {
+    const duplicate = await env.DB.prepare(
+      `SELECT id FROM exams
+       WHERE group_id = ? AND subject_id = ? AND exam_type IN ('MONTHLY', 'QUIZ')
+         AND substr(exam_date, 1, 7) = ? AND id <> ?
+       LIMIT 1`
+    ).bind(exam.group_id, targetSubjectId, targetExamDate.slice(0, 7), examId).first<{ id: string }>();
+
+    if (duplicate) {
+      return errorResponse(
+        'MONTHLY_EXAM_EXISTS',
+        'يوجد بالفعل اختبار شهري لهذه المادة في هذا الشهر. لا يمكن نقل اختبار آخر إلى الشهر نفسه.',
+        409
+      );
+    }
+  }
+
+  try {
+    await env.DB.prepare(
+      `UPDATE exams
+       SET exam_date = COALESCE(?, exam_date),
+           subject_id = COALESCE(?, subject_id),
+           title = COALESCE(?, title),
+           required_chapters = COALESCE(?, required_chapters),
+           notes = COALESCE(?, notes),
+           is_official = COALESCE(?, is_official),
+           exam_type = COALESCE(?, exam_type)
+       WHERE id = ?`
+    ).bind(
+      body.examDate || null,
+      body.subjectId?.trim() || null,
+      body.title?.trim() || null,
+      body.requiredChapters?.trim() || null,
+      body.notes?.trim() || null,
+      officialVal,
+      examTypeVal,
+      examId
+    ).run();
+  } catch (error) {
+    if (String(error).includes('MONTHLY_EXAM_DUPLICATE')) {
+      return errorResponse(
+        'MONTHLY_EXAM_EXISTS',
+        'يوجد بالفعل اختبار شهري لهذه المادة في هذا الشهر. لا يمكن نقل اختبار آخر إلى الشهر نفسه.',
+        409
+      );
+    }
+    throw error;
+  }
 
   return jsonResponse({
     success: true,

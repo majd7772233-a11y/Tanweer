@@ -165,7 +165,7 @@ fun NotebookTranscriptionDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("✍️ وضع نقل الدرس للدفتر", fontSize = 16.sp, fontWeight = FontWeight.Black, color = CyanAccent)
+                            Text("✍️ وضع نقل الدرس للدفتر", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Black, color = CyanAccent)
                             GlassPill(
                                 text = if (isLocallySaved) "محلي على جهازك ✓" else "متاح سحابياً ☁️",
                                 color = if (isLocallySaved) EmeraldGreen else WarmAmber,
@@ -174,7 +174,7 @@ fun NotebookTranscriptionDialog(
                         }
                         Text(
                             text = "${content.subjectName} • ${content.title} (${content.studyDate})",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary,
                             maxLines = 1
                         )
@@ -241,11 +241,11 @@ fun NotebookTranscriptionDialog(
                             ) {
                                 if (isLoadingCurrentPage || isDownloadingAll) {
                                     CircularProgressIndicator(color = CyanAccent, strokeWidth = 2.dp)
-                                    Text("يجري تنزيل صفحة الدرس بأمان...", fontSize = 12.sp, color = TextSecondary)
+                                    Text("يجري تنزيل صفحة الدرس بأمان...", fontSize = tanweerTextSize(12f), color = TextSecondary)
                                 } else {
                                     Text(
                                         currentPageLoadError ?: "الصورة غير محفوظة على هذا الجهاز بعد",
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         color = TextSecondary,
                                         textAlign = TextAlign.Center
                                     )
@@ -260,8 +260,8 @@ fun NotebookTranscriptionDialog(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Text("📝 لا تتوفر لوحات مصورة لهذا الدرس", fontSize = 14.sp, color = TextSecondary)
-                            Text("يمكنك نسخ ملخص الدرس المكتوب بالأسفل مباشرة إلى دفترك.", fontSize = 11.sp, color = TextSecondary)
+                            Text("📝 لا تتوفر لوحات مصورة لهذا الدرس", fontSize = tanweerTextSize(14f), color = TextSecondary)
+                            Text("يمكنك نسخ ملخص الدرس المكتوب بالأسفل مباشرة إلى دفترك.", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                     }
 
@@ -307,7 +307,7 @@ fun NotebookTranscriptionDialog(
                                 }
                                 .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
-                            Text("حفظ في المعرض 🖼️", fontSize = 10.sp, color = TextPrimary, fontWeight = FontWeight.Bold)
+                            Text("حفظ في المعرض 🖼️", fontSize = tanweerTextSize(10f), color = TextPrimary, fontWeight = FontWeight.Bold)
                         }
 
                         // High Contrast Toggle
@@ -320,7 +320,7 @@ fun NotebookTranscriptionDialog(
                         ) {
                             Text(
                                 text = if (isHighContrast) "تباين عالٍ 👁️" else "تباين عادي",
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 fontWeight = FontWeight.Bold,
                                 color = if (isHighContrast) TextOnAccent else TextPrimary
                             )
@@ -339,7 +339,7 @@ fun NotebookTranscriptionDialog(
                                 }
                                 .padding(horizontal = 8.dp, vertical = 5.dp)
                             ) {
-                                Text("إعادة الحجم 🔍", fontSize = 10.sp, color = TextPrimary)
+                                Text("إعادة الحجم 🔍", fontSize = tanweerTextSize(10f), color = TextPrimary)
                             }
                         }
                     }
@@ -356,7 +356,7 @@ fun NotebookTranscriptionDialog(
                         ) {
                             Text(
                                 text = "اللوحة ${currentPageIndex + 1} من ${mediaList.size}",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 fontWeight = FontWeight.Bold,
                                 color = CyanAccent
                             )
@@ -412,7 +412,7 @@ fun NotebookTranscriptionDialog(
                             }
                             Text(
                                 text = statusTitle,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = FontWeight.Bold,
                                 color = if (isCurrentPageCompleted) EmeraldGreen else TextPrimary
                             )
@@ -424,7 +424,7 @@ fun NotebookTranscriptionDialog(
                             }
                             Text(
                                 text = progressSubtitle,
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 color = TextSecondary
                             )
                         }

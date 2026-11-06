@@ -59,8 +59,12 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     val repository = TanweerRepository(db)
 
     // App Settings State (Persisted in SharedPreferences)
-    // Default Font Scale is 1.0f (Base 12sp default)
-    private val _fontSizeScale = MutableStateFlow(prefs.getFloat("font_size_scale", 1.0f))
+    // Supported base sizes are 12sp, 14sp and 16sp; normalize legacy values on restore.
+    private val _fontSizeScale = MutableStateFlow(
+        com.magd.tanweer.ui.theme.normalizeTanweerFontScale(
+            prefs.getFloat("font_size_scale", 1.0f)
+        )
+    )
     val fontSizeScale: StateFlow<Float> = _fontSizeScale.asStateFlow()
 
     private val _appTheme = MutableStateFlow(prefs.getString("app_theme", "DARK") ?: "DARK")
@@ -204,8 +208,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setFontScale(scale: Float) {
-        _fontSizeScale.value = scale
-        prefs.edit().putFloat("font_size_scale", scale).apply()
+        val normalizedScale = com.magd.tanweer.ui.theme.normalizeTanweerFontScale(scale)
+        _fontSizeScale.value = normalizedScale
+        prefs.edit().putFloat("font_size_scale", normalizedScale).apply()
     }
 
     fun setAppTheme(theme: String) {
@@ -996,7 +1001,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 onSuccess = { mutation ->
                     when (mutation) {
                         is com.magd.tanweer.data.local.ScheduleMutationResult.SavedDirectly -> {
-                            _scheduleSyncState.value = SyncState.Success()
+                            _scheduleSyncState.value = SyncState.Refreshing
+                            when (val syncResult = repository.syncSchedule(groupId)) {
+                                is SyncResult.Success -> _scheduleSyncState.value = SyncState.Success()
+                                is SyncResult.Offline -> _scheduleSyncState.value = SyncState.OfflineCached()
+                                is SyncResult.Error -> _scheduleSyncState.value =
+                                    SyncState.Error(syncResult.message, syncResult.isNetworkError)
+                            }
                         }
                         is com.magd.tanweer.data.local.ScheduleMutationResult.QueuedOffline -> {
                             _scheduleSyncState.value = SyncState.OfflineCached()
@@ -1027,7 +1038,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 onSuccess = { deleteRes ->
                     triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                     if (deleteRes.isSynced) {
-                        _scheduleSyncState.value = SyncState.Success()
+                        _scheduleSyncState.value = SyncState.Refreshing
+                        when (val syncResult = repository.syncSchedule(groupId)) {
+                            is SyncResult.Success -> _scheduleSyncState.value = SyncState.Success()
+                            is SyncResult.Offline -> _scheduleSyncState.value = SyncState.OfflineCached()
+                            is SyncResult.Error -> _scheduleSyncState.value =
+                                SyncState.Error(syncResult.message, syncResult.isNetworkError)
+                        }
                     } else {
                         _scheduleSyncState.value = SyncState.OfflineCached(message = deleteRes.message)
                     }

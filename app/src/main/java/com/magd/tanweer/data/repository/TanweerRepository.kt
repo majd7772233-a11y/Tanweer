@@ -1450,12 +1450,17 @@ class TanweerRepository(
         db.bookReadingDao().clearDrawingForPage(bookId, pageIndex)
     }
 
-    suspend fun getOrExtractPageText(bookId: String, pageIndex: Int, pdfFile: java.io.File): String = withContext(Dispatchers.IO) {
+    suspend fun getOrExtractPageText(
+        context: android.content.Context,
+        bookId: String,
+        pageIndex: Int,
+        pdfFile: java.io.File
+    ): String = withContext(Dispatchers.IO) {
         val cached = db.bookReadingDao().getExtractedPage(bookId, pageIndex)
         if (cached != null && cached.extractedText.isNotBlank()) {
             return@withContext cached.extractedText
         }
-        val extracted = com.magd.tanweer.util.PdfTextExtractor.extractPageText(pdfFile, pageIndex)
+        val extracted = com.magd.tanweer.util.PdfTextExtractor.extractPageText(context, pdfFile, pageIndex)
         if (extracted.isNotBlank()) {
             db.bookReadingDao().insertExtractedPage(
                 BookExtractedPageEntity(
@@ -1547,7 +1552,7 @@ class TanweerRepository(
                     endTime = endTime
                 )
             )
-            if (res.isSuccessful) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 db.scheduleDao().insertSlots(listOf(entity.copy(syncStatus = "SYNCED")))
                 Result.success(ScheduleMutationResult.SavedDirectly())
             } else if (res.code() == 403) {
@@ -1561,7 +1566,7 @@ class TanweerRepository(
                         reason = "اقتراح تعديل الجدول الدراسي"
                     )
                 )
-                if (propRes.isSuccessful) {
+                if (propRes.isSuccessful && propRes.body()?.success == true) {
                     Result.success(ScheduleMutationResult.SubmittedAsProposal())
                 } else {
                     Result.failure(Exception("لا تملك صلاحية تعديل الجدول مباشرة، وتعذر إرسال الاقتراح: ${propRes.message()}"))
@@ -1603,7 +1608,7 @@ class TanweerRepository(
     suspend fun deleteScheduleSlot(groupId: String, dayOfWeek: Int, slotOrder: Int): Result<ScheduleSlotDeleteResult> = withContext(Dispatchers.IO) {
         try {
             val res = api.deleteScheduleSlot(groupId, dayOfWeek, slotOrder)
-            if (res.isSuccessful) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 db.scheduleDao().deleteSlot(groupId, dayOfWeek, slotOrder)
                 Result.success(ScheduleSlotDeleteResult.Synced())
             } else {

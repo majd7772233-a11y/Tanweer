@@ -1886,3 +1886,52 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Staging's latest tracked migration is `0030_activate_existing_public_school_group_requests.sql`; migration `0031_user_dismissed_school_announcements.sql` is not applied. Production also does not have `user_dismissed_announcements`. Do not deploy the updated Worker before applying migration 0031 to the chosen target D1.
 - Verified CI run metadata: server run `42070665376` and Android run `42070665717` both completed successfully on source commit `dfc4335190182a71b9422e8531742e272f11c019`; the two commits after that source build only correct documentation/checksum metadata.
 - No Worker deployment, D1 migration, D1 write, secret change, merge, or Production change was made during this follow-up. Physical two-account/two-device acceptance remains outstanding.
+
+
+## Batch 2 — Study reader, typography, exam calendar and schedule editing (2026-11-05)
+
+### Branch / safety
+- Repository: `majd7772233-a11y/Tanweer`.
+- Working branch: `work/batch-2-study-experience`, forked from Batch 1 branch `work/release-readiness`.
+- Draft PR #7 targets `work/release-readiness`; it is not merged. Production `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- No Worker deployment, D1 migration apply, secret change, production write, merge, or data purge was performed.
+
+### PDF reader and study tools
+- Replaced overlapping page/tap/pinch gesture handlers in `CanvasPageCurl.kt` with one gesture owner: one finger handles page turn/tap or pan while zoomed; two or more fingers handle pinch zoom. Double-tap toggles zoom. Preserve the existing page-curl animation.
+- Corrected the page-curl bitmap destination to aspect-fit the PDF page instead of stretching it to the entire reader viewport during animation.
+- Kept Android system bars visible and reserved safe insets; made the study-tools sheet compact, vertically scrollable, bounded by the available height and navigation-bar insets. Its header no longer uses an oversized title or claims a fixed number of connected tools.
+- Focus ruler now has a visible translucent reading band, a drag handle path to reposition it, and an explicit X close control.
+- Added `FocusNoisePlayer`: generated, low-volume offline focus ambience through `AudioTrack`, with start/stop/recovery and disposal cleanup. UI only reports active playback after the player starts.
+- TTS now validates the selected language and the return status from `TextToSpeech.speak`, tracks multi-chunk utterances until the final chunk completes, stops prior reading when switching pages, and does not invent speech when a scanned/image page has no text. Such a page still needs OCR, which is not implemented.
+- Fixed PDFBox text extraction initialization: `PdfTextExtractor.initialize(applicationContext)` invokes `PDFBoxResourceLoader.init` once before loading a PDF. Repository and reader pass application context; digital page text is cached only when extraction returns content.
+- Added Robolectric PDF extraction tests that generate a text PDF and verify extraction, plus out-of-range page handling.
+
+### Shared typography
+- Converted screen and shared-component numeric font-size/line-height declarations to the shared Tanweer typography helpers across the app UI.
+- Settings now exposes the three requested presets: 12sp, 14sp, and 16sp. Restored legacy values are normalized to the nearest supported scale; invalid values fall back to 12sp.
+- Main title role is capped at a modest 18sp; regular content uses the selected shared 12/14/16sp scale rather than per-screen oversized values.
+- Added `TypographyScaleTest` for legacy, invalid and supported scale normalization.
+
+### Exams
+- Monthly exams are constrained per group + subject + calendar month. API preflight returns a 409 conflict; D1 insert/update triggers enforce the same rule under concurrent requests.
+- Historical `QUIZ` entries are included in the uniqueness guard because older Android snapshots displayed them as monthly exams. No existing exam rows are deleted or rewritten.
+- Same subject can have another monthly exam in a later month; different subjects can have tests in the same month; oral exams remain unrestricted.
+- Added `0032_monthly_exam_uniqueness.sql` and server regression coverage for duplicate, next-month, different-subject, oral, legacy-QUIZ and concurrent conflict cases.
+- Added month selection through a calendar picker and empty-month history navigation. Oral exams are presented in their own flexible list, outside the monthly calendar, with detail opening and authorized delete.
+
+### Schedule
+- Teacher/admin direct editing no longer requires a separate activation button. Authorized users can tap an occupied slot and edit directly; students retain the existing proposal path for occupied slots.
+- Schedule create/delete operations require both HTTP success and API `success: true`; after confirmation the ViewModel requests a fresh schedule snapshot and reports online/offline/error state.
+
+### Validation checkpoint
+- Server workflow run `42108844583` passed TypeScript, the full server unit/integration suite, dependency security baseline, and Wrangler production bundle validation. This was validation only; no deploy was performed.
+- Latest Android workflow run at this checkpoint: `42108844559`, source `28cef2aff446f5f0bb1ab89dcfda815ec4479e4d`. Android unit tests passed, including the new PDF extraction test. Staging Debug APK assembly was still in progress when recorded; do not claim APK assembly complete until a later workflow result confirms it.
+- The earlier Android failures on `7a189b9`, `623b0c4`, `ec488d3` and `2be91db` were stale runs that exposed missing LazyColumn `items` import or local `stopAudioPlayback` declaration order. Those source issues were corrected in later commits; current source is at `28cef2a`.
+- Migration `0032` is committed but has not been applied to Staging or Production. A Staging APK must not be used for end-to-end testing against an un-migrated Staging Worker.
+- Physical-device acceptance (pinch/page gesture separation, focus audio/TTS, bottom safe area, schedule sync, month history and two-account interactions) remains outstanding and must be performed on devices; do not claim it has been completed here.
+
+### Still open / explicit limitations
+- Digital text layer extraction is fixed; scanned/image-only PDFs still have no OCR, so their text cannot yet be read aloud.
+- Device-specific TTS language packs and AudioTrack behavior require real-device verification.
+- No signed Release assembly is part of PR validation. Production and Staging D1 remain unchanged.
+- Batch 3 remains separate: full synchronization at startup and section entry; direct navigation from subject timeline/archive; academic-year rollover; groups/clubs UX, visibility, messaging and join-request reason; do not pull those tasks into Batch 2.
