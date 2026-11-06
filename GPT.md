@@ -1890,11 +1890,13 @@ When giving the user a statement about the current state, re-read GitHub if it m
 
 ## Batch 2 — Study reader, typography, exam calendar and schedule editing (2026-11-05)
 
-### Branch / safety
+### Branch / safety (historical correction, updated 2026-11-07)
 - Repository: `majd7772233-a11y/Tanweer`.
-- Working branch: `work/batch-2-study-experience`, forked from Batch 1 branch `work/release-readiness`.
-- Draft PR #7 targets `work/release-readiness`; it is not merged. Production `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
-- No Worker deployment, D1 migration apply, secret change, production write, merge, or data purge was performed.
+- User requires exactly two branches, with all batch work committed directly to `work/release-readiness`: `main` and `work/release-readiness`.
+- Batch 2 was developed temporarily on `work/batch-2-study-experience`, then PR #7 was merged into `work/release-readiness` (merge commit `a834068b62094de8247f9b49072090df6d9a8ffb`). The temporary branch and four old `ci/android-validation-base-*` branches were removed; the temporary cleanup workflow self-deleted.
+- At the latest Batch 3 checkpoint, the only branches are `main` at `64143994070bcdc410cf044379fe2801da8f9a3c` and `work/release-readiness` at `9b524c3a965f6aa362904d783488768bf1b8dff2`.
+- PR #6 remains an open draft targeting `main`; it has not been merged. Batch 3 changes are direct commits on `work/release-readiness`, not a new branch or PR.
+- No Worker deployment, D1 migration apply, secret change, production write, production merge, or user-data purge was performed.
 
 ### PDF reader and study tools
 - Replaced overlapping page/tap/pinch gesture handlers in `CanvasPageCurl.kt` with one gesture owner: one finger handles page turn/tap or pan while zoomed; two or more fingers handle pinch zoom. Double-tap toggles zoom. Preserve the existing page-curl animation.
@@ -1935,3 +1937,68 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Device-specific TTS language packs and AudioTrack behavior require real-device verification.
 - No signed Release assembly is part of PR validation. Production and Staging D1 remain unchanged.
 - Batch 3 remains separate: full synchronization at startup and section entry; direct navigation from subject timeline/archive; academic-year rollover; groups/clubs UX, visibility, messaging and join-request reason; do not pull those tasks into Batch 2.
+
+
+## Batch 3 — synchronization integrity, group membership and publication recovery (2026-11-07)
+
+### Branch policy and current refs
+- Continue directly on `work/release-readiness`; do not create batch-specific branches.
+- Exactly two refs remain: `main` = `64143994070bcdc410cf044379fe2801da8f9a3c`; `work/release-readiness` = `9b524c3a965f6aa362904d783488768bf1b8dff2`.
+- Batch 2 PR #7 is merged into `work/release-readiness` at `a834068b62094de8247f9b49072090df6d9a8ffb`. PR #6 remains an open draft targeting `main`, unmerged.
+
+### Section-entry and return synchronization
+- `TanweerViewModel` now routes tab/subscreen entry through `syncTabOnEntry`, `syncSubScreenOnEntry`, and `syncCurrentDestinationOnEntry`.
+- Entry triggers forced section-specific refreshes even when optional background auto-sync is disabled. The destination is also refreshed after returning from a nested screen; closing PDF returns to and refreshes Library.
+- TODAY refreshes home, schedule, homework, exams and events; Calendar refreshes calendar/events; remaining tabs refresh their own datasets.
+- Schedule, groups, library, timeline/knowledge-base, archive, search, catch-up, events, community decisions, role dashboards, profile/settings and version screen entry all request their relevant server snapshots.
+- Startup full account reconciliation already existed from Batch 1 and remains the baseline; Batch 3 adds fresh section-entry snapshots rather than replacing it.
+
+### Safe server snapshot reconciliation
+- Added `ServerSnapshotValidation` and unit tests for declared-count equality and unique/nonblank record IDs.
+- Lesson-list, account archive and day-detail refresh paths reject incomplete, duplicated, malformed or mismatched server snapshots before Room deletion/reconciliation. Invalid day details must match the requested date and group; valid shared events may use the global group ID. On invalid responses, cached academic rows are retained.
+- This blocks a truncated/partial server response from being misread as an authoritative empty snapshot and clearing existing local records.
+
+### Groups, clubs and privacy
+- Root cause of private groups appearing public in Android: Room `GroupEntity` -> `GroupItem` mapping omitted `visibility` and `chatPolicy`, so model defaults silently changed PRIVATE/STAFF_ONLY to PUBLIC/MEMBERS. Added `GroupItemMapper.toGroupItem()` and use it for all, My Groups and Discovery flows; tests preserve both fields.
+- Server mapper now fails closed: missing/unknown group visibility is PRIVATE, not PUBLIC.
+- Group cards no longer show a single-group activation action/state. Groups remain independently accessible; each joined shared-group card provides its own discussion entry.
+- Private or approval-required join flow now retains the server privacy marker so Android shows the join-reason dialog and sends the reason. Server already requires a nonblank reason for PENDING requests and records it in `group_members.request_reason`; API test coverage remains in the groups hardening suite.
+- Fixed group creation SQL placeholder count so visibility/chat policy bindings align with SQL placeholders. Group row + creator's active moderator membership remain one atomic D1 batch.
+- After successful create, Android switches to My Groups and clears Discovery search so the new group is visible.
+- Join operation now treats success as confirmed only when both HTTP and JSON `success=true`.
+
+### Lesson publication and retry repair
+- Server previously inserted `contents` first, then `content_media` rows sequentially; a mid-list failure could leave a partially published lesson. Retrying the same content ID returned success as soon as the parent row existed, without repairing missing pages.
+- Reworked first publication to a single transactional D1 `batch()` for parent content + all media. The route confirms every statement and returns an error instead of claiming partial success.
+- Normalize and validate positive, unique page-order values before writing.
+- Idempotent retry now verifies ownership/group scope, compares stored media metadata, rejects conflicting or duplicated page rows, and adds only missing page rows transactionally. A previously partial lesson can complete on retry without duplicating existing media.
+- Duplicate-checksum logic excludes the same content ID so a retry of that exact lesson reaches the repair path rather than being mistaken for a duplicate lesson.
+- Added regressions for a second media-row failure with full rollback and successful retry, and for repairing a legacy partially written lesson while keeping existing page rows single.
+
+### Chat publication confirmation and idempotency
+- Android no longer considers `WebSocket.send()` queue acceptance to be successful publication. `sendChatMessage` waits for server ACK or its own persisted-message echo; after an 8-second timeout it uses HTTP with the same message ID. It sets SENT only after confirmed ACK or HTTP `success=true`; otherwise FAILED.
+- Retry follows the same confirmation contract. A rapid duplicate debounce no longer reports success for a message that was not sent.
+- Both REST and GroupChatDO now inspect D1 `INSERT OR IGNORE` changes. If the row already exists, they verify exact group, sender and text identity before treating it as an idempotent retry. Conflicting ID reuse returns 409/explicit WebSocket error and does not broadcast or ACK.
+- Exact persisted retry can be ACKed but is not rebroadcast as a second message.
+- Added server regression tests for exact retry and conflicting message IDs. Updated the integration-test MockD1 parser to model `INSERT OR IGNORE`; it previously recognized only `INSERT INTO`, creating a false 409 in the end-to-end test.
+
+### Archive and timeline behavior checked
+- The existing lesson/homework detail preview dialogs in Subject Timeline and Academic History already open on card tap; do not add a second overlapping preview flow.
+- Academic-year selector derives available years from actual stored lesson/homework/exam dates plus the current academic year. `AcademicYearManager.resolveAvailableAcademicYears` no longer invents an empty prior year. Regression test confirms `2025-2026` is absent when there are no records in that year and `2026-2027` is the current year.
+- Continue preserving real date-derived history; don't hardcode year rollover based on a device clock alone.
+
+### Validation checkpoint (latest)
+- Current branch HEAD: `9b524c3a965f6aa362904d783488768bf1b8dff2`.
+- Server workflow run `42299705972` passed: TypeScript, dependency-security baseline, all 34 test files / 236 tests, and Wrangler production-bundle validation. No deployment was performed.
+- Android workflow run `42299378382` passed on commit `02bb4e44698a610350e9714150e3639048be7df5`: Android unit tests, Staging Debug APK assembly and artifact upload succeeded. The only commit between that Android-validated source and current HEAD `9b524c3` is `server/test/integration.test.ts` (the MockD1 `INSERT OR IGNORE` matcher correction); no Android source changed after the successful build. Signed Release assembly was skipped because release-signing material was not available in this CI run.
+- A further Android run `42299713915` on current HEAD was still in progress at this checkpoint; the preceding successful Android run covers the unchanged Android source tree.
+- Read-only Cloudflare D1 inspection on 2026-11-07 confirmed Staging's latest migration is `0030_activate_existing_public_school_group_requests.sql`, while Production's latest migration is `0023_group_request_reason.sql`. Both SELECT checks returned `rows_written: 0` and `changed_db: false`.
+- Migrations `0031_user_dismissed_school_announcements.sql` and `0032_monthly_exam_uniqueness.sql` remain unapplied in both environments; Production also lacks the later Staging schema changes from migrations 0024–0030. Therefore new school-announcement dismissal, private-group, chat-policy and monthly-exam database behavior is **not live in either environment** until each target database applies its migrations sequentially and the matching Worker is deployed.
+- No Staging or Production D1 migration, write, Worker deployment, secret change, branch creation, PR merge into main, or data purge occurred in Batch 3.
+- Physical-device / two-account acceptance remains outstanding: publish the same lesson with multiple pages and verify all pages appear on a second account; interrupt/retry publication; verify private group visibility, reason submission and manager request review; send the same chat message from one device and confirm one copy on another; verify ACK/failed-message UI and section-entry refresh while online/offline.
+
+### Batch 3 remaining / next actions
+- Wait for the current-head Android workflow `42299713915` to finish; the verified Android source has already passed on `02bb4e4`, but latest HEAD should be tracked until its run concludes.
+- Continue auditing homework media upload/retry for the same multi-write partial-publication risk, and check every UI mutation for false success when server body `success` is false.
+- Review D1 migration rollout ordering and Production schema drift before any deployment. Do not apply migrations or deploy Workers as part of code-only work without a separate explicit release instruction.
+- Do not add another branch. All further changes belong on `work/release-readiness`.
