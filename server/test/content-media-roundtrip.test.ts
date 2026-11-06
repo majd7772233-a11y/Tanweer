@@ -76,8 +76,11 @@ class ContentMediaStatement {
     if (!match) return { success: true, meta: { changes: 0 } };
 
     const table = match[1];
-    if (table === 'content_media' && this.db.failContentMediaInsert) {
-      throw new Error('simulated content_media insert failure');
+    if (table === 'content_media') {
+      this.db.contentMediaInsertAttempts++;
+      if (this.db.failContentMediaInsert && this.db.contentMediaInsertAttempts === 2) {
+        throw new Error('simulated second content_media insert failure');
+      }
     }
     const columns = sql.match(/\((.*?)\)\s*VALUES/i)?.[1]
       ?.split(',')
@@ -99,6 +102,7 @@ class ContentMediaDb {
     subjects: [{ id: 'math', name_ar: 'الرياضيات', icon: '📐', color_hex: '#00E5FF' }],
   };
   failContentMediaInsert = false;
+  contentMediaInsertAttempts = 0;
 
   prepare(sql: string) {
     return new ContentMediaStatement(this, sql);
@@ -181,6 +185,7 @@ describe('Lesson media cross-device contract', () => {
     expect(failedAttempt.status).toBe(500);
     expect(db.tables.contents).toHaveLength(0);
     expect(db.tables.content_media).toHaveLength(0);
+    expect(db.contentMediaInsertAttempts).toBe(2);
 
     db.failContentMediaInsert = false;
     const retried = await handleCreateContent(author, makeRequest(), { DB: db as any } as Env);
