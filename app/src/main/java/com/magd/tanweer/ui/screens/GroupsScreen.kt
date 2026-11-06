@@ -699,15 +699,14 @@ fun GroupsScreen(
                                             },
                                             modifier = Modifier.weight(1f)
                                         )
-                                    } else if (!isSelected) {
-                                        GlassOutlinedButton(
-                                            text = "تفعيل المجموعة",
-                                            onClick = { viewModel.setSelectedGroup(group.id) },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    } else {
-                                        Spacer(modifier = Modifier.weight(1f))
                                     }
+                                }
+                                if (!isSelected) {
+                                    GlassOutlinedButton(
+                                        text = "تفعيل هذه المجموعة",
+                                        onClick = { viewModel.setSelectedGroup(group.id) },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
                                 }
                                 GlassOutlinedButton(
                                     text = "مغادرة المجموعة",
