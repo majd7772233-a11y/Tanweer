@@ -683,7 +683,7 @@ describe('Group join request concurrency and state', () => {
       new Request('https://tanweer.test/api/v1/groups/class-group/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: '   \\n  ' }),
+        body: JSON.stringify({ reason: '   \n  ' }),
       }),
       { DB: db as any } as Env,
     );
