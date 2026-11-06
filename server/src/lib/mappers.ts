@@ -10,7 +10,11 @@ export function mapGroup(r: any, defaultRole = 'MEMBER') {
     icon: r.icon ?? null,
     role: sanitizePublicRole(rawRole),
     memberCount: Number(r.member_count ?? r.memberCount ?? 1),
-    visibility: (r.visibility || 'PUBLIC').toUpperCase(),
+    // Unknown/missing visibility must never be promoted to PUBLIC by a mapper default.
+    visibility: (() => {
+      const value = typeof r.visibility === 'string' ? r.visibility.trim().toUpperCase() : '';
+      return value === 'PUBLIC' || value === 'PRIVATE' ? value : 'PRIVATE';
+    })(),
     chatPolicy: (r.chat_policy || r.chatPolicy || 'MEMBERS').toUpperCase(),
     membershipStatus: r.membership_status ?? r.membershipStatus ?? null,
   };

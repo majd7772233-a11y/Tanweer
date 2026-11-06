@@ -498,7 +498,6 @@ fun GroupsScreen(
                 // 1. Official Section Group (الشعبة الرسمية الأساسية) - Distinguished Hero Card
                 if (officialClassGroup != null) {
                     item {
-                        val isSelected = officialClassGroup.id == selectedGroupId || (selectedGroupId.isEmpty() && officialClassGroup.id == currentUser?.defaultGroupId)
 
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Row(
@@ -552,9 +551,6 @@ fun GroupsScreen(
                                             }
                                         }
 
-                                        if (isSelected) {
-                                            GlassPill(text = "الشعبة النشطة ✓", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
-                                        }
                                     }
 
                                     Text(
@@ -586,13 +582,6 @@ fun GroupsScreen(
                                                 modifier = Modifier.weight(1f)
                                             )
                                         }
-                                        if (!isSelected) {
-                                            GlassOutlinedButton(
-                                                text = "التبديل كشعبة نشطة",
-                                                onClick = { viewModel.setSelectedGroup(officialClassGroup.id) },
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
                                     }
                                 }
                             }
@@ -621,10 +610,9 @@ fun GroupsScreen(
                     }
                 } else {
                     items(sharedGroups, key = { it.id }) { group ->
-                        val isSelected = group.id == selectedGroupId
                         GlassCard(
                             modifier = Modifier.fillMaxWidth(),
-                            borderColor = if (isSelected) CyanAccent else GlassBorder,
+                            borderColor = if (group.visibility == "PRIVATE") WarmAmber.copy(alpha = 0.45f) else GlassBorderSubtle,
                             backgroundColor = GlassSurface
                         ) {
                             Column(modifier = Modifier.fillMaxWidth()) {
@@ -664,9 +652,6 @@ fun GroupsScreen(
                                         }
                                     }
 
-                                    if (isSelected) {
-                                        GlassPill(text = "نشطة", color = CyanAccent, bgColor = CyanGlow)
-                                    }
                                 }
 
                                 if (!group.description.isNullOrBlank()) {
@@ -700,13 +685,6 @@ fun GroupsScreen(
                                             modifier = Modifier.weight(1f)
                                         )
                                     }
-                                }
-                                if (!isSelected) {
-                                    GlassOutlinedButton(
-                                        text = "تفعيل هذه المجموعة",
-                                        onClick = { viewModel.setSelectedGroup(group.id) },
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
                                 }
                                 GlassOutlinedButton(
                                     text = "مغادرة المجموعة",
@@ -779,7 +757,7 @@ fun GroupsScreen(
                                                 color = TextPrimary
                                             )
                                             val groupTypeLabel = when (group.visibility) {
-                                                "PRIVATE" -> "خاصة • ظاهرة للاكتشاف وتتطلب موافقة"
+                                                "PRIVATE" -> "مجموعة خاصة • لا تنضم إلا بعد مراجعة طلبك"
                                                 else -> if (group.chatPolicy == "STAFF_ONLY") "مجموعة الهيئة التعليمية • قراءة للطلاب" else "مجموعة عامة • دخول مباشر"
                                             }
                                             Text(
@@ -1121,7 +1099,11 @@ fun GroupsScreen(
                         if (isCreating) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = TextOnAccent, strokeWidth = 2.dp)
                         } else {
-                            Text("إنشاء المجموعة ✅", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (newGroupVisibility == "PRIVATE") "إنشاء المجموعة الخاصة 🔒" else "إنشاء المجموعة العامة ✅",
+                                color = TextOnAccent,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 },

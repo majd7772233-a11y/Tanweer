@@ -634,61 +634,77 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     // NAVIGATION & ON-DEMAND SYNCING
     // =========================================================================
 
-    fun setTab(tab: NavigationTab) {
-        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
-        _currentTab.value = tab
-        _subScreen.value = SubScreen.NONE
-
-        val groupId = getActiveGroupId()
+    private fun syncTabOnEntry(tab: NavigationTab) {
+        val groupId = getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() }
         when (tab) {
-            NavigationTab.TODAY -> syncHome(groupId, _selectedDate.value, isRefresh = false)
-            NavigationTab.HOMEWORK -> syncHomeworks(groupId, isRefresh = false)
-            NavigationTab.EXAMS -> syncExams(groupId, isRefresh = false)
-            NavigationTab.CALENDAR -> syncCalendar(groupId, isRefresh = false)
-            NavigationTab.ISSUES -> syncIssues(groupId, isRefresh = false)
-            NavigationTab.MORE -> {}
+            NavigationTab.TODAY -> {
+                syncHome(groupId, _selectedDate.value, isRefresh = true)
+                syncSchedule(groupId, isRefresh = true)
+                syncHomeworks(groupId, isRefresh = true)
+                syncExams(groupId, isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+            }
+            NavigationTab.CALENDAR -> {
+                syncCalendar(groupId, isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+            }
+            NavigationTab.HOMEWORK -> syncHomeworks(groupId, isRefresh = true)
+            NavigationTab.EXAMS -> syncExams(groupId, isRefresh = true)
+            NavigationTab.ISSUES -> syncIssues(groupId, isRefresh = true)
+            NavigationTab.MORE -> {
+                syncGroups(isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+            }
         }
     }
 
-    fun setSubScreen(screen: SubScreen) {
-        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
-        _subScreen.value = screen
-        val groupId = getActiveGroupId()
-
-        // Reconcile the section's own server snapshot on entry. Startup sync already
-        // performs a broad account reconciliation; these calls keep long-lived screens
-        // current when the user returns to them without requiring a manual pull-to-refresh.
-        if (!_autoSyncEnabled.value) return
-
+    private fun syncSubScreenOnEntry(screen: SubScreen) {
+        val groupId = getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() }
         when (screen) {
+            SubScreen.NONE -> syncTabOnEntry(_currentTab.value)
+            SubScreen.EXTRA_SECTIONS_HUB -> {
+                syncGroups(isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+            }
             SubScreen.SCHEDULE -> {
-                syncSchedule(groupId, isRefresh = false)
+                syncSchedule(groupId, isRefresh = true)
                 loadScheduleData()
             }
-            SubScreen.GROUPS -> syncGroups(isRefresh = false)
+            SubScreen.GROUPS -> syncGroups(isRefresh = true)
             SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER ->
-                syncBooks(currentUser.value?.gradeId ?: 10, isRefresh = false)
+                syncBooks(currentUser.value?.gradeId ?: 10, isRefresh = true)
 
             SubScreen.TIMELINE, SubScreen.SUBJECT_KNOWLEDGE_BASE -> {
-                syncSectionContents(groupId)
-                syncHomeworks(groupId, isRefresh = false)
-                syncExams(groupId, isRefresh = false)
+                syncSectionContents(groupId, isRefresh = true)
+                syncHomeworks(groupId, isRefresh = true)
+                syncExams(groupId, isRefresh = true)
             }
 
-            SubScreen.ACADEMIC_HISTORY -> syncAcademicArchive(isRefresh = false)
+            SubScreen.ACADEMIC_HISTORY -> syncAcademicArchive(isRefresh = true)
 
-            SubScreen.SEARCH -> syncSectionContents(groupId)
+            SubScreen.SEARCH -> {
+                syncSectionContents(groupId, isRefresh = true)
+                syncHomeworks(groupId, isRefresh = true)
+                syncExams(groupId, isRefresh = true)
+                syncIssues(groupId, isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+                syncGroups(isRefresh = true)
+            }
 
             SubScreen.WHAT_DID_I_MISS -> {
-                syncSectionContents(groupId)
-                syncHomeworks(groupId, isRefresh = false)
-                syncExams(groupId, isRefresh = false)
-                syncEvents(groupId)
+                syncSectionContents(groupId, isRefresh = true)
+                syncHomeworks(groupId, isRefresh = true)
+                syncExams(groupId, isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+                syncSchedule(groupId, isRefresh = true)
             }
 
-            SubScreen.EVENTS -> syncEvents(groupId)
+            SubScreen.EVENTS -> syncEvents(groupId, isRefresh = true)
 
-            SubScreen.COMMUNITY_DECISIONS -> loadCommunityDecisions(groupId)
+            SubScreen.COMMUNITY_DECISIONS -> {
+                loadCommunityDecisions(groupId)
+                loadScheduleProposals()
+            }
 
             SubScreen.TEACHER_DASHBOARD -> loadTeacherDashboard()
             SubScreen.MODERATOR_DASHBOARD -> {
@@ -696,15 +712,41 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 loadGroupCorrections(groupId)
                 loadCommunityDecisions(groupId)
                 loadGroupMembers(groupId)
+                loadScheduleProposals()
             }
             SubScreen.ADMIN_DASHBOARD -> loadAdminDashboard()
 
-            SubScreen.PROFILE -> viewModelScope.launch {
+            SubScreen.PROFILE, SubScreen.SETTINGS -> viewModelScope.launch {
                 repository.syncProfile()
             }
 
-            else -> Unit
+            SubScreen.VERSION_CHECK -> viewModelScope.launch {
+                repository.getSystemVersion()
+            }
+
+            SubScreen.PDF_VIEWER -> Unit
         }
+    }
+
+    private fun syncCurrentDestinationOnEntry() {
+        if (_subScreen.value == SubScreen.NONE) {
+            syncTabOnEntry(_currentTab.value)
+        } else {
+            syncSubScreenOnEntry(_subScreen.value)
+        }
+    }
+
+    fun setTab(tab: NavigationTab) {
+        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+        _currentTab.value = tab
+        _subScreen.value = SubScreen.NONE
+        syncTabOnEntry(tab)
+    }
+
+    fun setSubScreen(screen: SubScreen) {
+        triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+        _subScreen.value = screen
+        syncSubScreenOnEntry(screen)
     }
 
     fun navigateBack() {
@@ -712,6 +754,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             closePdfReader()
             return
         }
+        val previousScreen = _subScreen.value
         when (_subScreen.value) {
             SubScreen.NONE -> {
                 // Already on root screen
@@ -744,6 +787,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 closePdfReader()
             }
         }
+        if (previousScreen != SubScreen.PDF_VIEWER && _subScreen.value != previousScreen) {
+            syncCurrentDestinationOnEntry()
+        }
     }
 
     fun openBookInPdfReader(book: BookItem, targetPage: Int? = null) {
@@ -756,22 +802,21 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _activeReadingBook.value = null
         _activeReadingInitialPage.value = null
         _subScreen.value = SubScreen.LIBRARY
+        syncSubScreenOnEntry(SubScreen.LIBRARY)
     }
 
     fun setSelectedGroup(groupId: String) {
         if (groupId.isBlank()) return
         _selectedGroupId.value = groupId
         persistSelectedGroup(groupId)
-        if (_autoSyncEnabled.value) {
-            syncInitialData(groupId, _selectedDate.value)
-        }
+        syncInitialData(groupId, _selectedDate.value, isExplicitAction = true)
     }
 
     fun setSelectedDate(date: String) {
         if (!AcademicSessionSelection.isValidIsoDate(date)) return
         _selectedDate.value = date
         persistSelectedStudyDate(date)
-        syncHome(getActiveGroupId(), date, isRefresh = false)
+        syncHome(getActiveGroupId(), date, isRefresh = true)
     }
 
     fun setSearchQuery(query: String) {
@@ -839,8 +884,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
      * Refreshes the active group's complete lesson snapshot for screens whose content
      * spans more than the currently selected day (timeline, search and knowledge base).
      */
-    fun syncSectionContents(groupId: String = getActiveGroupId()) {
-        if (!_autoSyncEnabled.value || groupId.isBlank()) return
+    fun syncSectionContents(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
+        if ((!_autoSyncEnabled.value && !isRefresh) || groupId.isBlank()) return
         viewModelScope.launch {
             when (val result = repository.syncContents(groupId)) {
                 is SyncResult.Success -> Unit

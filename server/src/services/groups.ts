@@ -623,7 +623,7 @@ export async function handleCreatePublicGroup(request: Request, user: UserContex
         `INSERT INTO groups (
            id, name, type, description, icon, academic_year_id, created_at,
            is_official, is_discoverable, created_by, updated_at, visibility, chat_policy
-         ) VALUES (?, ?, 'OPTIONAL', ?, ?, 'default', ?, 0, 1, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, 'OPTIONAL', ?, ?, 'default', ?, 0, 1, ?, ?, ?, ?)`
       ).bind(groupId, name, description, icon, now, user.userId, now, visibility, chatPolicy),
       env.DB.prepare(
         `INSERT INTO group_members (group_id, user_id, role, status, joined_at)
