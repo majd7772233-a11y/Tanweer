@@ -11,6 +11,7 @@ import com.magd.tanweer.util.ProcessedPageResult
 import com.magd.tanweer.util.DataGenerationPolicy
 import com.magd.tanweer.util.isConfirmedServerWrite
 import com.magd.tanweer.util.ServerSnapshotReconciliation
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -21,8 +22,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -2532,6 +2535,7 @@ class TanweerRepository(
                     val ackId = json.optString("id", "")
                     if (ackId.isNotBlank()) {
                         recentMessageIds.add(ackId)
+                        pendingChatAcks.remove(ackId)?.complete(true)
                         CoroutineScope(Dispatchers.IO).launch {
                             db.chatDao().updateMessageStatus(ackId, "SENT")
                         }
@@ -2542,6 +2546,7 @@ class TanweerRepository(
                 if (type == "message_error") {
                     val errId = json.optString("id", "")
                     if (errId.isNotBlank()) {
+                        pendingChatAcks.remove(errId)?.complete(false)
                         CoroutineScope(Dispatchers.IO).launch {
                             db.chatDao().updateMessageStatus(errId, "FAILED")
                         }
@@ -2558,8 +2563,9 @@ class TanweerRepository(
 
                 if (text.isNotBlank() && id.isNotBlank()) {
                     if (senderId == myUserId) {
-                        // My own message echo from server broadcast: confirmed saved and published
+                        // Server broadcast echo is also a persistence confirmation.
                         recentMessageIds.add(id)
+                        pendingChatAcks.remove(id)?.complete(true)
                         CoroutineScope(Dispatchers.IO).launch {
                             db.chatDao().updateMessageStatus(id, "SENT")
                         }
@@ -2594,6 +2600,45 @@ class TanweerRepository(
 
     private var lastSentMessageSignature: String? = null
     private var lastSentMessageTime: Long = 0L
+    private val pendingChatAcks = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+
+    private suspend fun sendChatMessageOverWebSocketAndAwaitAck(
+        messageId: String,
+        payload: JSONObject
+    ): Boolean? {
+        val acknowledgement = CompletableDeferred<Boolean>()
+        pendingChatAcks[messageId] = acknowledgement
+
+        if (!chatManager.sendMessage(payload)) {
+            pendingChatAcks.remove(messageId, acknowledgement)
+            return null
+        }
+
+        return try {
+            // A successful WebSocket enqueue is not a successful publication.
+            // Wait for the server's database-persisted ACK (or explicit rejection).
+            withTimeoutOrNull(8_000L) { acknowledgement.await() }
+        } finally {
+            pendingChatAcks.remove(messageId, acknowledgement)
+        }
+    }
+
+    private suspend fun sendChatMessageOverHttp(
+        groupId: String,
+        messageId: String,
+        text: String
+    ): Boolean {
+        return try {
+            val response = api.postGroupMessage(
+                groupId,
+                PostMessageRequest(id = messageId, text = text)
+            )
+            response.isSuccessful && response.body()?.success == true
+        } catch (error: Exception) {
+            Log.w("TanweerRepository", "HTTP chat delivery confirmation failed", error)
+            false
+        }
+    }
 
     suspend fun sendChatMessage(
         groupId: String,
@@ -2603,34 +2648,36 @@ class TanweerRepository(
         text: String
     ): Boolean = withContext(Dispatchers.IO) {
         val cleanText = text.trim()
-        if (cleanText.isBlank()) return@withContext false
+        if (cleanText.isBlank() || groupId.isBlank()) return@withContext false
 
-        // Debounce exact duplicate sends within 1.5s
+        // Debouncing must never report success for an earlier message that is
+        // still awaiting confirmation.
         val now = System.currentTimeMillis()
-        val sig = "$groupId|$senderId|$cleanText"
-        if (sig == lastSentMessageSignature && (now - lastSentMessageTime < 1500L)) {
-            return@withContext true
+        val signature = "$groupId|$senderId|$cleanText"
+        if (signature == lastSentMessageSignature && now - lastSentMessageTime < 1_500L) {
+            return@withContext false
         }
-        lastSentMessageSignature = sig
+        lastSentMessageSignature = signature
         lastSentMessageTime = now
 
-        val msgId = "msg_${now}_${(1000..9999).random()}"
-        recentMessageIds.add(msgId)
+        val messageId = "msg_${now}_${(1000..9999).random()}"
+        recentMessageIds.add(messageId)
 
-        val localMsg = ChatMessageEntity(
-            id = msgId,
-            groupId = groupId,
-            senderId = senderId,
-            senderName = senderName,
-            senderGradeSection = senderGradeSection,
-            text = cleanText,
-            timestamp = now,
-            status = "SENDING"
+        db.chatDao().insertMessage(
+            ChatMessageEntity(
+                id = messageId,
+                groupId = groupId,
+                senderId = senderId,
+                senderName = senderName,
+                senderGradeSection = senderGradeSection,
+                text = cleanText,
+                timestamp = now,
+                status = "SENDING"
+            )
         )
-        db.chatDao().insertMessage(localMsg)
 
-        val json = JSONObject().apply {
-            put("id", msgId)
+        val payload = JSONObject().apply {
+            put("id", messageId)
             put("groupId", groupId)
             put("senderId", senderId)
             put("senderName", senderName)
@@ -2638,49 +2685,21 @@ class TanweerRepository(
             put("text", cleanText)
             put("timestamp", now)
         }
-        val wsSent = chatManager.sendMessage(json)
 
-        if (!wsSent) {
-            // Fallback to HTTP REST endpoint if WebSocket is not connected
-            try {
-                val res = api.postGroupMessage(groupId, PostMessageRequest(id = msgId, text = cleanText))
-                if (res.isSuccessful && res.body()?.success == true) {
-                    db.chatDao().updateMessageStatus(msgId, "SENT")
-                    true
-                } else {
-                    db.chatDao().updateMessageStatus(msgId, "FAILED")
-                    false
-                }
-            } catch (e: Exception) {
-                Log.w("TanweerRepository", "HTTP fallback send failed, marking as FAILED", e)
-                db.chatDao().updateMessageStatus(msgId, "FAILED")
-                false
-            }
-        } else {
-            // Timeout reconciliation after 12s so message never stays SENDING forever
-            CoroutineScope(Dispatchers.IO).launch {
-                delay(12_000L)
-                val current = db.chatDao().getSendingMessagesSync(System.currentTimeMillis() - 10_000L)
-                if (current.any { it.id == msgId }) {
-                    try {
-                        val res = api.postGroupMessage(groupId, PostMessageRequest(id = msgId, text = cleanText))
-                        if (res.isSuccessful && res.body()?.success == true) {
-                            db.chatDao().updateMessageStatus(msgId, "SENT")
-                        } else {
-                            db.chatDao().updateMessageStatus(msgId, "FAILED")
-                        }
-                    } catch (e: Exception) {
-                        db.chatDao().updateMessageStatus(msgId, "FAILED")
-                    }
-                }
-            }
-            true
+        val webSocketConfirmation = sendChatMessageOverWebSocketAndAwaitAck(messageId, payload)
+        val confirmed = when (webSocketConfirmation) {
+            true -> true
+            false -> false // The server explicitly rejected persistence/permission.
+            null -> sendChatMessageOverHttp(groupId, messageId, cleanText)
         }
+
+        db.chatDao().updateMessageStatus(messageId, if (confirmed) "SENT" else "FAILED")
+        confirmed
     }
 
     suspend fun retryChatMessage(msg: ChatMessageItem) = withContext(Dispatchers.IO) {
         db.chatDao().updateMessageStatus(msg.id, "SENDING")
-        val json = JSONObject().apply {
+        val payload = JSONObject().apply {
             put("id", msg.id)
             put("groupId", msg.groupId)
             put("senderId", msg.senderId)
@@ -2689,20 +2708,14 @@ class TanweerRepository(
             put("text", msg.text)
             put("timestamp", msg.timestamp)
         }
-        val wsSent = chatManager.sendMessage(json)
-        if (!wsSent) {
-            try {
-                val res = api.postGroupMessage(msg.groupId, PostMessageRequest(id = msg.id, text = msg.text))
-                if (res.isSuccessful && res.body()?.success == true) {
-                    db.chatDao().updateMessageStatus(msg.id, "SENT")
-                } else {
-                    db.chatDao().updateMessageStatus(msg.id, "FAILED")
-                }
-            } catch (_: Exception) {
-                db.chatDao().updateMessageStatus(msg.id, "FAILED")
-            }
+
+        val webSocketConfirmation = sendChatMessageOverWebSocketAndAwaitAck(msg.id, payload)
+        val confirmed = when (webSocketConfirmation) {
+            true -> true
+            false -> false
+            null -> sendChatMessageOverHttp(msg.groupId, msg.id, msg.text)
         }
-        // If wsSent is true, message status remains SENDING until server ACK/echo confirms persistence
+        db.chatDao().updateMessageStatus(msg.id, if (confirmed) "SENT" else "FAILED")
     }
 
     suspend fun addLesson(
