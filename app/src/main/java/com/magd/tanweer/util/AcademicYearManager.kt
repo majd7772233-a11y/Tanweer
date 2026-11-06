@@ -23,14 +23,36 @@ object AcademicYearManager {
      * Strictly verifies whether a date string conforms to standard ISO (yyyy-MM-dd) with valid calendar values.
      */
     fun isValidIsoDate(dateStr: String?): Boolean {
-        if (dateStr.isNullOrBlank() || dateStr.length < 10) return false
+        if (dateStr.isNullOrBlank() || dateStr.trim().length < 10) return false
+
         val clean = dateStr.trim().take(10)
         if (!Regex("""^\d{4}-\d{2}-\d{2}$""").matches(clean)) return false
+
         val parts = clean.split("-")
-        val y = parts[0].toIntOrNull() ?: return false
-        val m = parts[1].toIntOrNull() ?: return false
-        val d = parts[2].toIntOrNull() ?: return false
-        return y in 2020..2099 && m in 1..12 && d in 1..31
+        val year = parts[0].toIntOrNull() ?: return false
+        val month = parts[1].toIntOrNull() ?: return false
+        val day = parts[2].toIntOrNull() ?: return false
+        if (year !in 1..9999 || month !in 1..12 || day !in 1..31) return false
+
+        // Calendar's default leniency silently accepts dates such as February 31.
+        // Use a strict UTC Gregorian calendar so historical archive filtering only
+        // accepts real calendar dates, including valid leap days.
+        return try {
+            java.util.GregorianCalendar(
+                java.util.TimeZone.getTimeZone("UTC"),
+                java.util.Locale.US
+            ).apply {
+                isLenient = false
+                clear()
+                set(java.util.Calendar.YEAR, year)
+                set(java.util.Calendar.MONTH, month - 1)
+                set(java.util.Calendar.DAY_OF_MONTH, day)
+                timeInMillis
+            }
+            true
+        } catch (_: IllegalArgumentException) {
+            false
+        }
     }
 
     /**
@@ -56,7 +78,13 @@ object AcademicYearManager {
         val startYear = parts.getOrNull(0)?.trim()?.toIntOrNull()
         val endYear = parts.getOrNull(1)?.trim()?.toIntOrNull()
 
-        val validYear = if (parts.size == 2 && startYear != null && endYear != null && endYear == startYear + 1) {
+        val validYear = if (
+            parts.size == 2 &&
+            startYear != null &&
+            endYear != null &&
+            startYear in 1..9998 &&
+            endYear == startYear + 1
+        ) {
             "${startYear}-${endYear}"
         } else {
             getCurrentAcademicYear()
@@ -128,10 +156,8 @@ object AcademicYearManager {
             }
         }
 
-        val startYr = currentYear.substringBefore("-").toIntOrNull()
-            ?: java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
-        yearsSet.add("${startYr - 1}-$startYr")
-
+        // Do not invent an empty "previous year" archive. Older years appear
+        // only when a real lesson, homework or exam record belongs to them.
         return yearsSet.toList().sortedDescending()
     }
 }
