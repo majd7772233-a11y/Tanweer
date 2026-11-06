@@ -49,12 +49,6 @@ fun EventsScreen(
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
-    LaunchedEffect(activeGroupId) {
-        if (activeGroupId.isNotBlank()) {
-            viewModel.repository.syncEvents(activeGroupId)
-        }
-    }
-
     val todayStr = remember { TanweerViewModel.getTodayDateString() }
 
     var selectedCategory by remember { mutableStateOf("ALL") }
