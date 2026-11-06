@@ -43,13 +43,6 @@ fun ModeratorDashboardScreen(
     val communityDecisions by viewModel.communityDecisions.collectAsStateWithLifecycle()
     val groupMembers by viewModel.groupMembersState.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        viewModel.loadModeratorDashboard()
-        viewModel.loadGroupCorrections()
-        viewModel.loadCommunityDecisions()
-        viewModel.loadGroupMembers()
-    }
-
     var selectedSection by remember { mutableIntStateOf(0) } // 0: Corrections, 1: Decisions & Schedule Proposals, 2: Members
     var decisionFilter by remember { mutableStateOf("ALL") } // "ALL", "SCHEDULE", "COMMUNITY"
 
