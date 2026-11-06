@@ -355,6 +355,7 @@ class PublicGroupCreateDb {
             created_by: params[5],
             updated_at: params[6],
             visibility: params[7],
+            chat_policy: params[8],
           });
           return { success: true, meta: { changes: 1 } };
         }
@@ -400,7 +401,10 @@ describe('Public group creation consistency', () => {
     role: Role.MODERATOR,
   };
 
-  const createRequest = (visibility: 'PUBLIC' | 'PRIVATE' = 'PUBLIC') => new Request('https://tanweer.test/api/v1/groups/public', {
+  const createRequest = (
+    visibility: 'PUBLIC' | 'PRIVATE' = 'PUBLIC',
+    chatPolicy: 'MEMBERS' | 'STAFF_ONLY' = 'MEMBERS'
+  ) => new Request('https://tanweer.test/api/v1/groups/public', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -408,6 +412,7 @@ describe('Public group creation consistency', () => {
       description: 'مجموعة لمشاركة الدروس والمشاريع',
       icon: '💻',
       visibility,
+      chatPolicy,
     }),
   });
 
@@ -450,6 +455,44 @@ describe('Public group creation consistency', () => {
       role: 'MODERATOR',
       status: 'ACTIVE',
     });
+  });
+
+  it('persists staff-only chat policy for a club created with read-only student access', async () => {
+    const db = new PublicGroupCreateDb();
+    const response = await handleCreatePublicGroup(
+      createRequest('PUBLIC', 'STAFF_ONLY'),
+      creator,
+      { DB: db as any } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.chatPolicy).toBe('STAFF_ONLY');
+    expect(db.groups[0]).toMatchObject({
+      visibility: 'PUBLIC',
+      chat_policy: 'STAFF_ONLY',
+      is_discoverable: 1,
+    });
+  });
+
+  it('rejects unsupported chat policies instead of silently widening message access', async () => {
+    const db = new PublicGroupCreateDb();
+    const request = new Request('https://tanweer.test/api/v1/groups/public', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'مجموعة غير صالحة',
+        visibility: 'PUBLIC',
+        chatPolicy: 'EVERYONE_ADMIN',
+      }),
+    });
+
+    const response = await handleCreatePublicGroup(request, creator, { DB: db as any } as Env);
+
+    expect(response.status).toBe(400);
+    expect((await response.json() as any).error.code).toBe('INVALID_CHAT_POLICY');
+    expect(db.groups).toHaveLength(0);
+    expect(db.batchCalls).toBe(0);
   });
 
   it('does not leave a published group behind if creator membership insertion fails', async () => {
