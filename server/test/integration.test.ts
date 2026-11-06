@@ -194,8 +194,11 @@ class MockD1Database {
       return [row];
     }
 
-    // INSERT INTO
-    if (/^INSERT INTO/i.test(normalized)) {
+    // INSERT INTO / INSERT OR IGNORE INTO
+    // D1 reports zero changes for an ignored duplicate; otherwise it inserts
+    // the row. The previous fake matched only INSERT INTO and silently skipped
+    // INSERT OR IGNORE, which made integration tests invent false 409 conflicts.
+    if (/^INSERT (?:OR IGNORE )?INTO/i.test(normalized)) {
       const match = normalized.match(/INSERT (?:OR IGNORE )?INTO (\w+)/i);
       if (match) {
         const table = match[1];
