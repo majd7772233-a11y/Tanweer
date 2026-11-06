@@ -1328,7 +1328,6 @@ class TanweerRepository(
             val res = api.joinGroupRequest(groupId, com.magd.tanweer.data.model.JoinGroupBody(reason = reason))
             if (res.isSuccessful && res.body() != null) {
                 val body = res.body()!!
-                syncGroups()
                 Result.success(body)
             } else {
                 val errorMsg = res.body()?.error?.message ?: res.body()?.message ?: "تعذر إتمام طلب الانضمام"
@@ -1908,7 +1907,6 @@ class TanweerRepository(
             val response = api.leaveGroup(groupId)
             val body = response.body()
             if (response.isSuccessful && body?.success == true) {
-                syncGroups()
                 Result.success(body.message ?: "تمت مغادرة المجموعة بنجاح")
             } else {
                 Result.failure(Exception(body?.error?.message ?: body?.message ?: "تعذر مغادرة المجموعة"))
@@ -1930,7 +1928,6 @@ class TanweerRepository(
                 com.magd.tanweer.data.model.CreateGroupRequest(name, description, icon, visibility, chatPolicy)
             )
             if (res.isSuccessful && res.body()?.success == true) {
-                syncGroups()
                 Result.success(res.body()!!)
             } else {
                 val errorMsg = res.body()?.error?.message ?: res.body()?.message ?: "تعذر إنشاء المجموعة"
