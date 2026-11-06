@@ -658,7 +658,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         if (!_autoSyncEnabled.value) return
 
         when (screen) {
-            SubScreen.SCHEDULE -> syncSchedule(groupId, isRefresh = false)
+            SubScreen.SCHEDULE -> {
+                syncSchedule(groupId, isRefresh = false)
+                loadScheduleData()
+            }
             SubScreen.GROUPS -> syncGroups(isRefresh = false)
             SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER ->
                 syncBooks(currentUser.value?.gradeId ?: 10, isRefresh = false)
@@ -685,7 +688,12 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             SubScreen.COMMUNITY_DECISIONS -> loadCommunityDecisions(groupId)
 
             SubScreen.TEACHER_DASHBOARD -> loadTeacherDashboard()
-            SubScreen.MODERATOR_DASHBOARD -> loadModeratorDashboard()
+            SubScreen.MODERATOR_DASHBOARD -> {
+                loadModeratorDashboard()
+                loadGroupCorrections(groupId)
+                loadCommunityDecisions(groupId)
+                loadGroupMembers(groupId)
+            }
             SubScreen.ADMIN_DASHBOARD -> loadAdminDashboard()
 
             SubScreen.PROFILE -> viewModelScope.launch {
