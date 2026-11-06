@@ -35,10 +35,6 @@ fun CommunityDecisionsScreen(
     val context = LocalContext.current
     val decisions by viewModel.communityDecisions.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        viewModel.loadCommunityDecisions()
-    }
-
     var selectedFilter by remember { mutableStateOf("ALL") } // "ALL", "PENDING", "COMPLETED"
 
     val filteredList = when (selectedFilter) {
