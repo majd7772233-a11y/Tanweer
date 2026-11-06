@@ -111,13 +111,6 @@ fun ScheduleScreen(
     val currentGradeName = SchoolHierarchy.getGradeName(currentUser?.gradeId ?: 10)
     val pendingProposalsCount = scheduleProposals.count { it.status == "PENDING" }
 
-    LaunchedEffect(activeGroupId) {
-        if (activeGroupId.isNotBlank()) {
-            viewModel.syncSchedule(activeGroupId, isRefresh = false)
-            viewModel.loadScheduleData()
-        }
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
