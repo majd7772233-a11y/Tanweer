@@ -399,6 +399,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _issuesSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val issuesSyncState: StateFlow<SyncState> = _issuesSyncState.asStateFlow()
 
+    private val _eventsSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val eventsSyncState: StateFlow<SyncState> = _eventsSyncState.asStateFlow()
+
     private val _librarySyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val librarySyncState: StateFlow<SyncState> = _librarySyncState.asStateFlow()
 
@@ -982,6 +985,19 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun syncEvents(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
+        if (groupId.isBlank()) return
+        viewModelScope.launch {
+            _eventsSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
+            when (val result = repository.syncEvents(groupId)) {
+                is SyncResult.Success -> _eventsSyncState.value = SyncState.Success()
+                is SyncResult.Offline -> _eventsSyncState.value = SyncState.OfflineCached()
+                is SyncResult.Error -> _eventsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+            }
+        }
+    }
+
     fun syncGroups(isRefresh: Boolean = false) {
         if (!_autoSyncEnabled.value && !isRefresh) return
         viewModelScope.launch {
@@ -1023,6 +1039,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun refreshExams() = syncExams(isRefresh = true)
     fun refreshCalendar() = syncCalendar(isRefresh = true)
     fun refreshIssues() = syncIssues(isRefresh = true)
+    fun refreshEvents() = syncEvents(isRefresh = true)
     fun refreshGroups() = syncGroups(isRefresh = true)
     fun refreshBooks() = syncBooks(isRefresh = true)
 
