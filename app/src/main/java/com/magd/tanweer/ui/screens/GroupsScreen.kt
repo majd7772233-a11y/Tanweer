@@ -914,6 +914,7 @@ fun GroupsScreen(
             var newGroupDesc by remember { mutableStateOf("") }
             var newGroupIcon by remember { mutableStateOf("👥") }
             var newGroupVisibility by remember { mutableStateOf("PUBLIC") }
+            var newGroupChatPolicy by remember { mutableStateOf("MEMBERS") }
             var isCreating by remember { mutableStateOf(false) }
             val iconsList = listOf("👥", "🔬", "📖", "🎨", "⚽", "💻", "💡", "🌐")
 
@@ -982,6 +983,40 @@ fun GroupsScreen(
                             }
                         }
 
+                        Text("من يمكنه المشاركة في النقاش؟", fontSize = tanweerTextSize(12f), color = TextSecondary)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(
+                                "MEMBERS" to "جميع الأعضاء يمكنهم إرسال الرسائل",
+                                "STAFF_ONLY" to "المعلمون والإدارة يرسلون، والطلاب يقرؤون فقط"
+                            ).forEach { (value, label) ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (newGroupChatPolicy == value) CyanGlow else MidnightBackground)
+                                        .border(
+                                            1.dp,
+                                            if (newGroupChatPolicy == value) CyanAccent else GlassBorderSubtle,
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .clickable { newGroupChatPolicy = value }
+                                        .padding(horizontal = 9.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = newGroupChatPolicy == value,
+                                        onClick = { newGroupChatPolicy = value },
+                                        colors = RadioButtonDefaults.colors(selectedColor = CyanAccent)
+                                    )
+                                    Text(
+                                        text = label,
+                                        fontSize = tanweerTextSize(11f),
+                                        color = TextPrimary
+                                    )
+                                }
+                            }
+                        }
+
                         OutlinedTextField(
                             value = newGroupDesc,
                             onValueChange = { newGroupDesc = it },
@@ -1010,7 +1045,8 @@ fun GroupsScreen(
                                 name = newGroupName.trim(),
                                 description = newGroupDesc.trim().ifEmpty { null },
                                 icon = newGroupIcon,
-                                visibility = newGroupVisibility
+                                visibility = newGroupVisibility,
+                                chatPolicy = newGroupChatPolicy
                             ) { success, msg ->
                                 isCreating = false
                                 if (success) {
