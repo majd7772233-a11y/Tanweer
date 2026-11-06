@@ -832,8 +832,17 @@ fun GroupsScreen(
                         )
                         OutlinedTextField(
                             value = joinReasonText,
-                            onValueChange = { joinReasonText = it },
-                            label = { Text("سبب طلب الانضمام (مثلاً: طالب منقول أو متابعة مواد)", fontSize = tanweerTextSize(11f)) },
+                            onValueChange = { value ->
+                                if (value.length <= 500) joinReasonText = value
+                            },
+                            label = { Text("سبب طلب الانضمام *", fontSize = tanweerTextSize(11f)) },
+                            supportingText = {
+                                Text(
+                                    text = "${joinReasonText.length}/500",
+                                    fontSize = tanweerTextSize(9f),
+                                    color = if (joinReasonText.length >= 500) WarmAmber else TextMuted
+                                )
+                            },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -859,8 +868,8 @@ fun GroupsScreen(
                                 reason = joinReasonText.trim(),
                                 onResult = { isSuccess, status, message ->
                                     isSubmittingJoin = false
-                                    joinRequestGroup = null
                                     if (isSuccess) {
+                                        joinRequestGroup = null
                                         if (status == "ACTIVE") {
                                             Toast.makeText(context, "تم الانضمام بنجاح! 🎉", Toast.LENGTH_SHORT).show()
                                             activeTab = GroupsTab.MY_GROUPS
@@ -873,7 +882,10 @@ fun GroupsScreen(
                                 }
                             )
                         },
-                        enabled = !isSubmittingJoin,
+                        enabled = !isSubmittingJoin &&
+                            joinReasonText.isNotBlank() &&
+                            joinReasonText.trim().isNotEmpty() &&
+                            joinReasonText.length <= 500,
                         colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
                     ) {
                         if (isSubmittingJoin) {
