@@ -454,40 +454,41 @@ class TanweerRepository(
                             SyncResult.Error("لقطة الأرشيف الأكاديمي غير مكتملة أو تحتوي معرّفات مكررة؛ احتُفظت البيانات المحلية")
                         )
                     } else {
-                    val entities = archiveBody.contents.map {
-                        val mediaJson = if (it.media.isNotEmpty()) {
-                            try {
-                                ContentMediaJson.serialize(it.media)
-                            } catch (_: Exception) { "[]" }
-                        } else "[]"
-                        ContentEntity(
-                            id = it.id,
-                            groupId = it.groupId,
-                            studyDate = it.studyDate,
-                            subjectId = it.subjectId,
-                            type = it.type,
-                            title = it.title,
-                            description = it.description,
-                            createdBy = it.createdBy,
-                            authorName = it.authorName,
-                            authorGradeSection = it.authorGradeSection,
-                            viewsCount = it.viewsCount,
-                            usefulCount = it.usefulCount,
-                            createdAt = it.createdAt,
-                            subjectName = it.subjectName,
-                            subjectIcon = it.subjectIcon,
-                            colorHex = it.colorHex,
-                            mediaUrlsJson = mediaJson,
-                            syncStatus = "SYNCED"
-                        )
-                    }
-                    db.withTransaction {
-                        val safeArchiveContents = ServerSnapshotReconciliation.preservePending(
-                            serverRows = entities,
-                            localPendingRows = db.contentDao().getAllPendingContents()
-                        ) { it.id }
-                        if (safeArchiveContents.isNotEmpty()) db.contentDao().insertContents(safeArchiveContents)
-                    }
+                        val entities = archiveBody.contents.map {
+                            val mediaJson = if (it.media.isNotEmpty()) {
+                                try {
+                                    ContentMediaJson.serialize(it.media)
+                                } catch (_: Exception) { "[]" }
+                            } else "[]"
+                            ContentEntity(
+                                id = it.id,
+                                groupId = it.groupId,
+                                studyDate = it.studyDate,
+                                subjectId = it.subjectId,
+                                type = it.type,
+                                title = it.title,
+                                description = it.description,
+                                createdBy = it.createdBy,
+                                authorName = it.authorName,
+                                authorGradeSection = it.authorGradeSection,
+                                viewsCount = it.viewsCount,
+                                usefulCount = it.usefulCount,
+                                createdAt = it.createdAt,
+                                subjectName = it.subjectName,
+                                subjectIcon = it.subjectIcon,
+                                colorHex = it.colorHex,
+                                mediaUrlsJson = mediaJson,
+                                syncStatus = "SYNCED"
+                            )
+                        }
+                        db.withTransaction {
+                            val safeArchiveContents = ServerSnapshotReconciliation.preservePending(
+                                serverRows = entities,
+                                localPendingRows = db.contentDao().getAllPendingContents()
+                            ) { it.id }
+                            if (safeArchiveContents.isNotEmpty()) db.contentDao().insertContents(safeArchiveContents)
+                        }
+
                     subResults.add(SyncResult.Success(entities.size))
                     }
                 } else {
