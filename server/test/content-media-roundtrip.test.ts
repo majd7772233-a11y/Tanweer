@@ -31,7 +31,7 @@ class ContentMediaStatement {
       return (blob || null) as T | null;
     }
 
-    if (/FROM content_media cm\\s+JOIN contents/i.test(sql)) {
+    if (/FROM content_media cm\s+JOIN contents/i.test(sql)) {
       const [checksum, groupId, studyDate, subjectId, excludedContentId] = this.params;
       const media = this.db.tables.content_media.find(row =>
         row.checksum === checksum && row.content_id !== excludedContentId
