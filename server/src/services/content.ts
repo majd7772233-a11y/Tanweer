@@ -83,14 +83,19 @@ export async function handleCreateContent(user: UserContext, request: Request, e
     return errorResponse('INVALID_MEDIA_ORDER', 'ترتيب صفحات المرفقات غير صالح أو مكرر');
   }
 
+  const contentId = (body.id && typeof body.id === 'string' && body.id.trim())
+    ? body.id.trim()
+    : generateId('cnt');
+
   // Check duplicate checksum if media provided
   if (mediaList && mediaList.length > 0 && mediaList[0].checksum) {
     const duplicate = await env.DB.prepare(
       `SELECT cm.content_id, c.title, c.study_date
        FROM content_media cm
        JOIN contents c ON cm.content_id = c.id
-       WHERE cm.checksum = ? AND c.group_id = ? AND c.study_date = ? AND c.subject_id = ?`
-    ).bind(mediaList[0].checksum, body.groupId, studyDate, body.subjectId).first<{
+       WHERE cm.checksum = ? AND c.group_id = ? AND c.study_date = ? AND c.subject_id = ?
+         AND cm.content_id != ?`
+    ).bind(mediaList[0].checksum, body.groupId, studyDate, body.subjectId, contentId).first<{
       content_id: string;
       title: string;
     }>();
@@ -105,10 +110,6 @@ export async function handleCreateContent(user: UserContext, request: Request, e
       });
     }
   }
-
-  const contentId = (body.id && typeof body.id === 'string' && body.id.trim())
-    ? body.id.trim()
-    : generateId('cnt');
 
   const createMediaInsertStatement = (
     item: typeof normalizedMediaList[number],

@@ -31,7 +31,24 @@ class ContentMediaStatement {
       return (blob || null) as T | null;
     }
 
-    if (/FROM content_media cm\s+JOIN contents/i.test(sql)) return null;
+    if (/FROM content_media cm\\s+JOIN contents/i.test(sql)) {
+      const [checksum, groupId, studyDate, subjectId, excludedContentId] = this.params;
+      const media = this.db.tables.content_media.find(row =>
+        row.checksum === checksum && row.content_id !== excludedContentId
+      );
+      if (!media) return null;
+      const content = this.db.tables.contents.find(row =>
+        row.id === media.content_id &&
+        row.group_id === groupId &&
+        row.study_date === studyDate &&
+        row.subject_id === subjectId
+      );
+      return (content ? {
+        content_id: media.content_id,
+        title: content.title,
+        study_date: content.study_date,
+      } as any : null) as T | null;
+    }
 
     if (/FROM contents WHERE id = \?/i.test(sql)) {
       return (this.db.tables.contents.find(row => row.id === this.params[0]) || null) as T | null;
