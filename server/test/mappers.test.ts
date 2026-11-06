@@ -29,6 +29,13 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
     expect((mapped as any).member_count).toBeUndefined();
   });
 
+  it('fails closed for unknown group visibility without rewriting valid private/public values', () => {
+    expect(mapGroup({ id: 'legacy', type: 'OPTIONAL' }).visibility).toBe('PRIVATE');
+    expect(mapGroup({ id: 'bad', type: 'OPTIONAL', visibility: 'UNKNOWN' }).visibility).toBe('PRIVATE');
+    expect(mapGroup({ id: 'private', type: 'OPTIONAL', visibility: ' private ' }).visibility).toBe('PRIVATE');
+    expect(mapGroup({ id: 'public', type: 'OPTIONAL', visibility: 'public' }).visibility).toBe('PUBLIC');
+  });
+
   it('maps ScheduleSlot correctly', () => {
     const raw = {
       id: 'slot_1',

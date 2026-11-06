@@ -384,8 +384,13 @@ class TanweerRepository(
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
                 val list = body.contents
-                if (list.any { it.groupId != groupId }) {
-                    return@withContext SyncResult.Error("رد الخادم للدروس لا يطابق المجموعة المطلوبة؛ احتُفظ بالبيانات المحلية")
+                if (!ServerSnapshotValidation.hasMatchingCount(body.totalCount, list.size) ||
+                    !ServerSnapshotValidation.hasUniqueNonBlankIds(list.map { it.id }) ||
+                    list.any { it.groupId != groupId }
+                ) {
+                    return@withContext SyncResult.Error(
+                        "لقطة الدروس غير مكتملة أو مكررة أو لا تطابق المجموعة المطلوبة؛ احتُفظت البيانات المحلية دون مسحها"
+                    )
                 }
 
                 val entities = list.map { item ->
@@ -442,6 +447,13 @@ class TanweerRepository(
                 val archiveRes = api.getAcademicArchive()
                 val archiveBody = archiveRes.body()
                 if (archiveRes.isSuccessful && archiveBody?.success == true) {
+                    if (!ServerSnapshotValidation.hasMatchingCount(archiveBody.totalCount, archiveBody.contents.size) ||
+                        !ServerSnapshotValidation.hasUniqueNonBlankIds(archiveBody.contents.map { it.id })
+                    ) {
+                        subResults.add(
+                            SyncResult.Error("لقطة الأرشيف الأكاديمي غير مكتملة أو تحتوي معرّفات مكررة؛ احتُفظت البيانات المحلية")
+                        )
+                    } else {
                     val entities = archiveBody.contents.map {
                         val mediaJson = if (it.media.isNotEmpty()) {
                             try {
@@ -477,6 +489,7 @@ class TanweerRepository(
                         if (safeArchiveContents.isNotEmpty()) db.contentDao().insertContents(safeArchiveContents)
                     }
                     subResults.add(SyncResult.Success(entities.size))
+                    }
                 } else {
                     subResults.add(resolveHttpError(archiveRes, "تعذر جلب الأرشيف الأكاديمي"))
                 }
@@ -671,12 +684,22 @@ class TanweerRepository(
             if (res.isSuccessful && res.body()?.success == true) {
                 val body = res.body()!!
                 if (body.date != date ||
-                    body.contents.any { it.groupId != groupId } ||
-                    body.homeworks.any { it.groupId != groupId } ||
-                    body.exams.any { it.groupId != groupId } ||
-                    body.events.any { it.groupId != groupId && it.groupId != "all" }
+                    !ServerSnapshotValidation.hasUniqueNonBlankIds(body.contents.map { it.id }) ||
+                    !ServerSnapshotValidation.hasUniqueNonBlankIds(body.homeworks.map { it.id }) ||
+                    !ServerSnapshotValidation.hasUniqueNonBlankIds(body.exams.map { it.id }) ||
+                    !ServerSnapshotValidation.hasUniqueNonBlankIds(body.events.map { it.id }) ||
+                    body.contents.any { it.groupId != groupId || it.studyDate != date } ||
+                    body.homeworks.any {
+                        it.groupId != groupId || (it.studyDate != date && it.dueDate != date)
+                    } ||
+                    body.exams.any { it.groupId != groupId || it.examDate != date } ||
+                    body.events.any {
+                        (it.groupId != groupId && it.groupId != "all") || it.eventDate != date
+                    }
                 ) {
-                    return@withContext SyncResult.Error("رد الخادم لليوم لا يطابق التاريخ أو المجموعة المطلوبة؛ احتُفظ بالبيانات المحلية")
+                    return@withContext SyncResult.Error(
+                        "لقطة اليوم لا تطابق التاريخ أو المجموعة، أو تحتوي سجلات مكررة؛ احتُفظت البيانات المحلية دون مسحها"
+                    )
                 }
 
                 db.withTransaction {

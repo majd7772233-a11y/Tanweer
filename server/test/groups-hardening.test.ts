@@ -331,6 +331,7 @@ class PublicGroupCreateDb {
   members: Array<Record<string, unknown>> = [];
   failMemberInsert = false;
   batchCalls = 0;
+  placeholderMismatches: Array<{ sql: string; placeholders: number; boundValues: number }> = [];
 
   prepare(sql: string) {
     const db = this;
@@ -342,6 +343,11 @@ class PublicGroupCreateDb {
         return statement;
       },
       async run() {
+        const placeholders = (sql.match(/\?/g) || []).length;
+        if (placeholders !== params.length) {
+          db.placeholderMismatches.push({ sql, placeholders, boundValues: params.length });
+          throw new Error("SQL placeholder count does not match bound values");
+        }
         if (sql.includes('INSERT INTO groups')) {
           db.groups.push({
             id: params[0],
@@ -445,6 +451,7 @@ describe('Public group creation consistency', () => {
     expect(response.status).toBe(200);
     const body = await response.json() as any;
     expect(body.visibility).toBe('PRIVATE');
+    expect(db.placeholderMismatches).toHaveLength(0);
     expect(db.groups[0]).toMatchObject({
       visibility: 'PRIVATE',
       is_discoverable: 1,

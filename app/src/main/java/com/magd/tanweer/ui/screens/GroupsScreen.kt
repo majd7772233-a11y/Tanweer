@@ -1087,6 +1087,9 @@ fun GroupsScreen(
                                 isCreating = false
                                 if (success) {
                                     showCreateGroupDialog = false
+                                    activeTab = GroupsTab.MY_GROUPS
+                                    groupSearchQuery = ""
+                                    viewModel.refreshGroups()
                                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 } else {
                                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
