@@ -67,6 +67,42 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   const mediaValidation = await validateMediaAttachmentAccess(user, mediaReferences, env.DB);
   if (mediaValidation) return mediaValidation;
 
+  const normalizedMediaList = mediaList.map((item, index) => ({
+    pageOrder: item.pageOrder ?? item.page_order ?? index + 1,
+    objectKey: item.objectKey?.trim() || '',
+    url: item.url,
+    mimeType: item.mimeType || item.mime_type || 'image/jpeg',
+    fileSize: item.fileSize ?? item.file_size ?? 0,
+    checksum: item.checksum || null,
+  }));
+  const requestedPageOrders = normalizedMediaList.map(item => item.pageOrder);
+  if (
+    requestedPageOrders.some(order => !Number.isInteger(order) || order < 1) ||
+    new Set(requestedPageOrders).size !== requestedPageOrders.length
+  ) {
+    return errorResponse('INVALID_MEDIA_ORDER', 'ترتيب صفحات المرفقات غير صالح أو مكرر');
+  }
+
+  const createMediaInsertStatement = (
+    item: typeof normalizedMediaList[number],
+    isPrimary: boolean,
+    createdAt: number
+  ) => env.DB.prepare(
+    `INSERT INTO content_media (id, content_id, page_order, object_key, url, mime_type, file_size, checksum, is_primary, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    generateId('med'),
+    contentId,
+    item.pageOrder,
+    item.objectKey,
+    item.url,
+    item.mimeType,
+    item.fileSize,
+    item.checksum,
+    isPrimary ? 1 : 0,
+    createdAt
+  );
+
   // Check duplicate checksum if media provided
   if (mediaList && mediaList.length > 0 && mediaList[0].checksum) {
     const duplicate = await env.DB.prepare(
@@ -104,10 +140,80 @@ export async function handleCreateContent(user: UserContext, request: Request, e
     if (existing.group_id !== body.groupId || existing.created_by !== user.userId) {
       return errorResponse('CONFLICT', 'المعرّف مستخدم مسبقاً في نطاق آخر أو بواسطة مستخدم آخر', 409);
     }
+
+    if (normalizedMediaList.length > 0) {
+      const storedResponse = await env.DB.prepare(
+        `SELECT page_order, object_key, url, mime_type, file_size, checksum
+         FROM content_media
+         WHERE content_id = ?
+         ORDER BY page_order ASC`
+      ).bind(existing.id).all<{
+        page_order: number;
+        object_key: string | null;
+        url: string;
+        mime_type: string;
+        file_size: number;
+        checksum: string | null;
+      }>();
+
+      const storedRows = storedResponse.results || [];
+      const storedByPage = new Map<number, typeof storedRows[number]>();
+      for (const stored of storedRows) {
+        if (storedByPage.has(stored.page_order)) {
+          return errorResponse(
+            'CONTENT_MEDIA_CONFLICT',
+            'توجد مرفقات مكررة في الدرس المحفوظ. لم يتم إعلان اكتمال النشر.',
+            409
+          );
+        }
+        storedByPage.set(stored.page_order, stored);
+      }
+
+      for (const stored of storedRows) {
+        const requested = normalizedMediaList.find(item => item.pageOrder === stored.page_order);
+        if (!requested ||
+            requested.url !== stored.url ||
+            requested.objectKey !== (stored.object_key || '') ||
+            requested.mimeType !== stored.mime_type ||
+            requested.fileSize !== Number(stored.file_size || 0) ||
+            requested.checksum !== (stored.checksum || null)
+        ) {
+          return errorResponse(
+            'CONTENT_MEDIA_CONFLICT',
+            'بيانات المرفقات لا تطابق النسخة المحفوظة لهذا المعرّف. لم يتم استبدال أي مرفق.',
+            409
+          );
+        }
+      }
+
+      const missingMedia = normalizedMediaList.filter(item => !storedByPage.has(item.pageOrder));
+      if (missingMedia.length > 0) {
+        const createdAt = Date.now();
+        const firstPageOrder = normalizedMediaList[0].pageOrder;
+        const repairStatements = missingMedia.map(item =>
+          createMediaInsertStatement(item, item.pageOrder === firstPageOrder, createdAt)
+        );
+        try {
+          const repairResults = await env.DB.batch(repairStatements);
+          if (repairResults.length !== repairStatements.length ||
+              repairResults.some(result => !result.success || result.meta?.changes !== 1)) {
+            throw new Error('D1 did not confirm every missing lesson media row');
+          }
+        } catch (error) {
+          console.error('Could not repair incomplete lesson media:', error);
+          return errorResponse(
+            'CONTENT_MEDIA_REPAIR_FAILED',
+            'تم العثور على درس محفوظ بمرفقات ناقصة، لكن تعذر استكمال حفظها. أعد المحاولة.',
+            500
+          );
+        }
+      }
+    }
+
     return jsonResponse({
       success: true,
       contentId: existing.id,
-      message: 'تم توثيق الدرس بنجاح',
+      message: 'تم التحقق من الدرس ومرفقاته المحفوظة بنجاح',
     });
   }
 
@@ -139,24 +245,9 @@ export async function handleCreateContent(user: UserContext, request: Request, e
       now,
       now
     ),
-    ...mediaList.map((item, index) => {
-      const pageOrder = item.pageOrder || item.page_order || index + 1;
-      return env.DB.prepare(
-        `INSERT INTO content_media (id, content_id, page_order, object_key, url, mime_type, file_size, checksum, is_primary, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        generateId('med'),
-        contentId,
-        pageOrder,
-        item.objectKey || '',
-        item.url,
-        item.mimeType || item.mime_type || 'image/jpeg',
-        item.fileSize || item.file_size || 0,
-        item.checksum || null,
-        index === 0 ? 1 : 0,
-        now
-      );
-    }),
+    ...normalizedMediaList.map((item, index) =>
+      createMediaInsertStatement(item, index === 0, now)
+    ),
   ];
 
   try {
