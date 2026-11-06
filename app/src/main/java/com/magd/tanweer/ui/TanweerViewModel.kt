@@ -2178,10 +2178,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         description: String? = null,
         icon: String? = "👥",
         visibility: String = "PUBLIC",
+        chatPolicy: String = "MEMBERS",
         onResult: (Boolean, String) -> Unit
     ) {
         viewModelScope.launch {
-            val res = repository.createPublicGroup(name, description, icon, visibility)
+            val res = repository.createPublicGroup(name, description, icon, visibility, chatPolicy)
             res.onSuccess {
                 syncGroups(isRefresh = true)
                 onResult(true, it.message ?: "تم إنشاء المجموعة بنجاح")
