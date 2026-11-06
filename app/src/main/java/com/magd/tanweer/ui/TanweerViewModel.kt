@@ -342,8 +342,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _selectedKnowledgeBaseSubjectId = MutableStateFlow<String?>(null)
     val selectedKnowledgeBaseSubjectId: StateFlow<String?> = _selectedKnowledgeBaseSubjectId.asStateFlow()
 
-    private val _selectedAcademicYear = MutableStateFlow("2026-2027")
+    private val _selectedAcademicYear = MutableStateFlow(
+        com.magd.tanweer.util.AcademicYearManager.getCurrentAcademicYear()
+    )
     val selectedAcademicYear: StateFlow<String> = _selectedAcademicYear.asStateFlow()
+
+    private val _academicArchiveSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val academicArchiveSyncState: StateFlow<SyncState> = _academicArchiveSyncState.asStateFlow()
 
     fun openSubjectKnowledgeBase(subjectId: String? = null) {
         _selectedKnowledgeBaseSubjectId.value = subjectId
@@ -646,12 +651,48 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _subScreen.value = screen
         val groupId = getActiveGroupId()
+
+        // Reconcile the section's own server snapshot on entry. Startup sync already
+        // performs a broad account reconciliation; these calls keep long-lived screens
+        // current when the user returns to them without requiring a manual pull-to-refresh.
+        if (!_autoSyncEnabled.value) return
+
         when (screen) {
             SubScreen.SCHEDULE -> syncSchedule(groupId, isRefresh = false)
             SubScreen.GROUPS -> syncGroups(isRefresh = false)
-            SubScreen.LIBRARY -> syncBooks(currentUser.value?.gradeId ?: 10, isRefresh = false)
-            SubScreen.TIMELINE -> syncHome(groupId, _selectedDate.value, isRefresh = false)
-            else -> {}
+            SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER ->
+                syncBooks(currentUser.value?.gradeId ?: 10, isRefresh = false)
+
+            SubScreen.TIMELINE, SubScreen.SUBJECT_KNOWLEDGE_BASE -> {
+                syncSectionContents(groupId)
+                syncHomeworks(groupId, isRefresh = false)
+                syncExams(groupId, isRefresh = false)
+            }
+
+            SubScreen.ACADEMIC_HISTORY -> syncAcademicArchive(isRefresh = false)
+
+            SubScreen.SEARCH -> syncSectionContents(groupId)
+
+            SubScreen.WHAT_DID_I_MISS -> {
+                syncSectionContents(groupId)
+                syncHomeworks(groupId, isRefresh = false)
+                syncExams(groupId, isRefresh = false)
+                syncEvents(groupId)
+            }
+
+            SubScreen.EVENTS -> syncEvents(groupId)
+
+            SubScreen.COMMUNITY_DECISIONS -> loadCommunityDecisions(groupId)
+
+            SubScreen.TEACHER_DASHBOARD -> loadTeacherDashboard()
+            SubScreen.MODERATOR_DASHBOARD -> loadModeratorDashboard()
+            SubScreen.ADMIN_DASHBOARD -> loadAdminDashboard()
+
+            SubScreen.PROFILE -> viewModelScope.launch {
+                repository.syncProfile()
+            }
+
+            else -> Unit
         }
     }
 
@@ -782,6 +823,39 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     // =========================================================================
     // SYNC METHODS (Server -> Room -> Compose)
     // =========================================================================
+
+    /**
+     * Refreshes the active group's complete lesson snapshot for screens whose content
+     * spans more than the currently selected day (timeline, search and knowledge base).
+     */
+    fun syncSectionContents(groupId: String = getActiveGroupId()) {
+        if (!_autoSyncEnabled.value || groupId.isBlank()) return
+        viewModelScope.launch {
+            when (val result = repository.syncContents(groupId)) {
+                is SyncResult.Success -> Unit
+                is SyncResult.Offline -> android.util.Log.i("TanweerViewModel", "Section contents remain on the local snapshot")
+                is SyncResult.Error -> android.util.Log.w("TanweerViewModel", "Section contents sync failed: ${result.message}")
+            }
+        }
+    }
+
+    /**
+     * Pulls the account-wide academic archive and the snapshots for every active group.
+     * This is intentionally separate from day-scoped sync so historical years stay current.
+     */
+    fun syncAcademicArchive(isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
+        viewModelScope.launch {
+            _academicArchiveSyncState.value =
+                if (isRefresh) SyncState.Refreshing else SyncState.Loading
+            when (val result = repository.syncStudentAcademicArchive(_selectedDate.value.take(7))) {
+                is SyncResult.Success -> _academicArchiveSyncState.value = SyncState.Success()
+                is SyncResult.Offline -> _academicArchiveSyncState.value = SyncState.OfflineCached()
+                is SyncResult.Error -> _academicArchiveSyncState.value =
+                    SyncState.Error(result.message, result.isNetworkError)
+            }
+        }
+    }
 
     fun syncInitialData(groupId: String, date: String, isExplicitAction: Boolean = false) {
         if (!_autoSyncEnabled.value && !isExplicitAction) return
