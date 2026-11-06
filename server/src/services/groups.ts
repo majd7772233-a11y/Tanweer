@@ -48,15 +48,36 @@ export async function handleJoinGroupRequest(groupId: string, user: UserContext,
     `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
   ).bind(groupId, user.userId).first<{ status: string }>();
 
-  let requestReason: string | null = null;
+  let requestBody: { reason?: unknown };
   try {
-    const body = await request.json() as { reason?: unknown };
-    if (typeof body?.reason === 'string') {
-      requestReason = body.reason.trim() || null;
-    }
-  } catch {}
+    requestBody = await request.json() as { reason?: unknown };
+  } catch {
+    return errorResponse('INVALID_INPUT', 'بيانات طلب الانضمام غير صالحة');
+  }
+
+  if (
+    requestBody.reason !== undefined &&
+    requestBody.reason !== null &&
+    typeof requestBody.reason !== 'string'
+  ) {
+    return errorResponse('INVALID_JOIN_REASON', 'سبب الانضمام يجب أن يكون نصاً');
+  }
+
+  const requestReason = typeof requestBody.reason === 'string'
+    ? requestBody.reason.trim() || null
+    : null;
+
+  if (requestReason && requestReason.length > 500) {
+    return errorResponse('INVALID_JOIN_REASON', 'سبب الانضمام طويل جداً؛ الحد الأقصى 500 حرف');
+  }
 
   const initialStatus = group.visibility === 'PUBLIC' && group.type !== 'CLASS' ? 'ACTIVE' : 'PENDING';
+  if (initialStatus === 'PENDING' && !requestReason) {
+    return errorResponse(
+      'JOIN_REASON_REQUIRED',
+      'يجب كتابة سبب طلب الانضمام حتى يتمكن مشرفو المجموعة من مراجعة طلبك.'
+    );
+  }
   const existingStatusResponse = (status: string): Response => {
     if (status === 'ACTIVE') {
       return errorResponse('ALREADY_MEMBER', 'أنت عضو مسجل بالفعل في هذه المجموعة');
