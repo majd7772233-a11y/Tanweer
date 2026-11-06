@@ -83,26 +83,6 @@ export async function handleCreateContent(user: UserContext, request: Request, e
     return errorResponse('INVALID_MEDIA_ORDER', 'ترتيب صفحات المرفقات غير صالح أو مكرر');
   }
 
-  const createMediaInsertStatement = (
-    item: typeof normalizedMediaList[number],
-    isPrimary: boolean,
-    createdAt: number
-  ) => env.DB.prepare(
-    `INSERT INTO content_media (id, content_id, page_order, object_key, url, mime_type, file_size, checksum, is_primary, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    generateId('med'),
-    contentId,
-    item.pageOrder,
-    item.objectKey,
-    item.url,
-    item.mimeType,
-    item.fileSize,
-    item.checksum,
-    isPrimary ? 1 : 0,
-    createdAt
-  );
-
   // Check duplicate checksum if media provided
   if (mediaList && mediaList.length > 0 && mediaList[0].checksum) {
     const duplicate = await env.DB.prepare(
@@ -129,6 +109,26 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   const contentId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
     : generateId('cnt');
+
+  const createMediaInsertStatement = (
+    item: typeof normalizedMediaList[number],
+    isPrimary: boolean,
+    createdAt: number
+  ) => env.DB.prepare(
+    `INSERT INTO content_media (id, content_id, page_order, object_key, url, mime_type, file_size, checksum, is_primary, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    generateId('med'),
+    contentId,
+    item.pageOrder,
+    item.objectKey,
+    item.url,
+    item.mimeType,
+    item.fileSize,
+    item.checksum,
+    isPrimary ? 1 : 0,
+    createdAt
+  );
 
   // Idempotency check with ownership & scope validation
   const existing = await env.DB.prepare(`SELECT id, group_id, created_by FROM contents WHERE id = ?`).bind(contentId).first<{
