@@ -111,9 +111,14 @@ object AcademicYearManager {
         if (!isValidIsoDate(dateStr) || !isDateInAcademicYear(dateStr, academicYear)) return 0
         val cleanDate = dateStr.trim().take(10)
         val parts = academicYear.split("-")
-        val startYear = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: return 0
-        val s1End = "$startYear-${config.semester1EndMonthDay}"
-        return if (cleanDate <= s1End) 1 else 2
+        val endYear = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: return 0
+        val semester1End = "$endYear-${config.semester1EndMonthDay}"
+        val semester2Start = "$endYear-${config.semester2StartMonthDay}"
+        return when {
+            cleanDate <= semester1End -> 1
+            cleanDate >= semester2Start -> 2
+            else -> 0
+        }
     }
 
     /**
