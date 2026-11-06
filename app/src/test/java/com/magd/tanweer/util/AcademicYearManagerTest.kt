@@ -25,7 +25,10 @@ class AcademicYearManagerTest {
         assertEquals("2026-2027", AcademicYearManager.getAcademicYearForDate("2026-08-01"))
         assertEquals("2026-2027", AcademicYearManager.getAcademicYearForDate("2027-01-31"))
         assertEquals("2026-2027", AcademicYearManager.getAcademicYearForDate("2027-02-01"))
-        assertEquals("2026-2027", AcademicYearManager.getAcademicYearForDate("not-a-date"))
+        assertEquals(
+            AcademicYearManager.getCurrentAcademicYear(),
+            AcademicYearManager.getAcademicYearForDate("not-a-date")
+        )
     }
 
     @Test
