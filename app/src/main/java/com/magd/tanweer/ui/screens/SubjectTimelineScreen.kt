@@ -25,19 +25,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.data.model.ContentItem
+import com.magd.tanweer.data.model.HomeworkItem
+import com.magd.tanweer.data.model.ExamItem
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 
 data class RealTimelineItem(
+    val id: String,
     val rawDate: String,
     val formattedDate: String,
     val title: String,
     val description: String,
     val author: String,
     val type: String, // "LESSON", "HOMEWORK", "EXAM"
-    val isCompleted: Boolean = false
+    val isCompleted: Boolean = false,
+    val content: ContentItem? = null,
+    val homework: HomeworkItem? = null,
+    val exam: ExamItem? = null
 )
 
 @Composable
@@ -61,6 +68,9 @@ fun SubjectTimelineScreen(
     }
 
     var sortDescending by remember { mutableStateOf(true) }
+    var previewContent by remember { mutableStateOf<ContentItem?>(null) }
+    var previewHomework by remember { mutableStateOf<HomeworkItem?>(null) }
+    var previewExam by remember { mutableStateOf<ExamItem?>(null) }
 
     // Fetch ALL lessons for the selected subject
     val subjectContents by viewModel.repository.getContentsBySubject(activeGroupId, selectedSubject.id)
@@ -81,12 +91,14 @@ fun SubjectTimelineScreen(
         subjectContents.forEach { c ->
             list.add(
                 RealTimelineItem(
+                    id = "lesson:${c.id}",
                     rawDate = c.studyDate,
                     formattedDate = TanweerViewModel.getFormattedArabicDate(c.studyDate),
                     title = "درس: ${c.title}",
                     description = c.description ?: "توثيق درس رسمي للشعبة",
                     author = c.authorName.ifBlank { "طالب مساهم" },
-                    type = "LESSON"
+                    type = "LESSON",
+                    content = c
                 )
             )
         }
@@ -94,13 +106,15 @@ fun SubjectTimelineScreen(
         homeworks.filter { it.subjectId == selectedSubject.id }.forEach { h ->
             list.add(
                 RealTimelineItem(
+                    id = "homework:${h.id}",
                     rawDate = h.dueDate.ifBlank { h.studyDate },
                     formattedDate = "تسليم: ${h.dueDate}",
                     title = "واجب: ${h.title}",
                     description = h.details ?: (h.pageNumbers?.let { "صفحات: $it" } ?: "واجب منزلي مقرر"),
                     author = if (h.isCompleted) "منجز بواسطةك ✓" else "مهمة شعبة",
                     type = "HOMEWORK",
-                    isCompleted = h.isCompleted
+                    isCompleted = h.isCompleted,
+                    homework = h
                 )
             )
         }
@@ -108,12 +122,14 @@ fun SubjectTimelineScreen(
         exams.filter { it.subjectId == selectedSubject.id }.forEach { e ->
             list.add(
                 RealTimelineItem(
+                    id = "exam:${e.id}",
                     rawDate = e.examDate,
                     formattedDate = "موعد: ${e.examDate}",
                     title = "اختبار: ${e.title}",
                     description = e.requiredChapters ?: "اختبار رسمي معتمد",
                     author = e.notes ?: "إدارة الشعبة",
-                    type = "EXAM"
+                    type = "EXAM",
+                    exam = e
                 )
             )
         }
@@ -274,7 +290,7 @@ fun SubjectTimelineScreen(
                 )
             }
         } else {
-            items(realTimelineEvents) { event ->
+            items(realTimelineEvents, key = { it.id }) { event ->
                 val isToday = event.rawDate == todayStr
                 val isFuture = event.rawDate > todayStr
 
@@ -316,7 +332,14 @@ fun SubjectTimelineScreen(
                     GlassCard(
                         modifier = Modifier
                             .weight(1f)
-                            .padding(bottom = 6.dp),
+                            .padding(bottom = 6.dp)
+                            .clickable {
+                                when (event.type) {
+                                    "LESSON" -> event.content?.let { previewContent = it }
+                                    "HOMEWORK" -> event.homework?.let { previewHomework = it }
+                                    "EXAM" -> event.exam?.let { previewExam = it }
+                                }
+                            },
                         backgroundColor = GlassSurface,
                         borderColor = if (isToday) CyanAccent else GlassBorderSubtle
                     ) {
@@ -380,5 +403,25 @@ fun SubjectTimelineScreen(
                 }
             }
         }
+    }
+
+    // Reuse the detail previews already used by the academic archive.
+    previewContent?.let { item ->
+        AcademicContentPreviewDialog(
+            content = item,
+            onDismiss = { previewContent = null }
+        )
+    }
+    previewHomework?.let { item ->
+        AcademicHomeworkPreviewDialog(
+            homework = item,
+            onDismiss = { previewHomework = null }
+        )
+    }
+    previewExam?.let { item ->
+        AcademicExamPreviewDialog(
+            exam = item,
+            onDismiss = { previewExam = null }
+        )
     }
 }
