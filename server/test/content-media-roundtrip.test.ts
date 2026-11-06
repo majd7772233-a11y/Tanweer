@@ -71,17 +71,17 @@ class ContentMediaStatement {
   }
 
   async run(): Promise<{ success: boolean; meta: { changes: number } }> {
-    const sql = this.sql.replace(/\\s+/g, ' ').trim();
-    const match = sql.match(/^INSERT INTO (\\w+)/i);
+    const sql = this.sql.replace(/\s+/g, ' ').trim();
+    const match = sql.match(/^INSERT INTO (\w+)/i);
     if (!match) return { success: true, meta: { changes: 0 } };
 
     const table = match[1];
     if (table === 'content_media' && this.db.failContentMediaInsert) {
       throw new Error('simulated content_media insert failure');
     }
-    const columns = sql.match(/\\((.*?)\\)\\s*VALUES/i)?.[1]
+    const columns = sql.match(/\((.*?)\)\s*VALUES/i)?.[1]
       ?.split(',')
-      .map(column => column.replace(/["`\\s]/g, '')) ?? [];
+      .map(column => column.replace(/["`\s]/g, '')) ?? [];
     const row: Row = {};
     columns.forEach((column, index) => { row[column] = this.params[index]; });
     this.db.tables[table] ||= [];
