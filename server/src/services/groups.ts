@@ -560,6 +560,7 @@ export async function handleCreatePublicGroup(request: Request, user: UserContex
     description?: string;
     icon?: string;
     visibility?: string;
+    chatPolicy?: string;
   };
   if (!body.name || !body.name.trim() || body.name.trim().length > 80) {
     return errorResponse('INVALID_INPUT', 'يرجى إدخال اسم مجموعة لا يتجاوز 80 حرفاً');
@@ -568,6 +569,12 @@ export async function handleCreatePublicGroup(request: Request, user: UserContex
   if (visibility !== 'PUBLIC' && visibility !== 'PRIVATE') {
     return errorResponse('INVALID_VISIBILITY', 'نوع المجموعة يجب أن يكون عامة أو خاصة');
   }
+
+  const chatPolicy = (body.chatPolicy || 'MEMBERS').trim().toUpperCase();
+  if (chatPolicy !== 'MEMBERS' && chatPolicy !== 'STAFF_ONLY') {
+    return errorResponse('INVALID_CHAT_POLICY', 'سياسة النقاش يجب أن تكون للأعضاء أو للهيئة التعليمية والإدارة فقط');
+  }
+
   if ((body.description || '').length > 500) {
     return errorResponse('INVALID_INPUT', 'وصف المجموعة طويل جداً');
   }
@@ -587,8 +594,8 @@ export async function handleCreatePublicGroup(request: Request, user: UserContex
         `INSERT INTO groups (
            id, name, type, description, icon, academic_year_id, created_at,
            is_official, is_discoverable, created_by, updated_at, visibility, chat_policy
-         ) VALUES (?, ?, 'OPTIONAL', ?, ?, 'default', ?, 0, 1, ?, ?, ?, 'MEMBERS')`
-      ).bind(groupId, body.name.trim(), body.description?.trim() || null, body.icon || '👥', now, user.userId, now, visibility),
+         ) VALUES (?, ?, 'OPTIONAL', ?, ?, 'default', ?, 0, 1, ?, ?, ?, ?, ?)`
+      ).bind(groupId, body.name.trim(), body.description?.trim() || null, body.icon || '👥', now, user.userId, now, visibility, chatPolicy),
       env.DB.prepare(
         `INSERT INTO group_members (group_id, user_id, role, status, joined_at)
          VALUES (?, ?, ?, 'ACTIVE', ?)`
@@ -607,6 +614,7 @@ export async function handleCreatePublicGroup(request: Request, user: UserContex
     success: true,
     groupId,
     visibility,
+    chatPolicy,
     message: visibility === 'PUBLIC'
       ? 'تم إنشاء المجموعة العامة بنجاح 🎉'
       : 'تم إنشاء المجموعة الخاصة بنجاح. سيحتاج الأعضاء إلى موافقة مشرفيها للانضمام.',
