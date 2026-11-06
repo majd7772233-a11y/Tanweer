@@ -1922,10 +1922,13 @@ class TanweerRepository(
         name: String,
         description: String? = null,
         icon: String? = "👥",
-        visibility: String = "PUBLIC"
+        visibility: String = "PUBLIC",
+        chatPolicy: String = "MEMBERS"
     ): Result<GenericResponse> = withContext(Dispatchers.IO) {
         try {
-            val res = api.createPublicGroup(com.magd.tanweer.data.model.CreateGroupRequest(name, description, icon, visibility))
+            val res = api.createPublicGroup(
+                com.magd.tanweer.data.model.CreateGroupRequest(name, description, icon, visibility, chatPolicy)
+            )
             if (res.isSuccessful && res.body()?.success == true) {
                 syncGroups()
                 Result.success(res.body()!!)
