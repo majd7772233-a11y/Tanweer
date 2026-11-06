@@ -41,10 +41,6 @@ fun TeacherDashboardScreen(
     val isLoading by viewModel.isDashboardLoading.collectAsStateWithLifecycle()
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        viewModel.loadTeacherDashboard()
-    }
-
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Overview & Stats, 1: Official Homeworks, 2: Official Exams
     var showCreateOfficialHomeworkSheet by remember { mutableStateOf(false) }
     var showCreateOfficialExamSheet by remember { mutableStateOf(false) }
