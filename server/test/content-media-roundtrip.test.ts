@@ -71,14 +71,17 @@ class ContentMediaStatement {
   }
 
   async run(): Promise<{ success: boolean; meta: { changes: number } }> {
-    const sql = this.sql.replace(/\s+/g, ' ').trim();
-    const match = sql.match(/^INSERT INTO (\w+)/i);
+    const sql = this.sql.replace(/\\s+/g, ' ').trim();
+    const match = sql.match(/^INSERT INTO (\\w+)/i);
     if (!match) return { success: true, meta: { changes: 0 } };
 
     const table = match[1];
-    const columns = sql.match(/\((.*?)\)\s*VALUES/i)?.[1]
+    if (table === 'content_media' && this.db.failContentMediaInsert) {
+      throw new Error('simulated content_media insert failure');
+    }
+    const columns = sql.match(/\\((.*?)\\)\\s*VALUES/i)?.[1]
       ?.split(',')
-      .map(column => column.replace(/["`\s]/g, '')) ?? [];
+      .map(column => column.replace(/["`\\s]/g, '')) ?? [];
     const row: Row = {};
     columns.forEach((column, index) => { row[column] = this.params[index]; });
     this.db.tables[table] ||= [];
@@ -95,9 +98,24 @@ class ContentMediaDb {
     content_media: [],
     subjects: [{ id: 'math', name_ar: 'الرياضيات', icon: '📐', color_hex: '#00E5FF' }],
   };
+  failContentMediaInsert = false;
 
   prepare(sql: string) {
     return new ContentMediaStatement(this, sql);
+  }
+
+  async batch(statements: ContentMediaStatement[]) {
+    const snapshot = Object.fromEntries(
+      Object.entries(this.tables).map(([name, rows]) => [name, [...rows]])
+    );
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
+    } catch (error) {
+      this.tables = snapshot;
+      throw error;
+    }
   }
 }
 
@@ -120,6 +138,57 @@ const secondDeviceUser: UserContext = {
 };
 
 describe('Lesson media cross-device contract', () => {
+  it('rolls back the lesson when any media row fails and permits a clean retry', async () => {
+    const db = new ContentMediaDb();
+    db.tables.group_members.push(
+      { group_id: 'class_10_A', user_id: author.userId, status: 'ACTIVE' }
+    );
+    db.tables.media_blobs.push(
+      { id: 'med_blob_1', uploaded_by: author.userId, mime_type: 'image/jpeg', file_size: 1024 },
+      { id: 'med_blob_2', uploaded_by: author.userId, mime_type: 'image/jpeg', file_size: 2048 },
+    );
+    db.failContentMediaInsert = true;
+
+    const makeRequest = () => new Request('https://tanweer-staging.magd.workers.dev/api/v1/contents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'content_atomic_retry',
+        groupId: 'class_10_A',
+        studyDate: '2026-11-02',
+        subjectId: 'math',
+        title: 'درس ذري مع مرفقين',
+        media: [
+          {
+            pageOrder: 1,
+            url: 'https://tanweer-staging.magd.workers.dev/api/v1/media/med_blob_1',
+            mimeType: 'image/jpeg',
+            fileSize: 1024,
+            checksum: 'sha256:atomic_page_1',
+          },
+          {
+            pageOrder: 2,
+            url: 'https://tanweer-staging.magd.workers.dev/api/v1/media/med_blob_2',
+            mimeType: 'image/jpeg',
+            fileSize: 2048,
+            checksum: 'sha256:atomic_page_2',
+          },
+        ],
+      }),
+    });
+
+    const failedAttempt = await handleCreateContent(author, makeRequest(), { DB: db as any } as Env);
+    expect(failedAttempt.status).toBe(500);
+    expect(db.tables.contents).toHaveLength(0);
+    expect(db.tables.content_media).toHaveLength(0);
+
+    db.failContentMediaInsert = false;
+    const retried = await handleCreateContent(author, makeRequest(), { DB: db as any } as Env);
+    expect(retried.status).toBe(200);
+    expect(db.tables.contents).toHaveLength(1);
+    expect(db.tables.content_media).toHaveLength(2);
+  });
+
   it('returns uploaded lesson pages to another active member of the same group', async () => {
     const db = new ContentMediaDb();
     db.tables.group_members.push(

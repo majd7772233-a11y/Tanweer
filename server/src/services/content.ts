@@ -117,47 +117,61 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   };
   const authorGradeSection = `${gradeNameMap[user.gradeId] || user.gradeId} — ${user.sectionId}`;
 
-  await env.DB.prepare(
-    `INSERT INTO contents (id, group_id, study_date, subject_id, type, title, description, created_by, author_name, author_grade_section, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    contentId,
-    body.groupId,
-    studyDate,
-    body.subjectId,
-    body.type || 'LESSON',
-    body.title.trim(),
-    body.description?.trim() || null,
-    user.userId,
-    user.fullName,
-    authorGradeSection,
-    'PUBLISHED',
-    now,
-    now
-  ).run();
-
-  if (mediaList && mediaList.length > 0) {
-    let order = 1;
-    for (const m of mediaList) {
-      const mediaId = generateId('med');
-      const pageOrder = m.pageOrder || m.page_order || order;
-      await env.DB.prepare(
+  // Treat the lesson row and all of its media rows as one publication.
+  // D1 batch is transactional: a failed media insert must not leave a published
+  // lesson that a retry would mistake for a complete successful upload.
+  const publicationStatements = [
+    env.DB.prepare(
+      `INSERT INTO contents (id, group_id, study_date, subject_id, type, title, description, created_by, author_name, author_grade_section, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      contentId,
+      body.groupId,
+      studyDate,
+      body.subjectId,
+      body.type || 'LESSON',
+      body.title.trim(),
+      body.description?.trim() || null,
+      user.userId,
+      user.fullName,
+      authorGradeSection,
+      'PUBLISHED',
+      now,
+      now
+    ),
+    ...mediaList.map((item, index) => {
+      const pageOrder = item.pageOrder || item.page_order || index + 1;
+      return env.DB.prepare(
         `INSERT INTO content_media (id, content_id, page_order, object_key, url, mime_type, file_size, checksum, is_primary, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
-        mediaId,
+        generateId('med'),
         contentId,
         pageOrder,
-        m.objectKey || '',
-        m.url,
-        m.mimeType || m.mime_type || 'image/jpeg',
-        m.fileSize || m.file_size || 0,
-        m.checksum || null,
-        order === 1 ? 1 : 0,
+        item.objectKey || '',
+        item.url,
+        item.mimeType || item.mime_type || 'image/jpeg',
+        item.fileSize || item.file_size || 0,
+        item.checksum || null,
+        index === 0 ? 1 : 0,
         now
-      ).run();
-      order++;
+      );
+    }),
+  ];
+
+  try {
+    const results = await env.DB.batch(publicationStatements);
+    if (results.length !== publicationStatements.length ||
+        results.some(result => !result.success || result.meta?.changes !== 1)) {
+      throw new Error('D1 did not confirm every lesson publication statement');
     }
+  } catch (error) {
+    console.error('Atomic lesson publication failed:', error);
+    return errorResponse(
+      'CONTENT_CREATE_FAILED',
+      'تعذر حفظ الدرس ومرفقاته بصورة مكتملة. لم يتم نشر سجل جزئي؛ أعد المحاولة.',
+      500
+    );
   }
 
   return jsonResponse({
