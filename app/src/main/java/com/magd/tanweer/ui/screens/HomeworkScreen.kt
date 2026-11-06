@@ -151,12 +151,6 @@ fun HomeworkScreen(
         pendingReminderHw = null
     }
 
-    LaunchedEffect(activeGroupId) {
-        if (activeGroupId.isNotBlank()) {
-            viewModel.syncHomeworks(activeGroupId, isRefresh = false)
-        }
-    }
-
     val sdf = remember { SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH) }
     val todayDate = remember { sdf.format(Date()) }
 
