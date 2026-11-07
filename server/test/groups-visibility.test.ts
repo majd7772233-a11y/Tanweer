@@ -89,7 +89,7 @@ class GroupDiscoveryDb {
           return { results: rows as T[] };
         }
 
-        if (sql.includes('JOIN group_members gm ON gm.group_id = g.id')) {
+        if (sql.includes('JOIN group_members gm ON g.id = gm.group_id')) {
           const rows = db.members
             .filter((member) => member.user_id === userId && member.status === 'ACTIVE')
             .flatMap((member) => {
@@ -139,9 +139,9 @@ describe('private-group discovery visibility', () => {
     };
 
     expect(body.discoverGroups.map((group) => group.id).sort()).toEqual([
+      'other-class',
       'private-pending',
       'private-rejected',
-      'other-class',
       'public-open',
     ]);
 
