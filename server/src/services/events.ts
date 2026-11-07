@@ -28,9 +28,23 @@ export async function handleGetEvents(groupId: string, user: UserContext, env: E
      ORDER BY CASE WHEN e.group_id = 'all' AND e.category = 'ANNOUNCEMENT' THEN 0 ELSE 1 END,
               e.is_official DESC, e.event_date ASC`
   ).bind(groupId, user.userId).all();
+  const totalCount = await env.DB.prepare(
+    `SELECT COUNT(*) AS total_count
+     FROM events e
+     WHERE (e.group_id = ? OR e.group_id = 'all')
+       AND NOT (
+         e.group_id = 'all'
+         AND UPPER(e.category) = 'ANNOUNCEMENT'
+         AND EXISTS (
+           SELECT 1 FROM user_dismissed_announcements d
+           WHERE d.user_id = ? AND d.event_id = e.id
+         )
+       )`
+  ).bind(groupId, user.userId).first<{ total_count: number }>();
 
   return jsonResponse({
     success: true,
+    totalCount: Number(totalCount?.total_count ?? -1),
     events: (events.results || []).map(mapSchoolEvent),
   });
 }
