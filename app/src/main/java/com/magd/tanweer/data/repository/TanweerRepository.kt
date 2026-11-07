@@ -4327,7 +4327,7 @@ class TanweerRepository(
             if (res.isSuccessful && res.body()?.success == true) {
                 Result.success(res.body()!!)
             } else {
-                Result.failure(Exception(res.body()?.message ?: res.message().ifBlank { "تعذر جلب بيانات التحديثات من الخادم" }))
+                Result.failure(Exception(res.message().ifBlank { "تعذر جلب بيانات التحديثات من الخادم" }))
             }
         } catch (e: Exception) {
             Result.failure(e)
