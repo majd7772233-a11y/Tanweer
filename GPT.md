@@ -2002,3 +2002,43 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Continue auditing homework media upload/retry for the same multi-write partial-publication risk, and check every UI mutation for false success when server body `success` is false.
 - Review D1 migration rollout ordering and Production schema drift before any deployment. Do not apply migrations or deploy Workers as part of code-only work without a separate explicit release instruction.
 - Do not add another branch. All further changes belong on `work/release-readiness`.
+
+
+## Batch 3 — synchronization, academic navigation and groups (2026-11-07)
+
+### Branch policy and base
+- All Batch 3 work is committed directly to `work/release-readiness`. No new working branch was created.
+- The repository branch list at the implementation checkpoint contains exactly `main` and `work/release-readiness`.
+- Production `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; no commit was pushed to it.
+- Batch 2 PR #7 was merged into `work/release-readiness` earlier in this session. Its temporary branch and the four historical CI scratch branches were removed. The temporary cleanup workflow was also deleted after use.
+
+### Server-authoritative synchronization audit
+- Reviewed the authenticated startup path in `TanweerViewModel` and `TanweerRepository.syncInitial`: generation verification gates outbox draining; profile and active memberships refresh first; then current-day data, the account-wide cross-group academic archive, every active group's lessons/homework/exams/events/schedule/issues/calendar, and the grade's books are pulled. Startup auxiliary data also refreshes chat history, role requests, group members, proposals, corrections, community decisions and role-specific dashboard data.
+- Retained the existing tab and sub-screen entry refresh routing rather than duplicating it. Each destination has a targeted refresh; navigation back refreshes the destination again. Calendar month/day selection already has its own refresh effects.
+- Closed one gap in the unified subject workspace: entering `SUBJECT_KNOWLEDGE_BASE` now refreshes group issues/discussions in addition to lessons, homework and exams (`a9fb2129`).
+- No Room wipe, table-wide destructive refresh, generation-marker reset, or outbox deletion was added. The snapshot count/ID/group validation and pending-row preservation protections from the preceding commits remain in place.
+
+### Timeline and academic archive
+- Re-audited `SubjectTimelineScreen` and `AcademicHistoryScreen`: tapping a lesson, homework or exam already opens the corresponding detail preview; the timeline and archive reuse the same typed preview dialogs. No duplicate navigation or second preview flow was introduced.
+- `AcademicYearManager.resolveAvailableAcademicYears` includes the current academic year and years inferred from valid recorded lesson/homework/exam dates only. It no longer fabricates an empty prior year. Its regression test explicitly verifies that `2025-2026` is absent when it has no records and `2026-2027` remains available as the current year.
+- Invalid calendar dates are rejected with strict Gregorian validation, so malformed dates cannot create phantom archive years.
+
+### Groups, clubs and join requests
+- Fixed the server discovery query in `server/src/services/groups.ts`: user-created PRIVATE optional/shared groups are no longer exposed to strangers as if they were public. The visibility filter still returns a PRIVATE group to its own pending/rejected applicant (to inspect status or retry), and keeps other school CLASS sections discoverable as PRIVATE approval-required sections. Active and banned memberships remain excluded from discovery.
+- Added `server/test/groups-visibility.test.ts` to cover public groups, hidden private groups, pending/rejected applicants, active/banned users, other school CLASS sections and non-discoverable records. The test also asserts that the SQL visibility guard is present, not only that the fake fixture returns the expected rows.
+- Tightened the shared-group card actions: the leave action is now a small secondary text action instead of a second full-width button. Joined official/shared cards display their active-membership state; no manual group activation switch is part of the current group screen.
+- Confirmed the join-reason path is wired end to end: private/class requests open a required 500-character reason field; the API rejects missing/blank/oversized reasons and stores `request_reason`; the members endpoint returns it; the manager dialog displays the actual reason before approve/reject. The “no reason provided” text is only the fallback for a genuinely empty stored value.
+- Existing per-group chat entry allows opening one joined class/club chat, returning to the group list, then opening another. Server membership/chat-policy checks remain authoritative.
+
+### Validation checkpoint — source commit `a9fb2129dda4efb2f551d3bd53b804dcc494b7fd`
+- Server workflow `42362616683` passed: TypeScript, dependency security baseline, all 36 Vitest files / 242 tests, and Wrangler production-bundle validation.
+- Android workflow `42362616605` passed: Android unit tests, Staging Debug APK assembly and Debug artifact upload.
+- Debug artifact: `13569774791`; SHA-256 `e78ee37dede23311439ed13b2a5e8d37d06e496988580dbbc54c53f0b9c5fb40`; expiry `2026-11-14`.
+- Signed Release assembly was skipped by this workflow; do not describe this artifact as a signed Release APK.
+- This validation is code/CI validation only. No Worker deployment, D1 migration apply/write, production change, secret change, data purge or merge into `main` was performed.
+- The join-reason, timeline/archive preview and existing startup/entry synchronization paths were audited from the current source; these are not claimed as new implementations in this batch. Real-device and two-account acceptance remains necessary for cross-device group privacy/chat and online/offline refresh behavior.
+
+### Remaining acceptance
+- Perform physical-device/two-account checks for private group discovery versus class-section discovery; submit a non-empty join reason and verify the manager sees it; open/switch between class and club chats; refresh each section after a second device publishes an update; tap lesson/homework/exam entries in both timeline and archive.
+- Before any Staging or Production rollout, review and apply only the migrations appropriate to that environment in order, then deploy the matching Worker. This batch introduced no new D1 migration.
+- Continue keeping all future work on `work/release-readiness`; maintain exactly the two branches `main` and `work/release-readiness`.
