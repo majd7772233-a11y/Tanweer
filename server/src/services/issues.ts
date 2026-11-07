@@ -28,9 +28,13 @@ export async function handleGetIssues(groupId: string, user: UserContext, env: E
      WHERE i.group_id = ?
      ORDER BY i.created_at DESC`
   ).bind(groupId).all();
+  const totalCount = await env.DB.prepare(
+    `SELECT COUNT(*) AS total_count FROM issues WHERE group_id = ?`
+  ).bind(groupId).first<{ total_count: number }>();
 
   return jsonResponse({
     success: true,
+    totalCount: Number(totalCount?.total_count ?? -1),
     issues: (issues.results || []).map(mapIssue),
   });
 }
