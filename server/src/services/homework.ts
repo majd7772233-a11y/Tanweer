@@ -112,6 +112,8 @@ function homeworkMetadataMatches(
 async function getHomeworkMediaInsertStatement(
   env: Env,
   homeworkId: string,
+  groupId: string,
+  creatorId: string,
   pageOrder: number,
   url: string,
   createdAt: number
@@ -119,8 +121,28 @@ async function getHomeworkMediaInsertStatement(
   const identity = await createHomeworkMediaIdentity(homeworkId, pageOrder, url);
   return env.DB.prepare(
     `INSERT OR IGNORE INTO homework_media (id, homework_id, media_id, url, page_order, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(identity.linkId, homeworkId, identity.mediaId, url, pageOrder, createdAt);
+     SELECT ?, ?, ?, ?, ?, ?
+     WHERE EXISTS (
+       SELECT 1 FROM homeworks
+       WHERE id = ? AND group_id = ? AND created_by = ?
+     )
+       AND NOT EXISTS (
+         SELECT 1 FROM homework_media
+         WHERE homework_id = ? AND page_order = ?
+       )`
+  ).bind(
+    identity.linkId,
+    homeworkId,
+    identity.mediaId,
+    url,
+    pageOrder,
+    createdAt,
+    homeworkId,
+    groupId,
+    creatorId,
+    homeworkId,
+    pageOrder
+  );
 }
 
 async function verifyHomeworkMediaSnapshot(
@@ -301,7 +323,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     if (missing.length > 0) {
       try {
         const repairStatements = await Promise.all(missing.map(item =>
-          getHomeworkMediaInsertStatement(env, hwId, item.pageOrder, item.url, Date.now())
+          getHomeworkMediaInsertStatement(env, hwId, body.groupId, user.userId, item.pageOrder, item.url, Date.now())
         ));
         const repairResults = await env.DB.batch(repairStatements);
         if (repairResults.length !== repairStatements.length ||
@@ -370,7 +392,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
       now
     ),
     ...(await Promise.all(identities.map(item =>
-      getHomeworkMediaInsertStatement(env, hwId, item.pageOrder, item.url, now)
+      getHomeworkMediaInsertStatement(env, hwId, body.groupId, user.userId, item.pageOrder, item.url, now)
     ))),
   ];
 
