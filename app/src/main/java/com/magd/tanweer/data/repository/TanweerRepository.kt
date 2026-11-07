@@ -654,6 +654,15 @@ class TanweerRepository(
             val res = api.getSchedule(groupId)
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
+                val slotPositions = body.slots.map { "${it.dayOfWeek}:${it.slotOrder}" }
+                if (!ServerSnapshotValidation.hasUniqueNonBlankIds(body.slots.map { it.id }) ||
+                    !ServerSnapshotValidation.hasUniqueNonBlankIds(slotPositions) ||
+                    body.slots.any { it.slotOrder < 1 }
+                ) {
+                    return@withContext SyncResult.Error(
+                        "لقطة الجدول تحتوي حصصاً مكررة أو ترتيباً غير صالح؛ احتُفظ بالجدول المحلي دون استبداله"
+                    )
+                }
                 val slots = body.slots.map {
                     ScheduleSlotEntity(
                         id = it.id,
@@ -870,8 +879,12 @@ class TanweerRepository(
             val res = api.getHomeworks(groupId)
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
-                if (body.homeworks.any { it.groupId != groupId }) {
-                    return@withContext SyncResult.Error("رد الخادم للواجبات لا يطابق المجموعة المطلوبة؛ احتُفظ بالبيانات المحلية")
+                if (!ServerSnapshotValidation.hasUniqueNonBlankIds(body.homeworks.map { it.id }) ||
+                    !ServerSnapshotValidation.allBelongToGroup(body.homeworks.map { it.groupId }, groupId)
+                ) {
+                    return@withContext SyncResult.Error(
+                        "لقطة الواجبات تحتوي معرفات فارغة/مكررة أو لا تطابق المجموعة؛ احتُفظت البيانات المحلية"
+                    )
                 }
                 val currentUserId = db.userDao().getUserSync()?.id ?: "local_user"
                 val completedIds = mutableListOf<String>()
@@ -925,8 +938,12 @@ class TanweerRepository(
             val res = api.getExams(groupId)
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
-                if (body.exams.any { it.groupId != groupId }) {
-                    return@withContext SyncResult.Error("رد الخادم للاختبارات لا يطابق المجموعة المطلوبة؛ احتُفظ بالبيانات المحلية")
+                if (!ServerSnapshotValidation.hasUniqueNonBlankIds(body.exams.map { it.id }) ||
+                    !ServerSnapshotValidation.allBelongToGroup(body.exams.map { it.groupId }, groupId)
+                ) {
+                    return@withContext SyncResult.Error(
+                        "لقطة الاختبارات تحتوي معرفات فارغة/مكررة أو لا تطابق المجموعة؛ احتُفظت البيانات المحلية"
+                    )
                 }
                 val exams = body.exams.mapNotNull {
                     if (db.outboxDao().getPendingMutation(it.id, "EXAM_DELETE") != null) {
@@ -982,8 +999,16 @@ class TanweerRepository(
             val res = api.getEvents(groupId)
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
-                if (body.events.any { it.groupId != groupId && it.groupId != "all" }) {
-                    return@withContext SyncResult.Error("رد الخادم للفعاليات لا يطابق المجموعة المطلوبة؛ احتُفظ بالبيانات المحلية")
+                if (!ServerSnapshotValidation.hasUniqueNonBlankIds(body.events.map { it.id }) ||
+                    !ServerSnapshotValidation.allBelongToGroup(
+                        body.events.map { it.groupId },
+                        groupId,
+                        allowGlobalGroup = true
+                    )
+                ) {
+                    return@withContext SyncResult.Error(
+                        "لقطة الفعاليات تحتوي معرفات فارغة/مكررة أو مجموعات غير مصرح بها؛ احتُفظت البيانات المحلية"
+                    )
                 }
                 val events = body.events.map {
                     EventEntity(
@@ -1023,11 +1048,32 @@ class TanweerRepository(
             val res = api.getCalendar(groupId, month)
             if (res.isSuccessful && res.body()?.success == true) {
                 val body = res.body()!!
-                if (body.exams.any { it.groupId != groupId } ||
-                    body.homeworks.any { it.groupId != groupId } ||
-                    body.events.any { it.groupId != groupId && it.groupId != "all" }
-                ) {
-                    return@withContext SyncResult.Error("رد الخادم للشهر لا يطابق المجموعة المطلوبة؛ احتُفظ بالبيانات المحلية")
+                val validMonthlySnapshot =
+                    ServerSnapshotValidation.isValidYearMonth(month) &&
+                    ServerSnapshotValidation.hasUniqueNonBlankIds(body.contentsByDate.map { it.date }) &&
+                    ServerSnapshotValidation.allBelongToMonth(body.contentsByDate.map { it.date }, month) &&
+                    body.contentsByDate.all { it.count >= 0 } &&
+                    ServerSnapshotValidation.hasUniqueNonBlankIds(body.exams.map { it.id }) &&
+                    ServerSnapshotValidation.allBelongToGroup(body.exams.map { it.groupId }, groupId) &&
+                    ServerSnapshotValidation.allBelongToMonth(body.exams.map { it.examDate }, month) &&
+                    ServerSnapshotValidation.hasUniqueNonBlankIds(body.homeworks.map { it.id }) &&
+                    ServerSnapshotValidation.allBelongToGroup(body.homeworks.map { it.groupId }, groupId) &&
+                    body.homeworks.all {
+                        ServerSnapshotValidation.belongsToMonth(it.studyDate, month) ||
+                            ServerSnapshotValidation.belongsToMonth(it.dueDate, month)
+                    } &&
+                    ServerSnapshotValidation.hasUniqueNonBlankIds(body.events.map { it.id }) &&
+                    ServerSnapshotValidation.allBelongToGroup(
+                        body.events.map { it.groupId },
+                        groupId,
+                        allowGlobalGroup = true
+                    ) &&
+                    ServerSnapshotValidation.allBelongToMonth(body.events.map { it.eventDate }, month)
+
+                if (!validMonthlySnapshot) {
+                    return@withContext SyncResult.Error(
+                        "لقطة التقويم الشهري ناقصة أو مكررة أو تتضمن سجلات خارج الشهر/المجموعة؛ احتُفظت البيانات المحلية دون مسحها"
+                    )
                 }
                 var count = 0
 
@@ -1156,8 +1202,12 @@ class TanweerRepository(
             val res = api.getIssues(groupId)
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
-                if (body.issues.any { it.groupId != groupId }) {
-                    return@withContext SyncResult.Error("رد الخادم للاستفسارات لا يطابق المجموعة المطلوبة؛ احتُفظ بالبيانات المحلية")
+                if (!ServerSnapshotValidation.hasUniqueNonBlankIds(body.issues.map { it.id }) ||
+                    !ServerSnapshotValidation.allBelongToGroup(body.issues.map { it.groupId }, groupId)
+                ) {
+                    return@withContext SyncResult.Error(
+                        "لقطة الاستفسارات تحتوي معرفات فارغة/مكررة أو لا تطابق المجموعة؛ احتُفظت البيانات المحلية"
+                    )
                 }
                 val issues = body.issues.map {
                     IssueEntity(
