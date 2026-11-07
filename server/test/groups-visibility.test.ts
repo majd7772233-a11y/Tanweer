@@ -28,6 +28,7 @@ class GroupDiscoveryDb {
     { id: 'private-rejected', name: 'فريق بطلب مرفوض', type: 'OPTIONAL', description: null, icon: '🔐', visibility: 'PRIVATE', chat_policy: 'MEMBERS', is_discoverable: 1 },
     { id: 'private-active', name: 'فريق خاص منضم إليه', type: 'OPTIONAL', description: null, icon: '🔐', visibility: 'PRIVATE', chat_policy: 'MEMBERS', is_discoverable: 1 },
     { id: 'private-banned', name: 'فريق محظور منه', type: 'OPTIONAL', description: null, icon: '🔐', visibility: 'PRIVATE', chat_policy: 'MEMBERS', is_discoverable: 1 },
+    { id: 'other-class', name: 'الشعبة الثانية ب', type: 'CLASS', description: null, icon: '🏫', visibility: 'PRIVATE', chat_policy: 'MEMBERS', is_discoverable: 1 },
     { id: 'not-discoverable', name: 'مجموعة غير مكتشفة', type: 'OPTIONAL', description: null, icon: '🔒', visibility: 'PUBLIC', chat_policy: 'MEMBERS', is_discoverable: 0 },
   ];
 
@@ -60,6 +61,7 @@ class GroupDiscoveryDb {
             const status = membership?.status ?? '';
             const isPublic = group.visibility === 'PUBLIC';
             const canSeePrivateRequest = status === 'PENDING' || status === 'REJECTED';
+            const isSchoolClass = group.type === 'CLASS';
             const notAlreadyActiveOrBanned = status !== 'ACTIVE' && status !== 'BANNED';
 
             // Mirror the expected SQL predicate so removing the private-visibility
@@ -67,7 +69,7 @@ class GroupDiscoveryDb {
             if (
               group.is_discoverable !== 1 ||
               !notAlreadyActiveOrBanned ||
-              !(isPublic || canSeePrivateRequest)
+              !(isPublic || isSchoolClass || canSeePrivateRequest)
             ) {
               return [];
             }
@@ -139,6 +141,7 @@ describe('private-group discovery visibility', () => {
     expect(body.discoverGroups.map((group) => group.id).sort()).toEqual([
       'private-pending',
       'private-rejected',
+      'other-class',
       'public-open',
     ]);
 
@@ -158,6 +161,10 @@ describe('private-group discovery visibility', () => {
     }));
     expect(body.discoverGroups.some((group) => group.id === 'private-active')).toBe(false);
 
+    expect(body.discoverGroups.find((group) => group.id === 'other-class')).toMatchObject({
+      visibility: 'PRIVATE',
+      membershipStatus: null,
+    });
     expect(body.discoverGroups.some((group) => group.id === 'private-hidden')).toBe(false);
     expect(body.discoverGroups.some((group) => group.id === 'private-banned')).toBe(false);
     expect(body.discoverGroups.some((group) => group.id === 'not-discoverable')).toBe(false);
