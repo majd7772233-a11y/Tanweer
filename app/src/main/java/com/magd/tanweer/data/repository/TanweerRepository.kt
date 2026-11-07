@@ -236,8 +236,11 @@ class TanweerRepository(
                     sectionId = sectionToUpdate
                 )
             )
-            if (!res.isSuccessful || res.body()?.user == null) {
-                val errorMsg = res.body()?.message ?: res.errorBody()?.string()?.takeIf { it.isNotBlank() } ?: res.message().let { if (it.isNullOrBlank()) "فشل تحديث بيانات الحساب على السيرفر" else it }
+            if (!res.isSuccessful || res.body()?.success != true || res.body()?.user == null) {
+                val errorMsg = res.body()?.message
+                    ?: res.body()?.error?.message
+                    ?: res.errorBody()?.string()?.takeIf { it.isNotBlank() }
+                    ?: res.message().let { if (it.isNullOrBlank()) "فشل تحديث بيانات الحساب على السيرفر" else it }
                 return@withContext Result.failure(Exception(errorMsg))
             }
             val updatedUser = res.body()!!.user!!
@@ -3415,17 +3418,33 @@ class TanweerRepository(
 
         try {
             val res = api.toggleHomework(homeworkId, ToggleCompletionRequest(isCompleted = targetStatus))
-            if (res.isSuccessful) {
+            val responseBody = res.body()
+            if (res.isSuccessful && responseBody?.success == true) {
                 db.outboxDao().deleteByEntityId(homeworkId)
                 HomeworkToggleResult.SyncedWithServer(targetStatus)
-            } else if (res.code() in listOf(401, 403)) {
-                // Rollback on rejection or authorization failure
+            } else if (res.isSuccessful) {
                 if (currentStatus) {
                     db.homeworkDao().insertCompletion(HomeworkCompletionEntity(homeworkId = homeworkId, userId = currentUserId))
                 } else {
                     db.homeworkDao().deleteCompletion(homeworkId, currentUserId)
                 }
-                HomeworkToggleResult.Failed(currentStatus, "لا تملك صلاحية تغيير حالة الواجب في السيرفر (كود ${res.code()})")
+                HomeworkToggleResult.Failed(
+                    currentStatus,
+                    responseBody?.error?.message ?: responseBody?.message
+                        ?: "الخادم لم يؤكد تغيير حالة الواجب (success=false)"
+                )
+            } else if (res.code() in listOf(400, 401, 403, 409, 422)) {
+                // Permanent client/authorization rejection: restore the previous local state.
+                if (currentStatus) {
+                    db.homeworkDao().insertCompletion(HomeworkCompletionEntity(homeworkId = homeworkId, userId = currentUserId))
+                } else {
+                    db.homeworkDao().deleteCompletion(homeworkId, currentUserId)
+                }
+                HomeworkToggleResult.Failed(
+                    currentStatus,
+                    responseBody?.error?.message ?: responseBody?.message
+                        ?: "رفض الخادم تغيير حالة الواجب (HTTP ${res.code()})"
+                )
             } else if (res.code() == 404) {
                 // If 404 on server, preserve local user action and queue Outbox retry
                 val outboxItem = OutboxEntity(
@@ -3621,15 +3640,25 @@ class TanweerRepository(
 
             try {
                 val res = api.toggleExamCompletion(examId, ToggleCompletionRequest(isCompleted = targetStatus))
-                if (res.isSuccessful) {
+                val responseBody = res.body()
+                if (res.isSuccessful && responseBody?.success == true) {
                     db.outboxDao().deleteByEntityIdAndType(examId, "EXAM_TOGGLE")
-                    val serverCompleted = res.body()?.isCompleted ?: targetStatus
+                    val serverCompleted = responseBody.isCompleted ?: targetStatus
                     db.examDao().updateExamCompletion(examId, serverCompleted)
                     Result.success(serverCompleted)
-                } else if (res.code() in listOf(401, 403)) {
-                    // Rollback on rejection or authorization failure.
+                } else if (res.isSuccessful) {
                     db.examDao().updateExamCompletion(examId, !targetStatus)
-                    Result.failure(Exception("لا تملك صلاحية تغيير حالة الاختبار (كود ${res.code()})"))
+                    Result.failure(
+                        Exception(responseBody?.error?.message ?: responseBody?.message
+                            ?: "الخادم لم يؤكد تغيير حالة الاختبار (success=false)")
+                    )
+                } else if (res.code() in listOf(400, 401, 403, 409, 422)) {
+                    // Rollback on permanent client/authorization rejection.
+                    db.examDao().updateExamCompletion(examId, !targetStatus)
+                    Result.failure(
+                        Exception(responseBody?.error?.message ?: responseBody?.message
+                            ?: "رفض الخادم تغيير حالة الاختبار (HTTP ${res.code()})")
+                    )
                 } else {
                     val outboxItem = OutboxEntity(
                         id = "ob_examt_${examId}_${System.currentTimeMillis()}",
@@ -3886,12 +3915,20 @@ class TanweerRepository(
 
         try {
             val res = api.addIssueComment(issueId, AddCommentRequest(id = commentId, comment = comment))
-            if (res.isSuccessful) {
+            val responseBody = res.body()
+            if (res.isSuccessful && responseBody?.success == true) {
                 db.issueDao().updateCommentSyncStatus(commentId, "SYNCED")
                 Result.success(CommentAddResult.Synced())
-            } else if (res.code() in listOf(401, 403)) {
+            } else if (res.isSuccessful) {
                 db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
-                Result.failure(Exception(res.message() ?: "فشل إرسال التعليق إلى السيرفر"))
+                Result.failure(
+                    Exception(responseBody?.error?.message ?: responseBody?.message
+                        ?: "الخادم لم يؤكد حفظ التعليق (success=false)")
+                )
+            } else if (res.code() in listOf(400, 401, 403, 404, 409, 422)) {
+                db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
+                Result.failure(Exception(responseBody?.error?.message ?: responseBody?.message
+                    ?: "رفض الخادم حفظ التعليق (HTTP ${res.code()})"))
             } else {
                 val outboxItem = OutboxEntity(
                     id = "ob_com_${commentId}_${System.currentTimeMillis()}",
@@ -3922,12 +3959,17 @@ class TanweerRepository(
         db.issueDao().updateCommentSyncStatus(commentId, "SYNCING")
         try {
             val res = api.addIssueComment(issueId, AddCommentRequest(id = commentId, comment = commentText))
-            if (res.isSuccessful) {
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true) {
                 db.issueDao().updateCommentSyncStatus(commentId, "SYNCED")
                 Result.success(Unit)
             } else {
                 db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
-                Result.failure(Exception("فشل إرسال التعليق"))
+                Result.failure(
+                    Exception(body?.error?.message ?: body?.message
+                        ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ التعليق (success=false)"
+                        else "فشل إرسال التعليق (HTTP ${res.code()})")
+                )
             }
         } catch (e: Exception) {
             db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
@@ -3944,13 +3986,17 @@ class TanweerRepository(
         db.issueDao().markIssueSolved(issueId, commentId)
         try {
             val res = api.markBestAnswer(issueId, commentId)
-            if (res.isSuccessful) {
+            val body = res.body()
+            if (res.isSuccessful && body?.success == true) {
                 Result.success(Unit)
             } else {
                 db.issueDao().revertIssueStatus(issueId, prevBestCommentId, prevStatus)
                 db.issueDao().revertCommentBestAnswer(issueId, prevBestCommentId)
-                val errMsg = if (res.code() == 403) "عذرًا، فقط صاحب السؤال أو المعلم يمكنه اعتماد أفضل إجابة"
-                             else (res.message()?.ifBlank { null } ?: "فشل اعتماد أفضل إجابة في السيرفر (${res.code()})")
+                val errMsg = body?.error?.message ?: body?.message ?: when {
+                    res.isSuccessful -> "الخادم لم يؤكد اعتماد أفضل إجابة (success=false)"
+                    res.code() == 403 -> "عذرًا، فقط صاحب السؤال أو المعلم يمكنه اعتماد أفضل إجابة"
+                    else -> res.message()?.ifBlank { null } ?: "فشل اعتماد أفضل إجابة في السيرفر (${res.code()})"
+                }
                 Result.failure(Exception(errMsg))
             }
         } catch (e: Exception) {
@@ -4002,8 +4048,9 @@ class TanweerRepository(
                     description = description
                 )
             )
-            if (res.isSuccessful) {
-                val serverId = res.body()?.issueId ?: res.body()?.id
+            val responseBody = res.body()
+            if (res.isSuccessful && responseBody?.success == true) {
+                val serverId = responseBody.issueId ?: responseBody.id
                 if (serverId != null && serverId != id) {
                     val updatedEntity = entity.copy(id = serverId, syncStatus = "SYNCED")
                     db.issueDao().replaceIssueId(id, updatedEntity)
@@ -4013,7 +4060,11 @@ class TanweerRepository(
                     db.issueDao().updateSyncStatus(id, "SYNCED")
                     Result.success(IssueAddResult.Synced(id))
                 }
-            } else if (res.code() in listOf(401, 403)) {
+            } else if (res.isSuccessful) {
+                db.issueDao().updateSyncStatus(id, "FAILED")
+                Result.failure(Exception(responseBody?.error?.message ?: responseBody?.message
+                    ?: "الخادم لم يؤكد إنشاء الاستفسار (success=false)"))
+            } else if (res.code() in listOf(400, 401, 403, 404, 409, 422)) {
                 db.issueDao().updateSyncStatus(id, "FAILED")
                 Result.failure(Exception(res.message() ?: "فشل إنشاء الاستفسار في السيرفر"))
             } else {
@@ -4096,11 +4147,16 @@ class TanweerRepository(
 
             try {
                 val res = api.deleteExam(examId)
+                val responseBody = res.body()
                 when {
-                    res.isSuccessful || res.code() == 404 -> {
+                    (res.isSuccessful && responseBody?.success == true) || res.code() == 404 -> {
                         db.examDao().deleteExamById(examId)
                         db.outboxDao().deleteByEntityId(examId)
                         Result.success(ExamDeleteResult.Synced())
+                    }
+                    res.isSuccessful -> {
+                        Result.failure(Exception(responseBody?.error?.message ?: responseBody?.message
+                            ?: "الخادم لم يؤكد حذف الاختبار (success=false)"))
                     }
                     res.code() in 400..499 && res.code() !in listOf(408, 429) -> {
                         val message = when (res.code()) {
@@ -4248,12 +4304,22 @@ class TanweerRepository(
         val req = SubmitCorrectionRequest(fieldName, originalValue, proposedValue, reason)
         try {
             val res = api.submitCorrection(contentId, req)
-            if (res.isSuccessful) {
+            val responseBody = res.body()
+            if (res.isSuccessful && responseBody?.success == true) {
                 db.correctionDao().updateStatus(id, "SUBMITTED")
+                Result.success(id)
+            } else {
+                db.correctionDao().updateStatus(id, "FAILED")
+                Result.failure(
+                    Exception(responseBody?.error?.message ?: responseBody?.message
+                        ?: if (res.isSuccessful) "الخادم لم يؤكد استلام اقتراح التصحيح (success=false)"
+                        else "تعذر إرسال اقتراح التصحيح (HTTP ${res.code()})")
+                )
             }
-        } catch (_: Exception) {}
-
-        Result.success(id)
+        } catch (error: Exception) {
+            db.correctionDao().updateStatus(id, "FAILED")
+            Result.failure(Exception(error.localizedMessage ?: "تعذر الاتصال بالخادم لإرسال التصحيح"))
+        }
     }
 
     suspend fun getSystemVersion(): Result<com.magd.tanweer.data.remote.SystemVersionResponse> = withContext(Dispatchers.IO) {
