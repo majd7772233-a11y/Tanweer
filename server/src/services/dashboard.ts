@@ -1,14 +1,15 @@
 /**
  * Tanweer Control Center (Owner Dashboard & Management Core)
  * Unified Administrative Engine & Cloudflare Worker Dashboard
- * URL: https://tanweer.magd.workers.dev/dashboard
+ * URL: /dashboard (relative to the current Worker origin)
  */
 
 import { Env } from '../env';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Role, normalizeRole, ROLE_METADATA } from '../lib/roles';
 import { generateId } from '../lib/ids';
-import { hashString, hashPassword, generateRandomToken, generateRecoveryCode, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
+import { hashString, hashPassword, generateRandomToken, generateRecoveryCode, encryptSensitivePayload } from '../lib/crypto';
+import { buildRecoveryCodeRotationStatements } from './notifications';
 import { isValidIsoDate } from '../lib/validation';
 import { applyDecisionExecution } from './governance';
 import { cleanupOrphanMedia } from './media';
@@ -52,9 +53,8 @@ export async function verifyOwnerAuth(request: Request, env: Env): Promise<{ isO
     return { isOwner: false, ownerId: '' };
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
-
-  // 1. Direct Secret Header check (for API / automated operations)
+  // 1. Direct Secret Header check (for API / automated operations).
+  // This path validates the configured owner secret directly without creating a session.
   const headerSecret = request.headers.get('X-Owner-Secret');
   if (headerSecret && headerSecret === secretKey) {
     return { isOwner: true, ownerId: 'SYSTEM_OWNER' };
@@ -76,6 +76,11 @@ export async function verifyOwnerAuth(request: Request, env: Env): Promise<{ isO
   }
 
   if (!token) {
+    return { isOwner: false, ownerId: '' };
+  }
+
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
     return { isOwner: false, ownerId: '' };
   }
 
@@ -137,7 +142,10 @@ export async function handleOwnerLogin(request: Request, env: Env): Promise<Resp
     return errorResponse('CONFIGURATION_ERROR', 'لوحة التحكم معطلة: مفتاح المالك TANWEER_OWNER_SECRET غير مهيأ في متغيرات البيئة', 500);
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIGURATION_ERROR', 'جلسات لوحة المالك معطلة: مفتاح الجلسات السري غير مهيأ في الخادم', 500);
+  }
 
   let secret = '';
   const contentType = request.headers.get('Content-Type') || '';
@@ -204,29 +212,45 @@ export async function handleOwnerLogin(request: Request, env: Env): Promise<Resp
  * Handles Owner Logout and server-side session revocation.
  */
 export async function handleOwnerLogout(request?: Request, env?: Env): Promise<Response> {
+  const cookieHeader = `${OWNER_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+
+  const failure = (code: string, message: string) => new Response(JSON.stringify({
+    success: false,
+    error: { code, message },
+  }), {
+    status: 500,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Set-Cookie': cookieHeader,
+    },
+  });
+
   if (request && env) {
-    try {
-      const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
-      let token: string | null = null;
-      const authHeader = request.headers.get('Authorization');
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.substring(7).trim();
-      } else {
-        const cookieHeader = request.headers.get('Cookie');
-        if (cookieHeader) {
-          const match = cookieHeader.match(/(?:^|;\s*)tanweer_owner_token=([^;]+)/);
-          if (match) {
-            token = decodeURIComponent(match[1]).trim();
-          }
-        }
+    let token: string | null = null;
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else {
+      const cookie = request.headers.get('Cookie');
+      if (cookie) {
+        const match = cookie.match(/(?:^|;\s*)tanweer_owner_token=([^;]+)/);
+        if (match) token = decodeURIComponent(match[1]).trim();
+      }
+    }
+
+    if (token) {
+      const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+      if (!pepper) {
+        return failure('CONFIG_ERROR', 'تعذر إبطال جلسة المالك لأن مفتاح الجلسات السري غير مهيأ في الخادم');
       }
 
-      if (token) {
+      try {
         const tokenHash = await hashString(token, pepper);
-        await env.DB.prepare(`
-          UPDATE owner_sessions SET revoked = 1 WHERE token_hash = ?
-        `).bind(tokenHash).run();
+        const revoke = await env.DB.prepare(
+          `UPDATE owner_sessions SET revoked = 1 WHERE token_hash = ?`
+        ).bind(tokenHash).run();
 
+        // A missing or already-revoked token is also a completed logout.
         await logRoleAudit(
           env.DB,
           'OWNER_LOGOUT',
@@ -235,13 +259,13 @@ export async function handleOwnerLogout(request?: Request, env?: Env): Promise<R
           null,
           'تم تسجيل خروج مالك النظام وإبطال رمز الجلسة في الخادم'
         );
+      } catch (error) {
+        console.error('Failed to revoke owner session in DB:', error);
+        return failure('LOGOUT_FAILED', 'تعذر إبطال جلسة المالك في قاعدة البيانات. لم يتم تأكيد تسجيل الخروج.');
       }
-    } catch (e) {
-      console.error('Failed to revoke owner session in DB:', e);
     }
   }
 
-  const cookieHeader = `${OWNER_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
   return new Response(JSON.stringify({ success: true, message: 'تم تسجيل الخروج وإبطال الجلسة بنجاح' }), {
     status: 200,
     headers: {
@@ -279,12 +303,12 @@ export async function handleGetDashboardStats(env: Env): Promise<Response> {
       activeSessionsTotal,
       auditLogsTotal
     ] = await Promise.all([
-      env.DB.prepare(`SELECT COUNT(*) as count FROM users`).first<{ count: number }>(),
+      env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role != 'SYSTEM_OWNER'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'STUDENT' OR role = 'MEMBER'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'MODERATOR'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'TEACHER' OR role = 'VERIFIED_TEACHER'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'ADMIN'`).first<{ count: number }>(),
-      env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE status = 'DISABLED'`).first<{ count: number }>().catch(() => ({ count: 0 })),
+      env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role != 'SYSTEM_OWNER' AND status = 'DISABLED'`).first<{ count: number }>().catch(() => ({ count: 0 })),
       env.DB.prepare(`SELECT COUNT(*) as count FROM groups`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM role_requests WHERE status = 'PENDING'`).first<{ count: number }>().catch(() => ({ count: 0 })),
       env.DB.prepare(`SELECT COUNT(*) as count FROM role_requests`).first<{ count: number }>().catch(() => ({ count: 0 })),
@@ -361,7 +385,7 @@ export async function handleGetDashboardUsers(request: Request, env: Env): Promi
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
 
-  let whereClause = ` WHERE 1=1`;
+  let whereClause = ` WHERE role != 'SYSTEM_OWNER'`;
   const binds: any[] = [];
 
   if (search) {
@@ -439,6 +463,7 @@ export async function handleChangeUserRole(
     id: string;
     full_name: string;
     role: string;
+    status: string;
   }>();
 
   if (!user) {
@@ -606,21 +631,82 @@ export async function handleRevokeUserSessions(
 }
 
 /**
- * God Mode: Reissues temporary recovery credentials for a user from User Details Modal (TA-16).
- * Single-use, hash-only stored, attempt-limited, expiration-enforced, session-revocable, audit-logged.
- * NEVER returns the old password or old hash.
+ * God Mode: rotates a user's permanent recovery code and delivers it only through
+ * the user's encrypted, account-scoped in-app notification. Temporary passwords
+ * remain a separate, expiring, single-use credential.
  */
+/**
+ * Revokes a user's permanent recovery credential without issuing a replacement.
+ * The historical schema marks recovery_code_hash NOT NULL, so a random non-hash marker
+ * is stored; future reissue always replaces it with a real keyed hash.
+ */
+export async function handleRevokeUserRecoveryCode(
+  userId: string,
+  actorId: string,
+  request: Request,
+  env: Env
+): Promise<Response> {
+  const user = await env.DB.prepare(
+    `SELECT id, full_name, role FROM users WHERE id = ?`
+  ).bind(userId).first<{ id: string; full_name: string; role: string }>();
+
+  if (!user) return errorResponse('USER_NOT_FOUND', 'المستخدم غير موجود', 404);
+  if (normalizeRole(user.role) === Role.SYSTEM_OWNER) {
+    return errorResponse('FORBIDDEN', 'لا يمكن إلغاء رمز استرداد مالك المنظومة من هذا المسار', 403);
+  }
+  if (typeof env.DB.batch !== 'function') {
+    return errorResponse('RECOVERY_REVOCATION_UNAVAILABLE', 'قاعدة البيانات لا تدعم الإلغاء الآمن بصورة ذرية حالياً', 503);
+  }
+
+  const now = Date.now();
+  const revokedMarker = `REVOKED_${generateRandomToken()}`;
+  const statements = [
+    env.DB.prepare(`UPDATE users SET recovery_code_hash = ?, updated_at = ? WHERE id = ?`)
+      .bind(revokedMarker, now, userId),
+    env.DB.prepare(`UPDATE user_recovery_tokens SET revoked = 1
+      WHERE user_id = ? AND type = 'RECOVERY_CODE' AND revoked = 0`).bind(userId),
+    env.DB.prepare(`DELETE FROM user_notifications WHERE user_id = ? AND type = 'RECOVERY_CODE_RESET'`).bind(userId),
+  ];
+
+  try {
+    const results = await env.DB.batch(statements);
+    if (results.length !== statements.length || results[0]?.meta?.changes !== 1) {
+      return errorResponse('RECOVERY_REVOCATION_FAILED', 'تعذر إلغاء رمز الاسترداد بصورة مكتملة', 500);
+    }
+  } catch (error) {
+    console.error('Failed to revoke permanent recovery code:', error);
+    return errorResponse('RECOVERY_REVOCATION_FAILED', 'تعذر إلغاء رمز الاسترداد حالياً. لم يتم تأكيد العملية.', 503);
+  }
+
+  await logRoleAudit(
+    env.DB,
+    'REVOKE_RECOVERY_CODE',
+    actorId,
+    'SYSTEM_OWNER',
+    userId,
+    `تم إلغاء رمز الاسترداد الدائم للمستخدم ${user.full_name}`,
+    request.headers.get('CF-Connecting-IP')
+  );
+
+  return jsonResponse({
+    success: true,
+    revoked: true,
+    message: 'تم إلغاء رمز الاسترداد. لن يعمل الرمز السابق، ويمكن إصدار رمز بديل لاحقاً.',
+  });
+}
+
 export async function handleReissueUserCredentials(
   userId: string,
   actorId: string,
   request: Request,
   env: Env
 ): Promise<Response> {
-  const user = await env.DB.prepare(`SELECT id, full_name, phone_number, role FROM users WHERE id = ?`).bind(userId).first<{
+  const user = await env.DB.prepare(`SELECT id, full_name, phone_number, role, COALESCE(status, 'ACTIVE') AS status FROM users WHERE id = ?`).bind(userId).first<{
     id: string;
     full_name: string;
     phone_number: string;
     role: string;
+    status: string;
   }>();
 
   if (!user) {
@@ -629,6 +715,9 @@ export async function handleReissueUserCredentials(
 
   if (normalizeRole(user.role) === Role.SYSTEM_OWNER) {
     return errorResponse('FORBIDDEN', 'لا يمكن إعادة تعيين بيانات اعتماد مالك المنظومة من هذا المسار', 403);
+  }
+  if (user.status !== 'ACTIVE') {
+    return errorResponse('ACCOUNT_NOT_ACTIVE', 'لا يمكن إصدار بيانات استرداد لحساب غير نشط. أعد تفعيل الحساب أولاً.', 409);
   }
 
   let body: {
@@ -642,9 +731,14 @@ export async function handleReissueUserCredentials(
 
   const credentialType = body.type === 'TEMP_PASSWORD' ? 'TEMP_PASSWORD' : 'RECOVERY_CODE';
   const expiresInHours = Math.max(1, Math.min(Number(body.expiresInHours) || 24, 72));
-  const revokeExistingSessions = body.revokeExistingSessions !== false;
+  const revokeExistingSessions = credentialType === 'RECOVERY_CODE'
+    ? body.revokeExistingSessions === true
+    : body.revokeExistingSessions !== false;
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || LEGACY_DEFAULT_PEPPER;
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح إصدار بيانات الاعتماد غير مهيأ في الخادم', 500);
+  }
   const now = Date.now();
   const expiresAt = now + expiresInHours * 3600 * 1000;
 
@@ -686,32 +780,34 @@ export async function handleReissueUserCredentials(
     `).run();
   } catch {}
 
-  // Invalidate any existing active recovery tokens for this user
-  await env.DB.prepare(
-    `UPDATE user_recovery_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0`
-  ).bind(userId).run();
-
-  // Insert single-use recovery token record with expiration
-  await env.DB.prepare(`
-    INSERT INTO user_recovery_tokens (id, user_id, token_hash, type, max_uses, uses_count, expires_at, revoked, created_by, created_at)
-    VALUES (?, ?, ?, ?, 1, 0, ?, 0, ?, ?)
-  `).bind(tokenId, userId, tokenHash, credentialType, expiresAt, actorId, now).run();
-
-  // Update appropriate column on users table
   if (credentialType === 'RECOVERY_CODE') {
-    await env.DB.prepare(
-      `UPDATE users SET recovery_code_hash = ?, updated_at = ? WHERE id = ?`
-    ).bind(tokenHash, now, userId).run();
+    if (typeof env.DB.batch !== 'function') {
+      return errorResponse('RECOVERY_ROTATION_UNAVAILABLE', 'قاعدة البيانات لا تدعم تسليم رمز الاسترداد بصورة ذرية وآمنة حالياً', 503);
+    }
+    const encryptedPayload = await encryptSensitivePayload(JSON.stringify({ recoveryCode: plainSecret }), pepper);
+    const statements = buildRecoveryCodeRotationStatements(env.DB, userId, tokenId, tokenHash, encryptedPayload, actorId, now);
+    if (revokeExistingSessions) statements.push(env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId));
+    try {
+      const results = await env.DB.batch(statements);
+      if (results.length !== statements.length || results[0]?.meta?.changes !== 1 ||
+          results[3]?.meta?.changes !== 1 || results[4]?.meta?.changes !== 1) {
+        return errorResponse('RECOVERY_ROTATION_FAILED', 'تعذر حفظ رمز الاسترداد ورسالة التسليم بصورة مكتملة', 500);
+      }
+    } catch (error) {
+      console.error('Failed to issue and privately deliver a recovery code:', error);
+      return errorResponse('RECOVERY_ROTATION_FAILED', 'تعذر إصدار رمز الاسترداد وتسليمه حالياً. لم يتم تأكيد العملية.', 503);
+    }
   } else {
-    // TA-21: Update password_hash so normal login with phone + password works seamlessly
-    await env.DB.prepare(
-      `UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`
-    ).bind(tokenHash, now, userId).run();
-  }
-
-  // Optionally revoke existing sessions to immediately protect the account
-  if (revokeExistingSessions) {
-    await env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
+    // Temporary passwords remain short-lived and single-use.
+    await env.DB.prepare(`UPDATE user_recovery_tokens SET revoked = 1
+      WHERE user_id = ? AND type = 'TEMP_PASSWORD' AND revoked = 0`).bind(userId).run();
+    await env.DB.prepare(`INSERT INTO user_recovery_tokens
+      (id, user_id, token_hash, type, max_uses, uses_count, expires_at, revoked, created_by, created_at)
+      VALUES (?, ?, ?, 'TEMP_PASSWORD', 1, 0, ?, 0, ?, ?)`)
+      .bind(tokenId, userId, tokenHash, expiresAt, actorId, now).run();
+    await env.DB.prepare(`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`)
+      .bind(tokenHash, now, userId).run();
+    if (revokeExistingSessions) await env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
   }
 
   await logRoleAudit(
@@ -720,19 +816,22 @@ export async function handleReissueUserCredentials(
     actorId,
     'SYSTEM_OWNER',
     userId,
-    `تم إصدار ${credentialType === 'RECOVERY_CODE' ? 'رمز استرداد' : 'بيانات اعتماد مؤقتة'} للمستخدم ${user.full_name} صالح لمرة واحدة لمدة (${expiresInHours}) ساعة${revokeExistingSessions ? ' مع إنهاء كافة جلساته السابقة' : ''}`,
+    credentialType === 'RECOVERY_CODE'
+      ? `تم تدوير رمز الاسترداد الدائم للمستخدم ${user.full_name} وتسليم نسخة مشفرة إلى صندوق إشعارات حسابه${revokeExistingSessions ? ' مع إنهاء جلساته الحالية' : ''}`
+      : `تم إصدار كلمة مرور مؤقتة للمستخدم ${user.full_name} صالحة لمرة واحدة لمدة (${expiresInHours}) ساعة${revokeExistingSessions ? ' مع إنهاء كافة جلساته السابقة' : ''}`,
     request.headers.get('CF-Connecting-IP')
   );
 
+  if (credentialType === 'RECOVERY_CODE') {
+    return jsonResponse({
+      success: true, credentialType, delivery: 'PRIVATE_IN_APP_NOTIFICATION', sessionsRevoked: revokeExistingSessions,
+      message: 'تم إصدار رمز استرداد دائم وتسليم نسخة مشفرة إلى إشعارات حساب المستخدم. سيظهر له داخل التطبيق عند تسجيل الدخول.',
+    });
+  }
   return jsonResponse({
-    success: true,
-    credentialType,
-    temporarySecret: plainSecret,
-    expiresAt,
-    expiresInHours,
-    singleUse: true,
-    sessionsRevoked: revokeExistingSessions,
-    message: `تم إصدار ${credentialType === 'RECOVERY_CODE' ? 'رمز استرداد مؤقت' : 'كلمة مرور مؤقتة'} بنجاح. أبلغه للمستخدم، حيث يمكن استخدامه لمرة واحدة فقط خلال ${expiresInHours} ساعة.`,
+    success: true, credentialType, temporarySecret: plainSecret, expiresAt, expiresInHours,
+    singleUse: true, sessionsRevoked: revokeExistingSessions,
+    message: `تم إصدار كلمة مرور مؤقتة بنجاح. يمكن استخدامها لمرة واحدة فقط خلال ${expiresInHours} ساعة.`,
   });
 }
 
@@ -907,8 +1006,16 @@ export async function handleApproveRoleRequest(
     return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح التحقق السري غير مهيأ في الخادم', 500);
+  }
+
   const targetRole = normalizeRole(req.requested_role);
+  if (targetRole !== Role.MODERATOR && targetRole !== Role.TEACHER) {
+    return errorResponse('INVALID_ROLE', 'الرتبة المطلوبة غير مسموح بتفعيلها عبر رمز التحقق', 400);
+  }
+
   const now = Date.now();
   const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
 
@@ -922,23 +1029,52 @@ export async function handleApproveRoleRequest(
   const codeHash = await hashString(codeRaw, pepper);
   const codeId = generateId('code');
 
-  // Insert verification code record storing only code_hash (no plain text in DB)
-  await env.DB.prepare(
-    `INSERT INTO role_verification_codes (id, request_id, user_id, role, code_hash, code_display, attempts, max_attempts, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?, NULL, 0, 5, ?, ?)`
-  ).bind(
-    codeId,
-    requestId,
-    req.user_id,
-    targetRole,
-    codeHash,
-    expiresAt,
-    now
-  ).run();
+  // Claim the pending request first. Concurrent approvals cannot both issue a code.
+  const claim = await env.DB.prepare(
+    `UPDATE role_requests
+     SET status = 'APPROVED', reviewed_by = ?, review_notes = ?, reviewed_at = ?
+     WHERE id = ? AND status = 'PENDING'`
+  ).bind(actorId, 'تم اعتماد الطلب وجارٍ إصدار رمز تفعيل مشفر', now, requestId).run();
+
+  if (claim.meta?.changes !== 1) {
+    return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
+  }
+
+  // Insert verification code record storing only code_hash (no plain text in DB).
+  // Restore PENDING if the insert fails so the request can be safely retried.
+  try {
+    await env.DB.prepare(
+      `INSERT INTO role_verification_codes (id, request_id, user_id, role, code_hash, code_display, attempts, max_attempts, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, 0, 5, ?, ?)`
+    ).bind(
+      codeId,
+      requestId,
+      req.user_id,
+      targetRole,
+      codeHash,
+      expiresAt,
+      now
+    ).run();
+  } catch (error) {
+    try {
+      await env.DB.prepare(
+        `UPDATE role_requests
+         SET status = 'PENDING', reviewed_by = NULL, review_notes = NULL, reviewed_at = NULL
+         WHERE id = ? AND status = 'APPROVED' AND reviewed_by = ?
+           AND NOT EXISTS (SELECT 1 FROM role_verification_codes WHERE request_id = ?)`
+      ).bind(requestId, actorId, requestId).run();
+    } catch (rollbackError) {
+      console.error('Failed to restore role request after code issuance error:', rollbackError);
+    }
+    console.error('Failed to issue role verification code:', error);
+    return errorResponse('ROLE_CODE_CREATION_FAILED', 'تعذر إصدار رمز التفعيل حالياً. بقي الطلب متاحاً لإعادة المحاولة.', 500);
+  }
 
   await env.DB.prepare(
-    `UPDATE role_requests SET status = 'APPROVED', reviewed_by = ?, review_notes = ?, reviewed_at = ? WHERE id = ?`
-  ).bind(actorId, 'تم اعتماد الطلب وتوليد رمز تفعيل مشفر بنجاح', now, requestId).run();
+    `UPDATE role_requests
+     SET review_notes = ?
+     WHERE id = ? AND status = 'APPROVED' AND reviewed_by = ?`
+  ).bind('تم اعتماد الطلب وتوليد رمز تفعيل مشفر بنجاح', requestId, actorId).run();
 
   await logRoleAudit(
     env.DB,
@@ -984,10 +1120,26 @@ export async function handleRejectRoleRequest(
     return errorResponse('REQUEST_NOT_FOUND', 'طلب الترقية غير موجود', 404);
   }
 
+  if (req.status !== 'PENDING') {
+    return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
+  }
+
   const now = Date.now();
+  const rejection = await env.DB.prepare(
+    `UPDATE role_requests
+     SET status = 'REJECTED', reviewed_by = ?, review_notes = ?, reviewed_at = ?
+     WHERE id = ? AND status = 'PENDING'`
+  ).bind(actorId, body.reason?.trim() || 'لم يستوفِ الشروط المطلوبة', now, requestId).run();
+
+  if (rejection.meta?.changes !== 1) {
+    return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
+  }
+
+  // Revoke any orphaned, still-unused code linked to this request.
   await env.DB.prepare(
-    `UPDATE role_requests SET status = 'REJECTED', reviewed_by = ?, review_notes = ?, reviewed_at = ? WHERE id = ?`
-  ).bind(actorId, body.reason || 'لم يستوفِ الشروط المطلوبة', now, requestId).run();
+    `UPDATE role_verification_codes SET used_at = ?
+     WHERE request_id = ? AND used_at IS NULL`
+  ).bind(now, requestId).run();
 
   await logRoleAudit(
     env.DB,
@@ -1011,7 +1163,7 @@ export async function handleRejectRoleRequest(
 export async function handleGetDashboardRoles(env: Env): Promise<Response> {
   try {
     const counts = await env.DB.prepare(
-      `SELECT role, COUNT(*) as count FROM users GROUP BY role`
+      `SELECT role, COUNT(*) as count FROM users WHERE role != 'SYSTEM_OWNER' GROUP BY role`
     ).all<{ role: string; count: number }>();
 
     const countsMap: Record<string, number> = {};
@@ -1142,7 +1294,7 @@ export async function handleGetDashboardContents(request: Request, env: Env): Pr
 export async function handleGetDashboardContentDetail(contentId: string, env: Env): Promise<Response> {
   const content = await env.DB.prepare(`
     SELECT c.*, u.full_name as author_name, u.phone_number as author_phone,
-           g.name as group_name, s.name as subject_name
+           g.name as group_name, COALESCE(s.name_ar, s.id) as subject_name
     FROM contents c
     LEFT JOIN users u ON c.created_by = u.id
     LEFT JOIN groups g ON c.group_id = g.id
@@ -1161,16 +1313,39 @@ export async function handleGetDashboardContentDetail(contentId: string, env: En
     ORDER BY page_order ASC
   `).bind(contentId).all<any>();
 
-  const mediaList = (mediaRows.results || []).map((m: any) => ({
-    id: m.id,
-    pageOrder: m.page_order,
-    objectKey: m.object_key,
-    url: m.url,
-    previewUrl: `/api/dashboard/media/${m.id}`,
-    mimeType: m.mime_type,
-    fileSize: m.file_size,
-    isPrimary: m.is_primary === 1,
-  }));
+  const mediaList = (mediaRows.results || []).map((m: any) => {
+    // Older content_media rows may have an empty object_key while url stores
+    // the media_blobs ID in the legacy public media route.
+    let linkedMediaId = String(m.object_key || '').trim();
+    if (!linkedMediaId && m.url) {
+      try {
+        const mediaPath = new URL(String(m.url), 'https://tanweer.invalid').pathname;
+        const pathSegments = mediaPath.split('/').filter(Boolean);
+        const isInternalMediaRoute = pathSegments.length >= 4
+          && pathSegments[pathSegments.length - 4] === 'api'
+          && pathSegments[pathSegments.length - 2] === 'media'
+          && (pathSegments[pathSegments.length - 3] === 'v1' || pathSegments[pathSegments.length - 3] === 'dashboard');
+        if (isInternalMediaRoute) {
+          linkedMediaId = decodeURIComponent(pathSegments[pathSegments.length - 1]);
+        }
+      } catch {
+        // Keep the original URL below when it is not a recognized internal media route.
+      }
+    }
+
+    return {
+      id: m.id,
+      pageOrder: m.page_order,
+      objectKey: linkedMediaId || m.object_key,
+      url: m.url,
+      previewUrl: linkedMediaId
+        ? `/api/dashboard/media/${encodeURIComponent(linkedMediaId)}`
+        : (m.url || ''),
+      mimeType: m.mime_type,
+      fileSize: m.file_size,
+      isPrimary: m.is_primary === 1,
+    };
+  });
 
   return jsonResponse({
     success: true,
@@ -1604,10 +1779,10 @@ export async function handleResetDashboardSchedule(groupId: string, actorId: str
  */
 export async function handleGetDashboardDecisions(env: Env): Promise<Response> {
   const rows = await env.DB.prepare(`
-    SELECT cd.*, g.name as group_name, u.full_name as creator_name
+    SELECT cd.*, g.name as group_name, COALESCE(u.full_name, cd.requester_name) as creator_name
     FROM community_decisions cd
     LEFT JOIN groups g ON cd.group_id = g.id
-    LEFT JOIN users u ON cd.created_by = u.id
+    LEFT JOIN users u ON cd.requested_by = u.id
     ORDER BY cd.created_at DESC LIMIT 100
   `).all();
   return jsonResponse({ success: true, decisions: rows.results || [] });
@@ -3557,7 +3732,7 @@ export function renderDashboardHtml(): Response {
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.5rem;">
             <div style="background:rgba(255,255,255,0.02); padding:1.25rem; border-radius:12px; border:1px solid var(--border);">
               <h3 style="font-size:0.95rem; color:var(--cyan); margin-bottom:0.75rem;">بيانات الخادم (Cloudflare Workers)</h3>
-              <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">المسار المعتمد: <code>https://tanweer.magd.workers.dev/dashboard</code></p>
+              <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">المسار المعتمد: <code>/dashboard</code> (على عنوان البيئة الحالية)</p>
               <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">حالة البيئة: <strong id="sysEnv" style="color:var(--emerald);">-</strong></p>
               <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">الموقع الجغرافي: <strong>Cloudflare Edge Network</strong></p>
               <p style="font-size:0.85rem; color:var(--text-sec);">قاعدة البيانات: <strong>Cloudflare D1 (مفعلة ومتصلة)</strong></p>
@@ -3747,15 +3922,18 @@ export function renderDashboardHtml(): Response {
       <div style="margin-top:1.25rem; padding:1rem; border-radius:10px; background:rgba(0, 229, 255, 0.03); border:1px solid rgba(0, 229, 255, 0.2);">
         <h4 style="font-size:0.9rem; color:var(--cyan); margin:0 0 0.5rem 0;">🔑 إدارة بيانات الدخول ورمز الاسترداد البديل</h4>
         <div style="font-size:0.8rem; color:var(--text-sec); margin-bottom:0.75rem;">
-          يمكن لمالك المنظومة توليد رمز استرداد جديد أحادي الاستخدام (صالح لـ 24 ساعة) لمساعدة الطالب أو المعلم عند فقدان وسيلة دخوله. يتم حفظ التجزئة المشفرة فقط دون إظهار أي كلمة مرور سابقة.
+          يمكن لمالك المنظومة إصدار رمز استرداد دائم جديد. تُحفظ بصمة للتحقق ونسخة مشفرة للتسليم الخاص داخل إشعارات حساب المستخدم، ولا يظهر الرمز في لوحة الإدارة.
         </div>
         <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; margin-bottom:0.5rem;">
           <label style="font-size:0.8rem; color:var(--text-sec); display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
-            <input type="checkbox" id="udReissueRevokeSessions" checked style="cursor:pointer;">
+            <input type="checkbox" id="udReissueRevokeSessions" style="cursor:pointer;">
             إبطال الجلسات الحالية النشطة فوراً لضمان الأمان
           </label>
           <button class="action-btn" onclick="reissueUserCredentialsFromModal()" style="background:var(--cyan); color:#000; font-weight:700; padding:0.4rem 0.8rem; font-size:0.8rem;">
             ⚡ إصدار رمز استرداد جديد
+          </button>
+          <button class="action-btn reject" onclick="revokeUserRecoveryCodeFromModal()" style="padding:0.4rem 0.8rem; font-size:0.8rem;">
+            إلغاء رمز الاسترداد الحالي
           </button>
         </div>
         <div id="udReissueResult" style="display:none; margin-top:0.5rem; padding:0.75rem; border-radius:8px; background:rgba(0,0,0,0.5); border:1px solid var(--border);"></div>
@@ -4101,6 +4279,13 @@ export function renderDashboardHtml(): Response {
       };
       document.getElementById('pageTitle').textContent = titles[tabId] || 'غرفة التحكم';
 
+      const mobileNav = document.getElementById('dashboardNav');
+      const ownerInfo = document.querySelector('.owner-info');
+      if (mobileNav?.classList.contains('mobile-open')) {
+        mobileNav.classList.remove('mobile-open');
+        ownerInfo?.classList.remove('mobile-open');
+      }
+
       if (tabId === 'overview') loadStats();
       if (tabId === 'users') loadUsers(0);
       if (tabId === 'roles') loadRoles();
@@ -4148,11 +4333,6 @@ export function renderDashboardHtml(): Response {
         document.getElementById('statSecurity').textContent = s.security.activeSessions;
         document.getElementById('statAudit').textContent = s.auditLog;
 
-        document.getElementById('acadLessons').textContent = s.content;
-        document.getElementById('acadHomeworks').textContent = s.homework;
-        document.getElementById('acadExams').textContent = s.exams;
-        document.getElementById('acadEvents').textContent = s.events;
-
         document.getElementById('sysEnv').textContent = s.system.environment;
 
         if (s.roleRequests.pending > 0) {
@@ -4165,6 +4345,14 @@ export function renderDashboardHtml(): Response {
       }
     }
 
+    function toggleMobileMenu() {
+      const nav = document.getElementById('dashboardNav');
+      const ownerInfo = document.querySelector('.owner-info');
+      if (!nav) return;
+
+      const isOpen = nav.classList.toggle('mobile-open');
+      if (ownerInfo) ownerInfo.classList.toggle('mobile-open', isOpen);
+    }
     function debounceUserSearch() {
       clearTimeout(searchTimeout);
       searchTimeout = setTimeout(() => loadUsers(0), 300);
@@ -4401,26 +4589,19 @@ export function renderDashboardHtml(): Response {
       const resContainer = document.getElementById('udReissueResult');
       resContainer.style.display = 'block';
       resContainer.innerHTML = '<div style="color:var(--text-sec); font-size:0.8rem;">جاري إصدار رمز استرداد جديد...</div>';
-
       try {
-        const res = await fetch(\`/api/dashboard/users/\${activeUserId}/reissue-credentials\`, {
+        const res = await fetch('/api/dashboard/users/' + encodeURIComponent(activeUserId) + '/reissue-credentials', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ revokeExistingSessions, expiresInHours: 24 })
+          body: JSON.stringify({ type: 'RECOVERY_CODE', revokeExistingSessions })
         });
         const data = await res.json();
         if (data.success) {
-          const secret = escapeHtml(data.temporarySecret);
-          resContainer.innerHTML = \`
-            <div style="color:var(--emerald); font-weight:bold; font-size:0.85rem; margin-bottom:0.4rem;">✓ تم إنشاء رمز استرداد بديل بنجاح:</div>
-            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem;">
-              <code style="font-size:1.1rem; color:var(--cyan); font-weight:800; background:rgba(0,229,255,0.1); padding:0.4rem 0.8rem; border-radius:6px; letter-spacing:1px;" id="reissuedCodeText">\${secret}</code>
-              <button class="action-btn" onclick="navigator.clipboard.writeText(document.getElementById('reissuedCodeText').innerText); showToast('تم نسخ رمز الاسترداد بنجاح');" style="padding:0.4rem 0.8rem; font-size:0.8rem;">📋 نسخ</button>
-            </div>
-            <div style="color:var(--amber); font-size:0.75rem;">⚠️ هذا الرمز أحادي الاستخدام وصالح لـ 24 ساعة فقط. لن يظهر هذا الرمز مرة أخرى، يرجى نسخه وتزويده للمستخدم فوراً.</div>
-          \`;
-          showToast('تم إصدار رمز الاسترداد بنجاح');
-          const resRefresh = await fetch('/api/dashboard/users/' + activeUserId);
+          resContainer.innerHTML = '<div style="color:var(--emerald); font-weight:bold; font-size:0.85rem; margin-bottom:0.4rem;">✓ تم إنشاء رمز استرداد دائم بنجاح.</div>' +
+            '<div style="color:var(--text-sec); font-size:0.78rem; line-height:1.8;">حُفظت الرسالة التي تحتوي الرمز مشفرة داخل إشعارات حساب المستخدم. لن يظهر الرمز في لوحة الإدارة أو استجابة الخادم؛ يستطيع صاحب الحساب فقط عرضه من ملفه الشخصي بعد تسجيل الدخول.</div>' +
+            '<div style="color:var(--amber); font-size:0.75rem; margin-top:0.35rem;">يبقى الرمز صالحاً حتى تغييره من المستخدم أو إلغائه من الإدارة.</div>';
+          showToast('تم تسليم رمز الاسترداد إلى إشعارات حساب المستخدم');
+          const resRefresh = await fetch('/api/dashboard/users/' + encodeURIComponent(activeUserId));
           const dataRefresh = await resRefresh.json();
           if (dataRefresh.success) {
             const sBody = document.getElementById('udSessionsTableBody');
@@ -4428,28 +4609,49 @@ export function renderDashboardHtml(): Response {
             if (sessions.length) {
               sBody.innerHTML = sessions.map(s => {
                 const sId = escapeHtml(s.id);
-                return \`<tr>
-                  <td><code>\${escapeHtml(s.id.substring(0, 10))}...</code></td>
-                  <td>\${escapeHtml(s.ip_address)}</td>
-                  <td>\${escapeHtml(s.device_info)}</td>
-                  <td>\${new Date(s.created_at).toLocaleString('ar-EG')}</td>
-                  <td>
-                    <button class="action-btn reject" data-user="\${escapeHtml(activeUserId)}" data-session="\${sId}" onclick="revokeSingleSession(this.getAttribute('data-user'), this.getAttribute('data-session'))" style="font-size:0.7rem; padding:0.2rem 0.5rem;">طرد</button>
-                  </td>
-                </tr>\`;
+                return '<tr>' +
+                  '<td><code>' + escapeHtml(s.id.substring(0, 10)) + '...</code></td>' +
+                  '<td>' + escapeHtml(s.ip_address) + '</td>' +
+                  '<td>' + escapeHtml(s.device_info) + '</td>' +
+                  '<td>' + new Date(s.created_at).toLocaleString('ar-EG') + '</td>' +
+                  '<td><button class="action-btn reject" data-user="' + escapeHtml(activeUserId) + '" data-session="' + sId + '" onclick="revokeSingleSession(this.getAttribute(\\'data-user\\'), this.getAttribute(\\'data-session\\'))" style="font-size:0.7rem; padding:0.2rem 0.5rem;">طرد</button></td>' +
+                  '</tr>';
               }).join('');
             } else {
               sBody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">لا توجد جلسات نشطة حالياً</td></tr>';
             }
           }
         } else {
-          resContainer.innerHTML = \`<div style="color:var(--ruby); font-size:0.85rem;">\${escapeHtml(data.message || 'فشلت عملية إصدار الرمز')}</div>\`;
+          resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">' + escapeHtml(data.message || 'فشلت عملية إصدار الرمز') + '</div>';
         }
       } catch (e) {
         resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
       }
     }
 
+    async function revokeUserRecoveryCodeFromModal() {
+      if (!activeUserId) return;
+      if (!confirm('هل تريد إلغاء رمز الاسترداد الحالي لهذا الحساب؟ لن يعمل الرمز بعد ذلك، ولن يتم إنشاء بديل تلقائياً.')) return;
+      const resContainer = document.getElementById('udReissueResult');
+      resContainer.style.display = 'block';
+      resContainer.innerHTML = '<div style="color:var(--text-sec); font-size:0.8rem;">جارٍ إلغاء رمز الاسترداد...</div>';
+      try {
+        const res = await fetch('/api/dashboard/users/' + encodeURIComponent(activeUserId) + '/revoke-recovery-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (data.success) {
+          resContainer.innerHTML = '<div style="color:var(--amber); font-size:0.85rem; font-weight:bold;">✓ ' + escapeHtml(data.message || 'تم إلغاء رمز الاسترداد') + '</div>';
+          showToast('تم إلغاء رمز الاسترداد السابق');
+        } else {
+          resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">' + escapeHtml(data.message || 'فشل إلغاء رمز الاسترداد') + '</div>';
+        }
+      } catch (error) {
+        resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
+      }
+    }
     async function loadRoles() {
       const container = document.getElementById('rolesList');
       container.innerHTML = '<div style="text-align:center; color:var(--text-sec); grid-column:1/-1;">جاري جلب بيانات الرتب...</div>';
@@ -4949,56 +5151,89 @@ export function renderDashboardHtml(): Response {
     }
 
     async function openHomeworkDetailModal(hwId) {
-      document.getElementById('homeworkDetailModal').style.display = 'flex';
-      document.getElementById('hwModalTitle').textContent = 'جاري التحميل...';
-      document.getElementById('hwModalGroupSubject').textContent = '';
-      document.getElementById('hwModalDueDate').textContent = '-';
-      document.getElementById('hwModalAuthor').textContent = '-';
-      document.getElementById('hwModalDetails').textContent = '';
-      document.getElementById('hwModalMediaCount').textContent = '0';
-      document.getElementById('hwModalMediaGrid').innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">جاري جلب المرفقات...</div>';
+      const modal = document.getElementById('homeworkDetailModal');
+      if (!modal) return;
+
+      const titleElement = document.getElementById('hdTitle');
+      const subjectGroupElement = document.getElementById('hdSubjectGroup');
+      const studyDateElement = document.getElementById('hdStudyDate');
+      const dueDateElement = document.getElementById('hdDueDate');
+      const taskTypeElement = document.getElementById('hdTaskType');
+      const authorElement = document.getElementById('hdAuthor');
+      const pagesElement = document.getElementById('hdPages');
+      const questionsElement = document.getElementById('hdQuestions');
+      const detailsElement = document.getElementById('hdDetails');
+      const mediaCountElement = document.getElementById('hdMediaCount');
+      const grid = document.getElementById('hdMediaGrid');
+      const deleteButton = document.getElementById('hdDeleteBtn');
+
+      modal.style.display = 'flex';
+      if (titleElement) titleElement.textContent = 'جاري تحميل تفاصيل الواجب...';
+      if (subjectGroupElement) subjectGroupElement.textContent = '';
+      if (studyDateElement) studyDateElement.textContent = '-';
+      if (dueDateElement) dueDateElement.textContent = '-';
+      if (taskTypeElement) taskTypeElement.textContent = '-';
+      if (authorElement) authorElement.textContent = '-';
+      if (pagesElement) pagesElement.textContent = '-';
+      if (questionsElement) questionsElement.textContent = '-';
+      if (detailsElement) detailsElement.textContent = '';
+      if (mediaCountElement) mediaCountElement.textContent = '0';
+      if (grid) grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">جاري جلب المرفقات...</div>';
+      if (deleteButton) { deleteButton.disabled = true; deleteButton.onclick = null; }
 
       try {
         const res = await fetch('/api/dashboard/homeworks/' + encodeURIComponent(hwId));
         const data = await res.json();
-        if (!data.success) {
-          alert(data.message || 'فشل جلب تفاصيل الواجب');
-          closeHomeworkDetailModal();
+        if (!res.ok || !data.success) {
+          const message = data.message || 'فشل جلب تفاصيل الواجب';
+          if (titleElement) titleElement.textContent = 'تعذر تحميل تفاصيل الواجب';
+          if (detailsElement) detailsElement.textContent = message;
+          if (grid) grid.innerHTML = '<div style="color:var(--ruby); font-size:0.8rem; grid-column:1/-1;">' + escapeHtml(message) + '</div>';
           return;
         }
 
         const hw = data.homework || {};
-        const media = data.media || [];
+        const media = Array.isArray(hw.media) ? hw.media : (Array.isArray(data.media) ? data.media : []);
         const subjectName = hw.subject_name || hw.subject_id || '';
         const groupName = hw.group_name || hw.group_id || '';
+        const taskType = String(hw.task_type || 'HOMEWORK').toUpperCase();
 
-        document.getElementById('hwModalTitle').textContent = (hw.title || '') + ' 📝';
-        document.getElementById('hwModalGroupSubject').textContent = \`الشعبة: \${groupName} | المادة: \${subjectName}\`;
-        document.getElementById('hwModalDueDate').textContent = hw.due_date || '-';
-        document.getElementById('hwModalAuthor').textContent = hw.author_name || '-';
-        document.getElementById('hwModalDetails').textContent = hw.details || 'لا يوجد شرح تفصيلي إضافي';
-        document.getElementById('hwModalMediaCount').textContent = media.length;
+        if (titleElement) titleElement.textContent = (hw.title || 'واجب دراسي') + ' 📝';
+        if (subjectGroupElement) subjectGroupElement.textContent = 'الشعبة: ' + groupName + ' | المادة: ' + subjectName;
+        if (studyDateElement) studyDateElement.textContent = hw.study_date || '-';
+        if (dueDateElement) dueDateElement.textContent = hw.due_date || '-';
+        if (taskTypeElement) taskTypeElement.textContent = taskType === 'TASK' ? 'مهمة دراسية' : 'واجب منزلي';
+        if (authorElement) authorElement.textContent = hw.author_name || '-';
+        if (pagesElement) pagesElement.textContent = hw.page_numbers || '-';
+        if (questionsElement) questionsElement.textContent = hw.question_numbers || '-';
+        if (detailsElement) detailsElement.textContent = hw.details || 'لا توجد تعليمات إضافية لهذا الواجب';
+        if (mediaCountElement) mediaCountElement.textContent = String(media.length);
 
-        const grid = document.getElementById('hwModalMediaGrid');
-        if (media.length) {
-          grid.innerHTML = media.map(m => {
-            const safeUrl = encodeURI(m.media_url || m.url || '');
-            const safeMime = escapeHtml(m.mime_type || 'صورة');
-            return \`
-              <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.4); text-align:center; cursor:pointer;" data-url="\${escapeHtml(safeUrl)}" onclick="openMediaLightbox(this.getAttribute('data-url'))">
-                <img src="\${escapeHtml(safeUrl)}" alt="مرفق الواجب" style="width:100%; height:90px; object-fit:cover; display:block;">
-                <div style="padding:0.3rem; font-size:0.7rem; color:var(--text-muted); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
-                  \${safeMime}
-                </div>
-              </div>
-            \`;
-          }).join('');
-        } else {
-          grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">لا توجد صور أو مرفقات مرفوعة مع هذا الواجب</div>';
+        if (grid) {
+          if (media.length) {
+            grid.innerHTML = media.map(m => {
+              const rawUrl = m.previewUrl || m.media_url || m.url || '';
+              const safeUrl = escapeHtml(encodeURI(String(rawUrl)));
+              const safeMime = escapeHtml(m.mime_type || m.mimeType || 'مرفق');
+              return '<div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.4); text-align:center; cursor:pointer;" data-url="' + safeUrl + '" onclick="openMediaLightbox(this.dataset.url)">' +
+                '<img src="' + safeUrl + '" alt="مرفق الواجب" style="width:100%; height:90px; object-fit:cover; display:block;">' +
+                '<div style="padding:0.3rem; font-size:0.7rem; color:var(--text-muted); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">' + safeMime + '</div>' +
+                '</div>';
+            }).join('');
+          } else {
+            grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">لا توجد صور أو مرفقات مرفوعة مع هذا الواجب</div>';
+          }
         }
-      } catch (e) {
-        alert('حدث خطأ أثناء تحميل بيانات الواجب');
-        closeHomeworkDetailModal();
+
+        if (deleteButton && hw.id) {
+          deleteButton.disabled = false;
+          deleteButton.onclick = () => deleteHomework(hw.id, hw.title || 'الواجب');
+        }
+      } catch (error) {
+        console.error('Failed to load homework details:', error);
+        if (titleElement) titleElement.textContent = 'تعذر تحميل تفاصيل الواجب';
+        if (detailsElement) detailsElement.textContent = 'حدث خطأ أثناء الاتصال بالخادم. حاول تحديث القائمة ثم إعادة المحاولة.';
+        if (grid) grid.innerHTML = '<div style="color:var(--ruby); font-size:0.8rem; grid-column:1/-1;">تعذر تحميل المرفقات</div>';
       }
     }
 
@@ -5013,6 +5248,7 @@ export function renderDashboardHtml(): Response {
         const data = await res.json();
         if (data.success) {
           showToast('تم حذف الواجب بنجاح');
+          closeHomeworkDetailModal();
           loadHomeworks(pagination.homeworks.offset);
           loadStats();
         } else {
@@ -5662,17 +5898,17 @@ export function renderDashboardHtml(): Response {
 
     function openPurgeModal() {
       currentPurgeSecret = '';
-      const secretInput = document.getElementById('purgeModalSecretInput');
+      const secretInput = document.getElementById('purgeStage1Secret');
       if (secretInput) secretInput.value = '';
       const errBox = document.getElementById('purgeStage1Error');
       if (errBox) { errBox.style.display = 'none'; errBox.textContent = ''; }
-      const stage1 = document.getElementById('purgeModalStage1');
+      const stage1 = document.getElementById('purgeStage1Section');
       if (stage1) stage1.style.display = 'block';
-      const stage2 = document.getElementById('purgeModalStage2');
+      const stage2 = document.getElementById('purgeStage2Section');
       if (stage2) stage2.style.display = 'none';
-      const confirmInput = document.getElementById('purgeConfirmInput');
+      const confirmInput = document.getElementById('purgeConfirmYesInput');
       if (confirmInput) confirmInput.value = '';
-      const execBtn = document.getElementById('executePurgeBtn');
+      const execBtn = document.getElementById('executePurgeFinalBtn');
       if (execBtn) {
         execBtn.disabled = true;
         execBtn.style.opacity = '0.5';
@@ -5683,15 +5919,15 @@ export function renderDashboardHtml(): Response {
 
     function closePurgeModal() {
       currentPurgeSecret = '';
-      const secretInput = document.getElementById('purgeModalSecretInput');
+      const secretInput = document.getElementById('purgeStage1Secret');
       if (secretInput) secretInput.value = '';
-      const confirmInput = document.getElementById('purgeConfirmInput');
+      const confirmInput = document.getElementById('purgeConfirmYesInput');
       if (confirmInput) confirmInput.value = '';
       document.getElementById('purgeModal').style.display = 'none';
     }
 
     async function submitPurgeStage1() {
-      const secretInput = document.getElementById('purgeModalSecretInput');
+      const secretInput = document.getElementById('purgeStage1Secret');
       const errBox = document.getElementById('purgeStage1Error');
       const secret = (secretInput?.value || '').trim();
 
@@ -5706,7 +5942,7 @@ export function renderDashboardHtml(): Response {
       }
 
       if (errBox) { errBox.style.display = 'none'; errBox.textContent = ''; }
-      const submitBtn = document.getElementById('submitPurgeStage1Btn');
+      const submitBtn = document.getElementById('purgeStage1Btn');
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'جاري التحقق من السر وفحص الجداول...'; }
 
       try {
@@ -5735,69 +5971,41 @@ export function renderDashboardHtml(): Response {
         if (secretInput) secretInput.value = '';
 
         // Transition from Stage 1 to Stage 2
-        document.getElementById('purgeModalStage1').style.display = 'none';
-        document.getElementById('purgeModalStage2').style.display = 'block';
+        document.getElementById('purgeStage1Section').style.display = 'none';
+        document.getElementById('purgeStage2Section').style.display = 'block';
 
         const counts = data.counts || data.preview || {};
-        const fullyPurged = data.fullyPurgedTables || [
-          'contents', 'content_media', 'homeworks', 'homework_media', 'exams',
-          'events', 'schedule_slots', 'chat_messages', 'notifications', 'school_holidays',
-          'decisions', 'decision_votes', 'reports', 'attendance', 'badges',
-          'user_badges', 'correction_suggestions', 'rate_limits', 'sync_mutations',
-          'outbox_mutations', 'groups', 'subjects', 'content_reads', 'content_views',
-          'content_useful', 'teacher_assistants', 'admin_audit_logs', 'system_audit_logs',
-          'role_audit_logs', 'sync_generation_history', 'audit_logs'
-        ];
+        const fullyPurged = Array.isArray(data.fullyPurgedTables) ? data.fullyPurgedTables : [];
+        const partiallyPurged = Array.isArray(data.partiallyPurgedTables) ? data.partiallyPurgedTables : [];
+        const preserved = Array.isArray(data.preservedTables) ? data.preservedTables : [];
 
-        let summaryHtml = \`
-          <div style="background:rgba(0,229,255,0.05); border:1px solid rgba(0,229,255,0.3); border-radius:8px; padding:0.8rem; margin-bottom:1rem;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-size:0.85rem; color:var(--text-sec);">جيل البيانات الحالي: <code>\${escapeHtml(String(data.currentGeneration || 'غير محدد'))}</code></span>
-              <span style="font-size:0.85rem; color:var(--cyan); font-weight:bold;">جيل البيانات الجديد: <code>\${escapeHtml(String(data.nextGeneration || ''))}</code></span>
-            </div>
-          </div>
+        document.getElementById('purgeTotalRecordsDisplay').textContent = Number(data.totalRecords || 0).toLocaleString();
+        document.getElementById('purgeNextGenDisplay').textContent = data.nextGeneration || '-';
 
-          <div style="margin-bottom:0.8rem;">
-            <div style="font-size:0.85rem; font-weight:bold; color:var(--ruby); margin-bottom:0.4rem;">
-              🗑️ جداول سيتم تصفيرها وحذفها بالكامل (31 جدولاً):
-            </div>
-            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:0.4rem; font-size:0.75rem; max-height:160px; overflow-y:auto; padding:0.4rem; background:rgba(0,0,0,0.3); border-radius:6px; border:1px solid var(--border);">
-        \`;
+        document.getElementById('purgeFullyPurgedGrid').innerHTML = fullyPurged.map(entry => {
+          const table = typeof entry === 'string' ? entry : (entry.table || '');
+          const count = typeof entry === 'string' ? (counts[table] ?? 0) : (entry.count ?? counts[table] ?? 0);
+          return '<div style="display:flex; justify-content:space-between; gap:0.5rem; padding:0.25rem 0.4rem; background:rgba(255,255,255,0.02); border-radius:4px;">' +
+            '<span>' + escapeHtml(table) + '</span>' +
+            '<strong style="color:var(--ruby);">' + escapeHtml(String(count)) + '</strong>' +
+            '</div>';
+        }).join('') || '<div style="color:var(--text-muted);">لا توجد جداول للتصفير.</div>';
 
-        for (const tbl of fullyPurged) {
-          const count = counts[tbl] !== undefined ? counts[tbl] : (counts[tbl] ?? 0);
-          summaryHtml += \`
-            <div style="display:flex; justify-content:space-between; padding:0.25rem 0.4rem; background:rgba(255,255,255,0.02); border-radius:4px;">
-              <span>\${escapeHtml(tbl)}</span>
-              <strong style="color:var(--ruby);">\${escapeHtml(String(count))}</strong>
-            </div>
-          \`;
-        }
+        document.getElementById('purgePartiallyPurgedBox').innerHTML = partiallyPurged.map(entry => {
+          return '<div style="padding:0.35rem 0; border-bottom:1px solid var(--border);">' +
+            '<strong>' + escapeHtml(entry.table || '') + '</strong>' +
+            '<div>سيتم حذف: ' + escapeHtml(String(entry.purgedCount ?? 0)) + ' — سيبقى: ' + escapeHtml(String(entry.retainedCount ?? 0)) + '</div>' +
+            '<div style="color:var(--text-muted);">' + escapeHtml(entry.policy || '') + '</div>' +
+            '</div>';
+        }).join('') || '<div style="color:var(--text-muted);">لا توجد جداول ذات تصفير جزئي.</div>';
 
-        summaryHtml += \`
-            </div>
-          </div>
-
-          <div style="margin-bottom:0.8rem;">
-            <div style="font-size:0.85rem; font-weight:bold; color:var(--amber); margin-bottom:0.4rem;">
-              ⚠️ جداول سيتم تصفيرها جزئياً (جدولان):
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem; font-size:0.75rem;">
-              <div style="background:rgba(255,160,0,0.05); border:1px solid rgba(255,160,0,0.2); padding:0.4rem; border-radius:4px;">
-                <strong>users</strong>: يتم الإبقاء على حساب المالك وحذف باقي الحسابات
-              </div>
-              <div style="background:rgba(255,160,0,0.05); border:1px solid rgba(255,160,0,0.2); padding:0.4rem; border-radius:4px;">
-                <strong>device_sync_tokens</strong>: يتم إلغاء وإبطال جميع رموز الأجهزة القديمة
-              </div>
-            </div>
-          </div>
-
-          <div style="background:rgba(0,230,118,0.05); border:1px solid rgba(0,230,118,0.2); border-radius:6px; padding:0.5rem 0.8rem; font-size:0.75rem; color:var(--emerald);">
-            🛡️ جداول محفوظة بالكامل دون مساس: <strong>schema_migrations</strong> (لحماية بنية وتاريخ مخطط قاعدة البيانات)
-          </div>
-        \`;
-
-        document.getElementById('purgeStage2Summary').innerHTML = summaryHtml;
+        document.getElementById('purgePreservedBox').innerHTML = preserved.map(entry => {
+          return '<div style="padding:0.35rem 0; border-bottom:1px solid var(--border);">' +
+            '<strong>' + escapeHtml(entry.table || '') + '</strong>' +
+            '<div>' + escapeHtml(entry.action || '') + '</div>' +
+            '<div style="color:var(--text-muted);">السجلات الحالية: ' + escapeHtml(String(entry.totalRecords ?? 0)) + '</div>' +
+            '</div>';
+        }).join('') || '<div style="color:var(--text-muted);">لا توجد جداول محفوظة.</div>';
       } catch (e) {
         if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'التحقق والمتابعة للمعاينة 🔒'; }
         if (errBox) {
@@ -5810,8 +6018,8 @@ export function renderDashboardHtml(): Response {
     }
 
     function checkPurgeConfirmMatch() {
-      const txt = (document.getElementById('purgeConfirmInput')?.value || '').trim();
-      const btn = document.getElementById('executePurgeBtn');
+      const txt = (document.getElementById('purgeConfirmYesInput')?.value || '').trim();
+      const btn = document.getElementById('executePurgeFinalBtn');
       if (!btn) return;
       if (txt === 'YES') {
         btn.disabled = false;
@@ -5825,7 +6033,7 @@ export function renderDashboardHtml(): Response {
     }
 
     async function executePurgeFinal() {
-      const confirmation = (document.getElementById('purgeConfirmInput')?.value || '').trim();
+      const confirmation = (document.getElementById('purgeConfirmYesInput')?.value || '').trim();
       if (confirmation !== 'YES' || !currentPurgeSecret) {
         alert('يجب كتابة كلمة YES بالحروف الإنجليزية الكبيرة للتأكيد.');
         return;
@@ -5835,12 +6043,10 @@ export function renderDashboardHtml(): Response {
         return;
       }
 
-      const execBtn = document.getElementById('executePurgeBtn');
+      const execBtn = document.getElementById('executePurgeFinalBtn');
       if (execBtn) { execBtn.disabled = true; execBtn.textContent = 'جاري تصفير قاعدة البيانات وتوليد الجيل الجديد...'; }
 
       const secretToSend = currentPurgeSecret;
-      // Wipe from in-memory variable immediately
-      currentPurgeSecret = '';
 
       try {
         const res = await fetch('/api/dashboard/system/purge', {
@@ -5854,6 +6060,7 @@ export function renderDashboardHtml(): Response {
         });
         const data = await res.json();
         if (data.success) {
+          currentPurgeSecret = '';
           const purgedCount = Array.isArray(data.tablesPurged) ? data.tablesPurged.length : (data.totalTables || 31);
           alert(\`تم تصفير البيانات بنجاح!\nالجيل الجديد: \${data.newGeneration}\nتم تفريغ \${purgedCount} جدولاً.\`);
           closePurgeModal();

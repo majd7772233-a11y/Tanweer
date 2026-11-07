@@ -27,6 +27,7 @@ describe('Audit Fixes 20-28 (Server verification)', () => {
                   full_name: 'طالب تنوير',
                   phone_number: '771234567',
                   role: 'STUDENT',
+                  status: 'ACTIVE',
                 };
               }
               if (sql.includes('FROM users WHERE phone_number = ?')) {
@@ -55,10 +56,11 @@ describe('Audit Fixes 20-28 (Server verification)', () => {
               if (sql.includes('UPDATE users SET password_hash = ?')) {
                 updatedPasswordHash = params[0];
               }
-              if (sql.includes('UPDATE user_recovery_tokens SET uses_count = uses_count + 1')) {
+              if (sql.includes('UPDATE user_recovery_tokens') && sql.includes('uses_count = uses_count + 1')) {
                 tokenBurned = true;
+                return { success: true, meta: { changes: 1 } };
               }
-              return { success: true };
+              return { success: true, meta: { changes: 1 } };
             },
           }),
           run: async () => ({ success: true }),
@@ -140,15 +142,27 @@ describe('Audit Fixes 20-28 (Server verification)', () => {
     const mockEnv = {
       DB: {
         prepare: (sql: string) => ({
-          bind: () => ({
+          bind: (...params: any[]) => ({
             first: async () => {
-              if (sql.includes('FROM schedule_versions')) return { id: 'ver_1', version_number: 1 };
+              if (sql.includes('FROM schedule_versions') && sql.includes('is_active = 1')) {
+                return { id: 'ver_1', version_number: 1 };
+              }
+              if (sql.includes('SELECT id, start_time, end_time FROM schedule_slots')) return null;
               return null;
             },
-            run: async () => ({ success: true }),
+            run: async () => ({ success: true, meta: { changes: 1 } }),
+            sql,
+            params,
           }),
-          run: async () => ({ success: true }),
+          run: async () => ({ success: true, meta: { changes: 1 } }),
         }),
+        batch: async (statements: any[]) => {
+          const results = [];
+          for (const statement of statements) {
+            results.push(await statement.run());
+          }
+          return results;
+        },
       },
     } as unknown as Env;
 

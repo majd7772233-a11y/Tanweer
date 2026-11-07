@@ -64,6 +64,19 @@ interface ScheduleDao {
 
     @Query("SELECT * FROM cached_schedule_slots WHERE groupId = :groupId")
     suspend fun getSlotsSync(groupId: String): List<ScheduleSlotEntity>
+
+    /**
+     * Atomically replaces a server snapshot while retaining local slot mutations.
+     * If the app process is killed during sync, Room rolls back the whole replacement
+     * instead of leaving the schedule table empty after the DELETE.
+     */
+    @Transaction
+    suspend fun reconcileGroupSchedule(groupId: String, serverSlots: List<ScheduleSlotEntity>) {
+        val localMutations = getSlotsSync(groupId).filter { it.syncStatus != "SYNCED" }
+        clearSlots(groupId)
+        if (serverSlots.isNotEmpty()) insertSlots(serverSlots)
+        if (localMutations.isNotEmpty()) insertSlots(localMutations)
+    }
 }
 
 @Dao
@@ -110,11 +123,17 @@ interface ContentDao {
     @Query("DELETE FROM cached_contents WHERE groupId = :groupId")
     suspend fun clearContents(groupId: String)
 
-    @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND studyDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND studyDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedContentsForDate(groupId: String, date: String)
 
-    @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_contents WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedContents(groupId: String)
+
+    @Query("SELECT * FROM cached_contents WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getPendingContents(groupId: String): List<ContentEntity>
+
+    @Query("SELECT * FROM cached_contents WHERE syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getAllPendingContents(): List<ContentEntity>
 
     @Query("SELECT COUNT(*) FROM cached_contents WHERE authorName = :authorName AND studyDate BETWEEN :startDate AND :endDate")
     fun countContentsForAuthorBetween(authorName: String, startDate: String, endDate: String): Flow<Int>
@@ -149,13 +168,16 @@ interface HomeworkDao {
     @Query("DELETE FROM cached_homeworks WHERE id = :id")
     suspend fun deleteHomeworkById(id: String)
 
-    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedHomeworks(groupId: String)
 
-    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND (studyDate = :date OR dueDate = :date) AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("SELECT * FROM cached_homeworks WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getPendingHomeworks(groupId: String): List<HomeworkEntity>
+
+    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND (studyDate = :date OR dueDate = :date) AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedHomeworksForDate(groupId: String, date: String)
 
-    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND (studyDate LIKE :monthPrefix || '%' OR dueDate LIKE :monthPrefix || '%') AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_homeworks WHERE groupId = :groupId AND (studyDate LIKE :monthPrefix || '%' OR dueDate LIKE :monthPrefix || '%') AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedHomeworksForMonth(groupId: String, monthPrefix: String)
 
     @Query("SELECT * FROM cached_homework_completions WHERE userId = :userId")
@@ -219,13 +241,16 @@ interface ExamDao {
         insertExam(newEntity)
     }
 
-    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExams(groupId: String)
 
-    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getPendingExams(groupId: String): List<ExamEntity>
+
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExamsForDate(groupId: String, date: String)
 
-    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExamsForMonth(groupId: String, monthPrefix: String)
 
     @Query("DELETE FROM cached_exams WHERE groupId = :groupId")
@@ -261,13 +286,16 @@ interface EventDao {
         insertEvent(newEntity)
     }
 
-    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedEvents(groupId: String)
 
-    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("SELECT * FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getPendingEvents(groupId: String): List<EventEntity>
+
+    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedEventsForDate(groupId: String, date: String)
 
-    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_events WHERE (groupId = :groupId OR groupId = 'all') AND eventDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedEventsForMonth(groupId: String, monthPrefix: String)
 
     @Query("DELETE FROM cached_events WHERE groupId = :groupId OR groupId = 'all'")
@@ -313,8 +341,11 @@ interface IssueDao {
     @Query("UPDATE cached_issues SET syncStatus = :status WHERE id = :id")
     suspend fun updateSyncStatus(id: String, status: String)
 
-    @Query("DELETE FROM cached_issues WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED')")
+    @Query("DELETE FROM cached_issues WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedIssues(groupId: String)
+
+    @Query("SELECT * FROM cached_issues WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    suspend fun getPendingIssues(groupId: String): List<IssueEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertComments(comments: List<IssueCommentEntity>)
@@ -529,8 +560,17 @@ interface OutboxDao {
     @Query("DELETE FROM outbox WHERE entityId = :entityId")
     suspend fun deleteByEntityId(entityId: String)
 
+    @Query("DELETE FROM outbox WHERE entityId = :entityId AND entityType = :entityType")
+    suspend fun deleteByEntityIdAndType(entityId: String, entityType: String)
+
+    @Query("DELETE FROM outbox WHERE entityId = :entityId AND (entityType = :entityType OR (:entityType = 'EXAM_CREATE' AND entityType = 'EXAM' AND operation = 'CREATE')) AND status IN ('PENDING', 'FAILED')")
+    suspend fun deleteUnclaimedMutation(entityId: String, entityType: String): Int
+
     @Query("SELECT * FROM outbox WHERE entityId = :entityId AND status IN ('PENDING', 'SYNCING', 'FAILED') LIMIT 1")
     suspend fun getPendingByEntityId(entityId: String): OutboxEntity?
+
+    @Query("SELECT * FROM outbox WHERE entityId = :entityId AND (entityType = :entityType OR (:entityType = 'EXAM_CREATE' AND entityType = 'EXAM' AND operation = 'CREATE') OR (:entityType = 'EXAM_DELETE' AND entityType = 'EXAM' AND operation = 'DELETE') OR (:entityType = 'EXAM_TOGGLE' AND entityType = 'EXAM' AND (operation = 'TOGGLE' OR payloadJson LIKE '%isCompleted%'))) AND status IN ('PENDING', 'SYNCING', 'FAILED') ORDER BY createdAt ASC LIMIT 1")
+    suspend fun getPendingMutation(entityId: String, entityType: String): OutboxEntity?
 
     @Query("UPDATE outbox SET entityId = :newEntityId WHERE entityId = :oldEntityId")
     suspend fun updateEntityId(oldEntityId: String, newEntityId: String)

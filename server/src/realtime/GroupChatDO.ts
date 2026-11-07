@@ -1,5 +1,6 @@
 import { Env } from '../env';
 import { generateId } from '../lib/ids';
+import { getGroupChatSendPermission, isSamePersistedChatMessage, PersistedChatMessageIdentity } from '../services/chat';
 
 interface ClientSession {
   ws: WebSocket;
@@ -8,6 +9,7 @@ interface ClientSession {
   gradeSection: string;
   role: string;
   groupId: string;
+  canSend: boolean;
 }
 
 export class GroupChatDO {
@@ -65,6 +67,7 @@ export class GroupChatDO {
         gradeSection,
         role: verifiedRole,
         groupId,
+        canSend: request.headers.get('X-Can-Send') === '1',
       };
 
       this.sessions.set(server, session);
@@ -73,6 +76,25 @@ export class GroupChatDO {
         try {
           const raw = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
           const data = JSON.parse(raw);
+
+          // Re-check membership and group policy for every message.
+          // This invalidates already-open sockets immediately after demotion/removal.
+          const livePermission = await getGroupChatSendPermission(
+            session.groupId,
+            session.userId,
+            session.role,
+            this.env
+          );
+          if (!livePermission.allowed) {
+            try {
+              server.send(JSON.stringify({
+                type: 'error',
+                code: 'READ_ONLY_GROUP',
+                message: 'لم تعد تملك صلاحية الإرسال في هذه المجموعة. يمكنك متابعة القراءة فقط.',
+              }));
+            } catch {}
+            return;
+          }
 
           // Handle message deletion action by sender or moderator/teacher/admin
           if (data.type === 'delete_message' || data.action === 'delete_message') {
@@ -122,9 +144,9 @@ export class GroupChatDO {
             status: 'SENT',
           };
 
-          // Save message to D1 (idempotent insert)
+          // Persist once, and ACK only a new row or an exact retry of that row.
           try {
-            await this.env.DB.prepare(
+            const insertResult = await this.env.DB.prepare(
               `INSERT OR IGNORE INTO chat_messages (id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp)
                VALUES (?, ?, ?, ?, ?, ?, ?)`
             ).bind(
@@ -137,10 +159,32 @@ export class GroupChatDO {
               now
             ).run();
 
-            // Broadcast verified message to all connected clients only after successful persistence
-            this.broadcast(JSON.stringify(messagePayload));
+            const wasInserted = insertResult.meta?.changes === 1;
+            if (!wasInserted) {
+              const existing = await this.env.DB.prepare(
+                `SELECT group_id, sender_id, text, timestamp
+                 FROM chat_messages WHERE id = ?`
+              ).bind(messageId).first<PersistedChatMessageIdentity>();
 
-            // Send explicit ACK back to the sender
+              if (!isSamePersistedChatMessage(existing, {
+                groupId: session.groupId,
+                senderId: session.userId,
+                text,
+              })) {
+                server.send(JSON.stringify({
+                  type: 'message_error',
+                  id: messageId,
+                  error: 'معرّف الرسالة مستخدم مسبقاً لرسالة أخرى. لم يتم تأكيد الإرسال.',
+                }));
+                return;
+              }
+              messagePayload.timestamp = existing.timestamp;
+            } else {
+              // Broadcast only after D1 confirms a new persisted row.
+              this.broadcast(JSON.stringify(messagePayload));
+            }
+
+            // An exact persisted retry is safe to ACK, but is not rebroadcast.
             try {
               server.send(JSON.stringify({ type: 'ack', id: messageId, status: 'SENT' }));
             } catch {}

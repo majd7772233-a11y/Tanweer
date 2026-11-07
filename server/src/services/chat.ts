@@ -4,6 +4,64 @@ import { mapChatMessage } from '../lib/mappers';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
+import { Role, normalizeRole } from '../lib/roles';
+
+
+export interface PersistedChatMessageIdentity {
+  group_id: string;
+  sender_id: string;
+  text: string;
+  timestamp: number;
+}
+
+export function isSamePersistedChatMessage(
+  existing: PersistedChatMessageIdentity | null,
+  expected: { groupId: string; senderId: string; text: string }
+): existing is PersistedChatMessageIdentity {
+  return !!existing &&
+    existing.group_id === expected.groupId &&
+    existing.sender_id === expected.senderId &&
+    existing.text === expected.text;
+}
+
+export async function getGroupChatSendPermission(
+  groupId: string,
+  userId: string,
+  globalRole: string,
+  env: Env
+): Promise<{ allowed: boolean; chatPolicy: string; memberRole: string }> {
+  const row = await env.DB.prepare(
+    `SELECT g.chat_policy, gm.role AS member_role, u.role AS global_role
+     FROM groups g
+     JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = ? AND gm.status = 'ACTIVE'
+     JOIN users u ON u.id = gm.user_id
+     WHERE g.id = ?`
+  ).bind(userId, groupId).first<{
+    chat_policy: string | null;
+    member_role: string;
+    global_role: string;
+  }>();
+
+  if (!row) {
+    // Membership can be revoked while a WebSocket is still open.
+    // Missing an active membership must never fall back to public send access.
+    return { allowed: false, chatPolicy: 'UNKNOWN', memberRole: Role.STUDENT };
+  }
+
+  const chatPolicy = (row.chat_policy || 'MEMBERS').toUpperCase();
+  const effectiveGlobalRole = normalizeRole(row.global_role || globalRole);
+  const groupRole = normalizeRole(row?.member_role || Role.STUDENT);
+  if (chatPolicy !== 'STAFF_ONLY') {
+    return { allowed: true, chatPolicy, memberRole: groupRole };
+  }
+
+  const allowedRoles = new Set<Role>([Role.TEACHER, Role.ADMIN, Role.SYSTEM_OWNER]);
+  return {
+    allowed: allowedRoles.has(effectiveGlobalRole) || groupRole === Role.TEACHER || groupRole === Role.ADMIN,
+    chatPolicy,
+    memberRole: groupRole,
+  };
+}
 
 export async function handleGetGroupMessages(groupId: string, user: UserContext, env: Env): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
@@ -34,6 +92,11 @@ export async function handlePostGroupMessage(
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
 
+  const sendPermission = await getGroupChatSendPermission(groupId, user.userId, user.role, env);
+  if (!sendPermission.allowed) {
+    return errorResponse('READ_ONLY_GROUP', 'هذه المجموعة مخصصة للقراءة للطلاب. الإرسال متاح للأساتذة المعتمدين وإدارة المدرسة فقط.', 403);
+  }
+
   const body = await request.json() as { id?: string; text?: string; messageText?: string; message?: string };
   const messageText = body.text || body.messageText || body.message;
 
@@ -51,7 +114,8 @@ export async function handlePostGroupMessage(
   const senderGradeSection = `${gradeNameMap[user.gradeId] || user.gradeId} — ${user.sectionId}`;
 
   // Server-authoritative sender identity from UserContext
-  await env.DB.prepare(
+  const text = messageText.trim();
+  const insertResult = await env.DB.prepare(
     `INSERT OR IGNORE INTO chat_messages (id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).bind(
@@ -60,9 +124,27 @@ export async function handlePostGroupMessage(
     user.userId,
     user.fullName,
     senderGradeSection,
-    messageText.trim(),
+    text,
     now
   ).run();
+
+  let persistedTimestamp = now;
+  const wasInserted = insertResult.meta?.changes === 1;
+  if (!wasInserted) {
+    const existing = await env.DB.prepare(
+      `SELECT group_id, sender_id, text, timestamp
+       FROM chat_messages WHERE id = ?`
+    ).bind(messageId).first<PersistedChatMessageIdentity>();
+
+    if (!isSamePersistedChatMessage(existing, { groupId, senderId: user.userId, text })) {
+      return errorResponse(
+        'MESSAGE_ID_CONFLICT',
+        'معرّف الرسالة مستخدم مسبقاً لرسالة أخرى. لم يتم تأكيد الإرسال.',
+        409
+      );
+    }
+    persistedTimestamp = existing.timestamp;
+  }
 
   const messagePayload = {
     id: messageId,
@@ -70,24 +152,27 @@ export async function handlePostGroupMessage(
     senderId: user.userId,
     senderName: user.fullName,
     senderGradeSection,
-    text: messageText.trim(),
-    timestamp: now,
+    text,
+    timestamp: persistedTimestamp,
     status: 'SENT',
   };
 
-  // Forward to Durable Object for live WebSocket broadcast
-  try {
-    const doId = env.CHAT.idFromName(groupId);
-    const doStub = env.CHAT.get(doId);
-    await doStub.fetch(new Request('http://internal/broadcast', {
-      method: 'POST',
-      body: JSON.stringify({
-        type: 'chat_message',
-        ...messagePayload,
-      }),
-    }));
-  } catch {
-    // Durable object fallback
+  // Broadcast only a row that was newly persisted. An exact retry is already
+  // visible to other members and must not be announced as a second message.
+  if (wasInserted) {
+    try {
+      const doId = env.CHAT.idFromName(groupId);
+      const doStub = env.CHAT.get(doId);
+      await doStub.fetch(new Request('http://internal/broadcast', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'chat_message',
+          ...messagePayload,
+        }),
+      }));
+    } catch {
+      // Persisted in D1; clients will reconcile through chat history.
+    }
   }
 
   return jsonResponse({
@@ -104,6 +189,11 @@ export async function handleDeleteGroupMessage(
 ): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
+
+  const sendPermission = await getGroupChatSendPermission(groupId, user.userId, user.role, env);
+  if (!sendPermission.allowed) {
+    return errorResponse('READ_ONLY_GROUP', 'لا تملك صلاحية حذف الرسائل في مجموعة الهيئة التعليمية؛ يمكنك القراءة فقط.', 403);
+  }
 
   const message = await env.DB.prepare(
     `SELECT sender_id FROM chat_messages WHERE id = ? AND group_id = ?`

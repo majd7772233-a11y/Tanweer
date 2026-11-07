@@ -35,10 +35,6 @@ fun CommunityDecisionsScreen(
     val context = LocalContext.current
     val decisions by viewModel.communityDecisions.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        viewModel.loadCommunityDecisions()
-    }
-
     var selectedFilter by remember { mutableStateOf("ALL") } // "ALL", "PENDING", "COMPLETED"
 
     val filteredList = when (selectedFilter) {
@@ -78,18 +74,18 @@ fun CommunityDecisionsScreen(
                                     .background(CyanGlow),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("🗳️", fontSize = 26.sp)
+                                Text("🗳️", fontSize = tanweerTextSize(26f))
                             }
                             Column {
                                 Text(
                                     text = "القرارات والتصويتات الجماعية",
-                                    fontSize = 17.sp,
+                                    fontSize = tanweerTextSize(17f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                                 Text(
                                     text = "حوكمة تشاركية للدروس، الجداول، وطلبات الحذف",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary
                                 )
                             }
@@ -119,9 +115,9 @@ fun CommunityDecisionsScreen(
                     ) {
                         Text(
                             text = "⚖️ نظام القرارات الجماعية: عند اكتمال النصاب القانوني المطلوب من أصوات الشعبة، يتم تنفيذ القرار فورياً وتلقائياً عبر الخادم (مثل حذف منشور مكرر أو اعتماد تعديل).",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextMuted,
-                            lineHeight = 15.sp
+                            lineHeight = tanweerLineHeight(15f)
                         )
                     }
                 }
@@ -145,7 +141,7 @@ fun CommunityDecisionsScreen(
                     ) {
                         Text(
                             text = label,
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) TextOnAccent else TextSecondary
                         )
@@ -163,10 +159,10 @@ fun CommunityDecisionsScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("✨", fontSize = 32.sp)
+                        Text("✨", fontSize = tanweerTextSize(32f))
                         Text(
                             text = "لا توجد قرارات مطابقة للفلتر المحدد",
-                            fontSize = 14.sp,
+                            fontSize = tanweerTextSize(14f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )

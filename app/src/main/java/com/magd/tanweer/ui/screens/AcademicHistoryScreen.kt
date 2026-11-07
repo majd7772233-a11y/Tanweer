@@ -43,11 +43,8 @@ fun AcademicHistoryScreen(
         viewModel.navigateBack()
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.repository.syncStudentAcademicArchive()
-    }
-
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val archiveSyncState by viewModel.academicArchiveSyncState.collectAsStateWithLifecycle()
     val selectedYear by viewModel.selectedAcademicYear.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
@@ -73,15 +70,32 @@ fun AcademicHistoryScreen(
 
     val todayStr = remember { TanweerViewModel.getTodayDateString() }
 
-    val allRecordedDates = remember(allHistoricalContents, allHistoricalHomeworks, allHistoricalExams, activeGroupContents) {
-        val dates = mutableListOf<String>()
-        allHistoricalContents.forEach { dates.add(it.studyDate) }
-        allHistoricalHomeworks.forEach { 
-            if (it.dueDate.isNotBlank()) dates.add(it.dueDate)
-            if (it.studyDate.isNotBlank()) dates.add(it.studyDate)
+    val allRecordedDates = remember(
+        allHistoricalContents,
+        allHistoricalHomeworks,
+        allHistoricalExams,
+        activeGroupContents,
+        activeGroupHomeworks,
+        activeGroupExams
+    ) {
+        buildList {
+            allHistoricalContents.forEach { add(it.studyDate) }
+            allHistoricalHomeworks.forEach {
+                if (it.dueDate.isNotBlank()) add(it.dueDate)
+                if (it.studyDate.isNotBlank()) add(it.studyDate)
+            }
+            allHistoricalExams.forEach { add(it.examDate) }
+
+            // Include active-group snapshots as well. This keeps the year selector
+            // accurate even when a current-group item has not yet appeared in the
+            // account-wide historical endpoint.
+            activeGroupContents.forEach { add(it.studyDate) }
+            activeGroupHomeworks.forEach {
+                if (it.dueDate.isNotBlank()) add(it.dueDate)
+                if (it.studyDate.isNotBlank()) add(it.studyDate)
+            }
+            activeGroupExams.forEach { add(it.examDate) }
         }
-        allHistoricalExams.forEach { dates.add(it.examDate) }
-        dates
     }
 
     val academicYears = remember(todayStr, allRecordedDates) {
@@ -184,17 +198,50 @@ fun AcademicHistoryScreen(
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "الأرشيف الأكاديمي 🏛️",
-                    fontSize = 17.sp,
+                    fontSize = tanweerTextSize(17f),
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
                 Text(
                     text = "السجل التراكمي للإنجازات والدروس والمواد",
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     color = TextSecondary
+                )
+                if (archiveSyncState.isBusy()) {
+                    Text(
+                        text = "جارٍ تحديث أرشيفك من الخادم…",
+                        fontSize = tanweerTextSize(10f),
+                        color = CyanAccent
+                    )
+                } else if (archiveSyncState is com.magd.tanweer.data.model.SyncState.OfflineCached) {
+                    Text(
+                        text = "تعرض السجلات المحفوظة محلياً حتى عودة الاتصال.",
+                        fontSize = tanweerTextSize(10f),
+                        color = WarmAmber
+                    )
+                } else if (archiveSyncState is com.magd.tanweer.data.model.SyncState.Error) {
+                    Text(
+                        text = (archiveSyncState as com.magd.tanweer.data.model.SyncState.Error).message,
+                        fontSize = tanweerTextSize(10f),
+                        color = RubyRed,
+                        maxLines = 2
+                    )
+                }
+            }
+            IconButton(
+                onClick = { viewModel.syncAcademicArchive(isRefresh = true) },
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(GlassSurface)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "تحديث الأرشيف الأكاديمي",
+                    tint = CyanAccent
                 )
             }
         }
@@ -230,14 +277,14 @@ fun AcademicHistoryScreen(
                     ) {
                         Text(
                             text = yr,
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             color = if (isSelected) CyanAccent else TextSecondary
                         )
                         if (isCurrent) {
-                            Text("📍 الحالي", fontSize = 11.sp, color = CyanAccent)
+                            Text("📍 الحالي", fontSize = tanweerTextSize(11f), color = CyanAccent)
                         } else {
-                            Text("📦 مؤرشف", fontSize = 10.sp, color = TextMuted)
+                            Text("📦 مؤرشف", fontSize = tanweerTextSize(10f), color = TextMuted)
                         }
                     }
                 }
@@ -263,7 +310,7 @@ fun AcademicHistoryScreen(
             ) {
                 Text(
                     text = "👤 إنجازاتي ومشاركاتي",
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     fontWeight = if (viewMode == 0) FontWeight.Bold else FontWeight.Normal,
                     color = if (viewMode == 0) PurpleAccent else TextSecondary
                 )
@@ -281,7 +328,7 @@ fun AcademicHistoryScreen(
             ) {
                 Text(
                     text = "🏫 أرشيف الشعبة للعام",
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     fontWeight = if (viewMode == 1) FontWeight.Bold else FontWeight.Normal,
                     color = if (viewMode == 1) EmeraldGreen else TextSecondary
                 )
@@ -310,13 +357,13 @@ fun AcademicHistoryScreen(
                         Column {
                             Text(
                                 text = "أرشيف العام: $selectedYear",
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = CyanAccent
                             )
                             Text(
-                                text = if (selectedYear == "2026-2027") "العام الدراسي النشط حالياً" else "سجل مؤرشف ومحفوظ للرجوع إليه",
-                                fontSize = 12.sp,
+                                text = if (selectedYear == currentAcademicYear) "العام الدراسي النشط حالياً" else "سجل مؤرشف ومحفوظ للرجوع إليه",
+                                fontSize = tanweerTextSize(12f),
                                 color = TextSecondary
                             )
                         }
@@ -346,7 +393,7 @@ fun AcademicHistoryScreen(
                         ) {
                             Text(
                                 text = "📊 النطاق الأكاديمي: ${archiveReport.startDate} إلى ${archiveReport.endDate}",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextSecondary
                             )
                             if (archiveReport.isArchivedPastYear) {
@@ -368,8 +415,8 @@ fun AcademicHistoryScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("الفصل الدراسي الأول", fontSize = 11.sp, color = TextSecondary)
-                                    Text("${archiveReport.semester1Lessons} درس • ${archiveReport.semester1Homeworks} واجب", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                                    Text("الفصل الدراسي الأول", fontSize = tanweerTextSize(11f), color = TextSecondary)
+                                    Text("${archiveReport.semester1Lessons} درس • ${archiveReport.semester1Homeworks} واجب", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
                                 }
                             }
                             Box(
@@ -381,8 +428,8 @@ fun AcademicHistoryScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("الفصل الدراسي الثاني", fontSize = 11.sp, color = TextSecondary)
-                                    Text("${archiveReport.semester2Lessons} درس • ${archiveReport.semester2Homeworks} واجب", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PurpleAccent)
+                                    Text("الفصل الدراسي الثاني", fontSize = tanweerTextSize(11f), color = TextSecondary)
+                                    Text("${archiveReport.semester2Lessons} درس • ${archiveReport.semester2Homeworks} واجب", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = PurpleAccent)
                                 }
                             }
                         }
@@ -404,17 +451,17 @@ fun AcademicHistoryScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("📦", fontSize = 32.sp)
+                            Text("📦", fontSize = tanweerTextSize(32f))
                             Text(
                                 text = "لا توجد سجلات محفوظة للشعبة في عام $selectedYear",
-                                fontSize = 14.sp,
+                                fontSize = tanweerTextSize(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary,
                                 textAlign = TextAlign.Center
                             )
                             Text(
-                                text = "يتم حفظ السجلات وأرشفتها تلقائياً مع انتهاء الفصول والأعوام الدراسية. يمكنك استعراض العام الدراسي الحالي (2026-2027).",
-                                fontSize = 12.sp,
+                                text = "تُعرض الأعوام التي تحتوي على سجلات فعلية، ويظل العام الحالي ${currentAcademicYear} متاحاً حتى قبل تسجيل أول نشاط.",
+                                fontSize = tanweerTextSize(12f),
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center
                             )
@@ -437,7 +484,7 @@ fun AcademicHistoryScreen(
                             ) {
                                 Text(
                                     text = "📊 ملخص أدائي الشخصي في $selectedYear",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = PurpleAccent
                                 )
@@ -452,16 +499,16 @@ fun AcademicHistoryScreen(
                                 horizontalArrangement = Arrangement.SpaceEvenly
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("${myCompletedHomeworks.size}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
-                                    Text("واجبات منجزة", fontSize = 11.sp, color = TextSecondary)
+                                    Text("${myCompletedHomeworks.size}", fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Bold, color = EmeraldGreen)
+                                    Text("واجبات منجزة", fontSize = tanweerTextSize(11f), color = TextSecondary)
                                 }
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("${myPersonalLessons.size}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-                                    Text("دروس وثقتها", fontSize = 11.sp, color = TextSecondary)
+                                    Text("${myPersonalLessons.size}", fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Bold, color = CyanAccent)
+                                    Text("دروس وثقتها", fontSize = tanweerTextSize(11f), color = TextSecondary)
                                 }
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("${yearHomeworks.size}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
-                                    Text("إجمالي الواجبات", fontSize = 11.sp, color = TextSecondary)
+                                    Text("${yearHomeworks.size}", fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Bold, color = WarmAmber)
+                                    Text("إجمالي الواجبات", fontSize = tanweerTextSize(11f), color = TextSecondary)
                                 }
                             }
                         }
@@ -472,7 +519,7 @@ fun AcademicHistoryScreen(
                 item {
                     Text(
                         text = "📖 الدروس التي وثقتها شخصياً (${myPersonalLessons.size})",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent,
                         modifier = Modifier.padding(top = 4.dp)
@@ -484,7 +531,7 @@ fun AcademicHistoryScreen(
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface.copy(alpha = 0.3f)) {
                             Text(
                                 text = "لم تقم بتوثيق دروس للشعبة تحت هذا العام بعد. يمكنك استخدام زر الإضافة لتوثيق حصصك.",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextMuted,
                                 modifier = Modifier.padding(8.dp)
                             )
@@ -505,13 +552,13 @@ fun AcademicHistoryScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "${lesson.subjectIcon} ${lesson.subjectName}: ${lesson.title}",
-                                        fontSize = 13.sp,
+                                        fontSize = tanweerTextSize(13f),
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
                                     Text(
                                         text = "تاريخ الحصة: ${lesson.studyDate} • ${lesson.viewsCount} مشاهدة (انقر للمعاينة 👁️)",
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         color = TextSecondary
                                     )
                                 }
@@ -525,7 +572,7 @@ fun AcademicHistoryScreen(
                 item {
                     Text(
                         text = "✅ الواجبات التي أنجزتها (${myCompletedHomeworks.size})",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = EmeraldGreen,
                         modifier = Modifier.padding(top = 8.dp)
@@ -537,7 +584,7 @@ fun AcademicHistoryScreen(
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface.copy(alpha = 0.3f)) {
                             Text(
                                 text = "لا توجد واجبات مكتملة مسجلة في هذا العام الدراسي حتى الآن.",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextMuted,
                                 modifier = Modifier.padding(8.dp)
                             )
@@ -558,13 +605,13 @@ fun AcademicHistoryScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "📝 واجب ${hw.subjectName}: ${hw.title}",
-                                        fontSize = 13.sp,
+                                        fontSize = tanweerTextSize(13f),
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
                                     Text(
                                         text = "تاريخ التسليم: ${hw.dueDate} (انقر للتفاصيل 👁️)",
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         color = TextSecondary
                                     )
                                 }
@@ -610,14 +657,14 @@ fun AcademicHistoryScreen(
                                             .border(1.dp, subjColor.copy(alpha = 0.4f), CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(subject.icon, fontSize = 18.sp)
+                                        Text(subject.icon, fontSize = tanweerTextSize(18f))
                                     }
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column {
-                                        Text(subject.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                        Text(subject.name, fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = TextPrimary)
                                         Text(
                                             text = "${subjContents.size} دروس • ${subjHomeworks.size} واجبات • ${subjExams.size} اختبارات",
-                                            fontSize = 11.sp,
+                                            fontSize = tanweerTextSize(11f),
                                             color = TextMuted
                                         )
                                     }
@@ -646,9 +693,9 @@ fun AcademicHistoryScreen(
                                             .background(GlassBorderSubtle)
                                     )
 
-                                    Text("📚 الدروس الموثقة (${subjContents.size}):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                                    Text("📚 الدروس الموثقة (${subjContents.size}):", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
                                     if (subjContents.isEmpty()) {
-                                        Text("لا توجد دروس مسجلة تحت هذا العام", fontSize = 11.sp, color = TextMuted)
+                                        Text("لا توجد دروس مسجلة تحت هذا العام", fontSize = tanweerTextSize(11f), color = TextMuted)
                                     } else {
                                         subjContents.take(5).forEach { c ->
                                             Row(
@@ -661,15 +708,15 @@ fun AcademicHistoryScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("  • ${c.studyDate}: ${c.title} (${c.authorName})", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.weight(1f))
-                                                Text("👁️", fontSize = 12.sp)
+                                                Text("  • ${c.studyDate}: ${c.title} (${c.authorName})", fontSize = tanweerTextSize(12f), color = TextSecondary, modifier = Modifier.weight(1f))
+                                                Text("👁️", fontSize = tanweerTextSize(12f))
                                             }
                                         }
                                     }
 
-                                    Text("📝 الواجبات والمشاريع (${subjHomeworks.size}):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+                                    Text("📝 الواجبات والمشاريع (${subjHomeworks.size}):", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = WarmAmber)
                                     if (subjHomeworks.isEmpty()) {
-                                        Text("لا توجد واجبات مسجلة", fontSize = 11.sp, color = TextMuted)
+                                        Text("لا توجد واجبات مسجلة", fontSize = tanweerTextSize(11f), color = TextMuted)
                                     } else {
                                         subjHomeworks.take(5).forEach { hw ->
                                             Row(
@@ -682,15 +729,15 @@ fun AcademicHistoryScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("  • ${hw.title} (التسليم: ${hw.dueDate})", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.weight(1f))
-                                                Text("👁️", fontSize = 12.sp)
+                                                Text("  • ${hw.title} (التسليم: ${hw.dueDate})", fontSize = tanweerTextSize(12f), color = TextSecondary, modifier = Modifier.weight(1f))
+                                                Text("👁️", fontSize = tanweerTextSize(12f))
                                             }
                                         }
                                     }
 
-                                    Text("🔴 الاختبارات والتقييمات (${subjExams.size}):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RubyRed)
+                                    Text("🔴 الاختبارات والتقييمات (${subjExams.size}):", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = RubyRed)
                                     if (subjExams.isEmpty()) {
-                                        Text("لا توجد اختبارات مسجلة", fontSize = 11.sp, color = TextMuted)
+                                        Text("لا توجد اختبارات مسجلة", fontSize = tanweerTextSize(11f), color = TextMuted)
                                     } else {
                                         subjExams.take(5).forEach { ex ->
                                             Row(
@@ -703,8 +750,8 @@ fun AcademicHistoryScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("  • ${ex.examDate}: ${ex.title}", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.weight(1f))
-                                                Text("👁️", fontSize = 12.sp)
+                                                Text("  • ${ex.examDate}: ${ex.title}", fontSize = tanweerTextSize(12f), color = TextSecondary, modifier = Modifier.weight(1f))
+                                                Text("👁️", fontSize = tanweerTextSize(12f))
                                             }
                                         }
                                     }
@@ -717,7 +764,7 @@ fun AcademicHistoryScreen(
                                         colors = ButtonDefaults.buttonColors(containerColor = subjColor.copy(alpha = 0.2f)),
                                         shape = RoundedCornerShape(10.dp)
                                     ) {
-                                        Text("فتح مساحة المادة الكاملة 🚀", fontSize = 12.sp, color = subjColor, fontWeight = FontWeight.Bold)
+                                        Text("فتح مساحة المادة الكاملة 🚀", fontSize = tanweerTextSize(12f), color = subjColor, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -775,17 +822,17 @@ fun AcademicContentPreviewDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(content.subjectIcon.ifEmpty { "📚" }, fontSize = 22.sp)
+                    Text(content.subjectIcon.ifEmpty { "📚" }, fontSize = tanweerTextSize(22f))
                     Column {
                         Text(
                             text = content.subjectName,
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             color = CyanAccent,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = content.title,
-                            fontSize = 15.sp,
+                            fontSize = tanweerTextSize(15f),
                             color = TextPrimary,
                             fontWeight = FontWeight.Bold
                         )
@@ -804,12 +851,12 @@ fun AcademicContentPreviewDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("📅 تاريخ الدرس: ${content.studyDate}", fontSize = 12.sp, color = TextSecondary)
-                    Text("👤 الموثق: ${content.authorName}", fontSize = 12.sp, color = TextSecondary)
+                    Text("📅 تاريخ الدرس: ${content.studyDate}", fontSize = tanweerTextSize(12f), color = TextSecondary)
+                    Text("👤 الموثق: ${content.authorName}", fontSize = tanweerTextSize(12f), color = TextSecondary)
                 }
 
                 if (content.authorGradeSection.isNotBlank()) {
-                    Text("🏫 الشعبة: ${content.authorGradeSection}", fontSize = 11.sp, color = TextMuted)
+                    Text("🏫 الشعبة: ${content.authorGradeSection}", fontSize = tanweerTextSize(11f), color = TextMuted)
                 }
 
                 Box(
@@ -820,17 +867,17 @@ fun AcademicContentPreviewDialog(
                         .padding(12.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("محتوى الدرس والشرح:", fontSize = 11.sp, color = TextMuted)
+                        Text("محتوى الدرس والشرح:", fontSize = tanweerTextSize(11f), color = TextMuted)
                         Text(
                             text = (content.description ?: "").ifBlank { "لا يوجد وصف إضافي مكتوب لهذا الدرس." },
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             color = TextPrimary
                         )
                     }
                 }
 
                 if (mediaUrls.isNotEmpty()) {
-                    Text("📎 المرفقات والصور (${mediaUrls.size}):", fontSize = 12.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Text("📎 المرفقات والصور (${mediaUrls.size}):", fontSize = tanweerTextSize(12f), color = WarmAmber, fontWeight = FontWeight.Bold)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -843,7 +890,7 @@ fun AcademicContentPreviewDialog(
                                     .border(1.dp, GlassBorderSubtle, RoundedCornerShape(6.dp))
                                     .padding(horizontal = 8.dp, vertical = 6.dp)
                             ) {
-                                Text("📷 مرفق ${index + 1}", fontSize = 11.sp, color = CyanAccent)
+                                Text("📷 مرفق ${index + 1}", fontSize = tanweerTextSize(11f), color = CyanAccent)
                             }
                         }
                     }
@@ -853,8 +900,8 @@ fun AcademicContentPreviewDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("👁️ المشاهدات: ${content.viewsCount}", fontSize = 11.sp, color = TextMuted)
-                    Text("👍 المفيدة: ${content.usefulCount}", fontSize = 11.sp, color = TextMuted)
+                    Text("👁️ المشاهدات: ${content.viewsCount}", fontSize = tanweerTextSize(11f), color = TextMuted)
+                    Text("👍 المفيدة: ${content.usefulCount}", fontSize = tanweerTextSize(11f), color = TextMuted)
                 }
             }
         },
@@ -880,17 +927,17 @@ fun AcademicHomeworkPreviewDialog(
         },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("📝", fontSize = 22.sp)
+                Text("📝", fontSize = tanweerTextSize(22f))
                 Column {
-                    Text(text = "واجب مادة ${homework.subjectName}", fontSize = 13.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
-                    Text(text = homework.title, fontSize = 15.sp, color = TextPrimary, fontWeight = FontWeight.Bold)
+                    Text(text = "واجب مادة ${homework.subjectName}", fontSize = tanweerTextSize(13f), color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Text(text = homework.title, fontSize = tanweerTextSize(15f), color = TextPrimary, fontWeight = FontWeight.Bold)
                 }
             }
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("📅 تاريخ التسليم: ${homework.dueDate}", fontSize = 12.sp, color = TextSecondary)
+                    Text("📅 تاريخ التسليم: ${homework.dueDate}", fontSize = tanweerTextSize(12f), color = TextSecondary)
                     val isOfficialHw = homework.taskType == "OFFICIAL" || homework.taskType == "HOMEWORK"
                     GlassPill(
                         text = if (isOfficialHw) "واجب رسمي معتمد ⭐" else "واجب تشاركي",
@@ -907,11 +954,11 @@ fun AcademicHomeworkPreviewDialog(
                         .padding(12.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("الأسئلة والصفحات المطلوبة:", fontSize = 11.sp, color = TextMuted)
+                        Text("الأسئلة والصفحات المطلوبة:", fontSize = tanweerTextSize(11f), color = TextMuted)
                         val hwDesc = homework.details ?: homework.questionNumbers ?: homework.pageNumbers ?: ""
                         Text(
                             text = hwDesc.ifBlank { "لا توجد تفاصيل إضافية مسجلة للواجب." },
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             color = TextPrimary
                         )
                     }
@@ -949,17 +996,17 @@ fun AcademicExamPreviewDialog(
         },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("📑", fontSize = 22.sp)
+                Text("📑", fontSize = tanweerTextSize(22f))
                 Column {
-                    Text(text = "اختبار مادة ${exam.subjectName}", fontSize = 13.sp, color = RubyRed, fontWeight = FontWeight.Bold)
-                    Text(text = exam.title, fontSize = 15.sp, color = TextPrimary, fontWeight = FontWeight.Bold)
+                    Text(text = "اختبار مادة ${exam.subjectName}", fontSize = tanweerTextSize(13f), color = RubyRed, fontWeight = FontWeight.Bold)
+                    Text(text = exam.title, fontSize = tanweerTextSize(15f), color = TextPrimary, fontWeight = FontWeight.Bold)
                 }
             }
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("📅 موعد الاختبار: ${exam.examDate}", fontSize = 12.sp, color = TextSecondary)
+                    Text("📅 موعد الاختبار: ${exam.examDate}", fontSize = tanweerTextSize(12f), color = TextSecondary)
                     GlassPill(
                         text = examTypeAr,
                         color = RubyRed,
@@ -975,10 +1022,10 @@ fun AcademicExamPreviewDialog(
                         .padding(12.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("المنهج والملاحظات المشمولة في الاختبار:", fontSize = 11.sp, color = TextMuted)
+                        Text("المنهج والملاحظات المشمولة في الاختبار:", fontSize = tanweerTextSize(11f), color = TextMuted)
                         Text(
                             text = (exam.notes ?: "").ifBlank { "كافة الدروس السابقة مشمولة ضمن الاختبار." },
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             color = TextPrimary
                         )
                     }

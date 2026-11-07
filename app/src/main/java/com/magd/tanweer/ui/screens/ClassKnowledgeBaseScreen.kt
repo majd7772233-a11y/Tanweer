@@ -142,13 +142,13 @@ fun ClassKnowledgeBaseScreen(
                 Column {
                     Text(
                         text = "بنك معرفة المادة ومستودع الدروس 📚",
-                        fontSize = 15.sp,
+                        fontSize = tanweerTextSize(15f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
                     Text(
                         text = "${currentUser?.gradeName ?: ""} • ${currentSubject.name}",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         color = TextSecondary
                     )
                 }
@@ -174,7 +174,7 @@ fun ClassKnowledgeBaseScreen(
                 ) {
                     Text(
                         text = "📚 جميع المواد",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent
                     )
@@ -201,10 +201,10 @@ fun ClassKnowledgeBaseScreen(
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(subj.icon, fontSize = 16.sp)
+                        Text(subj.icon, fontSize = tanweerTextSize(16f))
                         Text(
                             text = subj.name,
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) subjColor else TextSecondary
                         )
@@ -238,19 +238,19 @@ fun ClassKnowledgeBaseScreen(
                                 .border(1.dp, themeColor, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(currentSubject.icon, fontSize = 22.sp)
+                            Text(currentSubject.icon, fontSize = tanweerTextSize(22f))
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
                                 text = currentSubject.name,
-                                fontSize = 18.sp,
+                                fontSize = tanweerTextSize(18f),
                                 fontWeight = FontWeight.Black,
                                 color = TextPrimary
                             )
                             Text(
                                 text = "شعبة المادة الرسمية • ${currentUser?.gradeName ?: ""}",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextSecondary
                             )
                         }
@@ -265,7 +265,7 @@ fun ClassKnowledgeBaseScreen(
                         ) {
                             Icon(Icons.Default.Book, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("الكتاب", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("الكتاب", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -298,27 +298,27 @@ fun ClassKnowledgeBaseScreen(
             Tab(
                 selected = activeTab == 0,
                 onClick = { activeTab = 0 },
-                text = { Text("📅 الدروس (${subjectContents.size})", fontSize = 13.sp) }
+                text = { Text("📅 الدروس (${subjectContents.size})", fontSize = tanweerTextSize(13f)) }
             )
             Tab(
                 selected = activeTab == 1,
                 onClick = { activeTab = 1 },
-                text = { Text("📝 الواجبات (${subjectHomeworks.size})", fontSize = 13.sp) }
+                text = { Text("📝 الواجبات (${subjectHomeworks.size})", fontSize = tanweerTextSize(13f)) }
             )
             Tab(
                 selected = activeTab == 2,
                 onClick = { activeTab = 2 },
-                text = { Text("🔴 الاختبارات (${subjectExams.size})", fontSize = 13.sp) }
+                text = { Text("🔴 الاختبارات (${subjectExams.size})", fontSize = tanweerTextSize(13f)) }
             )
             Tab(
                 selected = activeTab == 3,
                 onClick = { activeTab = 3 },
-                text = { Text("❓ الأسئلة (${subjectIssues.size})", fontSize = 13.sp) }
+                text = { Text("❓ الأسئلة (${subjectIssues.size})", fontSize = tanweerTextSize(13f)) }
             )
             Tab(
                 selected = activeTab == 4,
                 onClick = { activeTab = 4 },
-                text = { Text("📖 الكتاب المدرسي", fontSize = 13.sp) }
+                text = { Text("📖 الكتاب المدرسي", fontSize = tanweerTextSize(13f)) }
             )
         }
 
@@ -397,13 +397,13 @@ fun ClassKnowledgeBaseScreen(
                                         Column {
                                             Text(
                                                 text = subjectBook.title,
-                                                fontSize = 16.sp,
+                                                fontSize = tanweerTextSize(16f),
                                                 fontWeight = FontWeight.Bold,
                                                 color = TextPrimary
                                             )
                                             Text(
                                                 text = "الطبعة الرسمية • ${subjectBook.fileSizeMb} ميغابايت",
-                                                fontSize = 12.sp,
+                                                fontSize = tanweerTextSize(12f),
                                                 color = TextSecondary
                                             )
                                         }
@@ -444,8 +444,8 @@ fun ClassKnowledgeBaseScreen(
 @Composable
 fun KnowledgeStatItem(label: String, value: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontSize = 16.sp, fontWeight = FontWeight.Black, color = color)
-        Text(label, fontSize = 11.sp, color = TextMuted)
+        Text(value, fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Black, color = color)
+        Text(label, fontSize = tanweerTextSize(11f), color = TextMuted)
     }
 }
 
@@ -466,18 +466,18 @@ fun KnowledgeContentCard(
             ) {
                 Text(
                     text = "🗓️ ${item.studyDate} • ${item.title}",
-                    fontSize = 14.sp,
+                    fontSize = tanweerTextSize(14f),
                     fontWeight = FontWeight.Bold,
                     color = CyanAccent
                 )
                 TextButton(onClick = onRequestCorrection) {
-                    Text("❌ تصحيح", fontSize = 11.sp, color = RubyRed)
+                    Text("❌ تصحيح", fontSize = tanweerTextSize(11f), color = RubyRed)
                 }
             }
             if (!item.description.isNull_or_empty()) {
                 Text(
                     text = item.description!!,
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     color = TextSecondary,
                     modifier = Modifier.padding(top = 4.dp)
                 )
@@ -485,7 +485,7 @@ fun KnowledgeContentCard(
             if (item.media.isNotEmpty()) {
                 Text(
                     text = "📷 يحتوي ${item.media.size} صفحات صور موثقة",
-                    fontSize = 11.sp,
+                    fontSize = tanweerTextSize(11f),
                     color = EmeraldGreen,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(top = 6.dp)
@@ -518,7 +518,7 @@ fun KnowledgeHomeworkCard(
             ) {
                 Text(
                     text = homework.title,
-                    fontSize = 14.sp,
+                    fontSize = tanweerTextSize(14f),
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
@@ -532,7 +532,7 @@ fun KnowledgeHomeworkCard(
             if (!homework.details.isNull_or_empty()) {
                 Text(
                     text = homework.details!!,
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     color = TextSecondary,
                     modifier = Modifier.padding(top = 4.dp)
                 )
@@ -546,7 +546,7 @@ fun KnowledgeHomeworkCard(
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                 ) {
-                    Text("📖 فتح صفحة $pageNum مباشرة في الكتاب", fontSize = 11.sp, color = CyanAccent, fontWeight = FontWeight.Bold)
+                    Text("📖 فتح صفحة $pageNum مباشرة في الكتاب", fontSize = tanweerTextSize(11f), color = CyanAccent, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -566,11 +566,11 @@ fun KnowledgeExamCard(exam: ExamItem) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(exam.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = RubyRed)
-                Text("الموعد: ${exam.examDate}", fontSize = 12.sp, color = TextMuted)
+                Text(exam.title, fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = RubyRed)
+                Text("الموعد: ${exam.examDate}", fontSize = tanweerTextSize(12f), color = TextMuted)
             }
             if (!exam.requiredChapters.isNull_or_empty()) {
-                Text("📚 المطلوب: ${exam.requiredChapters!!}", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.padding(top = 4.dp))
+                Text("📚 المطلوب: ${exam.requiredChapters!!}", fontSize = tanweerTextSize(12f), color = TextSecondary, modifier = Modifier.padding(top = 4.dp))
             }
         }
     }
@@ -583,14 +583,14 @@ fun KnowledgeIssueCard(issue: IssueItem) {
         backgroundColor = GlassSurface
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(issue.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Text(issue.title, fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
             if (!issue.description.isNull_or_empty()) {
-                Text(issue.description!!, fontSize = 12.sp, color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                Text(issue.description!!, fontSize = tanweerTextSize(12f), color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
             }
             Spacer(modifier = Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("💬 ${issue.commentsCount} إجابات", fontSize = 11.sp, color = CyanAccent)
-                Text("بواسطة: ${issue.authorName}", fontSize = 11.sp, color = TextMuted)
+                Text("💬 ${issue.commentsCount} إجابات", fontSize = tanweerTextSize(11f), color = CyanAccent)
+                Text("بواسطة: ${issue.authorName}", fontSize = tanweerTextSize(11f), color = TextMuted)
             }
         }
     }
@@ -604,7 +604,7 @@ fun EmptyStateKnowledge(message: String) {
             .padding(vertical = 32.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(message, fontSize = 13.sp, color = TextMuted)
+        Text(message, fontSize = tanweerTextSize(13f), color = TextMuted)
     }
 }
 
@@ -620,12 +620,12 @@ fun CorrectionRequestModal(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("اقتراح تصحيح للدرس ✍️", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+        title = { Text("اقتراح تصحيح للدرس ✍️", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("عنوان الدرس: ${contentItem.title}", fontSize = 12.sp, color = TextSecondary)
+                Text("عنوان الدرس: ${contentItem.title}", fontSize = tanweerTextSize(12f), color = TextSecondary)
 
-                Text("ما هو الحقل المراد تصويبه؟", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("ما هو الحقل المراد تصويبه؟", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -633,22 +633,22 @@ fun CorrectionRequestModal(
                     FilterChip(
                         selected = fieldName == "TITLE",
                         onClick = { fieldName = "TITLE" },
-                        label = { Text("العنوان", fontSize = 11.sp) }
+                        label = { Text("العنوان", fontSize = tanweerTextSize(11f)) }
                     )
                     FilterChip(
                         selected = fieldName == "DESCRIPTION",
                         onClick = { fieldName = "DESCRIPTION" },
-                        label = { Text("الوصف والشرح", fontSize = 11.sp) }
+                        label = { Text("الوصف والشرح", fontSize = tanweerTextSize(11f)) }
                     )
                     FilterChip(
                         selected = fieldName == "STUDY_DATE",
                         onClick = { fieldName = "STUDY_DATE" },
-                        label = { Text("التاريخ", fontSize = 11.sp) }
+                        label = { Text("التاريخ", fontSize = tanweerTextSize(11f)) }
                     )
                     FilterChip(
                         selected = fieldName == "PAGE_NUMBERS",
                         onClick = { fieldName = "PAGE_NUMBERS" },
-                        label = { Text("الصفحات", fontSize = 11.sp) }
+                        label = { Text("الصفحات", fontSize = tanweerTextSize(11f)) }
                     )
                 }
 
@@ -737,13 +737,13 @@ private fun SubjectHubCatalog(
             Column {
                 Text(
                     text = "بنك معرفة المواد الدراسية 📚",
-                    fontSize = 18.sp,
+                    fontSize = tanweerTextSize(18f),
                     fontWeight = FontWeight.Black,
                     color = CyanAccent
                 )
                 Text(
                     text = "$gradeName • اختر المادة لتصفح مستودعها",
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     color = TextSecondary
                 )
             }
@@ -779,10 +779,10 @@ private fun SubjectHubCatalog(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(text = subj.icon, fontSize = 32.sp)
+                        Text(text = subj.icon, fontSize = tanweerTextSize(32f))
                         Text(
                             text = subj.name,
-                            fontSize = 14.sp,
+                            fontSize = tanweerTextSize(14f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center

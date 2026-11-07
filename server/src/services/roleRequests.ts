@@ -8,6 +8,7 @@ import { generateId } from '../lib/ids';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Role, normalizeRole, ROLE_METADATA, ROLE_HIERARCHY, PUBLIC_ROLE_METADATA, PUBLIC_ROLE_HIERARCHY } from '../lib/roles';
 import { Permission, hasPermission } from '../lib/permissions';
+import { requireGroupMember } from '../middleware/permissions';
 import { hashString, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
 import { logRoleAudit } from './dashboard';
 
@@ -52,6 +53,15 @@ export async function handleCreateRoleRequest(
     return errorResponse('ALREADY_ELIGIBLE', 'لديك بالفعل هذه الرتبة أو رتبة أعلى منها');
   }
 
+  const requestedGroupId = body.groupId?.trim() || null;
+  if (body.groupId && !requestedGroupId) {
+    return errorResponse('INVALID_GROUP', 'معرف المجموعة غير صالح');
+  }
+  if (requestedGroupId) {
+    const memberCheck = await requireGroupMember(user, requestedGroupId, env.DB);
+    if (memberCheck) return memberCheck;
+  }
+
   // Check for existing pending request
   const existingPending = await env.DB.prepare(
     `SELECT id FROM role_requests WHERE user_id = ? AND requested_role = ? AND status = 'PENDING'`
@@ -71,7 +81,7 @@ export async function handleCreateRoleRequest(
     reqId,
     user.userId,
     targetRole,
-    body.groupId || null,
+    requestedGroupId,
     body.reason.trim(),
     user.phoneNumber || null,
     user.fullName || null,
@@ -118,7 +128,10 @@ export async function handleRedeemRoleCode(
     return errorResponse('INVALID_INPUT', 'يرجى إدخال رمز التحقق المكون من 8 أرقام');
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح التحقق السري غير مهيأ في الخادم', 500);
+  }
   const cleanCode = body.code.replace(/[\s\-]/g, '').trim();
 
   if (cleanCode.length !== 8 || !/^\d{8}$/.test(cleanCode)) {
@@ -128,7 +141,8 @@ export async function handleRedeemRoleCode(
   const inputHash = await hashString(cleanCode, pepper);
   const now = Date.now();
 
-  // Find active code issued for this user
+  // Find the active code and its still-approved request for this exact user.
+  // A code belonging to a rejected or otherwise resolved request must never activate a role.
   let query = `
     SELECT id, request_id, user_id, role, code_hash, attempts, max_attempts, expires_at, used_at
     FROM role_verification_codes
@@ -159,8 +173,26 @@ export async function handleRedeemRoleCode(
     return errorResponse('NO_ACTIVE_CODE', 'لا يوجد رمز تفعيل نشط معتمد لهذا الحساب أو تم استخدامه مسبقاً', 404);
   }
 
+  const originalReq = await env.DB.prepare(
+    `SELECT group_id, status FROM role_requests WHERE id = ? AND user_id = ?`
+  ).bind(codeRecord.request_id, user.userId).first<{ group_id: string | null; status: string }>();
+
+  if (!originalReq || originalReq.status !== 'APPROVED') {
+    return errorResponse('NO_ACTIVE_CODE', 'طلب الترقية المرتبط بهذا الرمز لم يعد معتمداً', 404);
+  }
+
+  if (originalReq.group_id) {
+    const memberCheck = await requireGroupMember(user, originalReq.group_id, env.DB);
+    if (memberCheck) return memberCheck;
+  }
+
+  const targetRole = normalizeRole(codeRecord.role);
+  if (targetRole !== Role.MODERATOR && targetRole !== Role.TEACHER) {
+    return errorResponse('INVALID_ROLE_CODE', 'رمز التفعيل مرتبط برتبة غير مسموح بها', 400);
+  }
+
   // 1. Check Expiration (24 hours)
-  if (codeRecord.expires_at < now) {
+  if (codeRecord.expires_at <= now) {
     return errorResponse('CODE_EXPIRED', 'انتهت صلاحية رمز التحقق (صالح لمدة 24 ساعة فقط). يرجى طلب رمز جديد من الإدارة.', 410);
   }
 
@@ -183,12 +215,23 @@ export async function handleRedeemRoleCode(
   }
 
   if (!isCodeValid) {
-    const newAttempts = codeRecord.attempts + 1;
-    await env.DB.prepare(
-      `UPDATE role_verification_codes SET attempts = ? WHERE id = ?`
-    ).bind(newAttempts, codeRecord.id).run();
+    // Increment atomically so concurrent invalid attempts cannot overwrite one another.
+    const attemptUpdate = await env.DB.prepare(
+      `UPDATE role_verification_codes
+       SET attempts = attempts + 1
+       WHERE id = ? AND used_at IS NULL AND expires_at > ? AND attempts < max_attempts`
+    ).bind(codeRecord.id, now).run();
 
-    const remaining = codeRecord.max_attempts - newAttempts;
+    if (attemptUpdate.meta?.changes !== 1) {
+      return errorResponse('MAX_ATTEMPTS_EXCEEDED', 'انتهت صلاحية الرمز أو تم إيقافه بعد استنفاد المحاولات', 429);
+    }
+
+    const updatedCode = await env.DB.prepare(
+      `SELECT attempts, max_attempts FROM role_verification_codes WHERE id = ?`
+    ).bind(codeRecord.id).first<{ attempts: number; max_attempts: number }>();
+    const attempts = updatedCode?.attempts ?? (codeRecord.attempts + 1);
+    const maxAttempts = updatedCode?.max_attempts ?? codeRecord.max_attempts;
+    const remaining = maxAttempts - attempts;
     if (remaining <= 0) {
       await logRoleAudit(
         env.DB,
@@ -205,26 +248,36 @@ export async function handleRedeemRoleCode(
     return errorResponse('INVALID_CODE', `رمز التحقق غير صحيح. متبقي لديك (${remaining}) محاولات.`);
   }
 
-  // 4. Success: Mark Code Used & Upgrade Role
-  const targetRole = normalizeRole(codeRecord.role);
+  // 4. Success: consume the code atomically before changing any role.
+  // Only one concurrent request can change used_at from NULL.
+  const consumeResult = await env.DB.prepare(
+    `UPDATE role_verification_codes
+     SET used_at = ?
+     WHERE id = ? AND user_id = ? AND used_at IS NULL
+       AND expires_at > ? AND attempts < max_attempts
+       AND EXISTS (
+         SELECT 1 FROM role_requests rr
+         WHERE rr.id = role_verification_codes.request_id
+           AND rr.user_id = ? AND rr.status = 'APPROVED'
+       )`
+  ).bind(now, codeRecord.id, user.userId, now, user.userId).run();
 
-  await env.DB.prepare(
-    `UPDATE role_verification_codes SET used_at = ? WHERE id = ?`
-  ).bind(now, codeRecord.id).run();
+  if (consumeResult.meta?.changes !== 1) {
+    return errorResponse(
+      'CODE_ALREADY_USED',
+      'تم استخدام رمز التفعيل أو إيقافه بالفعل. اطلب رمزاً جديداً من الإدارة.',
+      409
+    );
+  }
 
-  // Check if role request was scoped to a specific group
-  const originalReq = await env.DB.prepare(
-    `SELECT group_id FROM role_requests WHERE id = ?`
-  ).bind(codeRecord.request_id).first<{ group_id?: string | null }>();
-
-  if (originalReq?.group_id) {
+  if (originalReq.group_id) {
     // Group-scoped upgrade: update ONLY this group's member role
     await env.DB.prepare(
       `UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?`
     ).bind(targetRole, originalReq.group_id, user.userId).run();
 
-    // If upgraded to TEACHER or ADMIN, also reflect in global user profile
-    if (targetRole === Role.TEACHER || targetRole === Role.ADMIN) {
+    // Teacher certification is also reflected in the global user profile.
+    if (targetRole === Role.TEACHER) {
       await env.DB.prepare(
         `UPDATE users SET role = ?, updated_at = ? WHERE id = ?`
       ).bind(targetRole, now, user.userId).run();
@@ -235,7 +288,7 @@ export async function handleRedeemRoleCode(
       `UPDATE users SET role = ?, updated_at = ? WHERE id = ?`
     ).bind(targetRole, now, user.userId).run();
 
-    if (targetRole === Role.TEACHER || targetRole === Role.ADMIN) {
+    if (targetRole === Role.TEACHER) {
       await env.DB.prepare(
         `UPDATE group_members SET role = ? WHERE user_id = ?`
       ).bind(targetRole, user.userId).run();
