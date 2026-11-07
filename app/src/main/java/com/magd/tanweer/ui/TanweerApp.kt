@@ -112,7 +112,8 @@ fun TanweerApp(
                                     viewModel.setSubScreen(SubScreen.EXTRA_SECTIONS_HUB)
                                 }
                             } else {
-                                viewModel.setSubScreen(SubScreen.NONE)
+                                // setTab() already returns to the root and refreshes the
+                                // selected tab; avoid syncing the previous tab first.
                                 viewModel.setTab(tab)
                             }
                         }
