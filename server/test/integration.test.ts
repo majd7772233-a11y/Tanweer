@@ -53,6 +53,7 @@ class MockD1Database {
     issues: [],
     issue_comments: [],
     group_messages: [],
+    user_dismissed_announcements: [],
     media_blobs: [],
   };
 
@@ -368,6 +369,27 @@ class MockD1Database {
       if (!fromMatch) return [];
 
       const table = fromMatch[1];
+
+      if (normalized.toLowerCase().includes('count(*) as total_count')) {
+        const rows = [...(this.tables[table] || [])];
+        if (table.toLowerCase() === 'events') {
+          const [groupId, userId] = params;
+          const dismissed = this.tables.user_dismissed_announcements || [];
+          const visible = rows.filter(row => {
+            const inScope = row.group_id === groupId || row.group_id === 'all';
+            const isDismissedAnnouncement = row.group_id === 'all' &&
+              String(row.category || '').toUpperCase() === 'ANNOUNCEMENT' &&
+              dismissed.some(item => item.user_id === userId && item.event_id === row.id);
+            return inScope && !isDismissedAnnouncement;
+          });
+          return [{ total_count: visible.length }];
+        }
+
+        const groupId = params[0];
+        return [{
+          total_count: rows.filter(row => row.group_id === groupId).length
+        }];
+      }
 
       if (table.toLowerCase() === 'sessions' && normalized.includes('COUNT(DISTINCT device_id)')) {
         const [userId, now, excludedDeviceId] = params;
@@ -1023,6 +1045,14 @@ describe('End-to-End System Integration Flow', () => {
     );
 
     expect(getHwRes.status).toBe(200);
+    const getHwJson = await getHwRes.json() as {
+      success: boolean;
+      totalCount: number;
+      homeworks: unknown[];
+    };
+    expect(getHwJson.success).toBe(true);
+    expect(getHwJson.totalCount).toBe(getHwJson.homeworks.length);
+    expect(getHwJson.totalCount).toBe(1);
 
     // 8. Create Exam
     const examReq = new Request(
@@ -1048,6 +1078,24 @@ describe('End-to-End System Integration Flow', () => {
 
     expect(examRes.status).toBe(200);
 
+    const getExamsRes = await app.fetch(
+      new Request('http://localhost/api/v1/exams?groupId=class_10_A', {
+        method: 'GET',
+        headers: authHeaders,
+      }),
+      env,
+      {} as any
+    );
+    expect(getExamsRes.status).toBe(200);
+    const getExamsJson = await getExamsRes.json() as {
+      success: boolean;
+      totalCount: number;
+      exams: unknown[];
+    };
+    expect(getExamsJson.success).toBe(true);
+    expect(getExamsJson.totalCount).toBe(getExamsJson.exams.length);
+    expect(getExamsJson.totalCount).toBe(1);
+
     // 9. Create Issue & Add Comment
     const issueReq = new Request(
       'http://localhost/api/v1/issues',
@@ -1072,6 +1120,24 @@ describe('End-to-End System Integration Flow', () => {
     const issueJson = (await issueRes.json()) as any;
 
     expect(issueRes.status).toBe(200);
+
+    const getIssuesRes = await app.fetch(
+      new Request('http://localhost/api/v1/issues?groupId=class_10_A', {
+        method: 'GET',
+        headers: authHeaders,
+      }),
+      env,
+      {} as any
+    );
+    expect(getIssuesRes.status).toBe(200);
+    const getIssuesJson = await getIssuesRes.json() as {
+      success: boolean;
+      totalCount: number;
+      issues: unknown[];
+    };
+    expect(getIssuesJson.success).toBe(true);
+    expect(getIssuesJson.totalCount).toBe(getIssuesJson.issues.length);
+    expect(getIssuesJson.totalCount).toBe(1);
 
     const commentReq = new Request(
       `http://localhost/api/v1/issues/${issueJson.issueId || issueJson.id || 'iss_1'}/comments`,
