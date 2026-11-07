@@ -365,6 +365,33 @@ class MockD1Database {
 
     // SELECT
     if (/^SELECT/i.test(normalized)) {
+      // These list reads contain correlated subqueries whose FROM appears before
+      // the outer table. Resolve the outer table explicitly instead of mistaking
+      // homework_completions / exam_completions / issue_comments for the list.
+      if (normalized.includes('FROM homeworks h')) {
+        const groupId = params[1];
+        return (this.tables.homeworks || []).filter(row => row.group_id === groupId);
+      }
+      if (normalized.includes('FROM exams e')) {
+        const groupId = params[1];
+        return (this.tables.exams || []).filter(row => row.group_id === groupId);
+      }
+      if (normalized.includes('FROM events e')) {
+        const [groupId, userId] = params;
+        const dismissed = this.tables.user_dismissed_announcements || [];
+        return (this.tables.events || []).filter(row => {
+          const inScope = row.group_id === groupId || row.group_id === 'all';
+          const hiddenForUser = row.group_id === 'all' &&
+            String(row.category || '').toUpperCase() === 'ANNOUNCEMENT' &&
+            dismissed.some(item => item.user_id === userId && item.event_id === row.id);
+          return inScope && !hiddenForUser;
+        });
+      }
+      if (normalized.includes('FROM issues i')) {
+        const groupId = params[0];
+        return (this.tables.issues || []).filter(row => row.group_id === groupId);
+      }
+
       const fromMatch = normalized.match(/FROM (\w+)/i);
       if (!fromMatch) return [];
 
