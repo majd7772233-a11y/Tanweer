@@ -10,6 +10,11 @@ internal object ServerSnapshotValidation {
         return declaredCount >= 0 && declaredCount == receivedCount
     }
 
+    /** Older Workers may omit the count until they are upgraded; once present it is authoritative. */
+    fun hasOptionalMatchingCount(declaredCount: Int?, receivedCount: Int): Boolean {
+        return declaredCount == null || hasMatchingCount(declaredCount, receivedCount)
+    }
+
     fun hasUniqueNonBlankIds(ids: Collection<String>): Boolean {
         if (ids.any { it.isBlank() }) return false
         return ids.size == ids.toSet().size
