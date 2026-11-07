@@ -879,7 +879,8 @@ class TanweerRepository(
             val res = api.getHomeworks(groupId)
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
-                if (!ServerSnapshotValidation.hasUniqueNonBlankIds(body.homeworks.map { it.id }) ||
+                if (!ServerSnapshotValidation.hasOptionalMatchingCount(body.totalCount, body.homeworks.size) ||
+                    !ServerSnapshotValidation.hasUniqueNonBlankIds(body.homeworks.map { it.id }) ||
                     !ServerSnapshotValidation.allBelongToGroup(body.homeworks.map { it.groupId }, groupId)
                 ) {
                     return@withContext SyncResult.Error(
@@ -938,7 +939,8 @@ class TanweerRepository(
             val res = api.getExams(groupId)
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
-                if (!ServerSnapshotValidation.hasUniqueNonBlankIds(body.exams.map { it.id }) ||
+                if (!ServerSnapshotValidation.hasOptionalMatchingCount(body.totalCount, body.exams.size) ||
+                    !ServerSnapshotValidation.hasUniqueNonBlankIds(body.exams.map { it.id }) ||
                     !ServerSnapshotValidation.allBelongToGroup(body.exams.map { it.groupId }, groupId)
                 ) {
                     return@withContext SyncResult.Error(
@@ -999,7 +1001,8 @@ class TanweerRepository(
             val res = api.getEvents(groupId)
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
-                if (!ServerSnapshotValidation.hasUniqueNonBlankIds(body.events.map { it.id }) ||
+                if (!ServerSnapshotValidation.hasOptionalMatchingCount(body.totalCount, body.events.size) ||
+                    !ServerSnapshotValidation.hasUniqueNonBlankIds(body.events.map { it.id }) ||
                     !ServerSnapshotValidation.allBelongToGroup(
                         body.events.map { it.groupId },
                         groupId,
@@ -1202,7 +1205,8 @@ class TanweerRepository(
             val res = api.getIssues(groupId)
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
-                if (!ServerSnapshotValidation.hasUniqueNonBlankIds(body.issues.map { it.id }) ||
+                if (!ServerSnapshotValidation.hasOptionalMatchingCount(body.totalCount, body.issues.size) ||
+                    !ServerSnapshotValidation.hasUniqueNonBlankIds(body.issues.map { it.id }) ||
                     !ServerSnapshotValidation.allBelongToGroup(body.issues.map { it.groupId }, groupId)
                 ) {
                     return@withContext SyncResult.Error(
