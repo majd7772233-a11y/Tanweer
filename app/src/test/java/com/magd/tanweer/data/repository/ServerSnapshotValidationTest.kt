@@ -16,6 +16,15 @@ class ServerSnapshotValidationTest {
     }
 
     @Test
+    fun acceptsLegacySnapshotsWithoutCountsButRejectsMismatchingDeclaredCounts() {
+        assertTrue(ServerSnapshotValidation.hasOptionalMatchingCount(null, 4))
+        assertTrue(ServerSnapshotValidation.hasOptionalMatchingCount(0, 0))
+        assertTrue(ServerSnapshotValidation.hasOptionalMatchingCount(4, 4))
+        assertFalse(ServerSnapshotValidation.hasOptionalMatchingCount(5, 4))
+        assertFalse(ServerSnapshotValidation.hasOptionalMatchingCount(-1, 0))
+    }
+
+    @Test
     fun rejectsBlankAndDuplicateRecordIdsBeforeRoomReconciliation() {
         assertTrue(ServerSnapshotValidation.hasUniqueNonBlankIds(emptyList()))
         assertTrue(ServerSnapshotValidation.hasUniqueNonBlankIds(listOf("a", "b")))
