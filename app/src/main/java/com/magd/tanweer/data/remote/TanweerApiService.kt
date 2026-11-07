@@ -219,25 +219,29 @@ data class UpdateEventRequest(
 @JsonClass(generateAdapter = true)
 data class HomeworksResponse(
     val success: Boolean,
-    val homeworks: List<HomeworkItem> = emptyList()
+    val homeworks: List<HomeworkItem> = emptyList(),
+    val totalCount: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class ExamsResponse(
     val success: Boolean,
-    val exams: List<ExamItem> = emptyList()
+    val exams: List<ExamItem> = emptyList(),
+    val totalCount: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class EventsResponse(
     val success: Boolean,
-    val events: List<SchoolEventItem> = emptyList()
+    val events: List<SchoolEventItem> = emptyList(),
+    val totalCount: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class IssuesResponse(
     val success: Boolean,
-    val issues: List<IssueItem> = emptyList()
+    val issues: List<IssueItem> = emptyList(),
+    val totalCount: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
