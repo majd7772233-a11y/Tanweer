@@ -674,10 +674,19 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER ->
                 syncBooks(currentUser.value?.gradeId ?: 10, isRefresh = true)
 
-            SubScreen.TIMELINE, SubScreen.SUBJECT_KNOWLEDGE_BASE -> {
+            SubScreen.TIMELINE -> {
                 syncSectionContents(groupId, isRefresh = true)
                 syncHomeworks(groupId, isRefresh = true)
                 syncExams(groupId, isRefresh = true)
+            }
+
+            SubScreen.SUBJECT_KNOWLEDGE_BASE -> {
+                syncSectionContents(groupId, isRefresh = true)
+                syncHomeworks(groupId, isRefresh = true)
+                syncExams(groupId, isRefresh = true)
+                // The unified subject workspace also displays the class's
+                // questions/discussions; refresh them on entry as well.
+                syncIssues(groupId, isRefresh = true)
             }
 
             SubScreen.ACADEMIC_HISTORY -> syncAcademicArchive(isRefresh = true)
