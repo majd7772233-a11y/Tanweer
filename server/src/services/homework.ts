@@ -23,9 +23,13 @@ export async function handleGetHomeworks(groupId: string, user: UserContext, env
      WHERE h.group_id = ?
      ORDER BY h.is_official DESC, h.due_date ASC, h.created_at DESC`
   ).bind(user.userId, groupId).all();
+  const totalCount = await env.DB.prepare(
+    `SELECT COUNT(*) AS total_count FROM homeworks WHERE group_id = ?`
+  ).bind(groupId).first<{ total_count: number }>();
 
   return jsonResponse({
     success: true,
+    totalCount: Number(totalCount?.total_count ?? -1),
     homeworks: (homeworks.results || []).map(mapHomework),
   });
 }
