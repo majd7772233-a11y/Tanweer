@@ -193,7 +193,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     isOfficial?: boolean;
   };
 
-  if (!body.groupId || !body.dueDate || !body.subjectId || !body.title?.trim()) {
+  if (!groupId || !body.dueDate || !body.subjectId || !body.title?.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى ملء تفاصيل الواجب وتاريخ التسليم والمادة');
   }
 
@@ -205,7 +205,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     return errorResponse('INVALID_INPUT', 'تاريخ دراسة الواجب غير صالح، يرجى اختيار تاريخ تقويمي صحيح بصيغة YYYY-MM-DD');
   }
 
-  const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
+  const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
 
   if (body.mediaUrls !== undefined && (
@@ -222,10 +222,12 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
 
   const canPublishOfficial = await hasPermission(user, Permission.PUBLISH_OFFICIAL_HOMEWORK, {
     db: env.DB,
-    groupId: body.groupId,
+    groupId: groupId,
   });
   const isOfficial = body.isOfficial === true && canPublishOfficial ? 1 : 0;
 
+  const groupId = body.groupId;
+  const creatorId = user.userId;
   const hwId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
     : generateId('hw');
@@ -237,8 +239,8 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
   const taskType = body.taskType || 'HOMEWORK';
   const mediaUrlsJson = mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null;
   const expectedMetadata = {
-    groupId: body.groupId,
-    creatorId: user.userId,
+    groupId: groupId,
+    creatorId: creatorId,
     studyDate,
     dueDate: body.dueDate,
     subjectId: body.subjectId,
@@ -323,7 +325,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     if (missing.length > 0) {
       try {
         const repairStatements = await Promise.all(missing.map(item =>
-          getHomeworkMediaInsertStatement(env, hwId, body.groupId, user.userId, item.pageOrder, item.url, Date.now())
+          getHomeworkMediaInsertStatement(env, hwId, groupId, creatorId, item.pageOrder, item.url, Date.now())
         ));
         const repairResults = await env.DB.batch(repairStatements);
         if (repairResults.length !== repairStatements.length ||
@@ -377,7 +379,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       hwId,
-      body.groupId,
+      groupId,
       studyDate,
       body.dueDate,
       body.subjectId,
@@ -388,11 +390,11 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
       taskType,
       mediaUrlsJson,
       isOfficial,
-      user.userId,
+      creatorId,
       now
     ),
     ...(await Promise.all(identities.map(item =>
-      getHomeworkMediaInsertStatement(env, hwId, body.groupId, user.userId, item.pageOrder, item.url, now)
+      getHomeworkMediaInsertStatement(env, hwId, groupId, creatorId, item.pageOrder, item.url, now)
     ))),
   ];
 
