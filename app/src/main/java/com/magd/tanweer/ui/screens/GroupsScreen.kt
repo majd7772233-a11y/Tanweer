@@ -686,19 +686,29 @@ fun GroupsScreen(
                                         )
                                     }
                                 }
-                                GlassOutlinedButton(
-                                    text = "مغادرة المجموعة",
-                                    onClick = {
-                                        viewModel.leaveGroup(group.id) { success, message ->
-                                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                                            if (success) {
-                                                if (activeChatGroup?.id == group.id) activeChatGroup = null
-                                                if (selectedGroupId == group.id) activeTab = GroupsTab.MY_GROUPS
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            viewModel.leaveGroup(group.id) { success, message ->
+                                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                                if (success) {
+                                                    if (activeChatGroup?.id == group.id) activeChatGroup = null
+                                                    if (selectedGroupId == group.id) activeTab = GroupsTab.MY_GROUPS
+                                                }
                                             }
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "مغادرة المجموعة",
+                                            fontSize = tanweerTextSize(10f),
+                                            color = RubyRed
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
