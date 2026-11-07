@@ -407,6 +407,26 @@ class MockD1Database {
 
       let rows = [...(this.tables[table] || [])];
 
+      // Match the aliased academic list queries' parameter order exactly.
+      // Homework/exam reads bind userId for completion subqueries before groupId.
+      if (table.toLowerCase() === 'homeworks' && normalized.includes('h.group_id = ?')) {
+        const groupId = params[1];
+        rows = rows.filter(row => row.group_id === groupId);
+      } else if (table.toLowerCase() === 'exams' && normalized.includes('e.group_id = ?')) {
+        const groupId = params[1];
+        rows = rows.filter(row => row.group_id === groupId);
+      } else if (table.toLowerCase() === 'events' && normalized.includes('e.group_id = ?')) {
+        const [groupId, userId] = params;
+        const dismissed = this.tables.user_dismissed_announcements || [];
+        rows = rows.filter(row => {
+          const inScope = row.group_id === groupId || row.group_id === 'all';
+          const isDismissedAnnouncement = row.group_id === 'all' &&
+            String(row.category || '').toUpperCase() === 'ANNOUNCEMENT' &&
+            dismissed.some(item => item.user_id === userId && item.event_id === row.id);
+          return inScope && !isDismissedAnnouncement;
+        });
+      }
+
       if (normalized.includes("type = 'TEMP_PASSWORD'")) {
         rows = rows.filter((row) => row.type === 'TEMP_PASSWORD');
       }
