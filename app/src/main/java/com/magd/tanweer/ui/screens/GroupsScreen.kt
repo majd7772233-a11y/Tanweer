@@ -550,7 +550,11 @@ fun GroupsScreen(
                                                 )
                                             }
                                         }
-
+                                        GlassPill(
+                                            text = "شعبة نشطة ✓",
+                                            color = EmeraldGreen,
+                                            bgColor = EmeraldGreen.copy(alpha = 0.14f)
+                                        )
                                     }
 
                                     Text(
@@ -651,7 +655,11 @@ fun GroupsScreen(
                                             )
                                         }
                                     }
-
+                                    GlassPill(
+                                        text = "عضوية نشطة ✓",
+                                        color = EmeraldGreen,
+                                        bgColor = EmeraldGreen.copy(alpha = 0.14f)
+                                    )
                                 }
 
                                 if (!group.description.isNullOrBlank()) {
