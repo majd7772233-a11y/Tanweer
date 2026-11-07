@@ -564,7 +564,7 @@ class TanweerRepository(
     suspend fun syncProfile(): SyncResult = withContext(Dispatchers.IO) {
         try {
             val res = api.getProfile()
-            if (res.isSuccessful && res.body()?.user != null) {
+            if (res.isSuccessful && res.body()?.success == true && res.body()?.user != null) {
                 val user = res.body()!!.user!!
                 val currentToken = db.userDao().getUserSync()?.token ?: ""
                 db.userDao().insertUser(
@@ -2512,7 +2512,7 @@ class TanweerRepository(
     suspend fun connectToGroupChat(groupId: String, myUserId: String) = withContext(Dispatchers.IO) {
         try {
             val res = api.getGroupMessages(groupId)
-            if (res.isSuccessful && res.body()?.messages != null) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val msgs = res.body()!!.messages.map {
                     ChatMessageEntity(
                         id = it.id,
@@ -3853,7 +3853,7 @@ class TanweerRepository(
     suspend fun syncIssueDetails(issueId: String): SyncResult = withContext(Dispatchers.IO) {
         try {
             val res = api.getIssueDetails(issueId)
-            if (res.isSuccessful && res.body() != null) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 val detail = res.body()!!
                 val comments = detail.comments.map {
                     IssueCommentEntity(
@@ -4324,10 +4324,10 @@ class TanweerRepository(
     suspend fun getSystemVersion(): Result<com.magd.tanweer.data.remote.SystemVersionResponse> = withContext(Dispatchers.IO) {
         try {
             val res = api.getSystemVersion()
-            if (res.isSuccessful && res.body() != null) {
+            if (res.isSuccessful && res.body()?.success == true) {
                 Result.success(res.body()!!)
             } else {
-                Result.failure(Exception(res.message().ifBlank { "تعذر جلب بيانات التحديثات من الخادم" }))
+                Result.failure(Exception(res.body()?.message ?: res.message().ifBlank { "تعذر جلب بيانات التحديثات من الخادم" }))
             }
         } catch (e: Exception) {
             Result.failure(e)
