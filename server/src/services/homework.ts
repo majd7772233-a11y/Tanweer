@@ -193,6 +193,9 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     isOfficial?: boolean;
   };
 
+  const groupId = body.groupId;
+  const creatorId = user.userId;
+
   if (!groupId || !body.dueDate || !body.subjectId || !body.title?.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى ملء تفاصيل الواجب وتاريخ التسليم والمادة');
   }
@@ -226,8 +229,6 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
   });
   const isOfficial = body.isOfficial === true && canPublishOfficial ? 1 : 0;
 
-  const groupId = body.groupId;
-  const creatorId = user.userId;
   const hwId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
     : generateId('hw');
