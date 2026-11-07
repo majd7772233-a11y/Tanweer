@@ -219,7 +219,7 @@ describe('Atomic homework media publication', () => {
     const retried = await handleCreateHomework(author, createRequest(), envFor(db));
     const body = await retried.json() as any;
 
-    expect(retried.status).toBe(200);
+    expect(retried.status, JSON.stringify(body)).toBe(200);
     expect(body.success).toBe(true);
     expect(db.tables.homeworks).toHaveLength(1);
     expect(db.tables.homework_media).toHaveLength(2);
@@ -256,7 +256,7 @@ describe('Atomic homework media publication', () => {
     const response = await handleCreateHomework(author, createRequest(), envFor(db));
     const body = await response.json() as any;
 
-    expect(response.status).toBe(200);
+    expect(response.status, JSON.stringify(body)).toBe(200);
     expect(body.success).toBe(true);
     expect(db.tables.homeworks).toHaveLength(1);
     expect(db.tables.homework_media).toHaveLength(2);
@@ -267,7 +267,7 @@ describe('Atomic homework media publication', () => {
   it('rejects same-ID retries whose homework metadata differs without mutating saved data', async () => {
     const db = new HomeworkDb();
     const first = await handleCreateHomework(author, createRequest(), envFor(db));
-    expect(first.status).toBe(200);
+    expect(first.status, await first.clone().text()).toBe(200);
 
     const beforeHomework = db.tables.homeworks.map(row => ({ ...row }));
     const beforeMedia = db.tables.homework_media.map(row => ({ ...row }));
@@ -277,7 +277,7 @@ describe('Atomic homework media publication', () => {
       envFor(db)
     );
 
-    expect(conflict.status).toBe(409);
+    expect(conflict.status, await conflict.clone().text()).toBe(409);
     expect(db.tables.homeworks).toEqual(beforeHomework);
     expect(db.tables.homework_media).toEqual(beforeMedia);
   });
@@ -302,7 +302,7 @@ describe('Atomic homework media publication', () => {
     };
 
     const response = await handleCreateHomework(author, createRequest(), envFor(db));
-    expect(response.status).toBe(409);
+    expect(response.status, await response.clone().text()).toBe(409);
     expect(db.tables.homeworks).toHaveLength(1);
     expect(db.tables.homeworks[0].title).toBe('واجب مختلف من طلب متزامن');
     expect(db.tables.homework_media).toHaveLength(0);
