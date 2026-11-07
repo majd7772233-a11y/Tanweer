@@ -30,6 +30,131 @@ export async function handleGetHomeworks(groupId: string, user: UserContext, env
   });
 }
 
+async function createHomeworkMediaIdentity(
+  homeworkId: string,
+  pageOrder: number,
+  url: string
+): Promise<{ linkId: string; mediaId: string }> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(homeworkId + '\u0000' + pageOrder + '\u0000' + url)
+  );
+  const digestHex = Array.from(new Uint8Array(digest), byte =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+  const internalMediaId = url.match(/\/api\/v1\/media\/([A-Za-z0-9_-]+)(?:\.[A-Za-z0-9]+)?\/?$/i)?.[1];
+
+  return {
+    linkId: 'hwm_' + digestHex.slice(0, 40),
+    mediaId: internalMediaId || 'external_' + digestHex,
+  };
+}
+
+function parseHomeworkMediaUrls(value: string | null | undefined): string[] | null {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.some(item => typeof item !== 'string')) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function homeworkMetadataMatches(
+  existing: {
+    group_id: string;
+    created_by: string;
+    study_date: string;
+    due_date: string;
+    subject_id: string;
+    title: string;
+    details: string | null;
+    page_numbers: string | null;
+    question_numbers: string | null;
+    task_type: string;
+    media_urls: string | null;
+  },
+  expected: {
+    groupId: string;
+    creatorId: string;
+    studyDate: string;
+    dueDate: string;
+    subjectId: string;
+    title: string;
+    details: string | null;
+    pageNumbers: string | null;
+    questionNumbers: string | null;
+    taskType: string;
+    mediaUrlsJson: string | null;
+  }
+): boolean {
+  const storedMediaUrls = parseHomeworkMediaUrls(existing.media_urls);
+  const requestedMediaUrls = expected.mediaUrlsJson
+    ? parseHomeworkMediaUrls(expected.mediaUrlsJson)
+    : [];
+
+  return existing.group_id === expected.groupId &&
+    existing.created_by === expected.creatorId &&
+    existing.study_date === expected.studyDate &&
+    existing.due_date === expected.dueDate &&
+    existing.subject_id === expected.subjectId &&
+    existing.title === expected.title &&
+    (existing.details || null) === expected.details &&
+    (existing.page_numbers || null) === expected.pageNumbers &&
+    (existing.question_numbers || null) === expected.questionNumbers &&
+    existing.task_type === expected.taskType &&
+    storedMediaUrls !== null &&
+    requestedMediaUrls !== null &&
+    JSON.stringify(storedMediaUrls) === JSON.stringify(requestedMediaUrls);
+}
+
+async function getHomeworkMediaInsertStatement(
+  env: Env,
+  homeworkId: string,
+  pageOrder: number,
+  url: string,
+  createdAt: number
+) {
+  const identity = await createHomeworkMediaIdentity(homeworkId, pageOrder, url);
+  return env.DB.prepare(
+    `INSERT OR IGNORE INTO homework_media (id, homework_id, media_id, url, page_order, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(identity.linkId, homeworkId, identity.mediaId, url, pageOrder, createdAt);
+}
+
+async function verifyHomeworkMediaSnapshot(
+  env: Env,
+  homeworkId: string,
+  expectedUrls: string[],
+  identities: Array<{ pageOrder: number; mediaId: string; url: string }>
+): Promise<boolean> {
+  const response = await env.DB.prepare(
+    `SELECT media_id, url, page_order
+     FROM homework_media
+     WHERE homework_id = ?
+     ORDER BY page_order ASC`
+  ).bind(homeworkId).all<{
+    media_id: string;
+    url: string;
+    page_order: number;
+  }>();
+
+  const rows = response.results || [];
+  if (rows.length !== expectedUrls.length || rows.length !== identities.length) return false;
+
+  const seenOrders = new Set<number>();
+  for (const row of rows) {
+    if (!Number.isInteger(row.page_order) || row.page_order < 1 || seenOrders.has(row.page_order)) {
+      return false;
+    }
+    seenOrders.add(row.page_order);
+    const expected = identities.find(item => item.pageOrder === row.page_order);
+    if (!expected || expected.url !== row.url || expected.mediaId !== row.media_id) return false;
+  }
+  return true;
+}
+
 export async function handleCreateHomework(user: UserContext, request: Request, env: Env): Promise<Response> {
   const body = await request.json() as {
     id?: string;
@@ -46,7 +171,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     isOfficial?: boolean;
   };
 
-  if (!body.groupId || !body.dueDate || !body.subjectId || !body.title) {
+  if (!body.groupId || !body.dueDate || !body.subjectId || !body.title?.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى ملء تفاصيل الواجب وتاريخ التسليم والمادة');
   }
 
@@ -61,101 +186,239 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
   const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
   if (memberCheck) return memberCheck;
 
-  if (body.mediaUrls !== undefined) {
-    if (!Array.isArray(body.mediaUrls)) {
-      return errorResponse('INVALID_MEDIA', 'قائمة مرفقات الواجب غير صالحة');
-    }
-    const mediaValidation = await validateMediaAttachmentAccess(user, body.mediaUrls, env.DB);
-    if (mediaValidation) return mediaValidation;
+  if (body.mediaUrls !== undefined && (
+    !Array.isArray(body.mediaUrls) ||
+    body.mediaUrls.length > 200 ||
+    body.mediaUrls.some(url => typeof url !== 'string' || !url.trim())
+  )) {
+    return errorResponse('INVALID_MEDIA', 'قائمة مرفقات الواجب غير صالحة أو تتجاوز الحد المسموح');
   }
 
-  // Check if publishing official homework is authorized
+  const mediaUrls = (body.mediaUrls || []).map(url => url.trim());
+  const mediaValidation = await validateMediaAttachmentAccess(user, mediaUrls, env.DB);
+  if (mediaValidation) return mediaValidation;
+
   const canPublishOfficial = await hasPermission(user, Permission.PUBLISH_OFFICIAL_HOMEWORK, {
     db: env.DB,
     groupId: body.groupId,
   });
-
   const isOfficial = body.isOfficial === true && canPublishOfficial ? 1 : 0;
 
   const hwId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
     : generateId('hw');
+  const studyDate = body.studyDate || new Date().toISOString().slice(0, 10);
+  const title = body.title.trim();
+  const details = body.details?.trim() || null;
+  const pageNumbers = body.pageNumbers?.trim() || null;
+  const questionNumbers = body.questionNumbers?.trim() || null;
+  const taskType = body.taskType || 'HOMEWORK';
+  const mediaUrlsJson = mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null;
+  const expectedMetadata = {
+    groupId: body.groupId,
+    creatorId: user.userId,
+    studyDate,
+    dueDate: body.dueDate,
+    subjectId: body.subjectId,
+    title,
+    details,
+    pageNumbers,
+    questionNumbers,
+    taskType,
+    mediaUrlsJson,
+  };
 
-  // Idempotency check with ownership & scope validation
-  const existing = await env.DB.prepare(`SELECT id, is_official, group_id, created_by FROM homeworks WHERE id = ?`).bind(hwId).first<{
+  const identities = await Promise.all(mediaUrls.map(async (url, index) => {
+    const identity = await createHomeworkMediaIdentity(hwId, index + 1, url);
+    return { pageOrder: index + 1, mediaId: identity.mediaId, url };
+  }));
+
+  const findExistingHomework = () => env.DB.prepare(
+    `SELECT id, group_id, study_date, due_date, subject_id, title, details,
+            page_numbers, question_numbers, task_type, media_urls, is_official, created_by
+     FROM homeworks WHERE id = ? LIMIT 1`
+  ).bind(hwId).first<{
     id: string;
-    is_official: number;
     group_id: string;
+    study_date: string;
+    due_date: string;
+    subject_id: string;
+    title: string;
+    details: string | null;
+    page_numbers: string | null;
+    question_numbers: string | null;
+    task_type: string;
+    media_urls: string | null;
+    is_official: number;
     created_by: string;
   }>();
-  if (existing) {
-    if (existing.group_id !== body.groupId || existing.created_by !== user.userId) {
-      return errorResponse('CONFLICT', 'المعرّف مستخدم مسبقاً في نطاق آخر أو بواسطة مستخدم آخر', 409);
+
+  const existing = await findExistingHomework();
+  if (existing && !homeworkMetadataMatches(existing, expectedMetadata)) {
+    return errorResponse(
+      'HOMEWORK_ID_CONFLICT',
+      'المعرّف مستخدم لواجب مختلف أو في مجموعة أخرى. لم يتم استبدال أي بيانات محفوظة.',
+      409
+    );
+  }
+
+  const verifyOrRepairExisting = async (): Promise<Response> => {
+    const mediaResponse = await env.DB.prepare(
+      `SELECT media_id, url, page_order
+       FROM homework_media WHERE homework_id = ?
+       ORDER BY page_order ASC`
+    ).bind(hwId).all<{
+      media_id: string;
+      url: string;
+      page_order: number;
+    }>();
+
+    const storedRows = mediaResponse.results || [];
+    const storedByPage = new Map<number, typeof storedRows[number]>();
+    for (const stored of storedRows) {
+      if (storedByPage.has(stored.page_order)) {
+        return errorResponse(
+          'HOMEWORK_MEDIA_CONFLICT',
+          'توجد صفحات مكررة في الواجب المحفوظ. لم يتم إعلان اكتمال النشر.',
+          409
+        );
+      }
+      storedByPage.set(stored.page_order, stored);
     }
+
+    for (const stored of storedRows) {
+      const expected = identities.find(item => item.pageOrder === stored.page_order);
+      if (!expected || expected.url !== stored.url || expected.mediaId !== stored.media_id) {
+        return errorResponse(
+          'HOMEWORK_MEDIA_CONFLICT',
+          'مرفقات إعادة المحاولة لا تطابق النسخة المحفوظة. لم يتم استبدال أي مرفق.',
+          409
+        );
+      }
+    }
+
+    const missing = identities.filter(item => !storedByPage.has(item.pageOrder));
+    if (missing.length > 0) {
+      try {
+        const repairStatements = await Promise.all(missing.map(item =>
+          getHomeworkMediaInsertStatement(env, hwId, item.pageOrder, item.url, Date.now())
+        ));
+        const repairResults = await env.DB.batch(repairStatements);
+        if (repairResults.length !== repairStatements.length ||
+            repairResults.some(result => !result.success)) {
+          throw new Error('D1 did not complete the homework media repair batch');
+        }
+      } catch (error) {
+        console.error('Could not repair incomplete homework media:', error);
+        return errorResponse(
+          'HOMEWORK_MEDIA_REPAIR_FAILED',
+          'تم العثور على واجب محفوظ بمرفقات ناقصة، لكن تعذر استكمال حفظها. أعد المحاولة.',
+          500
+        );
+      }
+    }
+
+    const complete = await verifyHomeworkMediaSnapshot(env, hwId, mediaUrls, identities);
+    if (!complete) {
+      return errorResponse(
+        'HOMEWORK_MEDIA_REPAIR_FAILED',
+        'لم يؤكد الخادم حفظ جميع صفحات الواجب. أعد المحاولة دون إنشاء واجب جديد.',
+        500
+      );
+    }
+
+    const confirmedHomework = await findExistingHomework();
+    if (!confirmedHomework || !homeworkMetadataMatches(confirmedHomework, expectedMetadata)) {
+      return errorResponse('HOMEWORK_ID_CONFLICT', 'تغيرت بيانات الواجب أثناء إعادة المحاولة.', 409);
+    }
+
     return jsonResponse({
       success: true,
-      homeworkId: existing.id,
-      isOfficial: existing.is_official === 1,
-      message: existing.is_official === 1
+      homeworkId: confirmedHomework.id,
+      isOfficial: confirmedHomework.is_official === 1,
+      message: confirmedHomework.is_official === 1
         ? 'تم نشر الواجب الرسمي المعتمد للشعبة بنجاح 🎓'
         : 'تمت إضافة مساهمة الواجب بنجاح ومشاركتها مع الزملاء 📝',
     });
+  };
+
+  if (existing) {
+    return verifyOrRepairExisting();
   }
 
   const now = Date.now();
-  const mediaUrlsJson = (body.mediaUrls && Array.isArray(body.mediaUrls) && body.mediaUrls.length > 0)
-    ? JSON.stringify(body.mediaUrls)
-    : null;
+  const publicationStatements = [
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO homeworks (
+         id, group_id, study_date, due_date, subject_id, title, details,
+         page_numbers, question_numbers, task_type, media_urls, is_official, created_by, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      hwId,
+      body.groupId,
+      studyDate,
+      body.dueDate,
+      body.subjectId,
+      title,
+      details,
+      pageNumbers,
+      questionNumbers,
+      taskType,
+      mediaUrlsJson,
+      isOfficial,
+      user.userId,
+      now
+    ),
+    ...(await Promise.all(identities.map(item =>
+      getHomeworkMediaInsertStatement(env, hwId, item.pageOrder, item.url, now)
+    ))),
+  ];
 
-  await env.DB.prepare(
-    `INSERT INTO homeworks (id, group_id, study_date, due_date, subject_id, title, details, page_numbers, question_numbers, task_type, media_urls, is_official, created_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    hwId,
-    body.groupId,
-    body.studyDate || new Date().toISOString().slice(0, 10),
-    body.dueDate,
-    body.subjectId,
-    body.title.trim(),
-    body.details?.trim() || null,
-    body.pageNumbers?.trim() || null,
-    body.questionNumbers?.trim() || null,
-    body.taskType || 'HOMEWORK',
-    mediaUrlsJson,
-    isOfficial,
-    user.userId,
-    now
-  ).run();
-
-  // Populate relational homework_media table
-  if (body.mediaUrls && Array.isArray(body.mediaUrls)) {
-    for (let i = 0; i < body.mediaUrls.length; i++) {
-      const url = body.mediaUrls[i];
-      if (!url || typeof url !== 'string') continue;
-      const mediaIdMatch = url.match(/([a-zA-Z0-9_\-]+)$/);
-      const extractedMediaId = mediaIdMatch ? mediaIdMatch[1].replace(/\.[a-zA-Z0-9]+$/, '') : generateId('med');
-      const hwMediaId = generateId('hwm');
-      try {
-        await env.DB.prepare(
-          `INSERT INTO homework_media (id, homework_id, media_id, url, page_order, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        ).bind(hwMediaId, hwId, extractedMediaId, url, i + 1, now).run();
-      } catch {}
+  try {
+    const results = await env.DB.batch(publicationStatements);
+    if (results.length !== publicationStatements.length ||
+        results.some(result => !result.success)) {
+      throw new Error('D1 did not confirm every homework publication statement');
     }
+  } catch (error) {
+    console.error('Atomic homework publication failed:', error);
+    return errorResponse(
+      'HOMEWORK_CREATE_FAILED',
+      'تعذر حفظ الواجب ومرفقاته بصورة مكتملة. لم يتم نشر سجل جزئي؛ أعد المحاولة.',
+      500
+    );
   }
 
-  const msg = isOfficial === 1
-    ? 'تم نشر الواجب الرسمي المعتمد للشعبة بنجاح 🎓'
-    : 'تمت إضافة مساهمة الواجب بنجاح ومشاركتها مع الزملاء 📝';
+  const committedHomework = await findExistingHomework();
+  if (!committedHomework) {
+    return errorResponse('HOMEWORK_CREATE_FAILED', 'لم يؤكد الخادم إنشاء سجل الواجب. أعد المحاولة.', 500);
+  }
+  if (!homeworkMetadataMatches(committedHomework, expectedMetadata)) {
+    return errorResponse(
+      'HOMEWORK_ID_CONFLICT',
+      'المعرّف مستخدم لواجب مختلف أو في مجموعة أخرى. لم يتم استبدال أي بيانات محفوظة.',
+      409
+    );
+  }
+
+  const allMediaCommitted = await verifyHomeworkMediaSnapshot(env, hwId, mediaUrls, identities);
+  if (!allMediaCommitted) {
+    return errorResponse(
+      'HOMEWORK_MEDIA_CREATE_FAILED',
+      'لم يؤكد الخادم حفظ جميع صفحات الواجب. أعد المحاولة باستخدام نفس المعرّف.',
+      500
+    );
+  }
 
   return jsonResponse({
     success: true,
-    homeworkId: hwId,
-    isOfficial: isOfficial === 1,
-    message: msg,
+    homeworkId: committedHomework.id,
+    isOfficial: committedHomework.is_official === 1,
+    message: committedHomework.is_official === 1
+      ? 'تم نشر الواجب الرسمي المعتمد للشعبة بنجاح 🎓'
+      : 'تمت إضافة مساهمة الواجب بنجاح ومشاركتها مع الزملاء 📝',
   });
 }
-
 export async function handleUpdateHomework(
   homeworkId: string,
   user: UserContext,
