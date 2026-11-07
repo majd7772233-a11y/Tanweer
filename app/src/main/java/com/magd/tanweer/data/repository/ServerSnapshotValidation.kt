@@ -16,12 +16,12 @@ internal object ServerSnapshotValidation {
     }
 
     fun isValidYearMonth(month: String): Boolean {
-        return Regex("""^\\d{4}-(0[1-9]|1[0-2])$""").matches(month)
+        return Regex("""^\d{4}-(0[1-9]|1[0-2])$""").matches(month)
     }
 
     fun belongsToMonth(date: String, month: String): Boolean {
         if (!isValidYearMonth(month)) return false
-        if (!Regex("""^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$""").matches(date)) {
+        if (!Regex("""^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$""").matches(date)) {
             return false
         }
         return date.substring(0, 7) == month
