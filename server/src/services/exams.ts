@@ -25,9 +25,13 @@ export async function handleGetExams(groupId: string, user: UserContext, env: En
      WHERE e.group_id = ?
      ORDER BY e.is_official DESC, e.exam_date ASC`
   ).bind(user.userId, groupId).all();
+  const totalCount = await env.DB.prepare(
+    `SELECT COUNT(*) AS total_count FROM exams WHERE group_id = ?`
+  ).bind(groupId).first<{ total_count: number }>();
 
   return jsonResponse({
     success: true,
+    totalCount: Number(totalCount?.total_count ?? -1),
     exams: (exams.results || []).map(mapExam),
   });
 }
