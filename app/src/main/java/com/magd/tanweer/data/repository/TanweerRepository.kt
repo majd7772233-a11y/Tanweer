@@ -238,7 +238,6 @@ class TanweerRepository(
             )
             if (!res.isSuccessful || res.body()?.success != true || res.body()?.user == null) {
                 val errorMsg = res.body()?.message
-                    ?: res.body()?.error?.message
                     ?: res.errorBody()?.string()?.takeIf { it.isNotBlank() }
                     ?: res.message().let { if (it.isNullOrBlank()) "فشل تحديث بيانات الحساب على السيرفر" else it }
                 return@withContext Result.failure(Exception(errorMsg))
@@ -2988,7 +2987,7 @@ class TanweerRepository(
             } else {
                 val statusCode = res.code()
                 val responseBody = res.body()
-                val message = responseBody?.error?.message ?: responseBody?.message ?: when {
+                val message = responseBody?.message ?: when {
                     res.isSuccessful -> "الخادم لم يؤكد الحفظ (success=false)"
                     statusCode in listOf(401, 403) -> "لا تملك صلاحية النشر (HTTP $statusCode)"
                     else -> "رفض الخادم النشر (HTTP $statusCode)"
@@ -3370,7 +3369,7 @@ class TanweerRepository(
             } else {
                 val statusCode = res.code()
                 val responseBody = res.body()
-                val message = responseBody?.error?.message ?: responseBody?.message ?: when {
+                val message = responseBody?.message ?: when {
                     res.isSuccessful -> "الخادم لم يؤكد الحفظ (success=false)"
                     statusCode in listOf(401, 403) -> "لا تملك صلاحية النشر (HTTP $statusCode)"
                     else -> "رفض الخادم النشر (HTTP $statusCode)"
@@ -3430,7 +3429,7 @@ class TanweerRepository(
                 }
                 HomeworkToggleResult.Failed(
                     currentStatus,
-                    responseBody?.error?.message ?: responseBody?.message
+                    responseBody?.message
                         ?: "الخادم لم يؤكد تغيير حالة الواجب (success=false)"
                 )
             } else if (res.code() in listOf(400, 401, 403, 409, 422)) {
@@ -3442,7 +3441,7 @@ class TanweerRepository(
                 }
                 HomeworkToggleResult.Failed(
                     currentStatus,
-                    responseBody?.error?.message ?: responseBody?.message
+                    responseBody?.message
                         ?: "رفض الخادم تغيير حالة الواجب (HTTP ${res.code()})"
                 )
             } else if (res.code() == 404) {
@@ -3649,14 +3648,14 @@ class TanweerRepository(
                 } else if (res.isSuccessful) {
                     db.examDao().updateExamCompletion(examId, !targetStatus)
                     Result.failure(
-                        Exception(responseBody?.error?.message ?: responseBody?.message
+                        Exception(responseBody?.message
                             ?: "الخادم لم يؤكد تغيير حالة الاختبار (success=false)")
                     )
                 } else if (res.code() in listOf(400, 401, 403, 409, 422)) {
                     // Rollback on permanent client/authorization rejection.
                     db.examDao().updateExamCompletion(examId, !targetStatus)
                     Result.failure(
-                        Exception(responseBody?.error?.message ?: responseBody?.message
+                        Exception(responseBody?.message
                             ?: "رفض الخادم تغيير حالة الاختبار (HTTP ${res.code()})")
                     )
                 } else {
@@ -3922,12 +3921,12 @@ class TanweerRepository(
             } else if (res.isSuccessful) {
                 db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
                 Result.failure(
-                    Exception(responseBody?.error?.message ?: responseBody?.message
+                    Exception(responseBody?.message
                         ?: "الخادم لم يؤكد حفظ التعليق (success=false)")
                 )
             } else if (res.code() in listOf(400, 401, 403, 404, 409, 422)) {
                 db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
-                Result.failure(Exception(responseBody?.error?.message ?: responseBody?.message
+                Result.failure(Exception(responseBody?.message
                     ?: "رفض الخادم حفظ التعليق (HTTP ${res.code()})"))
             } else {
                 val outboxItem = OutboxEntity(
@@ -4062,7 +4061,7 @@ class TanweerRepository(
                 }
             } else if (res.isSuccessful) {
                 db.issueDao().updateSyncStatus(id, "FAILED")
-                Result.failure(Exception(responseBody?.error?.message ?: responseBody?.message
+                Result.failure(Exception(responseBody?.message
                     ?: "الخادم لم يؤكد إنشاء الاستفسار (success=false)"))
             } else if (res.code() in listOf(400, 401, 403, 404, 409, 422)) {
                 db.issueDao().updateSyncStatus(id, "FAILED")
@@ -4155,7 +4154,7 @@ class TanweerRepository(
                         Result.success(ExamDeleteResult.Synced())
                     }
                     res.isSuccessful -> {
-                        Result.failure(Exception(responseBody?.error?.message ?: responseBody?.message
+                        Result.failure(Exception(responseBody?.message
                             ?: "الخادم لم يؤكد حذف الاختبار (success=false)"))
                     }
                     res.code() in 400..499 && res.code() !in listOf(408, 429) -> {
@@ -4311,7 +4310,7 @@ class TanweerRepository(
             } else {
                 db.correctionDao().updateStatus(id, "FAILED")
                 Result.failure(
-                    Exception(responseBody?.error?.message ?: responseBody?.message
+                    Exception(responseBody?.message
                         ?: if (res.isSuccessful) "الخادم لم يؤكد استلام اقتراح التصحيح (success=false)"
                         else "تعذر إرسال اقتراح التصحيح (HTTP ${res.code()})")
                 )
