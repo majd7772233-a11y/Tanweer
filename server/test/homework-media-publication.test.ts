@@ -15,6 +15,8 @@ class HomeworkStatement {
     return new HomeworkStatement(this.db, this.sql, params);
   }
 
+  get rawSql(): string { return this.sql; }
+
   async first<T = unknown>(): Promise<T | null> {
     const sql = this.sql.replace(/\\s+/g, ' ').trim();
 
@@ -73,14 +75,25 @@ class HomeworkStatement {
     if (/^INSERT OR IGNORE INTO homework_media/i.test(sql)) {
       const [
         id, homework_id, media_id, url, page_order, created_at,
-        guardHomeworkId, guardGroupId, guardCreatorId, pageHomeworkId, guardedPageOrder,
+        guardHomeworkId, guardGroupId, guardCreatorId, guardStudyDate, guardDueDate,
+        guardSubjectId, guardTitle, guardDetails, guardPageNumbers, guardQuestionNumbers,
+        guardTaskType, guardMediaUrls, pageHomeworkId, guardedPageOrder,
       ] = this.params;
 
       const parent = this.db.tables.homeworks.find(row =>
         row.id === guardHomeworkId &&
         row.id === homework_id &&
         row.group_id === guardGroupId &&
-        row.created_by === guardCreatorId
+        row.created_by === guardCreatorId &&
+        row.study_date === guardStudyDate &&
+        row.due_date === guardDueDate &&
+        row.subject_id === guardSubjectId &&
+        row.title === guardTitle &&
+        row.details === guardDetails &&
+        row.page_numbers === guardPageNumbers &&
+        row.question_numbers === guardQuestionNumbers &&
+        row.task_type === guardTaskType &&
+        row.media_urls === guardMediaUrls
       );
       if (!parent || pageHomeworkId !== homework_id || guardedPageOrder !== page_order) {
         return { success: true, meta: { changes: 0 } };
@@ -122,6 +135,7 @@ class HomeworkDb {
 
   failOnMediaInsertAt = 0;
   mediaInsertAttempts = 0;
+  raceExistingHomework: Row | null = null;
 
   prepare(sql: string) {
     return new HomeworkStatement(this, sql);
@@ -132,6 +146,14 @@ class HomeworkDb {
       Object.entries(this.tables).map(([name, rows]) => [name, rows.map(row => ({ ...row }))])
     );
     try {
+      if (
+        this.raceExistingHomework &&
+        statements.length > 0 &&
+        /^INSERT OR IGNORE INTO homeworks/i.test(statements[0].rawSql)
+      ) {
+        this.tables.homeworks.push({ ...this.raceExistingHomework });
+        this.raceExistingHomework = null;
+      }
       const results = [];
       for (const statement of statements) {
         results.push(await statement.run());
@@ -258,6 +280,32 @@ describe('Atomic homework media publication', () => {
     expect(conflict.status).toBe(409);
     expect(db.tables.homeworks).toEqual(beforeHomework);
     expect(db.tables.homework_media).toEqual(beforeMedia);
+  });
+
+  it('does not attach media when a concurrent same-owner request already created a different parent', async () => {
+    const db = new HomeworkDb();
+    db.raceExistingHomework = {
+      id: 'homework_atomic_retry',
+      group_id: 'class_10_A',
+      study_date: '2026-11-06',
+      due_date: '2026-11-11',
+      subject_id: 'math',
+      title: 'واجب مختلف من طلب متزامن',
+      details: null,
+      page_numbers: null,
+      question_numbers: null,
+      task_type: 'HOMEWORK',
+      media_urls: null,
+      is_official: 0,
+      created_by: 'student_author',
+      created_at: 1762387200000,
+    };
+
+    const response = await handleCreateHomework(author, createRequest(), envFor(db));
+    expect(response.status).toBe(409);
+    expect(db.tables.homeworks).toHaveLength(1);
+    expect(db.tables.homeworks[0].title).toBe('واجب مختلف من طلب متزامن');
+    expect(db.tables.homework_media).toHaveLength(0);
   });
 
   it('rejects duplicated page-order corruption without hiding it as success', async () => {
