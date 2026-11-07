@@ -30,6 +30,9 @@ export async function handleGetGroups(user: UserContext, env: Env): Promise<Resp
        -- see its state or submit a reasoned retry.
        AND (
          COALESCE(g.visibility, 'PUBLIC') = 'PUBLIC'
+         -- Other school sections remain discoverable so a student can request
+         -- the correct class; they are still labelled PRIVATE and require approval.
+         OR g.type = 'CLASS'
          OR COALESCE(gm.status, '') IN ('PENDING', 'REJECTED')
        )
      ORDER BY CASE WHEN g.type = 'OPTIONAL' THEN 0 WHEN g.type = 'SHARED' THEN 1 ELSE 2 END,
