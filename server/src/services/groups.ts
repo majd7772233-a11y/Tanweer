@@ -25,6 +25,13 @@ export async function handleGetGroups(user: UserContext, env: Env): Promise<Resp
      LEFT JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = ?
      WHERE g.is_discoverable = 1
        AND COALESCE(gm.status, '') NOT IN ('ACTIVE', 'BANNED')
+       -- Private groups are not public discovery results. Keep them visible only
+       -- to accounts that already have a pending/rejected request so they can
+       -- see its state or submit a reasoned retry.
+       AND (
+         COALESCE(g.visibility, 'PUBLIC') = 'PUBLIC'
+         OR COALESCE(gm.status, '') IN ('PENDING', 'REJECTED')
+       )
      ORDER BY CASE WHEN g.type = 'OPTIONAL' THEN 0 WHEN g.type = 'SHARED' THEN 1 ELSE 2 END,
               g.name ASC`
   ).bind(user.userId).all();
