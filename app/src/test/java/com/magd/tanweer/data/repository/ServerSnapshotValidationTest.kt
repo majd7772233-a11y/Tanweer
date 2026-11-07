@@ -22,4 +22,28 @@ class ServerSnapshotValidationTest {
         assertFalse(ServerSnapshotValidation.hasUniqueNonBlankIds(listOf("a", "")))
         assertFalse(ServerSnapshotValidation.hasUniqueNonBlankIds(listOf("a", "a")))
     }
+
+    @Test
+    fun validatesMonthScopedRecordsBeforeReplacingMonthlySnapshots() {
+        assertTrue(ServerSnapshotValidation.isValidYearMonth("2026-11"))
+        assertFalse(ServerSnapshotValidation.isValidYearMonth("2026-13"))
+        assertFalse(ServerSnapshotValidation.isValidYearMonth("2026/11"))
+
+        assertTrue(ServerSnapshotValidation.belongsToMonth("2026-11-01", "2026-11"))
+        assertFalse(ServerSnapshotValidation.belongsToMonth("2026-12-01", "2026-11"))
+        assertFalse(ServerSnapshotValidation.belongsToMonth("2026-11-xx", "2026-11"))
+        assertFalse(ServerSnapshotValidation.belongsToMonth("2026-11-01", "2026-13"))
+
+        assertTrue(ServerSnapshotValidation.allBelongToMonth(emptyList(), "2026-11"))
+        assertFalse(ServerSnapshotValidation.allBelongToMonth(listOf("2026-11-01", "2026-12-01"), "2026-11"))
+    }
+
+    @Test
+    fun validatesGroupScopesAndAllowsOnlyExplicitGlobalEvents() {
+        assertTrue(ServerSnapshotValidation.allBelongToGroup(emptyList(), "group_a"))
+        assertTrue(ServerSnapshotValidation.allBelongToGroup(listOf("group_a"), "group_a"))
+        assertFalse(ServerSnapshotValidation.allBelongToGroup(listOf("group_b"), "group_a"))
+        assertFalse(ServerSnapshotValidation.allBelongToGroup(listOf("all"), "group_a"))
+        assertTrue(ServerSnapshotValidation.allBelongToGroup(listOf("group_a", "all"), "group_a", allowGlobalGroup = true))
+    }
 }
