@@ -2,6 +2,11 @@ name: Deploy Tanweer Staging
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - work/release-readiness
+    paths:
+      - .github/workflows/temporary-staging-deploy-trigger.txt
 
 permissions:
   contents: read
