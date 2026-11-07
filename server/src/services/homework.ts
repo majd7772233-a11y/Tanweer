@@ -112,8 +112,19 @@ function homeworkMetadataMatches(
 async function getHomeworkMediaInsertStatement(
   env: Env,
   homeworkId: string,
-  groupId: string,
-  creatorId: string,
+  expected: {
+    groupId: string;
+    creatorId: string;
+    studyDate: string;
+    dueDate: string;
+    subjectId: string;
+    title: string;
+    details: string | null;
+    pageNumbers: string | null;
+    questionNumbers: string | null;
+    taskType: string;
+    mediaUrlsJson: string | null;
+  },
   pageOrder: number,
   url: string,
   createdAt: number
@@ -124,7 +135,18 @@ async function getHomeworkMediaInsertStatement(
      SELECT ?, ?, ?, ?, ?, ?
      WHERE EXISTS (
        SELECT 1 FROM homeworks
-       WHERE id = ? AND group_id = ? AND created_by = ?
+       WHERE id = ?
+         AND group_id = ?
+         AND created_by = ?
+         AND study_date = ?
+         AND due_date = ?
+         AND subject_id = ?
+         AND title = ?
+         AND details IS ?
+         AND page_numbers IS ?
+         AND question_numbers IS ?
+         AND task_type = ?
+         AND media_urls IS ?
      )
        AND NOT EXISTS (
          SELECT 1 FROM homework_media
@@ -138,8 +160,17 @@ async function getHomeworkMediaInsertStatement(
     pageOrder,
     createdAt,
     homeworkId,
-    groupId,
-    creatorId,
+    expected.groupId,
+    expected.creatorId,
+    expected.studyDate,
+    expected.dueDate,
+    expected.subjectId,
+    expected.title,
+    expected.details,
+    expected.pageNumbers,
+    expected.questionNumbers,
+    expected.taskType,
+    expected.mediaUrlsJson,
     homeworkId,
     pageOrder
   );
@@ -326,7 +357,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
     if (missing.length > 0) {
       try {
         const repairStatements = await Promise.all(missing.map(item =>
-          getHomeworkMediaInsertStatement(env, hwId, groupId, creatorId, item.pageOrder, item.url, Date.now())
+          getHomeworkMediaInsertStatement(env, hwId, expectedMetadata, item.pageOrder, item.url, Date.now())
         ));
         const repairResults = await env.DB.batch(repairStatements);
         if (repairResults.length !== repairStatements.length ||
@@ -395,7 +426,7 @@ export async function handleCreateHomework(user: UserContext, request: Request, 
       now
     ),
     ...(await Promise.all(identities.map(item =>
-      getHomeworkMediaInsertStatement(env, hwId, groupId, creatorId, item.pageOrder, item.url, now)
+      getHomeworkMediaInsertStatement(env, hwId, expectedMetadata, item.pageOrder, item.url, now)
     ))),
   ];
 
