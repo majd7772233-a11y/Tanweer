@@ -133,6 +133,11 @@ describe('private-group discovery visibility', () => {
     const response = await handleGetGroups(student, { DB: db as any } as Env);
 
     expect(response.status).toBe(200);
+    const discoverySql = db.statements.find((sql) => sql.includes('LEFT JOIN group_members gm'));
+    expect(discoverySql).toContain("COALESCE(g.visibility, 'PUBLIC') = 'PUBLIC'");
+    expect(discoverySql).toContain('OR g.type = \'CLASS\'');
+    expect(discoverySql).toContain("COALESCE(gm.status, '') IN ('PENDING', 'REJECTED')");
+
     const body = await response.json() as {
       myGroups: Array<{ id: string; visibility: string }>;
       discoverGroups: Array<{ id: string; visibility: string; membershipStatus: string | null }>;
