@@ -18,7 +18,7 @@ class HomeworkStatement {
   get rawSql(): string { return this.sql; }
 
   async first<T = unknown>(): Promise<T | null> {
-    const sql = this.sql.replace(/\\s+/g, ' ').trim();
+    const sql = this.sql.replace(/\s+/g, ' ').trim();
 
     if (/FROM group_members/i.test(sql)) {
       const [groupId, userId] = this.params;
@@ -33,7 +33,7 @@ class HomeworkStatement {
       return (blob || null) as T | null;
     }
 
-    if (/FROM homeworks WHERE id = \\? LIMIT 1/i.test(sql)) {
+    if (/FROM homeworks WHERE id = \? LIMIT 1/i.test(sql)) {
       return (this.db.tables.homeworks.find(row => row.id === this.params[0]) || null) as T | null;
     }
 
@@ -41,8 +41,8 @@ class HomeworkStatement {
   }
 
   async all<T = unknown>(): Promise<{ results: T[] }> {
-    const sql = this.sql.replace(/\\s+/g, ' ').trim();
-    if (/FROM homework_media WHERE homework_id = \\?/i.test(sql)) {
+    const sql = this.sql.replace(/\s+/g, ' ').trim();
+    if (/FROM homework_media WHERE homework_id = \?/i.test(sql)) {
       const rows = this.db.tables.homework_media
         .filter(row => row.homework_id === this.params[0])
         .sort((a, b) => a.page_order - b.page_order);
@@ -52,7 +52,7 @@ class HomeworkStatement {
   }
 
   async run(): Promise<{ success: boolean; meta: { changes: number } }> {
-    const sql = this.sql.replace(/\\s+/g, ' ').trim();
+    const sql = this.sql.replace(/\s+/g, ' ').trim();
 
     if (/^INSERT OR IGNORE INTO homeworks/i.test(sql)) {
       const [
