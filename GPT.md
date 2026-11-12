@@ -2086,7 +2086,8 @@ When giving the user a statement about the current state, re-read GitHub if it m
 ### Exact Git state re-verified on 2026-11-12
 - Repository: `majd7772233-a11y/Tanweer`.
 - Working branch: `work/release-readiness`.
-- HEAD before the handoff documentation commits: `74a20067ab9edff05a9c82e0dd1958a063d73b6f` (`ci(staging): remove one-time deploy trigger file`, 2026-11-07 20:37 UTC). This latest code commit only removes the one-time Staging deploy trigger file; no app/server source changed in that commit.
+- Latest app/backend logic commit before handoff documentation changes: `a9fb2129dda4efb2f551d3bd53b804dcc494b7fd` (`fix(sync): refresh subject discussions when opening the knowledge base`, 2026-11-07 10:07 UTC).
+- Latest pre-handoff branch commit before documentation-only changes: `74a20067ab9edff05a9c82e0dd1958a063d73b6f` (`ci(staging): remove one-time deploy trigger file`, 2026-11-07 20:37 UTC). This is an infrastructure-trigger cleanup only and does not change app/server source.
 - Production `main`: `64143994070bcdc410cf044379fe2801da8f9a3c`. No Production commit was made.
 - Branch enumeration returned exactly two branches: `main` and `work/release-readiness`. No batch/feature/CI scratch branches remain. Do not create another branch.
 - Batch 2 PR #7 is merged into `work/release-readiness` at `a834068b62094de8247f9b49072090df6d9a8ffb`; PR #6 remains Open + Draft to `main`, unmerged.
