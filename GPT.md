@@ -2077,3 +2077,44 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - The timeline/archive entries open the current typed detail preview dialogs; confirm on-device whether this level of detail meets the expected “open directly” behavior.
 - No Staging or Production D1 migration, D1 write, Worker deployment, secret change, Production merge, or account-data purge is included here. Batch 2 migrations `0031` and `0032` remain subject to environment-specific sequential rollout review before using the corresponding features on a deployed environment.
 - Continue all future edits on `work/release-readiness`; never create another batch-specific branch. Keep only `main` and `work/release-readiness`.
+
+
+
+
+## 2026-11-12 — Current continuation checkpoint (supersedes earlier environment and HEAD notes)
+
+### Exact Git state re-verified on 2026-11-12
+- Repository: `majd7772233-a11y/Tanweer`.
+- Working branch: `work/release-readiness`.
+- HEAD before the handoff documentation commits: `74a20067ab9edff05a9c82e0dd1958a063d73b6f` (`ci(staging): remove one-time deploy trigger file`, 2026-11-07 20:37 UTC). This latest code commit only removes the one-time Staging deploy trigger file; no app/server source changed in that commit.
+- Production `main`: `64143994070bcdc410cf044379fe2801da8f9a3c`. No Production commit was made.
+- Branch enumeration returned exactly two branches: `main` and `work/release-readiness`. No batch/feature/CI scratch branches remain. Do not create another branch.
+- Batch 2 PR #7 is merged into `work/release-readiness` at `a834068b62094de8247f9b49072090df6d9a8ffb`; PR #6 remains Open + Draft to `main`, unmerged.
+
+### Staging deployment correction — supersedes older “0031/0032 unapplied” statements
+- A successful manual Staging deployment occurred in workflow run `42411869740`, using source commit `dca3e13ca21b8ee8ced6e0c89c8903a33c0d5c20`.
+- The run explicitly applied Staging D1 migrations `0031_user_dismissed_school_announcements.sql` and `0032_monthly_exam_uniqueness.sql`; both are marked successful in the deployment log.
+- The same run configured Staging app secrets from the corresponding GitHub Actions secrets, deployed Worker `tanweer-staging` to `https://tanweer-staging.magd.workers.dev`, and passed health plus Owner Dashboard route smoke tests.
+- This was Staging-only. No Production D1 migration or Production Worker deployment occurred. Do not confuse the Staging secret `TANWEER_OWNER_SECRET_STAGING` with the Production Owner secret.
+- `.github/workflows/deploy-staging.yml` is manual-only (`workflow_dispatch`) and restricted to `work/release-readiness`. The one-time trigger file has been removed. A future Staging deploy must be explicitly requested by the user.
+- Production migration state was last read-only checked on 2026-11-07 as `0023_group_request_reason.sql`; re-check before any Production rollout. Do not infer Production has Staging's 0031/0032 migrations.
+
+### CI on last code HEAD
+- Server workflow `42411918987` completed successfully on code HEAD `74a20067`: typecheck, dependency security baseline, server tests and Wrangler bundle validation passed.
+- Android workflow `42411918775` completed successfully on the same HEAD: Android unit tests, Staging Debug APK assembly and artifact upload passed. Signed Release steps were skipped because this was PR validation.
+- These are CI/build results; they do not replace the user's new real-device/test report or two-account acceptance.
+
+### Batch implementation state
+- Batch 1, Batch 2 and the Batch 3 code described in the 2026-11-07 post-implementation audit are already present on `work/release-readiness` and have passed CI checkpoints. Read the Batch 3 post-implementation audit above before changing those features; avoid reimplementing completed paths.
+- New real-world test results are expected from the user in the next conversation. They have not been received or analyzed in this checkpoint. The next task is to inspect those exact results, reproduce/trace each failure against current HEAD, identify root causes, fix them on `work/release-readiness`, and add regressions.
+
+### New durable documentation
+- `PROJECT_ARCHITECTURE.md`: Android/backend stack, source map, sync/data-loss invariants, roles/groups semantics, deployment safety and workflow expectations.
+- `SESSION_HANDOFF.md`: exact branch/commit/CI/Staging state, implemented batch status, known acceptance gaps and the next action for the new conversation.
+- Always re-fetch latest HEAD before editing; the documentation commits that follow this checkpoint will advance the branch without intentionally changing app/server behavior.
+
+### Continuation constraints
+- Work only on `work/release-readiness`; keep exactly `main` and `work/release-readiness`.
+- Never push to or merge into `main`; PR #6 remains a Draft until the user explicitly asks for a Production release.
+- No Production migration, Worker deploy, secret update or data purge without explicit authorization.
+- Do not claim physical-device acceptance from CI. Keep user-provided test observations distinct from automated CI evidence.
