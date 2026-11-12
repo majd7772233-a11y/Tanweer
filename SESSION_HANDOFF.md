@@ -6,8 +6,9 @@ Checkpoint prepared: 2026-11-12. All Git facts below were re-read from GitHub be
 
 - Repository: `majd7772233-a11y/Tanweer`.
 - Current working branch: `work/release-readiness`.
-- Current working HEAD: `74a20067ab9edff05a9c82e0dd1958a063d73b6f`.
-- Latest commit: `ci(staging): remove one-time deploy trigger file` (2026-11-07 20:37 UTC). This removes the one-time staging dispatch trigger file; it does not change application source.
+- Last application/backend source checkpoint: `74a20067ab9edff05a9c82e0dd1958a063d73b6f`.
+- That source checkpoint's latest code commit is `ci(staging): remove one-time deploy trigger file` (2026-11-07 20:37 UTC). It removes the one-time staging dispatch trigger file; it does not change application source.
+- Documentation-only commits added for this handoff: architecture `76e7c2ed1868acc74037c8c23bfa13bdd4557506`, initial handoff `c21a47f6fed233f5664b6adc01a14a982d8148dd`, and GPT checkpoint `a2068fd0f050af7d0e64aeb1feb8d787ad2199d5`. They do not intentionally change app/server source. Always fetch the branch's actual latest SHA before editing; this handoff refresh itself will also create a documentation-only commit.
 - Production branch `main`: `64143994070bcdc410cf044379fe2801da8f9a3c`. It has not been modified by the work described here.
 - Branch enumeration returned exactly two branches: `main` and `work/release-readiness`.
 - Do not create any other branch. All further changes go directly to `work/release-readiness`.
