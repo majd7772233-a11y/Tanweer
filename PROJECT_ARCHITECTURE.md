@@ -1,6 +1,6 @@
 # Tanweer — Project Architecture and Engineering Notes
 
-Last verified against `work/release-readiness` HEAD `74a20067ab9edff05a9c82e0dd1958a063d73b6f` (2026-11-07).
+Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c962814f6cdf288f07fca05af870810bed on work/release-readiness.
 
 ## 1. Repository and branch contract
 
@@ -37,14 +37,24 @@ Last verified against `work/release-readiness` HEAD `74a20067ab9edff05a9c82e0dd1
 
 ### Data ownership and sync invariants
 - The server is authoritative for shared school records. Room is the local cache/UI source and must remain useful offline.
-- Never treat a generation marker change, temporary empty response, partial response, malformed response or network failure as permission to wipe Room. Only explicit logout performs account isolation/clear; ordinary sync must not call `clearAllTables()`.
-- Data-generation verification gates outbox draining. A generation marker is a signal to refresh/reconcile, not a command to delete academic data or clear the token.
+- Never treat a temporary empty response, partial/malformed response, or network failure as permission to wipe Room. Ordinary server snapshot reconciliation is non-destructive.
+- The Owner Dashboard's explicit global purge rotates data_generation. A changed, previously recorded marker for the same normalized API origin and account ID is the only automatic full-wipe signal. A missing marker initializes a baseline; same/blank values, failed checks, or environment changes do not wipe.
+- On a confirmed global-purge mismatch, close and drain the outbox gate, wait for in-flight queue work, skip remote logout (the server already removed sessions), clear Room including outbox, account-scoped preferences, notebook data, reminders, app-private files/caches/downloaded PDFs, auth token and in-memory account UI, then return to sign-in. Commit the new marker only after cleanup succeeds.
+- App-wide preferences and the stable device-installation identifier survive a global purge. Ordinary user logout clears account Room/session/notebook state but preserves shared downloaded PDF books; only the explicit system purge wipes all app-private storage.
+- Verify the marker at startup and on Activity foreground resume. The app does not claim instantaneous push-based logout while suspended.
 - Server snapshots must be validated before reconciliation: check declared counts when present, unique/nonblank IDs, requested group/date scope and required shape. Retain cached rows on invalid/incomplete snapshots.
 - A local write is not confirmed by HTTP 2xx alone. Check the response body's `success == true` and any required returned entity/ID before marking data SENT/SYNCED or showing success.
 - For multi-row lesson/homework publications, use the server's atomic parent-plus-media batch and same-ID repairable idempotent retry. Do not re-create duplicate pages on retry.
 - The offline outbox has atomic item reservation, exponential backoff and startup recovery for stuck SYNCING rows. Do not bypass or delete pending mutations casually.
 - Chat SENT requires a persisted server ACK/echo or confirmed HTTP success using the same idempotency ID; WebSocket local send acceptance is not delivery confirmation.
 - Startup and destination-entry refreshes already exist. Inspect `TanweerViewModel`'s `syncInitialData`, `syncAllComprehensive`, `syncTabOnEntry`, `syncSubScreenOnEntry` and `syncCurrentDestinationOnEntry` before adding overlapping calls.
+
+### Global purge reset implementation (2026-11-14)
+
+- Android implementation lives in TanweerRepository.checkAndApplyDataGeneration, TanweerRepository.logout, TanweerViewModel.verifyServerDataGeneration/onAppResumed, and UnifiedMutationQueue.stopAndAwait.
+- TanweerNotificationManager.cancelAccountReminders cancels account-sourced alarms before Room is erased; DAO ID queries supply the request-code identities.
+- LocalAccountDataPolicy is the allowlist boundary for deleting account preferences while preserving app settings. Do not broaden it to include device identity or UI preferences without a product decision.
+- StartupPersistencePolicyTest covers marker baselines/mismatches and account-preference cleanup scope.
 
 ## 3. Cloudflare backend
 

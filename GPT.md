@@ -24,7 +24,7 @@
 - Current development branch for the active release-readiness work: work/release-readiness.
 - Do not modify main unless the user explicitly asks.
 - Main was last verified at 64143994070bcdc410cf044379fe2801da8f9a3c before the current work.
-- The latest previously verified development HEAD before this notebook conversion was 010407e952a03a504c3920960f6673f1499e84a1. This is a historical checkpoint, not a substitute for checking the live branch HEAD.
+- The latest verified source-code checkpoint for the system-purge reset fix is 6108a4c962814f6cdf288f07fca05af870810bed. Documentation-only commits may advance the branch after that code checkpoint; always fetch the live HEAD before editing.
 
 ### Previous foundational product/code changes
 
@@ -642,6 +642,17 @@ This startup fetch is mandatory and must not be disabled by the optional backgro
 ### Startup data-scope rule
 
 The client must not download private records from every account. It must use authenticated endpoints, and the server must filter records by account identity, active membership, and permission. Contributions from all active group members should appear where policy permits, because the server aggregates them.
+
+### Server system-purge reconciliation — implemented 2026-11-14
+
+- The Owner Dashboard's atomic rotation of the public data_generation value is the explicit signal for a system-wide data purge. Android stores the last-seen generation under a key namespaced by normalized API origin and signed-in account ID.
+- A missing/blank local marker is a legacy or first-install baseline: initialize it without deleting anything. A blank server value, failed request, same generation, or Staging/Production origin change must never trigger a wipe.
+- On a confirmed mismatch, close the outbox gate and stop/await queue work before cleanup. Do not call the remote logout endpoint: the global purge already removed server sessions.
+- The forced local reset clears every Room table (including pending outbox rows), account-scoped preferences and in-memory account UI state; cancels account reminder alarms/notifications; clears notebook data; and removes all app-private files/caches and downloaded PDFs. Clear the auth token and return to the sign-in screen.
+- Persist the new generation marker only after local cleanup succeeds, so an interrupted cleanup can be retried. Preserve app-wide preferences (theme, typography, notification/haptics settings) and the stable installation device ID.
+- Ordinary user logout still isolates Room/account state and notebook data, but preserves shared downloaded PDF books. The all-private-storage wipe is reserved for the explicit system-wide purge.
+- Check the generation at startup and when the app returns to the foreground. There is no claim of instantaneous remote push while the app remains suspended.
+- Regression coverage: StartupPersistencePolicyTest verifies safe first-baseline behavior, explicit generation mismatch, and account-preference cleanup scope.
 
 ### Data that is not yet server-backed
 
@@ -1796,7 +1807,7 @@ When giving the user a statement about the current state, re-read GitHub if it m
 
 ### Data loss root cause and fix
 - Found a destructive Android startup path: any mismatch between the single global SharedPreferences data_generation marker and the Worker value called clearAllTables(), cleared the auth token, and triggered ViewModel logout. This could erase Room cache/outbox when switching API environment or account.
-- Generation markers are now namespaced by normalized API origin and signed-in account id. A generation change is only a refresh signal; it never clears Room, the outbox, notebook files, token, or session. Explicit user logout remains the only normal local full-clear path.
+- Generation markers were namespaced by normalized API origin and signed-in account id, and ordinary mismatches were initially treated as refresh-only. This was the policy at the time; the 2026-11-14 system-purge work in Section 18 supersedes it for the Owner Dashboard's explicit global purge rotation while preserving non-destructive behavior for missing markers, failed requests, and environment/account scope changes.
 - Added Android regression tests for missing and changed generation markers. Profile endpoint now returns defaultGroupId, which Android sync previously expected but the response omitted.
 
 ### Publishing confirmation fix
@@ -1841,7 +1852,7 @@ When giving the user a statement about the current state, re-read GitHub if it m
 
 ### Data-loss / sync safety
 - Confirmed read-only aggregate counts still exist in Production D1: users 12, group_members 12, contents 9, homeworks 3, exams 5, events 2, issues 2, media_blobs 11. No records were fetched by name, and no D1 rows were written.
-- Server data-generation metadata is now a refresh signal only. Android stores the marker per API origin + account ID; a generation mismatch cannot call `clearAllTables()`, clear the auth token, or remove notebook data/outbox entries.
+- At this 2026-11-05 checkpoint, server data-generation metadata was treated as a refresh signal only. This historical rule was superseded on 2026-11-14 by the scoped, explicit Owner Dashboard purge signal documented in Section 18; normal snapshot reconciliation remains non-destructive.
 - A valid authenticated group-membership snapshot is authoritative, so removing a student from a class is reflected in the group list. The reconciliation only replaces group metadata; lesson, homework, exam, event, notebook and archive records live in separate Room tables and are not cleared by this operation. Blank or duplicate group IDs still cause the snapshot to be rejected.
 - Lesson/homework/exam/event create and retry paths, and all lesson/homework media upload/retry paths, now require HTTP success plus response `success: true` before marking an item `SYNCED`. Android regression tests cover generation markers, application-level write confirmation, and retention of cached academic records when group membership metadata changes.
 

@@ -1,19 +1,29 @@
 # Tanweer — Session Handoff
 
-Checkpoint prepared: 2026-11-12. All Git facts below were re-read from GitHub before writing this file.
+Checkpoint prepared: 2026-11-14. Repository state and the system-purge reset implementation were re-read from GitHub before writing this file.
 
 ## Exact repository state
 
 - Repository: `majd7772233-a11y/Tanweer`.
 - Current working branch: `work/release-readiness`.
-- Latest application/backend logic commit before documentation-only commits: `a9fb2129dda4efb2f551d3bd53b804dcc494b7fd` (`fix(sync): refresh subject discussions when opening the knowledge base`, 2026-11-07 10:07 UTC).
-- Latest pre-handoff branch commit before documentation-only handoff work: `74a20067ab9edff05a9c82e0dd1958a063d73b6f` (`ci(staging): remove one-time deploy trigger file`, 2026-11-07 20:37 UTC). This is an infrastructure-trigger cleanup only; it does not change app/backend logic.
+- Latest source-code commit for the system-purge reset: 6108a4c962814f6cdf288f07fca05af870810bed (fix(android): scope full storage wipe to system purge). Its parent d987344335bb6aff61c3c3c2f78b45dad744b82d added the reset flow, account preference policy, queue synchronization, notification cancellation, and Android regression tests.
+- Documentation is being refreshed in a follow-up docs-only commit. Always fetch the live branch SHA before editing.
 - Documentation-only commits added for this handoff: architecture `76e7c2ed1868acc74037c8c23bfa13bdd4557506`, initial handoff `c21a47f6fed233f5664b6adc01a14a982d8148dd`, and GPT checkpoint `a2068fd0f050af7d0e64aeb1feb8d787ad2199d5`. They do not intentionally change app/server source. Always fetch the branch's actual latest SHA before editing; this handoff refresh itself will also create a documentation-only commit.
 - Production branch `main`: `64143994070bcdc410cf044379fe2801da8f9a3c`. It has not been modified by the work described here.
 - Branch enumeration returned exactly two branches: `main` and `work/release-readiness`.
 - Do not create any other branch. All further changes go directly to `work/release-readiness`.
 - Batch 2 PR #7 is merged into `work/release-readiness` at merge commit `a834068b62094de8247f9b49072090df6d9a8ffb`; its branch was deleted.
 - PR #6 remains Open + Draft from `work/release-readiness` to `main`. It is not merged. Do not merge it or update Production.
+
+## System-wide purge reset fix — 2026-11-14
+
+- Root cause: Android previously stored the new data_generation and returned false on every path, so a successful Owner Dashboard purge left Room data, token and local files intact.
+- The new client path treats only a changed, nonblank generation marker for the same API origin/account as the explicit purge signal. First/legacy marker initialization is non-destructive; same value, blank value, network failure, and environment changes do not wipe.
+- On a mismatch, Android closes the outbox gate, stops/awaits queue work, avoids remote logout because server sessions have already been deleted, clears Room/outbox, account preferences, notebook data, alarms/notifications, all app-private files/caches/downloaded PDFs, and in-memory account UI, then returns to AuthScreen. It advances the local marker after cleanup.
+- Global app settings and stable device identity survive. Normal user logout retains shared downloaded PDFs; full private-storage wipe is restricted to system purge.
+- Foreground generation check is called from MainActivity.onResume; startup has its own pre-sync verification.
+- Main implementation: 6108a4c962814f6cdf288f07fca05af870810bed. Source commit CI checkpoint: Server workflow 43521664658 succeeded; Android workflow 43521664707 was still running at handoff preparation. Re-check before claiming Android tests/build pass.
+- No Worker deployment, D1 mutation, Production write, secret change, merge to main, or physical-device test was performed in this phase.
 
 ## Last CI and deployment evidence
 
@@ -70,13 +80,12 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 
 ## Exact next action in the new conversation
 
-1. Read latest `work/release-readiness` HEAD from GitHub again. Do not assume it is still `74a20067`.
-2. Read `GPT.md`, `PROJECT_ARCHITECTURE.md` and this file.
-3. Receive and inspect the user's new test report/logs/screenshots. Do not ask them to repeat anything already provided in that new conversation.
-4. Map each observation to the exact affected feature, reproduce or trace its path in the current code, identify the root cause, then implement the smallest complete fix on `work/release-readiness`.
-5. Add regression tests, run targeted and full CI checks, update `GPT.md` and this handoff, and verify there are still exactly two branches.
-6. No new branch, no Production merge, no Production D1 migration, no Production Worker deployment, and no secret changes unless the user explicitly authorizes them.
-
+1. Re-read the live work/release-readiness HEAD and current CI status; docs commits may have advanced the branch after source commit 6108a4c.
+2. Resolve any Android unit-test or Debug APK failure from workflow 43521664707; do not claim success until both jobs complete.
+3. Once Android CI passes, install the generated Staging Debug APK and perform physical acceptance: purge while the app is closed then launch; purge while backgrounded then foreground; verify academic cache, outbox, PDFs/notebook files, alarms and auth are gone; verify first-install/missing-marker and failed version requests do not wipe.
+4. Confirm app-wide settings and device identity remain; confirm normal logout still retains shared downloaded PDFs.
+5. Re-check the branch list (only main and work/release-readiness) and final diff. No Staging deployment, Production merge/deployment, D1 write, or secret change unless explicitly authorized.
+6. Keep GPT.md, PROJECT_ARCHITECTURE.md, and this handoff aligned with final test evidence.
 ## Links
 
 - Repository: https://github.com/majd7772233-a11y/Tanweer
