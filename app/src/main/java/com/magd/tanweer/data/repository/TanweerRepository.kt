@@ -313,7 +313,8 @@ class TanweerRepository(
     suspend fun logout(
         context: android.content.Context? = null,
         revokeServerSession: Boolean = true,
-        preservedGenerationMarker: String? = null
+        preservedGenerationMarker: String? = null,
+        wipeAllPrivateFiles: Boolean = false
     ) = withContext(Dispatchers.IO) {
         if (revokeServerSession && !NetworkModule.currentAuthToken().isNullOrBlank()) {
             try {
@@ -342,10 +343,14 @@ class TanweerRepository(
                 .cancelAccountReminders(context, homeworkIds, examIds)
             com.magd.tanweer.util.StudentNotebookManager.clearAllUserData(context)
 
-            clearDirectoryContents(context.filesDir)
-            clearDirectoryContents(context.cacheDir)
-            context.externalCacheDir?.let(::clearDirectoryContents)
-            clearDirectoryContents(context.noBackupFilesDir)
+            if (wipeAllPrivateFiles) {
+                // Only the explicit system-wide purge removes shared downloaded books
+                // and every app-private cache. Ordinary logout keeps shared PDF downloads.
+                clearDirectoryContents(context.filesDir)
+                clearDirectoryContents(context.cacheDir)
+                context.externalCacheDir?.let(::clearDirectoryContents)
+                clearDirectoryContents(context.noBackupFilesDir)
+            }
         }
 
         db.clearAllTables()
@@ -3950,7 +3955,8 @@ class TanweerRepository(
         logout(
             context = context,
             revokeServerSession = false,
-            preservedGenerationMarker = markerKey
+            preservedGenerationMarker = markerKey,
+            wipeAllPrivateFiles = true
         )
         if (!prefs.edit().putString(markerKey, serverGeneration).commit()) {
             Log.e("TanweerRepository", "Local data was cleared but the new generation marker could not be persisted")
