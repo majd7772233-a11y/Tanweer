@@ -22,7 +22,7 @@ Checkpoint prepared: 2026-11-14. Repository state and the system-purge reset imp
 - On a mismatch, Android closes the outbox gate, stops/awaits queue work, avoids remote logout because server sessions have already been deleted, clears Room/outbox, account preferences, notebook data, alarms/notifications, all app-private files/caches/downloaded PDFs, and in-memory account UI, then returns to AuthScreen. It advances the local marker after cleanup.
 - Global app settings and stable device identity survive. Normal user logout retains shared downloaded PDFs; full private-storage wipe is restricted to system purge.
 - Foreground generation check is called from MainActivity.onResume; startup has its own pre-sync verification.
-- Main implementation: 6108a4c962814f6cdf288f07fca05af870810bed. Source commit CI checkpoint: Server workflow 43521664658 succeeded; Android workflow 43521664707 was still running at handoff preparation. Re-check before claiming Android tests/build pass.
+- Main implementation: 6108a4c962814f6cdf288f07fca05af870810bed. CI passed on that source commit: Server workflow 43521664658 completed successfully; Android workflow 43521664707 passed Android unit tests, assembled the Staging Debug APK and uploaded artifact Tanweer-debug-a6c1fc407dcc890cac92d6d10b2a4f4749a8de98. PR validation skipped signed Release assembly/signing. Artifact run: https://github.com/majd7772233-a11y/Tanweer/actions/runs/43521664707.
 - No Worker deployment, D1 mutation, Production write, secret change, merge to main, or physical-device test was performed in this phase.
 
 ## Last CI and deployment evidence
@@ -80,12 +80,11 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 
 ## Exact next action in the new conversation
 
-1. Re-read the live work/release-readiness HEAD and current CI status; docs commits may have advanced the branch after source commit 6108a4c.
-2. Resolve any Android unit-test or Debug APK failure from workflow 43521664707; do not claim success until both jobs complete.
-3. Once Android CI passes, install the generated Staging Debug APK and perform physical acceptance: purge while the app is closed then launch; purge while backgrounded then foreground; verify academic cache, outbox, PDFs/notebook files, alarms and auth are gone; verify first-install/missing-marker and failed version requests do not wipe.
-4. Confirm app-wide settings and device identity remain; confirm normal logout still retains shared downloaded PDFs.
-5. Re-check the branch list (only main and work/release-readiness) and final diff. No Staging deployment, Production merge/deployment, D1 write, or secret change unless explicitly authorized.
-6. Keep GPT.md, PROJECT_ARCHITECTURE.md, and this handoff aligned with final test evidence.
+1. Download/install the Staging Debug APK from workflow 43521664707 on a test device.
+2. Perform physical acceptance: purge while the app is closed then launch; purge while backgrounded then foreground; verify academic cache, outbox, PDFs/notebook files, alarms and auth are gone; verify first-install/missing-marker and failed version requests do not wipe.
+3. Confirm app-wide settings and device identity remain; confirm normal logout still retains shared downloaded PDFs.
+4. Re-check the branch list (only main and work/release-readiness) and final diff. No Staging deployment, Production merge/deployment, D1 write, or secret change unless explicitly authorized.
+5. Keep GPT.md, PROJECT_ARCHITECTURE.md, and this handoff aligned with final test evidence.
 ## Links
 
 - Repository: https://github.com/majd7772233-a11y/Tanweer
