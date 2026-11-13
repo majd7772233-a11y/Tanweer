@@ -97,6 +97,7 @@ class MainActivity : ComponentActivity() {
                 .putBoolean("notifications_permission_granted", hasPermission)
                 .apply()
         }
+        viewModel.onAppResumed()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {

@@ -521,6 +521,37 @@ object TanweerNotificationManager {
         }
     }
 
+    /**
+     * Cancels alarms created from the signed-in account's cached homework and exams.
+     * IDs are read before Room is cleared so stale alerts cannot fire after a purge.
+     */
+    fun cancelAccountReminders(context: Context, homeworkIds: Collection<String>, examIds: Collection<String>) {
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+            fun cancelAlarm(requestCode: Int, action: String) {
+                val intent = Intent(context, TanweerAlarmReceiver::class.java).apply { this.action = action }
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context, requestCode, intent,
+                    PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+                )
+                if (pendingIntent != null) {
+                    alarmManager?.cancel(pendingIntent)
+                    pendingIntent.cancel()
+                }
+            }
+            cancelAlarm(1001, TanweerAlarmReceiver.ACTION_CHECK_REMINDERS)
+            homeworkIds.distinct().forEach {
+                cancelAlarm(it.hashCode() and 0x7FFFFFFF, TanweerAlarmReceiver.ACTION_HOMEWORK_REMINDER)
+            }
+            examIds.distinct().forEach {
+                cancelAlarm(it.hashCode() and 0x7FFFFFFF, TanweerAlarmReceiver.ACTION_EXAM_REMINDER)
+            }
+            NotificationManagerCompat.from(context).cancelAll()
+        } catch (e: Exception) {
+            Log.w("TanweerNotifications", "Could not cancel every account reminder during local reset", e)
+        }
+    }
+
     fun cancelReminder(context: Context, itemId: String) {
         try {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager

@@ -18,6 +18,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -414,29 +416,20 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     val chatConnectionStatus: StateFlow<ConnectionStatus> = repository.chatManager.status
     private val dataGenerationReady = CompletableDeferred<Unit>()
+    private val dataGenerationMutex = Mutex()
+    private var hasSeenInitialResume = false
+    private var lastForegroundGenerationCheckAt = 0L
 
     init {
-        // Never allow queued local mutations to run before the server generation is verified.
         repository.mutationQueue.isDrainAllowed = false
 
         viewModelScope.launch {
             localSessionReady.await()
             try {
-                val res = repository.getSystemVersion()
-                if (res.isSuccess) {
-                    val sysVer = res.getOrNull()
-                    if (!sysVer?.dataGeneration.isNullOrBlank()) {
-                        val purged = repository.checkAndApplyDataGeneration(getApplication(), sysVer?.dataGeneration)
-                        dataGenerationVerified = true
-                        if (purged) {
-                            logout()
-                        }
-                    }
-                }
+                verifyServerDataGeneration()
             } catch (e: Exception) {
-                android.util.Log.w("TanweerViewModel", "Server generation check unavailable; startup will use cached data if needed", e)
+                android.util.Log.w("TanweerViewModel", "Server data-generation verification failed; local cache is retained", e)
             } finally {
-                // Keep the outbox blocked until the complete startup push-then-pull sequence finishes.
                 dataGenerationReady.complete(Unit)
             }
         }
@@ -448,50 +441,34 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 .distinctUntilChangedBy { it?.id }
                 .collect { user ->
                     if (user == null) {
-                        repository.mutationQueue.isDrainAllowed = dataGenerationVerified
+                        dataGenerationVerified = false
+                        repository.mutationQueue.isDrainAllowed = false
+                        resetUserScopedUiState()
                         _isCheckingAuth.value = false
                     } else {
                         _isCheckingAuth.value = true
                         restoreAcademicSelection(user)
                         try {
-                            // Retry the generation check when the first app-level probe happened
-                            // before login or while the network was temporarily unavailable.
                             if (!dataGenerationVerified) {
-                                val retryVersion = repository.getSystemVersion()
-                                val retryGeneration = retryVersion.getOrNull()?.dataGeneration
-                                if (retryVersion.isSuccess && !retryGeneration.isNullOrBlank()) {
-                                    val purged = repository.checkAndApplyDataGeneration(
-                                        getApplication(),
-                                        retryGeneration
-                                    )
-                                    dataGenerationVerified = true
-                                    if (purged) {
-                                        logout()
-                                        return@collect
-                                    }
+                                val purged = verifyServerDataGeneration()
+                                if (purged) {
+                                    _isCheckingAuth.value = false
+                                    return@collect
                                 }
                             }
 
-                            // Push acknowledged local mutations first, then pull the authoritative
-                            // server snapshot. This happens on every app launch/login, independent
-                            // of the optional background auto-sync preference.
                             if (dataGenerationVerified) {
-                                // The gate is opened only after the server generation check succeeded.
                                 repository.mutationQueue.isDrainAllowed = true
                                 val outboxResult = repository.processOutboxQueue()
                                 outboxResult.exceptionOrNull()?.let {
                                     android.util.Log.w("TanweerViewModel", "Startup outbox drain was incomplete", it)
                                 }
                             } else {
-                                // Do not submit queued mutations until the server's data generation
-                                // has been verified. The pull still runs and local pending rows remain.
-                                android.util.Log.w("TanweerViewModel", "Skipping startup outbox drain because server generation was not verified")
+                                repository.mutationQueue.isDrainAllowed = false
+                                android.util.Log.w("TanweerViewModel", "Skipping startup outbox drain because server data generation was not verified")
                             }
 
                             val syncResult = repository.syncInitial(getActiveGroupId(), _selectedDate.value)
-
-                            // Memberships are now server-refreshed. Never retain a saved group
-                            // selection after the server has removed this account from that group.
                             val refreshedUser = db.userDao().getUserSync()
                             val activeGroupIds = db.groupDao().getMyGroupsSync().map { it.id }
                             val authorizedGroupId = AcademicSessionSelection.resolveAuthorizedGroupId(
@@ -500,15 +477,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                                 availableGroupIds = activeGroupIds
                             )
                             _selectedGroupId.value = authorizedGroupId
-                            prefs.edit()
-                                .putString("selected_group_id_${user.id}", authorizedGroupId)
-                                .commit()
+                            prefs.edit().putString("selected_group_id_${user.id}", authorizedGroupId).commit()
 
-                            // Refresh server-backed secondary screens before releasing startup.
-                            // The server still authorizes each endpoint; this only preloads data
-                            // for the signed-in account and its currently active group.
                             refreshStartupAuxiliaryData(user, authorizedGroupId, activeGroupIds)
-
                             applyStartupSyncResult(syncResult)
                         } catch (e: Exception) {
                             android.util.Log.e("TanweerViewModel", "Startup server reconciliation failed", e)
@@ -517,12 +488,118 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                             repository.mutationQueue.isDrainAllowed = dataGenerationVerified
                             _isCheckingAuth.value = false
                             if (_autoSyncEnabled.value && dataGenerationVerified) {
+                                repository.mutationQueue.start()
                                 repository.mutationQueue.triggerDrain()
                             }
                         }
                     }
                 }
         }
+    }
+
+    fun onAppResumed() {
+        val now = System.currentTimeMillis()
+        if (!hasSeenInitialResume) {
+            hasSeenInitialResume = true
+            lastForegroundGenerationCheckAt = now
+            return
+        }
+        if (now - lastForegroundGenerationCheckAt < 10_000L) return
+        lastForegroundGenerationCheckAt = now
+
+        viewModelScope.launch {
+            localSessionReady.await()
+            dataGenerationReady.await()
+            if (db.userDao().getUserSync() == null) return@launch
+            _isCheckingAuth.value = true
+            try {
+                val purged = verifyServerDataGeneration()
+                if (!purged && dataGenerationVerified && _autoSyncEnabled.value) {
+                    repository.mutationQueue.triggerDrain()
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("TanweerViewModel", "Foreground data-generation verification failed", e)
+            } finally {
+                _isCheckingAuth.value = false
+            }
+        }
+    }
+
+    private suspend fun verifyServerDataGeneration(): Boolean = dataGenerationMutex.withLock {
+        if (db.userDao().getUserSync() == null) {
+            dataGenerationVerified = false
+            repository.mutationQueue.isDrainAllowed = false
+            return@withLock false
+        }
+        repository.mutationQueue.isDrainAllowed = false
+        repository.mutationQueue.stopAndAwait()
+        val versionResult = repository.getSystemVersion()
+        val generation = versionResult.getOrNull()?.dataGeneration
+        if (!versionResult.isSuccess || generation.isNullOrBlank()) {
+            dataGenerationVerified = false
+            return@withLock false
+        }
+        val purged = repository.checkAndApplyDataGeneration(getApplication(), generation)
+        if (purged) {
+            dataGenerationVerified = false
+            resetUserScopedUiState()
+            return@withLock true
+        }
+        dataGenerationVerified = true
+        repository.mutationQueue.isDrainAllowed = true
+        repository.mutationQueue.start()
+        false
+    }
+
+    private fun resetUserScopedUiState() {
+        currentActiveUserId = null
+        _shouldShowCatchUpCard.value = false
+        _lastOpenDate.value = todayDateStr
+        _isNewAccountOrFirstLaunch.value = false
+        _previousSessionTimestamp.value = System.currentTimeMillis()
+        _selectedGroupId.value = ""
+        _selectedDate.value = todayDateStr
+        _currentTab.value = NavigationTab.TODAY
+        _subScreen.value = SubScreen.NONE
+        _activeReadingBook.value = null
+        _activeReadingInitialPage.value = null
+        _isUploadModalOpen.value = false
+        _uploadInitialSubjectId.value = null
+        _isAddHomeworkModalOpen.value = false
+        _initialHomeworkDueDate.value = null
+        _isAddExamModalOpen.value = false
+        _initialExamDate.value = null
+        _isAddEventModalOpen.value = false
+        _initialEventDate.value = null
+        _pendingDeepLinkChatGroupId.value = null
+        _pendingDeepLinkMessageId.value = null
+        _recoveryCodeDialog.value = null
+        _searchQuery.value = ""
+        _selectedKnowledgeBaseSubjectId.value = null
+        _selectedAcademicYear.value = com.magd.tanweer.util.AcademicYearManager.getCurrentAcademicYear()
+        _academicArchiveSyncState.value = SyncState.Idle
+        _homeSyncState.value = SyncState.Idle
+        _scheduleSyncState.value = SyncState.Idle
+        _homeworkSyncState.value = SyncState.Idle
+        _examsSyncState.value = SyncState.Idle
+        _calendarSyncState.value = SyncState.Idle
+        _issuesSyncState.value = SyncState.Idle
+        _eventsSyncState.value = SyncState.Idle
+        _librarySyncState.value = SyncState.Idle
+        _groupsSyncState.value = SyncState.Idle
+        _scheduleMeta.value = null
+        _scheduleVersion.value = null
+        _scheduleProposals.value = emptyList()
+        _groupMembersState.value = null
+        _groupMembersError.value = null
+        _teacherDashboard.value = null
+        _moderatorDashboard.value = null
+        _adminDashboard.value = null
+        _adminDashboardError.value = null
+        _myNotifications.value = emptyList()
+        _groupCorrections.value = emptyList()
+        _communityDecisions.value = emptyList()
+        _myRoleRequests.value = emptyList()
     }
 
     private suspend fun refreshStartupAuxiliaryData(user: User, groupId: String, activeGroupIds: List<String>) = coroutineScope {
@@ -1824,21 +1901,17 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun logout() {
+        _isCheckingAuth.value = true
         viewModelScope.launch {
-            repository.logout(getApplication())
-            currentActiveUserId = null
-            _shouldShowCatchUpCard.value = false
-            _lastOpenDate.value = todayDateStr
-            _isNewAccountOrFirstLaunch.value = false
-            _selectedGroupId.value = ""
-            _homeSyncState.value = SyncState.Idle
-            _scheduleSyncState.value = SyncState.Idle
-            _homeworkSyncState.value = SyncState.Idle
-            _examsSyncState.value = SyncState.Idle
-            _calendarSyncState.value = SyncState.Idle
-            _issuesSyncState.value = SyncState.Idle
-            _librarySyncState.value = SyncState.Idle
-            _groupsSyncState.value = SyncState.Idle
+            try {
+                repository.logout(getApplication())
+            } catch (e: Exception) {
+                android.util.Log.e("TanweerViewModel", "Local logout cleanup failed", e)
+            } finally {
+                dataGenerationVerified = false
+                resetUserScopedUiState()
+                _isCheckingAuth.value = false
+            }
         }
     }
 

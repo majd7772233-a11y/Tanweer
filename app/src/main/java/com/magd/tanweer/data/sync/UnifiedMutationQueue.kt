@@ -11,6 +11,10 @@ import com.magd.tanweer.data.remote.PostMessageRequest
 import com.magd.tanweer.data.remote.TanweerApiService
 import com.magd.tanweer.data.remote.isRetryableHttpStatus
 import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -40,6 +44,7 @@ class UnifiedMutationQueue private constructor(
 
     private val _isDraining = MutableStateFlow(false)
     val isDraining: StateFlow<Boolean> = _isDraining.asStateFlow()
+    private val drainMutex = Mutex()
 
     private val _syncErrors = MutableSharedFlow<SyncErrorInfo>(extraBufferCapacity = 64)
     val syncErrors: SharedFlow<SyncErrorInfo> = _syncErrors.asSharedFlow()
@@ -90,6 +95,20 @@ class UnifiedMutationQueue private constructor(
     fun stop() {
         periodicJob?.cancel()
         periodicJob = null
+        _isDraining.value = false
+    }
+
+    suspend fun stopAndAwait() {
+        val oldScope: CoroutineScope
+        synchronized(this) {
+            isDrainAllowed = false
+            periodicJob?.cancel()
+            periodicJob = null
+            oldScope = scope
+            scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        }
+        oldScope.coroutineContext[Job]?.cancelAndJoin()
+        drainMutex.withLock { /* wait for an external drain */ }
         _isDraining.value = false
     }
 
@@ -170,54 +189,43 @@ class UnifiedMutationQueue private constructor(
      * Drains all pending items in the outbox queue using unified execution and atomic reservation.
      */
     suspend fun drainQueue(): Int = withContext(Dispatchers.IO) {
-        if (!isDrainAllowed) {
-            Log.d("UnifiedMutationQueue", "Drain blocked: awaiting data_generation verification")
-            return@withContext 0
-        }
-        if (_isDraining.value) return@withContext 0
-        _isDraining.value = true
-        var processedCount = 0
-
-        try {
-            // Recover any items that were reserved in SYNCING state by an interrupted worker
-            // and exceeded the safe 60-second lease window.
-            outboxDao.recoverStuckSyncingItems(now = System.currentTimeMillis(), timeoutMs = 60_000L)
-
-            val pendingItems = outboxDao.getPendingItemsSync()
-            for (rawItem in pendingItems) {
-                // An earlier queued create may have replaced this entity's server ID.
-                val currentItem = outboxDao.getOutboxItemById(rawItem.id) ?: continue
-                val item = normalizeLegacyOperation(currentItem)
-
-                // Exponential backoff check: 2s, 4s, 8s, 16s, max 60s
-                val backoffMs = (1000L * (1 shl item.attempts.coerceAtMost(5))).coerceIn(2000L, 60_000L)
-                val now = System.currentTimeMillis()
-                if (item.attempts > 0 && (now - item.lastAttemptAt < backoffMs)) {
-                    continue // Skip until backoff window elapses
-                }
-
-                // Atomic reservation: only proceed if this worker successfully claims the item
-                val claimed = outboxDao.claimPendingItem(item.id, now)
-                if (claimed <= 0) {
-                    continue // Already claimed by concurrent worker
-                }
-
-                val success = executeMutation(item)
-                if (success) processedCount++
+        drainMutex.withLock {
+            if (!isDrainAllowed) {
+                Log.d("UnifiedMutationQueue", "Drain blocked: awaiting data_generation verification")
+                return@withLock 0
             }
-        } catch (e: Exception) {
-            Log.e("UnifiedMutationQueue", "Error during outbox drain", e)
-            _syncErrors.emit(
-                SyncErrorInfo(
-                    operation = "DRAIN_QUEUE",
-                    entityId = "all",
-                    message = e.localizedMessage ?: "حدث خطأ أثناء مزامنة البيانات غير المعلقة"
+            if (_isDraining.value) return@withLock 0
+            _isDraining.value = true
+            var processedCount = 0
+            try {
+                outboxDao.recoverStuckSyncingItems(now = System.currentTimeMillis(), timeoutMs = 60_000L)
+                val pendingItems = outboxDao.getPendingItemsSync()
+                for (rawItem in pendingItems) {
+                    if (!isDrainAllowed) break
+                    val currentItem = outboxDao.getOutboxItemById(rawItem.id) ?: continue
+                    val item = normalizeLegacyOperation(currentItem)
+                    val backoffMs = (1000L * (1 shl item.attempts.coerceAtMost(5))).coerceIn(2000L, 60_000L)
+                    val now = System.currentTimeMillis()
+                    if (item.attempts > 0 && (now - item.lastAttemptAt < backoffMs)) continue
+                    if (outboxDao.claimPendingItem(item.id, now) <= 0) continue
+                    if (executeMutation(item)) processedCount++
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("UnifiedMutationQueue", "Error during outbox drain", e)
+                _syncErrors.emit(
+                    SyncErrorInfo(
+                        operation = "DRAIN_QUEUE",
+                        entityId = "all",
+                        message = e.localizedMessage ?: "حدث خطأ أثناء مزامنة البيانات غير المعلقة"
+                    )
                 )
-            )
-        } finally {
-            _isDraining.value = false
+            } finally {
+                _isDraining.value = false
+            }
+            processedCount
         }
-        processedCount
     }
 
     private suspend fun executeMutation(item: OutboxEntity): Boolean {

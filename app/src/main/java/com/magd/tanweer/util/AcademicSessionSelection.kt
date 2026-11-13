@@ -43,17 +43,33 @@ internal object AcademicSessionSelection {
 }
 
 /**
- * A missing local generation marker means this installation predates the
- * marker, not that its user's cached database is stale.
+ * The server rotates data_generation only after an explicit system-wide purge.
+ * A missing marker is a legacy/first-install state and must never trigger deletion.
  */
 internal object DataGenerationPolicy {
-    /**
-     * A generation mismatch is useful as a refresh signal, never as permission to erase
-     * the local database. The server snapshot is reconciled without destroying offline
-     * work, cached lessons, notebook state, or the current authenticated session.
-     */
     fun hasChanged(previousGeneration: String?, serverGeneration: String?): Boolean {
         if (serverGeneration.isNullOrBlank() || previousGeneration.isNullOrBlank()) return false
         return previousGeneration != serverGeneration
+    }
+}
+
+/**
+ * Preferences that belong to the signed-in account, not to the app installation.
+ * Theme, typography, notification preferences and the separate device identity store
+ * intentionally survive an account purge.
+ */
+internal object LocalAccountDataPolicy {
+    private val fixedAccountKeys = setOf(
+        "auth_token",
+        "last_open_date",
+        "last_active_time",
+        "previous_session_time"
+    )
+
+    fun keysToRemove(allKeys: Set<String>): Set<String> = allKeys.filterTo(mutableSetOf()) { key ->
+        key in fixedAccountKeys ||
+            key.startsWith("last_open_date_") ||
+            key.startsWith("selected_group_id_") ||
+            key.startsWith("selected_study_date_")
     }
 }

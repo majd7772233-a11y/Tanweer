@@ -147,6 +147,9 @@ interface HomeworkDao {
     @Query("SELECT * FROM cached_homeworks ORDER BY dueDate ASC")
     fun getAllHistoricalHomeworks(): Flow<List<HomeworkEntity>>
 
+    @Query("SELECT id FROM cached_homeworks")
+    suspend fun getAllHomeworkIds(): List<String>
+
     @Query("SELECT * FROM cached_homeworks WHERE groupId = :groupId ORDER BY dueDate ASC")
     fun getHomeworks(groupId: String): Flow<List<HomeworkEntity>>
 
@@ -210,6 +213,9 @@ interface HomeworkDao {
 interface ExamDao {
     @Query("SELECT * FROM cached_exams ORDER BY examDate ASC")
     fun getAllHistoricalExams(): Flow<List<ExamEntity>>
+
+    @Query("SELECT id FROM cached_exams")
+    suspend fun getAllExamIds(): List<String>
 
     @Query("SELECT * FROM cached_exams WHERE groupId = :groupId ORDER BY examDate ASC")
     fun getExams(groupId: String): Flow<List<ExamEntity>>

@@ -24,6 +24,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -128,6 +130,8 @@ class TanweerRepository(
                         )
                     )
                 )
+                mutationQueue.isDrainAllowed = false
+                mutationQueue.start()
                 Result.success(Pair(body.user, body.recoveryCode ?: ""))
             } else {
                 val errorMsg = body?.error?.message ?: res.errorBody()?.string()?.takeIf { it.isNotBlank() } ?: "تعذر إنشاء الحساب، يرجى المحاولة لاحقاً"
@@ -165,6 +169,8 @@ class TanweerRepository(
                         token = body.token
                     )
                 )
+                mutationQueue.isDrainAllowed = false
+                mutationQueue.start()
                 Result.success(body.user)
             } else {
                 val errorMsg = body?.error?.message ?: "بيانات الدخول غير صحيحة"
@@ -201,6 +207,8 @@ class TanweerRepository(
                         token = body.token
                     )
                 )
+                mutationQueue.isDrainAllowed = false
+                mutationQueue.start()
                 Result.success(body.user)
             } else {
                 val errorMsg = body?.error?.message ?: "رمز الاسترداد غير صحيح أو منتهي الصلاحية"
@@ -302,25 +310,69 @@ class TanweerRepository(
         }
     }
 
-    suspend fun logout(context: android.content.Context? = null) = withContext(Dispatchers.IO) {
-        // Revoke the server-side session before removing the local token.
-        // A failed network request must not prevent local logout.
-        try {
-            api.logoutCurrentDevice()
-        } catch (e: Exception) {
-            Log.w("TanweerRepository", "Could not revoke server session during offline logout: ${e.message}")
-        }
-        mutationQueue.stop()
-        chatManager.disconnect()
-        NetworkModule.setAuthToken(null)
-        // Complete isolation: clear all local database tables so subsequent users never see prior user's cached data
-        db.clearAllTables()
-        if (context != null) {
-            com.magd.tanweer.util.StudentNotebookManager.clearAllUserData(context)
+    suspend fun logout(
+        context: android.content.Context? = null,
+        revokeServerSession: Boolean = true,
+        preservedGenerationMarker: String? = null
+    ) = withContext(Dispatchers.IO) {
+        if (revokeServerSession && !NetworkModule.currentAuthToken().isNullOrBlank()) {
             try {
-                val prefs = context.getSharedPreferences("tanweer_prefs", android.content.Context.MODE_PRIVATE)
-                prefs.edit().remove("auth_token").apply()
-            } catch (_: Exception) {}
+                val response = api.logoutCurrentDevice()
+                if (!response.isSuccessful || response.body()?.success != true) {
+                    Log.w("TanweerRepository", "Server did not confirm logout (HTTP ${response.code()})")
+                }
+            } catch (e: Exception) {
+                Log.w("TanweerRepository", "Could not revoke server session during offline logout: ${e.message}")
+            }
+        }
+
+        mutationQueue.isDrainAllowed = false
+        mutationQueue.stopAndAwait()
+        chatManager.disconnect()
+
+        if (context != null) {
+            val homeworkIds = runCatching { db.homeworkDao().getAllHomeworkIds() }
+                .onFailure { Log.w("TanweerRepository", "Could not read homework reminder IDs before reset", it) }
+                .getOrDefault(emptyList())
+            val examIds = runCatching { db.examDao().getAllExamIds() }
+                .onFailure { Log.w("TanweerRepository", "Could not read exam reminder IDs before reset", it) }
+                .getOrDefault(emptyList())
+
+            com.magd.tanweer.data.notifications.TanweerNotificationManager
+                .cancelAccountReminders(context, homeworkIds, examIds)
+            com.magd.tanweer.util.StudentNotebookManager.clearAllUserData(context)
+
+            clearDirectoryContents(context.filesDir)
+            clearDirectoryContents(context.cacheDir)
+            context.externalCacheDir?.let(::clearDirectoryContents)
+            clearDirectoryContents(context.noBackupFilesDir)
+        }
+
+        db.clearAllTables()
+        NetworkModule.setAuthToken(null)
+
+        if (context != null) {
+            val prefs = context.getSharedPreferences("tanweer_prefs", android.content.Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+            com.magd.tanweer.util.LocalAccountDataPolicy.keysToRemove(prefs.all.keys).forEach(editor::remove)
+            if (!editor.commit()) {
+                Log.w("TanweerRepository", "Could not persist every account-scoped preference cleanup")
+            }
+            if (preservedGenerationMarker != null) {
+                Log.d("TanweerRepository", "Preserving active data-generation marker during forced reset")
+            }
+        }
+    }
+
+    private fun clearDirectoryContents(directory: File) {
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw IOException("تعذر إنشاء مجلد التخزين لتنظيف بيانات الحساب")
+        }
+        val children = directory.listFiles() ?: throw IOException("تعذر قراءة محتويات مجلد بيانات التطبيق")
+        children.forEach { child ->
+            if (!child.deleteRecursively() && child.exists()) {
+                throw IOException("تعذر حذف ملف محلي أثناء تصفير بيانات الحساب")
+            }
         }
     }
 
@@ -3880,28 +3932,30 @@ class TanweerRepository(
         val prefs = context.getSharedPreferences("tanweer_prefs", android.content.Context.MODE_PRIVATE)
         val accountId = db.userDao().getUserSync()?.id?.takeIf { it.isNotBlank() } ?: "anonymous"
         val serverScope = NetworkModule.apiBaseUrl.trim().trimEnd('/').lowercase(java.util.Locale.ROOT)
-        // A Staging/Production switch or a different signed-in account must never be
-        // interpreted as proof that this installation's Room database is disposable.
         val markerKey = "data_generation|$serverScope|$accountId"
         val previousGeneration = prefs.getString(markerKey, null)
 
         if (previousGeneration.isNullOrBlank()) {
-            Log.i(
-                "TanweerRepo",
-                "Initializing generation marker for account $accountId at $serverScope; retaining all local data."
-            )
-        } else if (DataGenerationPolicy.hasChanged(previousGeneration, serverGeneration)) {
-            Log.w(
-                "TanweerRepo",
-                "Server generation changed from $previousGeneration to $serverGeneration for account $accountId. " +
-                    "Keeping Room, notebook files, auth session, and pending outbox; the next server snapshot will reconcile data."
-            )
+            // Older installations have no reliable baseline; initializing is non-destructive.
+            prefs.edit().putString(markerKey, serverGeneration).commit()
+            Log.i("TanweerRepo", "Initialized data-generation marker for account $accountId at $serverScope")
+            return@withContext false
         }
 
-        // Generation values are synchronization metadata only. They must never trigger
-        // clearAllTables(), token removal, logout, or deletion of pending mutations.
-        prefs.edit().putString(markerKey, serverGeneration).apply()
-        false
+        if (!DataGenerationPolicy.hasChanged(previousGeneration, serverGeneration)) {
+            return@withContext false
+        }
+
+        Log.w("TanweerRepository", "Server generation changed; forcing a local account reset.")
+        logout(
+            context = context,
+            revokeServerSession = false,
+            preservedGenerationMarker = markerKey
+        )
+        if (!prefs.edit().putString(markerKey, serverGeneration).commit()) {
+            Log.e("TanweerRepository", "Local data was cleared but the new generation marker could not be persisted")
+        }
+        true
     }
 
     suspend fun syncIssueDetails(issueId: String): SyncResult = withContext(Dispatchers.IO) {

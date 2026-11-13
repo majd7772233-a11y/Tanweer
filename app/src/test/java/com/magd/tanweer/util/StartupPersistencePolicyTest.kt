@@ -137,11 +137,31 @@ class StartupPersistencePolicyTest {
     }
 
     @Test
-    fun explicitGenerationChangeIsDetectedOnlyAsARefreshSignal() {
+    fun explicitGenerationChangeRequiresLocalAccountReset() {
         assertFalse(DataGenerationPolicy.hasChanged("gen_initial_1", "gen_initial_1"))
         assertTrue(DataGenerationPolicy.hasChanged("gen_initial_1", "gen_initial_2"))
         assertFalse(DataGenerationPolicy.hasChanged("gen_initial_1", null))
+        assertFalse(DataGenerationPolicy.hasChanged(null, "gen_initial_2"))
+        assertFalse(DataGenerationPolicy.hasChanged(" ", "gen_initial_2"))
     }
 
-
+    @Test
+    fun localResetRemovesAccountStateButPreservesAppPreferences() {
+        val keys = setOf(
+            "auth_token", "last_open_date", "last_open_date_user_1",
+            "selected_group_id_user_1", "selected_study_date_user_1",
+            "last_active_time", "previous_session_time",
+            "data_generation|https://tanweer-staging.magd.workers.dev|user_1",
+            "app_theme", "font_size_scale", "auto_sync_enabled",
+            "notify_homework", "haptics_enabled"
+        )
+        assertEquals(
+            setOf(
+                "auth_token", "last_open_date", "last_open_date_user_1",
+                "selected_group_id_user_1", "selected_study_date_user_1",
+                "last_active_time", "previous_session_time"
+            ),
+            LocalAccountDataPolicy.keysToRemove(keys)
+        )
+    }
 }
