@@ -268,6 +268,33 @@ describe('Schedule writes are serialized against active versions', () => {
     expect(db.slots).toHaveLength(1);
   });
 
+  it('rejects fractional day and slot values through both single-slot and batch handlers before any write', async () => {
+    const invalidSingleRequests = [
+      createSlotRequest(1.5, 1, 'math'),
+      createSlotRequest(1, 1.5, 'math'),
+    ];
+
+    for (const request of invalidSingleRequests) {
+      const db = new ScheduleWriteDb();
+      const response = await handleCreateScheduleSlot('group-1', admin, request, envFor(db));
+      expect(response.status).toBe(400);
+      expect((await response.json() as any).error.code).toBe('INVALID_INPUT');
+      expect(db.versions).toHaveLength(0);
+      expect(db.slots).toHaveLength(0);
+      expect(db.statements.some(sql => sql.startsWith('INSERT'))).toBe(false);
+    }
+
+    const db = new ScheduleWriteDb();
+    const response = await handleSaveScheduleBatch('group-1', admin, batchRequest([
+      { dayOfWeek: 1, slotOrder: 1.5, subjectId: 'math' },
+    ]), envFor(db));
+    expect(response.status).toBe(400);
+    expect((await response.json() as any).error.code).toBe('INVALID_INPUT');
+    expect(db.versions).toHaveLength(0);
+    expect(db.slots).toHaveLength(0);
+    expect(db.statements.some(sql => sql.startsWith('INSERT'))).toBe(false);
+  });
+
   it('rejects duplicate positions within one full schedule payload', async () => {
     const db = new ScheduleWriteDb();
     const response = await handleSaveScheduleBatch('group-1', admin, batchRequest([
