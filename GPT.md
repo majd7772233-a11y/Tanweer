@@ -2138,3 +2138,10 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Group chat validates message text as a non-empty string of at most 2,000 Unicode code points. One per-user/per-group Durable Object quota is shared by REST and WebSocket: up to 8 messages per 10 seconds and 30 per minute. Quota storage failure must reject the send, not bypass the guard. REST bodies and WS frames are limited to 16 KiB.
 - Phase 1 leaves the PDF reader untouched. Preserve `PdfReaderScreen.kt`, `CanvasPageCurl.kt`, gesture routing, zoom/pan, page-turn animation, and page-curl geometry unless a later task explicitly targets PDF behavior.
 - Implementation and regression tests are recorded in the deep audit report and current session handoff. Verify the live branch HEAD and CI before claiming completion; do not deploy or merge to Production without explicit release authorization.
+
+
+## 2026-11-14 — Phase 1 WebSocket action quota
+- Consume the same Durable Object per-user/per-group quota for every supported WebSocket chat action, including delete-message, before performing D1 authorization reads.
+- Ignore unsupported control frames before D1 work. Keep per-action live membership and chat-policy verification for supported actions.
+- Validate WebSocket delete IDs as nonblank strings up to 128 characters.
+- Test concurrent quota calls and both storage get/put failure paths; fail closed on either failure.

@@ -110,3 +110,10 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Verify the updated branch diff contains no PDF reader or animation paths.
 - After CI, test on Staging: D1 generation unavailable/missing returns 503 without local purge; duplicate-account registration cannot move or activate a class membership; REST and WebSocket share rate limits and reject overlong messages.
 - No Worker deploy, D1 write/migration, Production change, or merge to `main` is included in this implementation.
+
+
+## Phase 1 chat action quota follow-up — 2026-11-14
+- Follow-up checkpoint parent: `3b1f46af53a2be06b30001cd7cb55f839bdc4ecb` (WebSocket handshake IP rate-limit fix; server CI passed at that checkpoint).
+- The next patch applies the same persisted Durable Object per-user/per-group quota to supported WS send and delete actions before D1 permission reads, returns early for unsupported control frames, and validates delete IDs.
+- Regression coverage adds concurrent quota consumption and fail-closed Durable Object storage read/write tests.
+- PDF reader code and animation paths remain untouched. Staging/live two-account WS+REST acceptance is still required; no deployment or Production operation is authorized.

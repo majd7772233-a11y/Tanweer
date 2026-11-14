@@ -35,4 +35,19 @@ describe('group chat guardrails', () => {
     expect((await two.fetch(quotaRequest('student-1'))).status).toBe(429);
     expect((await two.fetch(quotaRequest('student-2'))).status).toBe(200);
   });
+  it('serializes concurrent quota checks inside one Durable Object instance', async () => {
+    const storage = new MemoryStorage(); const object = new GroupChatDO({ storage } as any, {} as Env);
+    const responses = await Promise.all(Array.from({ length: 24 }, () => object.fetch(quotaRequest('student-concurrent'))));
+    expect(responses.filter(response => response.status === 200)).toHaveLength(CHAT_RATE_LIMIT_MAX_BURST);
+    expect(responses.filter(response => response.status === 429)).toHaveLength(24 - CHAT_RATE_LIMIT_MAX_BURST);
+  });
+  it('fails closed when Durable Object rate-limit storage cannot be read or written', async () => {
+    const readFailure = new GroupChatDO({ storage: { async get() { throw new Error('storage read failed'); }, async put() {} } } as any, {} as Env);
+    const writeFailure = new GroupChatDO({ storage: { async get() { return undefined; }, async put() { throw new Error('storage write failed'); } } } as any, {} as Env);
+    for (const object of [readFailure, writeFailure]) {
+      const response = await object.fetch(quotaRequest('student-1'));
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ success: false, code: 'CHAT_RATE_LIMIT_UNAVAILABLE' });
+    }
+  });
 });

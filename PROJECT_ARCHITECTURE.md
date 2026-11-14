@@ -127,3 +127,9 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - Public registration is creation-only. An existing phone number cannot be used to mutate grade/section, recreate a class membership, or turn a PENDING/REJECTED/BANNED membership into ACTIVE. Existing accounts must use login/recovery; legacy partial records require a separate authorized repair process.
 - Group chat text must be a non-empty string of at most 2,000 Unicode code points. REST and WebSocket sends share the same persisted Durable Object per-user/per-group quota (8 per 10 seconds and 30 per minute). REST payloads and WS frames are limited to 16 KiB. If the limiter storage is unavailable, reject the send before D1 insert/broadcast.
 - The PDF reader is explicitly out of scope for Phase 1. Keep its gesture ownership, page curl, zoom/pan, animation and aspect ratio unchanged.
+
+
+## WebSocket action quota completion (2026-11-14)
+- The persisted per-user/per-group Durable Object quota applies to both send-message and delete-message actions. Consume it before D1 authorization reads for supported actions.
+- Ignore unsupported JSON control frames before D1 reads, while retaining live permission checks for supported chat actions.
+- Reject invalid delete-message identifiers (blank, non-string or longer than 128 characters).

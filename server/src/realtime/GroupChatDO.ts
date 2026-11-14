@@ -94,8 +94,23 @@ export class GroupChatDO {
           const parsed = JSON.parse(raw);
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
           const data = parsed as Record<string, any>;
+          const isDeleteMessage = data.type === 'delete_message' || data.action === 'delete_message';
+          const hasMessageText = Object.prototype.hasOwnProperty.call(data, 'text');
+          if (!isDeleteMessage && !hasMessageText) return;
 
-          // Re-check membership and group policy for every message.
+          // Every supported chat action consumes the persistent per-user/per-group quota.
+          // Check before D1 authorization reads so delete operations cannot bypass the guard.
+          let rateAllowed = false;
+          try { rateAllowed = await this.consumeMessageRateLimit(session.userId); } catch {
+            try { server.send(JSON.stringify({ type: 'message_error', code: 'CHAT_RATE_LIMIT_UNAVAILABLE', error: 'تعذر التحقق من حد إرسال الرسائل. حاول مجدداً.' })); } catch {}
+            return;
+          }
+          if (!rateAllowed) {
+            try { server.send(JSON.stringify({ type: 'message_error', code: 'RATE_LIMIT_EXCEEDED', error: 'أرسلت رسائل كثيرة خلال وقت قصير. انتظر قليلاً ثم حاول مجدداً.' })); } catch {}
+            return;
+          }
+
+          // Re-check membership and group policy for every supported chat action.
           // This invalidates already-open sockets immediately after demotion/removal.
           const livePermission = await getGroupChatSendPermission(
             session.groupId,
@@ -115,9 +130,13 @@ export class GroupChatDO {
           }
 
           // Handle message deletion action by sender or moderator/teacher/admin
-          if (data.type === 'delete_message' || data.action === 'delete_message') {
-            const messageId = data.messageId || data.id;
-            if (!messageId) return;
+          if (isDeleteMessage) {
+            const candidateId = data.messageId ?? data.id;
+            if (typeof candidateId !== 'string' || !candidateId.trim() || candidateId.length > 128) {
+              try { server.send(JSON.stringify({ type: 'message_error', code: 'INVALID_MESSAGE_ID', error: 'معرّف الرسالة المطلوب حذفه غير صالح.' })); } catch {}
+              return;
+            }
+            const messageId = candidateId;
 
             const existing = await this.env.DB.prepare(
               `SELECT sender_id FROM chat_messages WHERE id = ? AND group_id = ?`
@@ -146,15 +165,6 @@ export class GroupChatDO {
             return;
           }
           const text = validation.text;
-          let rateAllowed = false;
-          try { rateAllowed = await this.consumeMessageRateLimit(session.userId); } catch {
-            try { server.send(JSON.stringify({ type: 'message_error', code: 'CHAT_RATE_LIMIT_UNAVAILABLE', error: 'تعذر التحقق من حد إرسال الرسائل. حاول مجدداً.' })); } catch {}
-            return;
-          }
-          if (!rateAllowed) {
-            try { server.send(JSON.stringify({ type: 'message_error', code: 'RATE_LIMIT_EXCEEDED', error: 'أرسلت رسائل كثيرة خلال وقت قصير. انتظر قليلاً ثم حاول مجدداً.' })); } catch {}
-            return;
-          }
           const messageId = (data.id && typeof data.id === 'string' && data.id.length > 3) ? data.id : generateId('msg');
           const now = Date.now();
 
