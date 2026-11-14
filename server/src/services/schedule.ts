@@ -5,6 +5,7 @@ import { requireGroupMember, requireScheduleManager } from '../middleware/permis
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
 import { sanitizePublicRole } from '../lib/roles';
+import { parseScheduleVoteType, validateScheduleProposalInput, validateScheduleSlotInput } from './scheduleValidation';
 
 export interface ScheduleSlotInput {
   dayOfWeek: number;
@@ -118,25 +119,9 @@ export async function handleCreateScheduleSlot(
 
   const body = await request.json() as ScheduleSlotInput;
 
-  // TA-23: Strict unified validation matching batch schedule rules
-  if (
-    body.dayOfWeek === undefined ||
-    typeof body.dayOfWeek !== 'number' ||
-    body.dayOfWeek < 0 ||
-    body.dayOfWeek > 6 ||
-    !body.slotOrder ||
-    typeof body.slotOrder !== 'number' ||
-    body.slotOrder < 1 ||
-    body.slotOrder > 12 ||
-    !body.subjectId ||
-    typeof body.subjectId !== 'string' ||
-    !body.subjectId.trim()
-  ) {
-    return errorResponse(
-      'INVALID_INPUT',
-      'بيانات الحصة غير صالحة، يرجى التأكد من اليوم (0-6) ورقم الحصة (1-12) والمادة وعدم ترك حقول فارغة'
-    );
-  }
+  // Use identical strict field/type/range rules for single-slot and batch writes.
+  const slotValidation = validateScheduleSlotInput(body);
+  if (!slotValidation.valid) return errorResponse(slotValidation.code, slotValidation.message);
 
   const isScheduleManager = await hasPermission(user, Permission.MANAGE_SCHEDULE, {
     db: env.DB,
@@ -328,22 +313,9 @@ export async function handleSaveScheduleBatch(
   const seenPositions = new Set<string>();
   for (let i = 0; i < slotList.length; i++) {
     const slot = slotList[i];
-    if (
-      slot.dayOfWeek === undefined ||
-      typeof slot.dayOfWeek !== 'number' ||
-      !Number.isInteger(slot.dayOfWeek) ||
-      slot.dayOfWeek < 0 ||
-      slot.dayOfWeek > 6 ||
-      !Number.isInteger(slot.slotOrder) ||
-      slot.slotOrder < 1 ||
-      slot.slotOrder > 12 ||
-      typeof slot.subjectId !== 'string' ||
-      !slot.subjectId.trim()
-    ) {
-      return errorResponse(
-        'INVALID_INPUT',
-        `الحصة رقم (${i + 1}) غير صالحة، يرجى التأكد من اليوم ورقم الحصة والمادة لجميع الحصص وعدم ترك حصص ناقصة`
-      );
+    const slotValidation = validateScheduleSlotInput(slot);
+    if (!slotValidation.valid) {
+      return errorResponse('INVALID_INPUT', `الحصة رقم (${i + 1}) غير صالحة: ${slotValidation.message}`);
     }
 
     const positionKey = `${slot.dayOfWeek}:${slot.slotOrder}`;
@@ -648,30 +620,30 @@ export async function handleProposeScheduleChange(user: UserContext, request: Re
     reason?: string;
   };
 
-  if (!body.groupId || body.dayOfWeek === undefined || !body.slotOrder || !body.newSubjectId || !body.reason) {
-    return errorResponse('INVALID_INPUT', 'يرجى إكمال تفاصيل اقتراح تعديل الجدول والسبب');
-  }
+  const proposalValidation = validateScheduleProposalInput(body);
+  if (!proposalValidation.valid) return errorResponse(proposalValidation.code, proposalValidation.message);
+  const proposalInput = proposalValidation.value;
 
-  const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
+  const memberCheck = await requireGroupMember(user, proposalInput.groupId, env.DB);
   if (memberCheck) return memberCheck;
 
   // TA-19: Derive server truth for the slot's current subject from the active schedule version
   const activeVersion = await env.DB.prepare(
     `SELECT id FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
-  ).bind(body.groupId).first<{ id: string }>();
+  ).bind(proposalInput.groupId).first<{ id: string }>();
 
   let serverCurrentSubjectId: string | null = null;
   if (activeVersion) {
     const currentSlot = await env.DB.prepare(
       `SELECT subject_id FROM schedule_slots WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
-    ).bind(activeVersion.id, body.dayOfWeek, body.slotOrder).first<{ subject_id: string }>();
+    ).bind(activeVersion.id, proposalInput.dayOfWeek, proposalInput.slotOrder).first<{ subject_id: string }>();
     serverCurrentSubjectId = currentSlot?.subject_id || null;
   }
 
   // The active schedule is authoritative even when the requested cell is empty.
   // Never trust a stale client oldSubjectId when the server has no subject in that slot.
   const finalOldSubjectId = serverCurrentSubjectId;
-  if (finalOldSubjectId === body.newSubjectId.trim()) {
+  if (finalOldSubjectId === proposalInput.newSubjectId) {
     return errorResponse('NO_SCHEDULE_CHANGE', 'المادة الجديدة هي نفسها المادة الموجودة حالياً في هذه الحصة؛ لا يوجد تغيير لطرحه للتصويت', 400);
   }
 
@@ -681,26 +653,29 @@ export async function handleProposeScheduleChange(user: UserContext, request: Re
   const eligibleRows = await env.DB.prepare(
     `SELECT user_id FROM group_members
      WHERE group_id = ? AND status = 'ACTIVE' AND role != 'BANNED'`
-  ).bind(body.groupId).all<{ user_id: string }>();
+  ).bind(proposalInput.groupId).all<{ user_id: string }>();
   const eligibleVoters = [...new Set((eligibleRows.results || []).map(row => row.user_id))];
   if (!eligibleVoters.includes(user.userId)) eligibleVoters.push(user.userId);
   const totalEligible = Math.max(1, eligibleVoters.length);
   const thresholdPercent = 60;
   const subjectRows = await env.DB.prepare(
     `SELECT id, name_ar FROM subjects WHERE id IN (?, ?)`
-  ).bind(finalOldSubjectId || '', body.newSubjectId.trim()).all<{ id: string; name_ar: string }>();
+  ).bind(finalOldSubjectId || '', proposalInput.newSubjectId).all<{ id: string; name_ar: string }>();
   const subjectNames = new Map((subjectRows.results || []).map(row => [row.id, row.name_ar]));
+  if (!subjectNames.has(proposalInput.newSubjectId)) {
+    return errorResponse('INVALID_SUBJECT', 'المادة الجديدة غير موجودة في قائمة مواد المنظومة.', 400);
+  }
   const oldSubjectLabel = finalOldSubjectId
     ? (subjectNames.get(finalOldSubjectId) || finalOldSubjectId)
     : 'فارغة';
-  const newSubjectLabel = subjectNames.get(body.newSubjectId.trim()) || body.newSubjectId.trim();
+  const newSubjectLabel = subjectNames.get(proposalInput.newSubjectId) || proposalInput.newSubjectId;
   const voterSnapshot = JSON.stringify({
-    text: `تغيير مادة الحصة من ${oldSubjectLabel} إلى ${newSubjectLabel}. السبب: ${body.reason.trim()}`,
+    text: `تغيير مادة الحصة من ${oldSubjectLabel} إلى ${newSubjectLabel}. السبب: ${proposalInput.reason}`,
     voters: eligibleVoters,
     targetType: 'SCHEDULE',
   });
   const dayNames = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-  const decisionTitle = `اقتراح تعديل الجدول • ${dayNames[body.dayOfWeek] || 'اليوم'} • الحصة ${body.slotOrder}`;
+  const decisionTitle = `اقتراح تعديل الجدول • ${dayNames[proposalInput.dayOfWeek] || 'اليوم'} • الحصة ${proposalInput.slotOrder}`;
 
   try {
     if (typeof env.DB.batch !== 'function') {
@@ -712,8 +687,8 @@ export async function handleProposeScheduleChange(user: UserContext, request: Re
          (id, group_id, proposed_by, day_of_week, slot_order, old_subject_id, new_subject_id, reason, status, votes_for, votes_against, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 1, 0, ?)`
       ).bind(
-        proposalId, body.groupId, user.userId, body.dayOfWeek, body.slotOrder,
-        finalOldSubjectId, body.newSubjectId.trim(), body.reason.trim(), now
+        proposalId, proposalInput.groupId, user.userId, proposalInput.dayOfWeek, proposalInput.slotOrder,
+        finalOldSubjectId, proposalInput.newSubjectId, proposalInput.reason, now
       ),
       env.DB.prepare(
         `INSERT INTO community_decisions
@@ -722,7 +697,7 @@ export async function handleProposeScheduleChange(user: UserContext, request: Re
           votes_for, votes_against, status, expires_at, created_at)
          VALUES (?, ?, 'SCHEDULE', ?, ?, ?, ?, ?, ?, ?, 1, 0, 'PENDING', ?, ?)`
       ).bind(
-        decisionId, body.groupId, proposalId, decisionTitle, voterSnapshot,
+        decisionId, proposalInput.groupId, proposalId, decisionTitle, voterSnapshot,
         user.userId, user.fullName, totalEligible, thresholdPercent, now + 48 * 3600 * 1000, now
       ),
       env.DB.prepare(
@@ -737,9 +712,9 @@ export async function handleProposeScheduleChange(user: UserContext, request: Re
 
   if (totalEligible <= 1) {
     const result = await applyScheduleProposalToActiveSchedule({
-      id: proposalId, group_id: body.groupId, day_of_week: body.dayOfWeek,
-      slot_order: body.slotOrder, old_subject_id: finalOldSubjectId,
-      new_subject_id: body.newSubjectId.trim(), status: 'PENDING', proposed_by: user.userId,
+      id: proposalId, group_id: proposalInput.groupId, day_of_week: proposalInput.dayOfWeek,
+      slot_order: proposalInput.slotOrder, old_subject_id: finalOldSubjectId,
+      new_subject_id: proposalInput.newSubjectId, status: 'PENDING', proposed_by: user.userId,
     }, user.userId, env);
     if (result.success) {
       await env.DB.prepare(`UPDATE schedule_proposals SET status = 'ACCEPTED' WHERE id = ?`).bind(proposalId).run();
@@ -787,8 +762,11 @@ export async function handleVoteScheduleProposal(
   const memberCheck = await requireGroupMember(user, proposal.group_id, env.DB);
   if (memberCheck) return memberCheck;
 
-  const body = await request.json() as { voteType?: 'FOR' | 'AGAINST' };
-  const voteType = body.voteType === 'AGAINST' ? 'AGAINST' : 'FOR';
+  let body: { voteType?: unknown } | null = null;
+  try { body = await request.json() as { voteType?: unknown }; } catch {}
+  const parsedVote = parseScheduleVoteType(body?.voteType);
+  if (parsedVote === null) return errorResponse('INVALID_VOTE_TYPE', 'نوع التصويت غير صالح؛ استخدم FOR أو AGAINST.', 400);
+  const voteType = parsedVote === 0 ? 'AGAINST' : 'FOR';
 
   // Check existing vote
   const existingVote = await env.DB.prepare(

@@ -7,6 +7,7 @@ import { Permission, hasPermission } from '../lib/permissions';
 import { Role, normalizeRole } from '../lib/roles';
 import { applyScheduleProposalToActiveSchedule } from './schedule';
 import { isValidIsoDate } from '../lib/validation';
+import { parseCommunityVoteChoice } from './scheduleValidation';
 
 type CorrectionField = 'TITLE' | 'DESCRIPTION' | 'STUDY_DATE' | 'PAGE_NUMBERS';
 
@@ -880,8 +881,10 @@ export async function handleVoteCommunityDecision(
     );
   }
 
-  const body = await request.json() as { voteChoice: number }; // 1 = For, 0 = Against
-  const choice = body.voteChoice === 1 ? 1 : 0;
+  let body: { voteChoice?: unknown } | null = null;
+  try { body = await request.json() as { voteChoice?: unknown }; } catch {}
+  const choice = parseCommunityVoteChoice(body?.voteChoice);
+  if (choice === null) return errorResponse('INVALID_VOTE_CHOICE', 'قيمة التصويت غير صالحة؛ أرسل 1 للموافقة أو 0 للرفض.', 400);
 
   // Insert or replace vote
   await env.DB.prepare(

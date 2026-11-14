@@ -1,4 +1,5 @@
 import { Env } from './env';
+import { parseScheduleVoteType } from './services/scheduleValidation';
 import { authenticateRequest } from './middleware/auth';
 import { errorResponse, jsonResponse } from './lib/response';
 import { handleLogin, handleRegister, handleLoginWithRecoveryCode } from './services/auth';
@@ -335,8 +336,11 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/vote') && method === 'POST') {
     const proposalId = path.split('/')[5];
-    const body = await request.json() as { voteType?: string };
-    return handleUnifiedScheduleProposalVote(proposalId, user, env, body.voteType === 'AGAINST' ? 0 : 1);
+    let body: { voteType?: unknown } | null = null;
+    try { body = await request.json() as { voteType?: unknown }; } catch {}
+    const voteChoice = parseScheduleVoteType(body?.voteType);
+    if (voteChoice === null) return errorResponse('INVALID_VOTE_TYPE', 'نوع التصويت غير صالح؛ استخدم FOR أو AGAINST.', 400);
+    return handleUnifiedScheduleProposalVote(proposalId, user, env, voteChoice);
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/approve') && method === 'POST') {
     const proposalId = path.split('/')[5];
