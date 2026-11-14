@@ -328,8 +328,8 @@ class TanweerRepository(
         }
 
         mutationQueue.isDrainAllowed = false
-        mutationQueue.stopAndAwait()
         invalidateChatConnection()
+        mutationQueue.stopAndAwait()
 
         if (context != null) {
             val homeworkIds = runCatching { db.homeworkDao().getAllHomeworkIds() }
