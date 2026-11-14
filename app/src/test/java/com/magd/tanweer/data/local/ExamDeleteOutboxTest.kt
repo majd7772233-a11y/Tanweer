@@ -113,6 +113,84 @@ class ExamDeleteOutboxTest {
     }
 
     @Test
+    fun failedMutationsAreNotIncludedInAutomaticDrainOrClaimed() = runBlocking {
+        database.outboxDao().insertOutbox(
+            OutboxEntity(
+                id = "failed_exam",
+                entityType = "EXAM_CREATE",
+                entityId = "exam_failed",
+                operation = "CREATE",
+                payloadJson = "{}",
+                attempts = 5,
+                status = "FAILED"
+            )
+        )
+        database.outboxDao().insertOutbox(
+            OutboxEntity(
+                id = "pending_exam",
+                entityType = "EXAM_TOGGLE",
+                entityId = "exam_pending",
+                operation = "UPDATE",
+                payloadJson = "{\\"isCompleted\\":true}",
+                createdAt = 10L
+            )
+        )
+
+        val automaticItems = database.outboxDao().getPendingItemsSync()
+        assertEquals(listOf("pending_exam"), automaticItems.map { it.id })
+        assertEquals(0, database.outboxDao().claimPendingItem("failed_exam"))
+        assertEquals(1, database.outboxDao().claimPendingItem("pending_exam"))
+    }
+
+    @Test
+    fun explicitRetryRequeuesOnlyTheRequestedFailedEntityAndResetsItsBudget() = runBlocking {
+        database.outboxDao().insertOutbox(
+            OutboxEntity(
+                id = "failed_a",
+                entityType = "HOMEWORK_CREATE",
+                entityId = "homework_a",
+                operation = "CREATE",
+                payloadJson = "{}",
+                attempts = 5,
+                lastAttemptAt = 1234L,
+                error = "rejected",
+                status = "FAILED"
+            )
+        )
+        database.outboxDao().insertOutbox(
+            OutboxEntity(
+                id = "failed_b",
+                entityType = "HOMEWORK_CREATE",
+                entityId = "homework_b",
+                operation = "CREATE",
+                payloadJson = "{}",
+                attempts = 5,
+                status = "FAILED"
+            )
+        )
+
+        assertEquals(1, database.outboxDao().requeueFailedItems("homework_a"))
+        val retried = database.outboxDao().getOutboxItemById("failed_a")
+        assertNotNull(retried)
+        assertEquals("PENDING", retried?.status)
+        assertEquals(0, retried?.attempts)
+        assertEquals(0L, retried?.lastAttemptAt)
+        assertNull(retried?.error)
+        assertEquals("FAILED", database.outboxDao().getOutboxItemById("failed_b")?.status)
+    }
+
+    @Test
+    fun pendingQueueOrderIsStableForMutationsCreatedAtTheSameTime() = runBlocking {
+        database.outboxDao().insertOutbox(
+            OutboxEntity("z_order", "EXAM_TOGGLE", "same_entity", "UPDATE", "{}", createdAt = 99L)
+        )
+        database.outboxDao().insertOutbox(
+            OutboxEntity("a_order", "EXAM_TOGGLE", "same_entity", "UPDATE", "{}", createdAt = 99L)
+        )
+        assertEquals(listOf("a_order", "z_order"), database.outboxDao().getPendingItemsSync().map { it.id })
+    }
+
+    @Test
     fun `deleting one mutation type preserves the other operation for same exam`() = runBlocking {
         val examId = "typed_delete_exam"
         database.outboxDao().insertOutbox(

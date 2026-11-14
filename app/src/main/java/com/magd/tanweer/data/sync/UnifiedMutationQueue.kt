@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
+import java.util.UUID
 
 data class SyncErrorInfo(
     val operation: String,
@@ -162,15 +163,16 @@ class UnifiedMutationQueue private constructor(
         operation: String,
         payloadJson: String
     ): OutboxEntity = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
         val outboxItem = OutboxEntity(
-            id = "ob_${entityType.lowercase()}_${entityId}_${System.currentTimeMillis()}",
+            id = "ob_${entityType.lowercase()}_${entityId}_${UUID.randomUUID()}",
             entityType = entityType,
             entityId = entityId,
             operation = operation,
             payloadJson = payloadJson,
             status = "PENDING",
             attempts = 0,
-            createdAt = System.currentTimeMillis()
+            createdAt = now
         )
         outboxDao.insertOutbox(outboxItem)
         if (isAutoSyncEnabled) {
@@ -183,6 +185,17 @@ class UnifiedMutationQueue private constructor(
         scope.launch {
             drainQueue()
         }
+    }
+
+    /**
+     * FAILED mutations are terminal for automatic drains. A user-initiated retry
+     * explicitly resets their retry budget and returns them to the PENDING queue.
+     */
+    suspend fun retryFailedMutations(entityId: String? = null): Int = withContext(Dispatchers.IO) {
+        if (entityId != null && entityId.isBlank()) return@withContext 0
+        val requeued = outboxDao.requeueFailedItems(entityId)
+        if (requeued > 0) triggerDrain()
+        requeued
     }
 
     /**
@@ -200,15 +213,31 @@ class UnifiedMutationQueue private constructor(
             try {
                 outboxDao.recoverStuckSyncingItems(now = System.currentTimeMillis(), timeoutMs = 60_000L)
                 val pendingItems = outboxDao.getPendingItemsSync()
+                val blockedEntityIds = mutableSetOf<String>()
                 for (rawItem in pendingItems) {
                     if (!isDrainAllowed) break
                     val currentItem = outboxDao.getOutboxItemById(rawItem.id) ?: continue
                     val item = normalizeLegacyOperation(currentItem)
+
+                    // Mutations for one entity are ordered. A prior retry/backoff or
+                    // in-flight claim blocks later changes to the same entity in this pass.
+                    if (item.entityId.isNotBlank() && item.entityId in blockedEntityIds) continue
+
                     val backoffMs = (1000L * (1 shl item.attempts.coerceAtMost(5))).coerceIn(2000L, 60_000L)
                     val now = System.currentTimeMillis()
-                    if (item.attempts > 0 && (now - item.lastAttemptAt < backoffMs)) continue
-                    if (outboxDao.claimPendingItem(item.id, now) <= 0) continue
-                    if (executeMutation(item)) processedCount++
+                    if (item.attempts > 0 && (now - item.lastAttemptAt < backoffMs)) {
+                        if (item.entityId.isNotBlank()) blockedEntityIds.add(item.entityId)
+                        continue
+                    }
+                    if (outboxDao.claimPendingItem(item.id, now) <= 0) {
+                        if (item.entityId.isNotBlank()) blockedEntityIds.add(item.entityId)
+                        continue
+                    }
+                    if (executeMutation(item)) {
+                        processedCount++
+                    } else if (item.entityId.isNotBlank()) {
+                        blockedEntityIds.add(item.entityId)
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e

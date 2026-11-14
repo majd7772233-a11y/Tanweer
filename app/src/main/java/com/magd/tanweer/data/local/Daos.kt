@@ -545,8 +545,11 @@ interface OutboxDao {
     @Query("SELECT * FROM outbox WHERE status IN ('PENDING', 'FAILED') ORDER BY createdAt ASC")
     fun getPendingItems(): Flow<List<OutboxEntity>>
 
-    @Query("SELECT * FROM outbox WHERE status IN ('PENDING', 'FAILED') ORDER BY createdAt ASC")
+    @Query("SELECT * FROM outbox WHERE status = 'PENDING' ORDER BY createdAt ASC, id ASC")
     suspend fun getPendingItemsSync(): List<OutboxEntity>
+
+    @Query("UPDATE outbox SET status = 'PENDING', attempts = 0, lastAttemptAt = 0, error = NULL WHERE status = 'FAILED' AND (:entityId IS NULL OR entityId = :entityId)")
+    suspend fun requeueFailedItems(entityId: String? = null): Int
 
     @Query("SELECT * FROM outbox WHERE id = :id LIMIT 1")
     suspend fun getOutboxItemById(id: String): OutboxEntity?
@@ -557,7 +560,7 @@ interface OutboxDao {
     @Query("UPDATE outbox SET status = :status, lastAttemptAt = :now, error = :error WHERE id = :id")
     suspend fun updateOutboxStatus(id: String, status: String, now: Long = System.currentTimeMillis(), error: String? = null)
 
-    @Query("UPDATE outbox SET status = 'SYNCING', attempts = attempts + 1, lastAttemptAt = :now WHERE id = :id AND status IN ('PENDING', 'FAILED')")
+    @Query("UPDATE outbox SET status = 'SYNCING', attempts = attempts + 1, lastAttemptAt = :now WHERE id = :id AND status = 'PENDING'")
     suspend fun claimPendingItem(id: String, now: Long = System.currentTimeMillis()): Int
 
     @Query("DELETE FROM outbox WHERE id = :id")
