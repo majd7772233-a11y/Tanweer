@@ -1697,7 +1697,7 @@ class TanweerRepository(
                 "{\"groupId\":\"$groupId\",\"dayOfWeek\":$dayOfWeek,\"slotOrder\":$slotOrder}"
             }
             val outboxItem = OutboxEntity(
-                id = "ob_sch_${slotId}_${System.currentTimeMillis()}",
+                id = "ob_sch_${slotId}_${java.util.UUID.randomUUID()}",
                 entityType = "SCHEDULE_SLOT_UPDATE",
                 entityId = slotId,
                 operation = "CREATE",
@@ -1728,7 +1728,7 @@ class TanweerRepository(
                 }.toString()
             } catch (_: Exception) { "{}" }
             val outboxItem = OutboxEntity(
-                id = "ob_schdel_${groupId}_${dayOfWeek}_${slotOrder}_${System.currentTimeMillis()}",
+                id = "ob_schdel_${groupId}_${dayOfWeek}_${slotOrder}_${java.util.UUID.randomUUID()}",
                 entityType = "SCHEDULE_SLOT_DELETE",
                 entityId = "${groupId}:${dayOfWeek}:${slotOrder}",
                 operation = "DELETE",
@@ -3038,7 +3038,7 @@ class TanweerRepository(
                 put("authorGradeSection", authorGradeSection)
             }.toString()
             val outboxItem = OutboxEntity(
-                id = "ob_lsc_${id}_${System.currentTimeMillis()}",
+                id = "ob_lsc_${id}_${java.util.UUID.randomUUID()}",
                 entityType = "LESSON_CREATE",
                 entityId = id,
                 operation = "CREATE",
@@ -3242,7 +3242,7 @@ class TanweerRepository(
                 put("isOfficial", isOfficial)
             }.toString()
             val outboxItem = OutboxEntity(
-                id = "ob_hwc_${id}_${System.currentTimeMillis()}",
+                id = "ob_hwc_${id}_${java.util.UUID.randomUUID()}",
                 entityType = "HOMEWORK_CREATE",
                 entityId = id,
                 operation = "CREATE",
@@ -3402,7 +3402,7 @@ class TanweerRepository(
                 put("isOfficial", isOfficial)
             }.toString()
             val outboxItem = OutboxEntity(
-                id = "ob_hwc_${id}_${System.currentTimeMillis()}",
+                id = "ob_hwc_${id}_${java.util.UUID.randomUUID()}",
                 entityType = "HOMEWORK_CREATE",
                 entityId = id,
                 operation = "CREATE",
@@ -3550,7 +3550,7 @@ class TanweerRepository(
         if (isNotSyncedYet) {
             // Queue toggle in Outbox for when homework creation completes
             val outboxItem = OutboxEntity(
-                id = "ob_hwt_${homeworkId}_${System.currentTimeMillis()}",
+                id = "ob_hwt_${homeworkId}_${java.util.UUID.randomUUID()}",
                 entityType = "HOMEWORK_TOGGLE",
                 entityId = homeworkId,
                 operation = "UPDATE",
@@ -3592,7 +3592,7 @@ class TanweerRepository(
             } else if (res.code() == 404) {
                 // If 404 on server, preserve local user action and queue Outbox retry
                 val outboxItem = OutboxEntity(
-                    id = "ob_hwt_${homeworkId}_${System.currentTimeMillis()}",
+                    id = "ob_hwt_${homeworkId}_${java.util.UUID.randomUUID()}",
                     entityType = "HOMEWORK_TOGGLE",
                     entityId = homeworkId,
                     operation = "UPDATE",
@@ -3603,7 +3603,7 @@ class TanweerRepository(
             } else {
                 // Server temporary error -> queue for background retry
                 val outboxItem = OutboxEntity(
-                    id = "ob_hwt_${homeworkId}_${System.currentTimeMillis()}",
+                    id = "ob_hwt_${homeworkId}_${java.util.UUID.randomUUID()}",
                     entityType = "HOMEWORK_TOGGLE",
                     entityId = homeworkId,
                     operation = "UPDATE",
@@ -3615,7 +3615,7 @@ class TanweerRepository(
         } catch (e: Exception) {
             // Offline or network exception -> queue for background retry
             val outboxItem = OutboxEntity(
-                id = "ob_hwt_${homeworkId}_${System.currentTimeMillis()}",
+                id = "ob_hwt_${homeworkId}_${java.util.UUID.randomUUID()}",
                 entityType = "HOMEWORK_TOGGLE",
                 entityId = homeworkId,
                 operation = "UPDATE",
@@ -3711,7 +3711,7 @@ class TanweerRepository(
                     }.toString()
                 } catch (_: Exception) { "{}" }
                 val outboxItem = OutboxEntity(
-                    id = "ob_exc_${id}_${System.currentTimeMillis()}",
+                    id = "ob_exc_${id}_${java.util.UUID.randomUUID()}",
                     entityType = "EXAM_CREATE",
                     entityId = id,
                     operation = "CREATE",
@@ -3737,7 +3737,7 @@ class TanweerRepository(
                 }.toString()
             } catch (_: Exception) { "{}" }
             val outboxItem = OutboxEntity(
-                id = "ob_exc_${id}_${System.currentTimeMillis()}",
+                id = "ob_exc_${id}_${java.util.UUID.randomUUID()}",
                 entityType = "EXAM_CREATE",
                 entityId = id,
                 operation = "CREATE",
@@ -3772,7 +3772,7 @@ class TanweerRepository(
 
             if (mustQueue) {
                 val outboxItem = OutboxEntity(
-                    id = "ob_examt_${examId}_${System.currentTimeMillis()}",
+                    id = "ob_examt_${examId}_${java.util.UUID.randomUUID()}",
                     entityType = "EXAM_TOGGLE",
                     entityId = examId,
                     operation = "UPDATE",
@@ -3805,7 +3805,7 @@ class TanweerRepository(
                     )
                 } else {
                     val outboxItem = OutboxEntity(
-                        id = "ob_examt_${examId}_${System.currentTimeMillis()}",
+                        id = "ob_examt_${examId}_${java.util.UUID.randomUUID()}",
                         entityType = "EXAM_TOGGLE",
                         entityId = examId,
                         operation = "UPDATE",
@@ -3817,7 +3817,7 @@ class TanweerRepository(
             } catch (_: Exception) {
                 // Network failure: retain the desired state for reliable retry.
                 val outboxItem = OutboxEntity(
-                    id = "ob_examt_${examId}_${System.currentTimeMillis()}",
+                    id = "ob_examt_${examId}_${java.util.UUID.randomUUID()}",
                     entityType = "EXAM_TOGGLE",
                     entityId = examId,
                     operation = "UPDATE",
@@ -3901,7 +3901,7 @@ class TanweerRepository(
                 Result.failure(Exception("يلزم الاتصال بالإنترنت لنشر التعميم الرسمي. لم يتم تسجيله كمنشور ناجح."))
             } else {
                 val outboxItem = OutboxEntity(
-                    id = "ob_evc_${id}_${System.currentTimeMillis()}",
+                    id = "ob_evc_${id}_${java.util.UUID.randomUUID()}",
                     entityType = "EVENT_CREATE",
                     entityId = id,
                     operation = "CREATE",
@@ -3918,7 +3918,7 @@ class TanweerRepository(
             } else {
                 // Queue ordinary local events for later synchronization.
                 val outboxItem = OutboxEntity(
-                    id = "ob_evc_${id}_${System.currentTimeMillis()}",
+                    id = "ob_evc_${id}_${java.util.UUID.randomUUID()}",
                     entityType = "EVENT_CREATE",
                     entityId = id,
                     operation = "CREATE",
@@ -4078,7 +4078,7 @@ class TanweerRepository(
                     ?: "رفض الخادم حفظ التعليق (HTTP ${res.code()})"))
             } else {
                 val outboxItem = OutboxEntity(
-                    id = "ob_com_${commentId}_${System.currentTimeMillis()}",
+                    id = "ob_com_${commentId}_${java.util.UUID.randomUUID()}",
                     entityType = "ISSUE_COMMENT_CREATE",
                     entityId = commentId,
                     operation = "CREATE",
@@ -4090,7 +4090,7 @@ class TanweerRepository(
             }
         } catch (e: Exception) {
             val outboxItem = OutboxEntity(
-                id = "ob_com_${commentId}_${System.currentTimeMillis()}",
+                id = "ob_com_${commentId}_${java.util.UUID.randomUUID()}",
                 entityType = "ISSUE_COMMENT_CREATE",
                 entityId = commentId,
                 operation = "CREATE",
@@ -4216,7 +4216,7 @@ class TanweerRepository(
                 Result.failure(Exception(res.message() ?: "فشل إنشاء الاستفسار في السيرفر"))
             } else {
                 val outboxItem = OutboxEntity(
-                    id = "ob_isc_${id}_${System.currentTimeMillis()}",
+                    id = "ob_isc_${id}_${java.util.UUID.randomUUID()}",
                     entityType = "ISSUE_CREATE",
                     entityId = id,
                     operation = "CREATE",
@@ -4228,7 +4228,7 @@ class TanweerRepository(
             }
         } catch (e: Exception) {
             val outboxItem = OutboxEntity(
-                id = "ob_isc_${id}_${System.currentTimeMillis()}",
+                id = "ob_isc_${id}_${java.util.UUID.randomUUID()}",
                 entityType = "ISSUE_CREATE",
                 entityId = id,
                 operation = "CREATE",
@@ -4251,7 +4251,7 @@ class TanweerRepository(
         if (existing == null) {
             db.outboxDao().insertOutbox(
                 OutboxEntity(
-                    id = "ob_exd_${examId}_${System.currentTimeMillis()}",
+                    id = "ob_exd_${examId}_${java.util.UUID.randomUUID()}",
                     entityType = "EXAM_DELETE",
                     entityId = examId,
                     operation = "DELETE",

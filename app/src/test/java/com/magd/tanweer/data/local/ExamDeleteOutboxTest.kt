@@ -131,7 +131,7 @@ class ExamDeleteOutboxTest {
                 entityType = "EXAM_TOGGLE",
                 entityId = "exam_pending",
                 operation = "UPDATE",
-                payloadJson = "{\\"isCompleted\\":true}",
+                payloadJson = "{\"isCompleted\":true}",
                 createdAt = 10L
             )
         )
