@@ -213,30 +213,32 @@ class UnifiedMutationQueue private constructor(
             try {
                 outboxDao.recoverStuckSyncingItems(now = System.currentTimeMillis(), timeoutMs = 60_000L)
                 val pendingItems = outboxDao.getPendingItemsSync()
-                val blockedEntityIds = mutableSetOf<String>()
+                val blockedEntities = mutableSetOf<String>()
                 for (rawItem in pendingItems) {
                     if (!isDrainAllowed) break
                     val currentItem = outboxDao.getOutboxItemById(rawItem.id) ?: continue
                     val item = normalizeLegacyOperation(currentItem)
+                    val entityKey = if (item.entityId.isNotBlank()) "${item.entityType}:${item.entityId}" else null
 
-                    // Mutations for one entity are ordered. A prior retry/backoff or
-                    // in-flight claim blocks later changes to the same entity in this pass.
-                    if (item.entityId.isNotBlank() && item.entityId in blockedEntityIds) continue
+                    // Mutations for one entity are ordered within its own domain. An
+                    // earlier retry/backoff or in-flight claim blocks later mutations
+                    // for the same entity type and ID, without blocking another domain.
+                    if (entityKey != null && entityKey in blockedEntities) continue
 
                     val backoffMs = (1000L * (1 shl item.attempts.coerceAtMost(5))).coerceIn(2000L, 60_000L)
                     val now = System.currentTimeMillis()
                     if (item.attempts > 0 && (now - item.lastAttemptAt < backoffMs)) {
-                        if (item.entityId.isNotBlank()) blockedEntityIds.add(item.entityId)
+                        if (entityKey != null) blockedEntities.add(entityKey)
                         continue
                     }
                     if (outboxDao.claimPendingItem(item.id, now) <= 0) {
-                        if (item.entityId.isNotBlank()) blockedEntityIds.add(item.entityId)
+                        if (entityKey != null) blockedEntities.add(entityKey)
                         continue
                     }
                     if (executeMutation(item)) {
                         processedCount++
-                    } else if (item.entityId.isNotBlank()) {
-                        blockedEntityIds.add(item.entityId)
+                    } else if (entityKey != null) {
+                        blockedEntities.add(entityKey)
                     }
                 }
             } catch (e: CancellationException) {

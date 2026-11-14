@@ -329,7 +329,7 @@ class TanweerRepository(
 
         mutationQueue.isDrainAllowed = false
         mutationQueue.stopAndAwait()
-        chatManager.disconnect()
+        invalidateChatConnection()
 
         if (context != null) {
             val homeworkIds = runCatching { db.homeworkDao().getAllHomeworkIds() }
@@ -2627,6 +2627,14 @@ class TanweerRepository(
     private fun isActiveChatConnection(groupId: String, generation: Long): Boolean =
         activeChatGroupId == groupId && chatConnectionGeneration == generation
 
+    private fun invalidateChatConnection() {
+        synchronized(chatConnectionLock) {
+            chatConnectionGeneration += 1
+            activeChatGroupId = null
+        }
+        chatManager.disconnect()
+    }
+
     suspend fun connectToGroupChat(groupId: String, myUserId: String) = withContext(Dispatchers.IO) {
         val generation = synchronized(chatConnectionLock) {
             chatConnectionGeneration += 1
@@ -2737,11 +2745,7 @@ class TanweerRepository(
     }
 
     suspend fun disconnectFromGroupChat() = withContext(Dispatchers.IO) {
-        synchronized(chatConnectionLock) {
-            chatConnectionGeneration += 1
-            activeChatGroupId = null
-        }
-        chatManager.disconnect()
+        invalidateChatConnection()
     }
 
     private var lastSentMessageSignature: String? = null
