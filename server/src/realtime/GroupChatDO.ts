@@ -1,6 +1,6 @@
 import { Env } from '../env';
 import { generateId } from '../lib/ids';
-import { getGroupChatSendPermission, isSamePersistedChatMessage, PersistedChatMessageIdentity } from '../services/chat';
+import { consumeChatRateLimit, getGroupChatSendPermission, isSamePersistedChatMessage, MAX_CHAT_FRAME_BYTES, PersistedChatMessageIdentity, validateChatMessageText } from '../services/chat';
 
 interface ClientSession {
   ws: WebSocket;
@@ -16,6 +16,7 @@ export class GroupChatDO {
   state: DurableObjectState;
   env: Env;
   sessions: Map<WebSocket, ClientSession>;
+  private rateLimitQueue: Promise<void> = Promise.resolve();
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -23,24 +24,35 @@ export class GroupChatDO {
     this.sessions = new Map();
   }
 
+  private async consumeMessageRateLimit(userId: string): Promise<boolean> {
+    const previous = this.rateLimitQueue;
+    let release!: () => void;
+    this.rateLimitQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await consumeChatRateLimit(this.state.storage, userId); } finally { release(); }
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    // 1. Broadcast endpoint from internal REST postGroupMessage
-    if (request.method === 'POST') {
+    if (request.method === 'POST' && url.pathname === '/rate-limit') {
+      let data: { userId?: unknown };
+      try { data = await request.json() as { userId?: unknown }; } catch { return new Response(JSON.stringify({ success: false }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
+      if (typeof data.userId !== 'string' || !data.userId.trim()) return new Response(JSON.stringify({ success: false }), { status: 400, headers: { 'Content-Type': 'application/json' } });
       try {
-        const data = await request.text();
-        this.broadcast(data);
-        return new Response(JSON.stringify({ success: true }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      } catch {
-        return new Response('Error', { status: 500 });
-      }
+        const allowed = await this.consumeMessageRateLimit(data.userId);
+        return new Response(JSON.stringify({ success: true, allowed }), { status: allowed ? 200 : 429, headers: { 'Content-Type': 'application/json' } });
+      } catch { return new Response(JSON.stringify({ success: false, code: 'CHAT_RATE_LIMIT_UNAVAILABLE' }), { status: 503, headers: { 'Content-Type': 'application/json' } }); }
     }
 
-    // 2. WebSocket Upgrade
+    if (request.method === 'POST' && url.pathname === '/broadcast') {
+      try {
+        const data = await request.text(); this.broadcast(data);
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } catch { return new Response('Error', { status: 500 }); }
+    }
+
+    // WebSocket Upgrade
     if (request.headers.get('Upgrade') === 'websocket') {
       const userId = request.headers.get('X-User-Id');
       const rawName = request.headers.get('X-User-Name');
@@ -75,7 +87,13 @@ export class GroupChatDO {
       server.addEventListener('message', async (event) => {
         try {
           const raw = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
-          const data = JSON.parse(raw);
+          if (new TextEncoder().encode(raw).byteLength > MAX_CHAT_FRAME_BYTES) {
+            try { server.send(JSON.stringify({ type: 'message_error', code: 'MESSAGE_BODY_TOO_LARGE', error: 'حجم الرسالة أكبر من الحد المسموح.' })); } catch {}
+            server.close(1009, 'Message frame too large'); return;
+          }
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+          const data = parsed as Record<string, any>;
 
           // Re-check membership and group policy for every message.
           // This invalidates already-open sockets immediately after demotion/removal.
@@ -122,12 +140,22 @@ export class GroupChatDO {
             return;
           }
 
-          const text = (data.text || '').trim();
-          if (!text) return; // ignore empty messages
-
-          const messageId = (data.id && typeof data.id === 'string' && data.id.length > 3)
-            ? data.id
-            : generateId('msg');
+          const validation = validateChatMessageText(data.text);
+          if (!validation.valid) {
+            try { server.send(JSON.stringify({ type: 'message_error', id: typeof data.id === 'string' ? data.id : '', code: validation.code, error: validation.message })); } catch {}
+            return;
+          }
+          const text = validation.text;
+          let rateAllowed = false;
+          try { rateAllowed = await this.consumeMessageRateLimit(session.userId); } catch {
+            try { server.send(JSON.stringify({ type: 'message_error', code: 'CHAT_RATE_LIMIT_UNAVAILABLE', error: 'تعذر التحقق من حد إرسال الرسائل. حاول مجدداً.' })); } catch {}
+            return;
+          }
+          if (!rateAllowed) {
+            try { server.send(JSON.stringify({ type: 'message_error', code: 'RATE_LIMIT_EXCEEDED', error: 'أرسلت رسائل كثيرة خلال وقت قصير. انتظر قليلاً ثم حاول مجدداً.' })); } catch {}
+            return;
+          }
+          const messageId = (data.id && typeof data.id === 'string' && data.id.length > 3) ? data.id : generateId('msg');
           const now = Date.now();
 
           // Server-authoritative sender identity from verified session

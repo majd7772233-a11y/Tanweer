@@ -2130,3 +2130,11 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Never push to or merge into `main`; PR #6 remains a Draft until the user explicitly asks for a Production release.
 - No Production migration, Worker deploy, secret update or data purge without explicit authorization.
 - Do not claim physical-device acceptance from CI. Keep user-provided test observations distinct from automated CI evidence.
+
+## Phase 1 — critical data, registration and chat guardrails (2026-11-14)
+
+- The `/api/v1/system/version` route requires a nonblank, successfully-read D1 `data_generation` before returning success. D1 read failure or a missing marker returns 503; never synthesize a generation value on this path. GitHub release metadata may fall back only after the real D1 marker is verified.
+- Public registration is creation-only. Existing phone numbers return `PHONE_EXISTS` (unless the existing stored class membership is banned, which returns `GROUP_BANNED`). A missing session is not evidence of an incomplete registration and must never authorize profile/class mutation or membership reactivation. Legacy partial accounts need an explicit, authorized support-repair design rather than public registration repair.
+- Group chat validates message text as a non-empty string of at most 2,000 Unicode code points. One per-user/per-group Durable Object quota is shared by REST and WebSocket: up to 8 messages per 10 seconds and 30 per minute. Quota storage failure must reject the send, not bypass the guard. REST bodies and WS frames are limited to 16 KiB.
+- Phase 1 leaves the PDF reader untouched. Preserve `PdfReaderScreen.kt`, `CanvasPageCurl.kt`, gesture routing, zoom/pan, page-turn animation, and page-curl geometry unless a later task explicitly targets PDF behavior.
+- Implementation and regression tests are recorded in the deep audit report and current session handoff. Verify the live branch HEAD and CI before claiming completion; do not deploy or merge to Production without explicit release authorization.

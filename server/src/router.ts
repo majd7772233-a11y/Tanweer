@@ -108,6 +108,16 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
 
   // System Version & Release Check (Dynamic GitHub Release fetcher with fallback)
   if (path === '/api/v1/system/version' && method === 'GET') {
+    // data_generation is a destructive client-side control signal. Never fabricate it.
+    let dataGeneration = '';
+    try {
+      const genRow = await env.DB.prepare('SELECT value FROM system_settings WHERE key = ?').bind('data_generation').first<{ value: string }>();
+      dataGeneration = typeof genRow?.value === 'string' ? genRow.value.trim() : '';
+      if (!dataGeneration) return errorResponse('SYSTEM_GENERATION_UNAVAILABLE', 'تعذر التحقق من إصدار بيانات المنظومة. حاول مجدداً لاحقاً.', 503);
+    } catch {
+      return errorResponse('SYSTEM_GENERATION_UNAVAILABLE', 'تعذر التحقق من إصدار بيانات المنظومة. حاول مجدداً لاحقاً.', 503);
+    }
+
     try {
       const ghRes = await fetch('https://api.github.com/repos/majd7772233-a11y/Tanweer/releases/latest', {
         headers: {
@@ -142,11 +152,6 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
           if (bodyMatch) sha256Hex = bodyMatch[1].toLowerCase();
         }
 
-        let dataGeneration = 'gen_initial_1';
-        try {
-          const genRow = await env.DB.prepare('SELECT value FROM system_settings WHERE key = ?').bind('data_generation').first<{ value: string }>();
-          if (genRow?.value) dataGeneration = genRow.value;
-        } catch {}
 
         return jsonResponse({
           currentVersion: verName,
@@ -163,16 +168,11 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
       }
     } catch (_: any) {}
 
-    let fallbackDataGeneration = 'gen_initial_1';
-    try {
-      const genRow = await env.DB.prepare('SELECT value FROM system_settings WHERE key = ?').bind('data_generation').first<{ value: string }>();
-      if (genRow?.value) fallbackDataGeneration = genRow.value;
-    } catch {}
 
     return jsonResponse({
       currentVersion: '1.2.0',
       versionCode: 120,
-      dataGeneration: fallbackDataGeneration,
+      dataGeneration,
       minSupportedVersion: '1.0.0',
       minSupportedVersionCode: 1,
       isUpdateRequired: false,

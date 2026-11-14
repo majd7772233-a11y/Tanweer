@@ -120,3 +120,10 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - `PROJECT_ARCHITECTURE.md`: architecture and durable invariants (this file).
 - `SESSION_HANDOFF.md`: exact current session continuation state and next action.
 - `server/README.md`: backend development and local commands.
+
+## Phase 1 security invariants (2026-11-14)
+
+- System version responses are successful only when D1 returns a non-empty `system_settings.data_generation`. D1 errors and missing/blank values return 503; release metadata fallback must retain the already-verified D1 value and must never fabricate a generation marker. Android's existing blank/error behavior remains non-destructive.
+- Public registration is creation-only. An existing phone number cannot be used to mutate grade/section, recreate a class membership, or turn a PENDING/REJECTED/BANNED membership into ACTIVE. Existing accounts must use login/recovery; legacy partial records require a separate authorized repair process.
+- Group chat text must be a non-empty string of at most 2,000 Unicode code points. REST and WebSocket sends share the same persisted Durable Object per-user/per-group quota (8 per 10 seconds and 30 per minute). REST payloads and WS frames are limited to 16 KiB. If the limiter storage is unavailable, reject the send before D1 insert/broadcast.
+- The PDF reader is explicitly out of scope for Phase 1. Keep its gesture ownership, page curl, zoom/pan, animation and aspect ratio unchanged.

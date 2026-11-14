@@ -95,3 +95,18 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Staging deployment run: https://github.com/majd7772233-a11y/Tanweer/actions/runs/42411869740
 - Latest server CI: https://github.com/majd7772233-a11y/Tanweer/actions/runs/42411918987
 - Latest Android CI: https://github.com/majd7772233-a11y/Tanweer/actions/runs/42411918775
+
+## Phase 1 implementation — 2026-11-14
+
+### Scope implemented on `work/release-readiness`
+- TNR-001: system-version endpoint now requires a valid D1 generation marker before success. D1 read error or absent/blank marker returns 503 and cannot produce a destructive client signal. GitHub release fallback carries the same verified marker.
+- TNR-002: public registration no longer attempts to repair any existing account. It cannot update an existing account's academic placement or re-enable a group membership. Existing accounts use login/recovery; legacy partial records require an authorized repair path.
+- TNR-003: REST and WebSocket chat messages share a Durable Object quota per user/group (8 per 10 seconds; 30 per minute) and the same 2,000-Unicode-character text validation. REST request bodies and WS frames are limited to 16 KiB; quota-store failure blocks persistence.
+- Added `server/test/system-version-generation.test.ts` and `server/test/chat-rate-limit.test.ts`; updated `server/test/auth-hardening.test.ts`, `server/test/group-chat-policy.test.ts` and `server/test/integration.test.ts`.
+- The PDF reader was not changed. Page-turn animation, page-curl, zoom, pan, gestures and PDF rendering files were left untouched.
+
+### Verification still required
+- Server CI must pass typecheck, full tests, dependency audit and Wrangler production/staging dry runs.
+- Verify the updated branch diff contains no PDF reader or animation paths.
+- After CI, test on Staging: D1 generation unavailable/missing returns 503 without local purge; duplicate-account registration cannot move or activate a class membership; REST and WebSocket share rate limits and reject overlong messages.
+- No Worker deploy, D1 write/migration, Production change, or merge to `main` is included in this implementation.

@@ -7,6 +7,30 @@ import { Permission, hasPermission } from '../lib/permissions';
 import { Role, normalizeRole } from '../lib/roles';
 
 
+export const MAX_CHAT_MESSAGE_CHARACTERS = 2000;
+export const MAX_CHAT_BODY_BYTES = 16 * 1024;
+export const MAX_CHAT_FRAME_BYTES = 16 * 1024;
+export const CHAT_RATE_LIMIT_WINDOW_MS = 60_000;
+export const CHAT_RATE_LIMIT_BURST_WINDOW_MS = 10_000;
+export const CHAT_RATE_LIMIT_MAX_PER_WINDOW = 30;
+export const CHAT_RATE_LIMIT_MAX_BURST = 8;
+export type ChatMessageValidation = { valid: true; text: string } | { valid: false; code: 'INVALID_INPUT' | 'MESSAGE_TOO_LONG'; message: string };
+export interface ChatRateLimitStorage { get<T = unknown>(key: string): Promise<T | undefined>; put<T = unknown>(key: string, value: T): Promise<void>; }
+export function validateChatMessageText(value: unknown): ChatMessageValidation {
+  if (typeof value !== 'string' || !value.trim()) return { valid: false, code: 'INVALID_INPUT', message: 'يرجى كتابة نص الرسالة' };
+  const text = value.trim();
+  if (Array.from(text).length > MAX_CHAT_MESSAGE_CHARACTERS) return { valid: false, code: 'MESSAGE_TOO_LONG', message: 'الحد الأقصى لطول الرسالة هو ' + MAX_CHAT_MESSAGE_CHARACTERS + ' حرفاً.' };
+  return { valid: true, text };
+}
+export async function consumeChatRateLimit(storage: ChatRateLimitStorage, userId: string, now = Date.now()): Promise<boolean> {
+  if (!userId.trim()) return false;
+  const key = 'chat_rate_limit:' + userId;
+  const stored = await storage.get<unknown>(key);
+  const recent = Array.isArray(stored) ? stored.filter((t): t is number => typeof t === 'number' && Number.isFinite(t) && t <= now && t > now - CHAT_RATE_LIMIT_WINDOW_MS) : [];
+  const burstCount = recent.filter(t => t > now - CHAT_RATE_LIMIT_BURST_WINDOW_MS).length;
+  if (recent.length >= CHAT_RATE_LIMIT_MAX_PER_WINDOW || burstCount >= CHAT_RATE_LIMIT_MAX_BURST) return false;
+  recent.push(now); await storage.put(key, recent); return true;
+}
 export interface PersistedChatMessageIdentity {
   group_id: string;
   sender_id: string;
@@ -97,24 +121,33 @@ export async function handlePostGroupMessage(
     return errorResponse('READ_ONLY_GROUP', 'هذه المجموعة مخصصة للقراءة للطلاب. الإرسال متاح للأساتذة المعتمدين وإدارة المدرسة فقط.', 403);
   }
 
-  const body = await request.json() as { id?: string; text?: string; messageText?: string; message?: string };
-  const messageText = body.text || body.messageText || body.message;
-
-  if (!messageText || !messageText.trim()) {
-    return errorResponse('INVALID_INPUT', 'يرجى كتابة نص الرسالة');
-  }
-
-  const messageId = (body.id && typeof body.id === 'string' && body.id.length > 3)
-    ? body.id
-    : generateId('msg');
+  const contentLength = Number(request.headers.get('Content-Length') || 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_CHAT_BODY_BYTES) return errorResponse('MESSAGE_BODY_TOO_LARGE', 'حجم طلب الرسالة أكبر من الحد المسموح.', 413);
+  let rawBody: string;
+  try { rawBody = await request.text(); } catch { return errorResponse('INVALID_INPUT', 'تعذر قراءة نص الرسالة.', 400); }
+  if (new TextEncoder().encode(rawBody).byteLength > MAX_CHAT_BODY_BYTES) return errorResponse('MESSAGE_BODY_TOO_LARGE', 'حجم طلب الرسالة أكبر من الحد المسموح.', 413);
+  let parsed: unknown;
+  try { parsed = JSON.parse(rawBody) as unknown; } catch { return errorResponse('INVALID_INPUT', 'صيغة طلب الرسالة غير صالحة.', 400); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return errorResponse('INVALID_INPUT', 'صيغة طلب الرسالة غير صالحة.', 400);
+  const body = parsed as { id?: string; text?: unknown; messageText?: unknown; message?: unknown };
+  const validation = validateChatMessageText(body.text ?? body.messageText ?? body.message);
+  if (!validation.valid) return errorResponse(validation.code, validation.message, 400);
+  const text = validation.text;
+  const chatStub = env.CHAT.get(env.CHAT.idFromName(groupId));
+  let rateResponse: Response;
+  try { rateResponse = await chatStub.fetch(new Request('http://internal/rate-limit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: user.userId }) })); }
+  catch { return errorResponse('CHAT_RATE_LIMIT_UNAVAILABLE', 'تعذر التحقق من حد إرسال الرسائل. حاول مجدداً.', 503); }
+  if (rateResponse.status === 429) return errorResponse('RATE_LIMIT_EXCEEDED', 'أرسلت رسائل كثيرة خلال وقت قصير. انتظر قليلاً ثم حاول مجدداً.', 429);
+  if (!rateResponse.ok) return errorResponse('CHAT_RATE_LIMIT_UNAVAILABLE', 'تعذر التحقق من حد إرسال الرسائل. حاول مجدداً.', 503);
+  let rateBody: { allowed?: boolean };
+  try { rateBody = await rateResponse.json() as { allowed?: boolean }; } catch { return errorResponse('CHAT_RATE_LIMIT_UNAVAILABLE', 'تعذر التحقق من حد إرسال الرسائل. حاول مجدداً.', 503); }
+  if (rateBody.allowed !== true) return errorResponse('CHAT_RATE_LIMIT_UNAVAILABLE', 'تعذر التحقق من حد إرسال الرسائل. حاول مجدداً.', 503);
+  const messageId = (body.id && typeof body.id === 'string' && body.id.length > 3) ? body.id : generateId('msg');
   const now = Date.now();
-  const gradeNameMap: Record<number, string> = {
-    7: 'سابع', 8: 'ثامن', 9: 'تاسع', 10: 'أول ثانوي', 11: 'ثاني ثانوي', 12: 'ثالث ثانوي'
-  };
+  const gradeNameMap: Record<number, string> = { 7: 'سابع', 8: 'ثامن', 9: 'تاسع', 10: 'أول ثانوي', 11: 'ثاني ثانوي', 12: 'ثالث ثانوي' };
   const senderGradeSection = `${gradeNameMap[user.gradeId] || user.gradeId} — ${user.sectionId}`;
 
   // Server-authoritative sender identity from UserContext
-  const text = messageText.trim();
   const insertResult = await env.DB.prepare(
     `INSERT OR IGNORE INTO chat_messages (id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -161,9 +194,7 @@ export async function handlePostGroupMessage(
   // visible to other members and must not be announced as a second message.
   if (wasInserted) {
     try {
-      const doId = env.CHAT.idFromName(groupId);
-      const doStub = env.CHAT.get(doId);
-      await doStub.fetch(new Request('http://internal/broadcast', {
+      await chatStub.fetch(new Request('http://internal/broadcast', {
         method: 'POST',
         body: JSON.stringify({
           type: 'chat_message',

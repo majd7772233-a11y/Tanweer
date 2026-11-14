@@ -4,6 +4,7 @@ import {
   getGroupChatSendPermission,
   handleDeleteGroupMessage,
   handlePostGroupMessage,
+  MAX_CHAT_MESSAGE_CHARACTERS,
 } from '../src/services/chat';
 
 class GroupChatPolicyDb {
@@ -87,8 +88,12 @@ function makeUser(role: string, userId = 'student-1'): UserContext {
   };
 }
 
-function makeEnv(db: GroupChatPolicyDb): Env {
-  return { DB: db as any } as Env;
+function makeEnv(db: GroupChatPolicyDb, rateLimitAllowed = true): Env {
+  const stub = { async fetch(request: Request) {
+    if (new URL(request.url).pathname === '/rate-limit') return new Response(JSON.stringify({ success: true, allowed: rateLimitAllowed }), { status: rateLimitAllowed ? 200 : 429, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  } };
+  return { DB: db as any, CHAT: { idFromName: (_name: string) => 'chat-test', get: (_id: unknown) => stub } as any } as Env;
 }
 
 describe('Group chat policy is enforced by server routes', () => {
@@ -144,6 +149,21 @@ describe('Group chat policy is enforced by server routes', () => {
     expect(db.messages).toHaveLength(0);
   });
 
+  it('rejects overlong messages before persistence', async () => {
+    const db = new GroupChatPolicyDb('MEMBERS', 'STUDENT', 'STUDENT');
+    const response = await handlePostGroupMessage('all', makeUser('STUDENT'), new Request('https://tanweer.test/api/v1/groups/all/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'x'.repeat(MAX_CHAT_MESSAGE_CHARACTERS + 1) }) }), makeEnv(db));
+    expect(response.status).toBe(400); expect((await response.json() as any).error.code).toBe('MESSAGE_TOO_LONG'); expect(db.messages).toHaveLength(0);
+  });
+  it('rejects oversized REST bodies before persistence', async () => {
+    const db = new GroupChatPolicyDb('MEMBERS', 'STUDENT', 'STUDENT');
+    const response = await handlePostGroupMessage('all', makeUser('STUDENT'), new Request('https://tanweer.test/api/v1/groups/all/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'ok', unused: 'x'.repeat(17 * 1024) }) }), makeEnv(db));
+    expect(response.status).toBe(413); expect((await response.json() as any).error.code).toBe('MESSAGE_BODY_TOO_LARGE'); expect(db.messages).toHaveLength(0);
+  });
+  it('rejects REST sends when the Durable Object quota is exhausted', async () => {
+    const db = new GroupChatPolicyDb('MEMBERS', 'STUDENT', 'STUDENT');
+    const response = await handlePostGroupMessage('all', makeUser('STUDENT'), new Request('https://tanweer.test/api/v1/groups/all/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'رسالة تتجاوز الحد' }) }), makeEnv(db, false));
+    expect(response.status).toBe(429); expect((await response.json() as any).error.code).toBe('RATE_LIMIT_EXCEEDED'); expect(db.messages).toHaveLength(0);
+  });
   it('treats an exact persisted message retry as idempotent without inserting twice', async () => {
     const db = new GroupChatPolicyDb('MEMBERS', 'STUDENT', 'STUDENT');
     db.persistedRows.push({

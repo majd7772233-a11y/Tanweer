@@ -87,46 +87,20 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   ).bind(normalizedPhone).first<{ id: string; password_hash: string; grade_id: number; section_id: string; status?: string }>();
 
   let userId: string;
-  let isRepairingIncompleteRegistration = false;
 
   if (existingUser) {
-    if (existingUser.status === 'DISABLED') {
-      return errorResponse('ACCOUNT_DISABLED', 'هذا الحساب موقوف من قِبل إدارة المنظومة، يرجى التواصل مع الإدارة', 403);
-    }
-
-    const targetMembership = await env.DB.prepare(
-      `SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`
-    ).bind(classGroupId, existingUser.id).first<{ status: string }>();
-
-    if (targetMembership?.status === 'BANNED') {
+    if (existingUser.status === 'DISABLED') return errorResponse('ACCOUNT_DISABLED', 'هذا الحساب موقوف من قِبل إدارة المنظومة، يرجى التواصل مع الإدارة', 403);
+    // Registration is creation-only. Missing/expired sessions are normal after logout.
+    const storedClassGroupId = `class_${existingUser.grade_id}_${existingUser.section_id.toUpperCase()}`;
+    const storedClassMembership = await env.DB.prepare(`SELECT status FROM group_members WHERE group_id = ? AND user_id = ?`)
+      .bind(storedClassGroupId, existingUser.id).first<{ status: string }>();
+    if (storedClassMembership?.status === 'BANNED') {
       return errorResponse('GROUP_BANNED', 'تم حظرك من هذه المجموعة، ولا يمكن استعادة عضويتك عبر إعادة التسجيل', 403);
     }
-
-    // Check if user has an active membership and a valid session
-    const membership = await env.DB.prepare(
-      `SELECT group_id FROM group_members WHERE user_id = ? AND status = 'ACTIVE' LIMIT 1`
-    ).bind(existingUser.id).first();
-    const session = await env.DB.prepare(
-      `SELECT id FROM sessions WHERE user_id = ? AND expires_at > ? LIMIT 1`
-    ).bind(existingUser.id, Date.now()).first();
-
-    if (!membership || !session) {
-      // Incomplete registration: User record exists, but memberships or sessions failed/interrupted
-      const isPwdValid = await verifyPassword(body.password, existingUser.password_hash, pepper);
-      if (!isPwdValid) {
-        return errorResponse(
-          'INCOMPLETE_REGISTRATION',
-          'رقم الهاتف مسجل ولكن إنشاء الحساب لم يكتمل سابقاً. يرجى إدخال كلمة المرور المستخدمة سابقاً لإتمام تسجيل الحساب، أو استخدام رمز الاسترداد.'
-        );
-      }
-      userId = existingUser.id;
-      isRepairingIncompleteRegistration = true;
-    } else {
-      return errorResponse('PHONE_EXISTS', 'رقم الهاتف مسجل مسبقًا. يمكنك تسجيل الدخول بنفس الرقم وكلمة المرور أو برمز الاسترداد.');
-    }
-  } else {
-    userId = generateId('user');
+    return errorResponse('PHONE_EXISTS', 'رقم الهاتف مسجل مسبقًا. سجّل الدخول أو استخدم رمز الاسترداد؛ لا يمكن تغيير الصف أو إعادة تنشيط عضوية عبر التسجيل.', 409);
   }
+
+  userId = generateId('user');
 
   const now = Date.now();
   // Fail early for incomplete-registration repair when this account already uses
@@ -167,46 +141,13 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   // Single atomic batch execution for all registration entities
   const batchStatements = [];
 
-  if (isRepairingIncompleteRegistration) {
-    batchStatements.push(
-      env.DB.prepare(
-        `UPDATE users
-         SET password_hash = ?, recovery_code_hash = ?, full_name = ?, grade_id = ?,
-             section_id = ?, email = ?, updated_at = ?, last_seen = ?
-         WHERE id = ?`
-      ).bind(
-        passwordHash,
-        recoveryCodeHash,
-        body.fullName.trim().replace(/\s+/g, ' '),
-        body.gradeId,
-        body.sectionId.toUpperCase(),
-        body.email?.trim() || null,
-        now,
-        now,
-        userId
-      )
-    );
-  } else {
-    batchStatements.push(
-      env.DB.prepare(
-        `INSERT INTO users (id, phone_number, password_hash, full_name, grade_id, section_id, email, recovery_code_hash, role, last_seen, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        userId,
-        normalizedPhone,
-        passwordHash,
-        body.fullName.trim().replace(/\s+/g, ' '),
-        body.gradeId,
-        body.sectionId.toUpperCase(),
-        body.email?.trim() || null,
-        recoveryCodeHash,
-        Role.STUDENT,
-        now,
-        now,
-        now
-      )
-    );
-  }
+  batchStatements.push(
+    env.DB.prepare(
+      `INSERT INTO users (id, phone_number, password_hash, full_name, grade_id, section_id, email, recovery_code_hash, role, last_seen, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(userId, normalizedPhone, passwordHash, body.fullName.trim().replace(/\s+/g, ' '),
+      body.gradeId, body.sectionId.toUpperCase(), body.email?.trim() || null, recoveryCodeHash, Role.STUDENT, now, now, now)
+  );
 
   batchStatements.push(...buildRecoveryCodeRotationStatements(
     env.DB, userId, recoveryTokenId, recoveryCodeHash, recoveryPayload, userId, now
@@ -226,17 +167,8 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
     ).bind(classGroupId, body.gradeId, body.sectionId.toUpperCase())
   );
 
-  batchStatements.push(
-    env.DB.prepare(
-      `INSERT INTO group_members (group_id, user_id, role, status, joined_at)
-       VALUES (?, ?, ?, 'ACTIVE', ?)
-       ON CONFLICT(group_id, user_id) DO UPDATE SET
-         role = excluded.role,
-         status = 'ACTIVE',
-         joined_at = excluded.joined_at
-       WHERE group_members.status != 'BANNED'`
-    ).bind(classGroupId, userId, Role.STUDENT, now)
-  );
+  // Registration only creates the first class membership; it never reactivates an existing one.
+  batchStatements.push(env.DB.prepare(`INSERT OR IGNORE INTO group_members (group_id, user_id, role, status, joined_at) VALUES (?, ?, ?, 'ACTIVE', ?)`).bind(classGroupId, userId, Role.STUDENT, now));
 
   const deviceSessionStatements = buildNewDeviceSessionStatements(env, {
     userId,

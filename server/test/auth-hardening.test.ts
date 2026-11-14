@@ -502,146 +502,48 @@ describe('Authentication hardening regressions', () => {
     await expect(getUserFromToken(token, env)).resolves.toBeNull();
   });
 
-  it('does not restore a banned class membership during incomplete-registration repair', async () => {
-    const password = 'Magd#School2026';
-    const passwordHash = (await hashPassword(password, pepper)).hash;
-    let batchAttempted = false;
-
-    const env = {
-      SESSION_PEPPER: pepper,
-      PASSWORD_PEPPER: pepper,
-      DB: {
-        prepare(sql: string) {
-          return {
-            bind(...params: unknown[]) {
-              return {
-                async first() {
-                  if (sql.includes('FROM users WHERE phone_number = ?')) {
-                    return {
-                      id: 'banned-user',
-                      password_hash: passwordHash,
-                      grade_id: 10,
-                      section_id: 'A',
-                      status: 'ACTIVE',
-                    };
-                  }
-                  if (sql.includes('FROM group_members WHERE group_id = ? AND user_id = ?')) {
-                    return { status: 'BANNED' };
-                  }
-                  if (sql.includes('FROM group_members WHERE user_id = ?')) return null;
-                  if (sql.includes('FROM sessions WHERE user_id = ?')) return null;
-                  return null;
-                },
-                async run() {
-                  return { success: true, meta: { changes: 1 } };
-                },
-              };
-            },
-          };
-        },
-        async batch() {
-          batchAttempted = true;
-          return [];
-        },
-      },
-    } as unknown as Env;
-
-    const response = await handleRegister(new Request('https://tanweer.test/api/v1/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phoneNumber: '771234567',
-        password,
-        fullName: 'مجد أنور عبدالرحمن',
-        gradeId: 10,
-        sectionId: 'A',
-      }),
-    }), env);
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({
-      success: false,
-      error: { code: 'GROUP_BANNED' },
-    });
-    expect(batchAttempted).toBe(false);
+  it('does not restore a banned class membership through public registration', async () => {
+    const password = 'Magd#School2026'; const passwordHash = (await hashPassword(password, pepper)).hash; let batchAttempted = false;
+    const env = { SESSION_PEPPER: pepper, PASSWORD_PEPPER: pepper, DB: {
+      prepare(sql: string) { return { bind(..._params: unknown[]) { return {
+        async first() {
+          if (sql.includes('FROM users WHERE phone_number = ?')) return { id: 'banned-user', password_hash: passwordHash, grade_id: 10, section_id: 'A', status: 'ACTIVE' };
+          if (sql.includes('FROM group_members WHERE group_id = ? AND user_id = ?')) return { status: 'BANNED' };
+          return null;
+        }, async run() { return { success: true, meta: { changes: 1 } }; },
+      }; } }; }, async batch() { batchAttempted = true; return []; },
+    } } as unknown as Env;
+    const response = await handleRegister(new Request('https://tanweer.test/api/v1/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phoneNumber: '771234567', password, fullName: 'مجد أنور عبدالرحمن', gradeId: 10, sectionId: 'A' }) }), env);
+    expect(response.status).toBe(403); expect(await response.json()).toMatchObject({ success: false, error: { code: 'GROUP_BANNED' } }); expect(batchAttempted).toBe(false);
   });
 
-  it('stores the new password and recovery-code hashes when repairing an incomplete registration', async () => {
-    const password = 'Magd#School2026';
-    const existingPasswordHash = (await hashPassword(password, pepper)).hash;
-    let repairedUserStatement: { sql: string; params: unknown[] } | null = null;
-    const batchStatements: Array<{ sql: string; params: unknown[] }> = [];
+  it('does not use a missing session to move an existing account to another class', async () => {
+    const password = 'Magd#School2026'; const passwordHash = (await hashPassword(password, pepper)).hash; let batchAttempted = false; const checkedGroups: unknown[] = [];
+    const env = { SESSION_PEPPER: pepper, PASSWORD_PEPPER: pepper, DB: {
+      prepare(sql: string) { return { bind(...params: unknown[]) {
+        if (sql.includes('FROM group_members WHERE group_id = ? AND user_id = ?')) checkedGroups.push(params[0]);
+        return {
+          async first() {
+            if (sql.includes('FROM users WHERE phone_number = ?')) return { id: 'existing-user', password_hash: passwordHash, grade_id: 10, section_id: 'A', status: 'ACTIVE' };
+            if (sql.includes('FROM group_members WHERE group_id = ? AND user_id = ?')) return { status: 'ACTIVE' };
+            return null;
+          }, async run() { return { success: true, meta: { changes: 1 } }; },
+        };
+      } }; }, async batch() { batchAttempted = true; return []; },
+    } } as unknown as Env;
+    const response = await handleRegister(new Request('https://tanweer.test/api/v1/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phoneNumber: '771234567', password, fullName: 'مجد أنور عبدالرحمن', gradeId: 11, sectionId: 'B' }) }), env);
+    expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ success: false, error: { code: 'PHONE_EXISTS' } }); expect(checkedGroups).toEqual(['class_10_A']); expect(batchAttempted).toBe(false);
+  });
 
-    const env = {
-      SESSION_PEPPER: pepper,
-      PASSWORD_PEPPER: pepper,
-      DB: {
-        prepare(sql: string) {
-          return {
-            bind(...params: unknown[]) {
-              const statement = {
-                sql,
-                params,
-                async first() {
-                  if (sql.includes('FROM users WHERE phone_number = ?')) {
-                    return {
-                      id: 'user-incomplete',
-                      password_hash: existingPasswordHash,
-                      grade_id: 10,
-                      section_id: 'A',
-                    };
-                  }
-                  if (sql.includes('FROM group_members WHERE user_id = ?')) return null;
-                  if (sql.includes('FROM sessions WHERE user_id = ?')) return null;
-                  if (sql.includes('FROM academic_years')) return null;
-                  return null;
-                },
-                async run() {
-                  return { success: true, meta: { changes: 1 } };
-                },
-              };
-              return statement;
-            },
-          };
-        },
-        async batch(statements: Array<{ sql: string; params: unknown[] }>) {
-          batchStatements.push(...statements);
-          repairedUserStatement = statements.find((statement) =>
-            statement.sql.includes('UPDATE users') &&
-            statement.sql.includes('password_hash = ?') &&
-            statement.sql.includes('recovery_code_hash = ?')
-          ) ?? null;
-          return statements.map(() => ({ success: true, meta: { changes: 1 } }));
-        },
-      },
-    } as unknown as Env;
-
-    const response = await handleRegister(new Request('https://tanweer.test/api/v1/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phoneNumber: '771234567',
-        password,
-        fullName: 'مجد أنور عبدالرحمن',
-        gradeId: 10,
-        sectionId: 'A',
-      }),
-    }), env);
-
-    expect(response.status).toBe(200);
-    const data = await response.json() as any;
-    expect(data.success).toBe(true);
-    expect(data.user.id).toBe('user-incomplete');
-    expect(data.recoveryCode).toBeTruthy();
-    expect(repairedUserStatement).not.toBeNull();
-
-    const statement = repairedUserStatement as unknown as { sql: string; params: unknown[] };
-    expect(await verifyPassword(password, String(statement.params[0]), pepper)).toBe(true);
-    const expectedRecoveryHash = await hashString(
-      String(data.recoveryCode).replace(/[\\s\\-]/g, '').toUpperCase(),
-      pepper,
-    );
-    expect(statement.params[1]).toBe(expectedRecoveryHash);
-    expect(batchStatements.some((entry) => entry.sql.includes('INSERT INTO sessions'))).toBe(true);
+  it('does not publicly repair an existing account with no membership or session', async () => {
+    const password = 'Magd#School2026'; const passwordHash = (await hashPassword(password, pepper)).hash; let batchAttempted = false;
+    const env = { SESSION_PEPPER: pepper, PASSWORD_PEPPER: pepper, DB: {
+      prepare(sql: string) { return { bind(..._params: unknown[]) { return {
+        async first() { if (sql.includes('FROM users WHERE phone_number = ?')) return { id: 'partial-user', password_hash: passwordHash, grade_id: 10, section_id: 'A', status: 'ACTIVE' }; return null; },
+        async run() { return { success: true, meta: { changes: 1 } }; },
+      }; } }; }, async batch() { batchAttempted = true; return []; },
+    } } as unknown as Env;
+    const response = await handleRegister(new Request('https://tanweer.test/api/v1/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phoneNumber: '771234567', password, fullName: 'مجد أنور عبدالرحمن', gradeId: 10, sectionId: 'A' }) }), env);
+    expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ success: false, error: { code: 'PHONE_EXISTS' } }); expect(batchAttempted).toBe(false);
   });
 });

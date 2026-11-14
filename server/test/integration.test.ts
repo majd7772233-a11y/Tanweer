@@ -638,7 +638,10 @@ describe('End-to-End System Integration Flow', () => {
       CHAT: {
         idFromName: () => 'mock-id',
         get: () => ({
-          fetch: async () => new Response('ws'),
+          fetch: async (request: Request) => {
+            if (new URL(request.url).pathname === '/rate-limit') return new Response(JSON.stringify({ success: true, allowed: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          },
         }),
       } as any,
       JWT_SECRET: 'test-jwt-secret-key-12345678901234567890',
