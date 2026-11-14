@@ -108,6 +108,7 @@ class RealtimeChatManager(
                         return
                     }
                     this@RealtimeChatManager.webSocket = webSocket
+                    reconnectAttempt = 0
                     _status.value = ConnectionStatus.CONNECTED
                 }
                 Log.d("RealtimeChatManager", "Connected to group WS: $groupId")
