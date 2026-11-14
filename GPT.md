@@ -2158,3 +2158,14 @@ When giving the user a statement about the current state, re-read GitHub if it m
 
 - Cloudflare Workers Types in this repository require `ignoreBOM` to be explicit when `fatal: true` is set on TextDecoder. Use `{ fatal: true, ignoreBOM: false }` to retain default BOM handling.
 - The previous CI typecheck failed only at this constructor option; the test step had not started. Re-run typecheck and full server tests after this correction.
+
+## Phase 2 — schedule, realtime chat and Outbox invariants (2026-11-15)
+
+- Schedule single-slot, batch and proposal writes share `server/src/services/scheduleValidation.ts`: integer day 0–6, integer slot 1–12, nonblank bounded subject ID, and proposal reason up to 500 characters. New subject must exist before proposal creation.
+- Schedule votes accept only exact `FOR`/`AGAINST`; community vote choices accept only numeric 1/0. Never coerce an unknown value into a vote.
+- Migration `0033_schedule_input_constraints.sql` adds D1 triggers for persisted slot/proposal bounds. The migration is committed but not applied to D1.
+- RealtimeChatManager uses session/socket generations to ignore stale callbacks, reconnects only for transient closes/failures while the group session remains active, applies exponential backoff up to 30 seconds, and resets the backoff after a successful open. Repository chat-history responses are generation-gated; logout invalidates chat immediately before waiting for Outbox shutdown.
+- Automatic Outbox drains only `PENDING`; `FAILED` requires explicit `retryFailedMutations()`. The retry operation resets attempts and error state and still passes through `isDrainAllowed` (data-generation gate). Keep entity mutations ordered by (entityType, entityId) and use UUIDs for every new Outbox row.
+- Snapshot validation/reconciliation preserves local pending/in-flight/failed rows and gives local pending rows precedence over server rows with the same ID. Tests cover collision and retention.
+- Do not touch PDF reader/page-curl/zoom/gesture files. No Worker deployment, D1 migration application, secrets, Production operation, or merge to main without explicit authorization.
+- Staging two-account REST/WS, reconnect/group-switch/logout race, Outbox offline/retry, and post-migration schedule/vote acceptance remain separate release gates. CI does not establish physical-device acceptance.

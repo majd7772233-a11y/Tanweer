@@ -140,3 +140,24 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - Count WebSocket binary frames using their original ArrayBuffer or ArrayBufferView byte length before UTF-8 decoding.
 - Keep malformed/unreadable REST payloads as explicit input errors; do not silently convert a truncated body into a valid message.
 - Keep the existing Worker IP throttle ahead of WebSocket upgrades and the Durable Object per-user/per-group action quota as independent controls.
+
+## Phase 2 — durable sync and realtime contracts
+
+### Schedule and votes
+- Validate day/slot positions as integers (0–6 and 1–12) in a shared Worker validator for single, batch and proposal writes.
+- Reject unknown vote values. Legacy schedule votes accept only `FOR`/`AGAINST`; unified decision votes accept only numeric 1/0.
+- D1 migration 0033 adds insert/update triggers for schedule slot and proposal bounds. Commit exists; database rollout is a separate authorized operation.
+
+### WebSocket session lifecycle
+- Gate callbacks with both session generation and socket-attempt generation. A callback from an old socket/group may not mutate status, dispatch messages or trigger reconnect for a newer selection.
+- Apply retry only to transient/network close/failure classes while the current group session remains active. Exponential backoff begins at 1 second, caps at 30 seconds, and resets after a successful open.
+- Repository history refresh is scoped to its connection generation. Switching groups, leaving chat or logging out invalidates the generation; logout disconnects before waiting for Outbox shutdown.
+
+### Outbox and snapshots
+- Automatic drains select only `PENDING`. `FAILED` is terminal until an explicit retry resets attempts/lastAttemptAt/error.
+- Claim only `PENDING`; order by `createdAt,id`; preserve per-(entityType, entityId) ordering so a later mutation cannot pass an earlier retry/backoff/in-flight operation.
+- Use UUIDs for new Outbox IDs, including mutations created directly by the repository.
+- Validate a server snapshot before replacing local data. Preserve local PENDING/SYNCING/FAILED rows and prefer the local pending version on an ID collision.
+- Keep the settings retry affordance connected to the explicit retry API, not merely to a generic automatic drain.
+
+No PDF reader or page-curl path is in Phase 2 scope.

@@ -131,3 +131,15 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - TypeScript on `af67b696e390e9d00c9f0aacfbe8446c464708c1` failed at `new TextDecoder('utf-8', { fatal: true })` because the installed Workers Types declaration requires `ignoreBOM`.
 - The follow-up sets `ignoreBOM: false`, preserving the standard BOM-stripping behavior. The earlier run stopped before the test step; it is not test evidence.
 - Re-run the full server workflow and confirm the Android workflow result before further phase closure.
+
+## Phase 2 implementation checkpoint — 2026-11-15
+
+- Latest code checkpoint before this documentation commit: `dc76de52e81f9739b07beb5be7644673702233c0` on `work/release-readiness`; parent `d3437db98fcf8c7ca217188a73c4dc26f8c8f581`.
+- PR #6 remains open Draft with base `main`. The only repository branches remain `main` and `work/release-readiness`.
+- `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- Phase 2 code implemented: strict schedule/proposal/vote validation; D1 migration 0033 committed but not applied; WebSocket socket/session generations and bounded reconnect policy; repository chat-history generation gate; logout invalidates chat before queue wait; Outbox failed state requires explicit retry, sequence ordering and UUID IDs; snapshot pending-row retention has direct regression coverage; the Settings retry button is wired to the explicit retry operation.
+- Server CI for the parent commit `d3437db98fcf8c7ca217188a73c4dc26f8c8f581` passed typecheck, dependency audit, full tests and Wrangler dry-run. Server CI is rerunning against `dc76de52e81f9739b07beb5be7644673702233c0` because the logout ordering changed.
+- Android unit tests and Staging Debug APK assembly/upload passed on `40cadcd391f9c3df679671dd63c9820dee7063c2`. Android CI for `d3437db98fcf8c7ca217188a73c4dc26f8c8f581` was running at the time of the last checkpoint; the new `dc76...` run also needs confirmation before claiming the final Android result.
+- No PDF reader/page-curl/zoom/gesture paths were changed.
+- Migration 0033 has not been applied. No Worker deploy, D1 write, secret update, Production change or merge to main has occurred.
+- Remaining release acceptance: live Staging test using two accounts and REST+WS; switch groups during slow history load; disconnect/reconnect, normal close and logout races; Outbox pending/failure/backoff/manual retry/idempotency across network loss; schedule/vote tests against a Staging DB after authorized migration; physical Android acceptance.
