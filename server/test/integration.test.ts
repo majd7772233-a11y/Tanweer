@@ -633,6 +633,15 @@ describe('End-to-End System Integration Flow', () => {
       color_hex: '#1E88E5',
     });
 
+    mockDb.tables.subjects.push({
+      id: 'sub_science',
+      grade_id: 10,
+      name_ar: 'العلوم',
+      name_en: 'Science',
+      icon_name: 'science',
+      color_hex: '#43A047',
+    });
+
     env = {
       DB: mockDb as any,
       CHAT: {

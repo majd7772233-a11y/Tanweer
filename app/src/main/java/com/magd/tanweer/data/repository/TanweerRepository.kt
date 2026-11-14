@@ -2627,13 +2627,6 @@ class TanweerRepository(
     private fun isActiveChatConnection(groupId: String, generation: Long): Boolean =
         activeChatGroupId == groupId && chatConnectionGeneration == generation
 
-    private val chatConnectionLock = Any()
-    @Volatile private var chatConnectionGeneration = 0L
-    @Volatile private var activeChatGroupId: String? = null
-
-    private fun isActiveChatConnection(groupId: String, generation: Long): Boolean =
-        activeChatGroupId == groupId && chatConnectionGeneration == generation
-
     suspend fun connectToGroupChat(groupId: String, myUserId: String) = withContext(Dispatchers.IO) {
         val generation = synchronized(chatConnectionLock) {
             chatConnectionGeneration += 1
