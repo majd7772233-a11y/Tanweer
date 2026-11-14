@@ -20,7 +20,7 @@ export type ChatRequestBodyReadResult = { ok: true; text: string } | { ok: false
 export async function readChatRequestBody(body: ReadableStream<Uint8Array> | null): Promise<ChatRequestBodyReadResult> {
   if (!body) return { ok: true, text: '' };
   const reader = body.getReader();
-  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
   let totalBytes = 0;
   let text = '';
   try {

@@ -125,3 +125,9 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Regression coverage verifies stream cancellation/no second read and raw ArrayBuffer length.
 - Re-run the full server suite/typecheck/Wrangler validation and Android unit/build workflow on the resulting commit. CI from the parent commit does not validate these changes.
 - Do not deploy Staging or Production, change secrets, mutate D1, or merge to `main` without explicit authorization. PDF reader files/animation/zoom/gesture paths remain out of scope and untouched.
+
+## CI correction — TextDecoder options
+
+- TypeScript on `af67b696e390e9d00c9f0aacfbe8446c464708c1` failed at `new TextDecoder('utf-8', { fatal: true })` because the installed Workers Types declaration requires `ignoreBOM`.
+- The follow-up sets `ignoreBOM: false`, preserving the standard BOM-stripping behavior. The earlier run stopped before the test step; it is not test evidence.
+- Re-run the full server workflow and confirm the Android workflow result before further phase closure.

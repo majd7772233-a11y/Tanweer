@@ -2153,3 +2153,8 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Add regression tests for cancellation on the first oversized chunk, absence of further stream reads, and raw binary frame byte counting.
 - Preserve the previously added per-IP handshake limiter and per-user/per-group Durable Object action quota (send/delete, burst and minute ceilings, fail-closed storage behavior).
 - The PDF reader, page curl, gesture routing, zoom/pan and animations remain unchanged.
+
+## Phase 1 follow-up — Worker TextDecoder typing
+
+- Cloudflare Workers Types in this repository require `ignoreBOM` to be explicit when `fatal: true` is set on TextDecoder. Use `{ fatal: true, ignoreBOM: false }` to retain default BOM handling.
+- The previous CI typecheck failed only at this constructor option; the test step had not started. Re-run typecheck and full server tests after this correction.
