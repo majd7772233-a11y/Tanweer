@@ -9,8 +9,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -73,6 +73,7 @@ fun CanvasPageCurlViewer(
     focusRulerY: Float?,
     isWatermarkEnabled: Boolean,
     onZoomChange: (Float, Offset) -> Unit,
+    onFocusRulerYChange: (Float) -> Unit,
     onNextPage: () -> Unit,
     onPrevPage: () -> Unit,
     onStrokeAdded: (DrawnStroke) -> Unit,
@@ -83,7 +84,10 @@ fun CanvasPageCurlViewer(
 
     // 3D Curl State (-1f = prev page curled, 0f = neutral, 1f = next page curled)
     val curlProgress = remember { Animatable(0f) }
-    var isCurlingForward by remember { mutableStateOf(true) }
+    // Keep gesture processing alive while Compose state changes during a pinch or pan.
+    val latestZoomScale by rememberUpdatedState(zoomScale)
+    val latestPanOffset by rememberUpdatedState(panOffset)
+    val latestFocusRulerY by rememberUpdatedState(focusRulerY)
 
     // Live drawing points for active stroke
     val activeStrokePoints = remember { mutableStateListOf<Offset>() }
@@ -126,114 +130,170 @@ fun CanvasPageCurlViewer(
                     )
                 }
             }
-            // Gesture Layer 2: Seamless Pinch-to-Zoom and Viewport Panning (Point 47.1)
-            .pointerInput(isDrawingMode, zoomScale, panOffset) {
+            // Gesture Layer 2: One gesture owner for pinch, pan, page curl and taps.
+            // Two or more fingers can only zoom; a single finger can only turn or pan.
+            .pointerInput(
+                isDrawingMode,
+                currentPageIndex,
+                totalPages,
+                pageTurnMode
+            ) {
                 if (!isDrawingMode) {
-                    detectTransformGestures(
-                        panZoomLock = false
-                    ) { centroid, pan, zoom, _ ->
-                        if (zoom != 1.0f || zoomScale > 1.05f) {
-                            val newScale = (zoomScale * zoom).coerceIn(1.0f, 5.0f)
-                            val maxPanX = (size.width * (newScale - 1f)) / 2f
-                            val maxPanY = (size.height * (newScale - 1f)) / 2f
-                            val newPan = if (newScale <= 1.02f) {
-                                Offset.Zero
-                            } else {
-                                Offset(
-                                    x = (panOffset.x + pan.x).coerceIn(-maxPanX, maxPanX),
-                                    y = (panOffset.y + pan.y).coerceIn(-maxPanY, maxPanY)
+                    var lastTapUptime = 0L
+                    var lastTapPosition = Offset.Zero
+
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        var previousPosition = down.position
+                        var totalDrag = Offset.Zero
+                        var didMove = false
+                        var didPinch = false
+                        val rulerYAtGestureStart = latestFocusRulerY
+                        var didRulerDrag = rulerYAtGestureStart != null && kotlin.math.abs(
+                            down.position.y - (if (rulerYAtGestureStart < 0f) size.height / 2f else rulerYAtGestureStart)
+                        ) <= 36f
+                        var previousPinchSpan = 0f
+                        var previousPinchCentroid = Offset.Zero
+
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val pressed = event.changes.filter { it.pressed }
+
+                            if (pressed.size >= 2) {
+                                didPinch = true
+                                didMove = true
+
+                                val centroid = Offset(
+                                    x = pressed.sumOf { it.position.x.toDouble() }.div(pressed.size).toFloat(),
+                                    y = pressed.sumOf { it.position.y.toDouble() }.div(pressed.size).toFloat()
                                 )
+                                val span = pressed.map { (it.position - centroid).getDistance() }.average().toFloat()
+
+                                if (previousPinchSpan > 0f && span > 0f) {
+                                    val requestedZoom = span / previousPinchSpan
+                                    val currentScale = latestZoomScale
+                                    val currentPan = latestPanOffset
+                                    val newScale = (currentScale * requestedZoom).coerceIn(1f, 5f)
+                                    val appliedZoom = newScale / currentScale.coerceAtLeast(1f)
+                                    val center = Offset(size.width / 2f, size.height / 2f)
+                                    val focus = centroid - center - currentPan
+                                    val focalCorrection = Offset(
+                                        x = focus.x * (1f - appliedZoom),
+                                        y = focus.y * (1f - appliedZoom)
+                                    )
+                                    val centroidPan = centroid - previousPinchCentroid
+                                    val maxPanX = (size.width * (newScale - 1f)) / 2f
+                                    val maxPanY = (size.height * (newScale - 1f)) / 2f
+                                    val newPan = if (newScale <= 1.02f) {
+                                        Offset.Zero
+                                    } else {
+                                        Offset(
+                                            x = (currentPan.x + centroidPan.x + focalCorrection.x).coerceIn(-maxPanX, maxPanX),
+                                            y = (currentPan.y + centroidPan.y + focalCorrection.y).coerceIn(-maxPanY, maxPanY)
+                                        )
+                                    }
+                                    onZoomChange(newScale, newPan)
+                                }
+
+                                previousPinchSpan = span
+                                previousPinchCentroid = centroid
+                                event.changes.forEach { if (it.pressed) it.consume() }
+                            } else if (pressed.isEmpty()) {
+                                val up = event.changes.firstOrNull { it.id == down.id }
+                                if (!didMove && !didPinch) {
+                                    val tapTime = up?.uptimeMillis ?: down.uptimeMillis
+                                    val tapPosition = up?.position ?: down.position
+                                    val isDoubleTap = lastTapUptime > 0L &&
+                                        tapTime - lastTapUptime in 1..320 &&
+                                        (tapPosition - lastTapPosition).getDistance() <= 56f
+
+                                    if (isDoubleTap) {
+                                        if (latestZoomScale > 1.15f) {
+                                            onZoomChange(1f, Offset.Zero)
+                                        } else {
+                                            onZoomChange(2.2f, Offset.Zero)
+                                        }
+                                        lastTapUptime = 0L
+                                    } else {
+                                        if (latestZoomScale <= 1.05f) {
+                                            if (tapPosition.x > size.width * 0.88f && hasNextPage) {
+                                                onNextPage()
+                                            } else if (tapPosition.x < size.width * 0.12f && hasPrevPage) {
+                                                onPrevPage()
+                                            } else {
+                                                onTap()
+                                            }
+                                        } else {
+                                            onTap()
+                                        }
+                                        lastTapUptime = tapTime
+                                        lastTapPosition = tapPosition
+                                    }
+                                } else if (!didPinch && !didRulerDrag && latestZoomScale <= 1.05f) {
+                                    val progress = curlProgress.value
+                                    if (progress > 0.20f && hasNextPage) {
+                                        coroutineScope.launch {
+                                            curlProgress.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
+                                            onNextPage()
+                                            curlProgress.snapTo(0f)
+                                        }
+                                    } else if (progress < -0.20f && hasPrevPage) {
+                                        coroutineScope.launch {
+                                            curlProgress.animateTo(-1f, tween(200, easing = FastOutSlowInEasing))
+                                            onPrevPage()
+                                            curlProgress.snapTo(0f)
+                                        }
+                                    } else {
+                                        coroutineScope.launch {
+                                            curlProgress.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                        }
+                                    }
+                                }
+                                break
+                            } else if (didPinch) {
+                                event.changes.forEach { if (it.pressed) it.consume() }
+                            } else {
+                                val change = pressed.first()
+                                val delta = change.position - previousPosition
+                                totalDrag += delta
+
+                                if (totalDrag.getDistance() > viewConfiguration.touchSlop) {
+                                    didMove = true
+
+                                    if (didRulerDrag) {
+                                        val rulerHeight = 65f
+                                        onFocusRulerYChange(
+                                            change.position.y.coerceIn(rulerHeight / 2f, size.height - rulerHeight / 2f)
+                                        )
+                                        change.consume()
+                                    } else if (latestZoomScale > 1.05f) {
+                                        val currentScale = latestZoomScale
+                                        val currentPan = latestPanOffset
+                                        val maxPanX = (size.width * (currentScale - 1f)) / 2f
+                                        val maxPanY = (size.height * (currentScale - 1f)) / 2f
+                                        onZoomChange(
+                                            currentScale,
+                                            Offset(
+                                                x = (currentPan.x + delta.x).coerceIn(-maxPanX, maxPanX),
+                                                y = (currentPan.y + delta.y).coerceIn(-maxPanY, maxPanY)
+                                            )
+                                        )
+                                        change.consume()
+                                    } else if (kotlin.math.abs(totalDrag.x) > kotlin.math.abs(totalDrag.y) * 0.6f) {
+                                        val width = size.width.toFloat().coerceAtLeast(1f)
+                                        val progressDelta = -(delta.x / width) * 1.55f
+                                        val minProgress = if (hasPrevPage) -1f else 0f
+                                        val maxProgress = if (hasNextPage) 1f else 0f
+                                        val target = (curlProgress.value + progressDelta).coerceIn(minProgress, maxProgress)
+                                        coroutineScope.launch { curlProgress.snapTo(target) }
+                                        change.consume()
+                                    }
+                                }
+
+                                previousPosition = change.position
                             }
-                            onZoomChange(newScale, newPan)
                         }
                     }
-                }
-            }
-            // Gesture Layer 3: Tap, Double Tap, and Edge Quick Nav
-            .pointerInput(isDrawingMode, zoomScale, currentPageIndex, totalPages) {
-                if (!isDrawingMode) {
-                    detectTapGestures(
-                        onTap = { offset ->
-                            val screenWidth = size.width
-                            // Edge tap navigation at normal 1.0x scale
-                            if (zoomScale <= 1.05f) {
-                                if (offset.x > screenWidth * 0.88f && hasNextPage) {
-                                    onNextPage()
-                                } else if (offset.x < screenWidth * 0.12f && hasPrevPage) {
-                                    onPrevPage()
-                                } else {
-                                    onTap()
-                                }
-                            } else {
-                                onTap()
-                            }
-                        },
-                        onDoubleTap = {
-                            if (zoomScale > 1.15f) {
-                                onZoomChange(1.0f, Offset.Zero)
-                            } else {
-                                onZoomChange(2.2f, Offset.Zero)
-                            }
-                        }
-                    )
-                }
-            }
-            // Gesture Layer 4: 3D Page Curl Drag (Only active when scale == 1.0x and not in drawing mode)
-            .pointerInput(isDrawingMode, zoomScale, pageTurnMode, currentPageIndex, totalPages) {
-                if (!isDrawingMode && zoomScale <= 1.05f) {
-                    detectDragGestures(
-                        onDragStart = { startOffset ->
-                            isCurlingForward = startOffset.x > size.width / 2f
-                        },
-                        onDrag = { change, dragAmount ->
-                            // Only capture primarily horizontal drags for page curl
-                            if (abs(dragAmount.x) > abs(dragAmount.y) * 0.6f) {
-                                change.consume()
-                                val dragDeltaX = dragAmount.x
-                                val width = size.width.toFloat().coerceAtLeast(1f)
-                                var progressDelta = -(dragDeltaX / width) * 1.55f
-
-                                // STRICT BOUNDARY RULES:
-                                if (!hasPrevPage && (curlProgress.value + progressDelta) < 0f) {
-                                    progressDelta = 0f
-                                }
-                                if (!hasNextPage && (curlProgress.value + progressDelta) > 0f) {
-                                    progressDelta = 0f
-                                }
-
-                                coroutineScope.launch {
-                                    val currentVal = curlProgress.value
-                                    val targetVal = (currentVal + progressDelta).coerceIn(
-                                        if (hasPrevPage) -1f else 0f,
-                                        if (hasNextPage) 1f else 0f
-                                    )
-                                    curlProgress.snapTo(targetVal)
-                                }
-                            }
-                        },
-                        onDragEnd = {
-                            coroutineScope.launch {
-                                val currentVal = curlProgress.value
-                                // Point 47.2: Smooth transition without previous page flash
-                                if (currentVal > 0.20f && hasNextPage) {
-                                    curlProgress.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
-                                    onNextPage()
-                                    curlProgress.snapTo(0f)
-                                } else if (currentVal < -0.20f && hasPrevPage) {
-                                    curlProgress.animateTo(-1f, tween(200, easing = FastOutSlowInEasing))
-                                    onPrevPage()
-                                    curlProgress.snapTo(0f)
-                                } else {
-                                    curlProgress.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                                }
-                            }
-                        },
-                        onDragCancel = {
-                            coroutineScope.launch {
-                                curlProgress.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                            }
-                        }
-                    )
                 }
             }
     ) {
@@ -296,7 +356,7 @@ fun CanvasPageCurlViewer(
 
             // Draw Focus Reading Ruler (if active)
             focusRulerY?.let { rulerY ->
-                drawFocusRuler(rulerY = rulerY, size = size)
+                drawFocusRuler(rulerY = if (rulerY < 0f) size.height / 2f else rulerY, size = size)
             }
 
             // Draw Watermark (if enabled)
@@ -469,10 +529,22 @@ private fun DrawScope.drawPageCurlEffect(
         }
         canvas.clipPath(clipPath)
 
+        // Use the same aspect-fit bounds as the resting page. Stretching
+        // the bitmap to the whole viewport here made pages look abnormally
+        // tall during the curl animation, even though the static page was correct.
+        val pageScale = minOf(
+            width / imageBitmap.width.toFloat(),
+            height / imageBitmap.height.toFloat()
+        )
+        val pageWidth = (imageBitmap.width * pageScale).toInt().coerceAtLeast(1)
+        val pageHeight = (imageBitmap.height * pageScale).toInt().coerceAtLeast(1)
+        val pageLeft = ((width - pageWidth) / 2f).toInt()
+        val pageTop = ((height - pageHeight) / 2f).toInt()
+
         drawImage(
             image = imageBitmap,
-            dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
-            dstSize = androidx.compose.ui.unit.IntSize(width.toInt(), height.toInt())
+            dstOffset = androidx.compose.ui.unit.IntOffset(pageLeft, pageTop),
+            dstSize = androidx.compose.ui.unit.IntSize(pageWidth, pageHeight)
         )
 
         // Draw page strokes deformed/clipped synchronously with the curled paper
@@ -588,19 +660,27 @@ private fun DrawScope.drawFocusRuler(rulerY: Float, size: Size) {
         )
     }
 
+    // Slightly brighten the reading band so it behaves like a usable ruler,
+    // not just two disconnected guide lines.
+    drawRect(
+        color = Color(0x18FFD54F),
+        topLeft = Offset(0f, topDimHeight),
+        size = Size(size.width, (bottomDimTop - topDimHeight).coerceAtLeast(0f))
+    )
+
     // Highlight band borders
     drawLine(
         color = Color(0xFFFFD54F),
         start = Offset(0f, topDimHeight),
         end = Offset(size.width, topDimHeight),
-        strokeWidth = 3f
+        strokeWidth = 2.dp.toPx()
     )
 
     drawLine(
         color = Color(0xFFFFD54F),
         start = Offset(0f, bottomDimTop),
         end = Offset(size.width, bottomDimTop),
-        strokeWidth = 3f
+        strokeWidth = 2.dp.toPx()
     )
 
     // Dim bottom area

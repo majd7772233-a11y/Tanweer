@@ -28,9 +28,9 @@ class MockD1PreparedStatement {
     return { results: results as T[] };
   }
 
-  async run(): Promise<{ success: boolean }> {
-    this.db.executeSql(this.sql, this.params);
-    return { success: true };
+  async run(): Promise<{ success: boolean; meta: { changes: number } }> {
+    const changes = this.db.executeSql(this.sql, this.params);
+    return { success: true, meta: { changes: changes.length } };
   }
 }
 
@@ -53,6 +53,7 @@ class MockD1Database {
     issues: [],
     issue_comments: [],
     group_messages: [],
+    user_dismissed_announcements: [],
     media_blobs: [],
   };
 
@@ -60,12 +61,145 @@ class MockD1Database {
     return new MockD1PreparedStatement(this, sql);
   }
 
+  async batch(statements: MockD1PreparedStatement[]): Promise<Array<{ success: boolean; meta: { changes: number } }>> {
+    const results = [];
+    for (const statement of statements) {
+      results.push(await statement.run());
+    }
+    return results;
+  }
+
   executeSql(sql: string, params: any[]): any[] {
     const trimmed = sql.trim();
     const normalized = trimmed.replace(/\s+/g, ' ');
 
-    // INSERT INTO
-    if (/^INSERT INTO/i.test(normalized)) {
+    // Guarded schedule-version creation used by the atomic first-slot setup path.
+    if (
+      /^INSERT INTO schedule_versions/i.test(normalized) &&
+      normalized.includes('SELECT ?') &&
+      normalized.includes('NOT EXISTS')
+    ) {
+      const [id, groupId, versionNumber, validFrom, createdAt, createdBy, guardGroupId] = params;
+      const hasActive = (this.tables.schedule_versions || []).some(
+        (row) => row.group_id === guardGroupId && row.is_active === 1
+      );
+      if (hasActive) return [];
+      const row = {
+        id, group_id: groupId, version_number: versionNumber,
+        valid_from: validFrom, valid_until: null, is_active: 1,
+        created_at: createdAt, created_by: createdBy,
+      };
+      this.tables.schedule_versions.push(row);
+      return [row];
+    }
+
+    // Guarded schedule-slot creation. Check both active version and slot-position uniqueness.
+    if (
+      /^INSERT INTO schedule_slots/i.test(normalized) &&
+      normalized.includes('SELECT ?') &&
+      normalized.includes('NOT EXISTS')
+    ) {
+      const [
+        id, versionId, dayOfWeek, slotOrder, subjectId, startTime, endTime,
+        activeVersionId, groupId, positionVersionId, positionDay, positionOrder,
+      ] = params;
+      const activeVersion = (this.tables.schedule_versions || []).some(
+        (row) => row.id === activeVersionId && row.group_id === groupId && row.is_active === 1
+      );
+      const occupied = (this.tables.schedule_slots || []).some(
+        (row) => row.version_id === positionVersionId &&
+          row.day_of_week === positionDay && row.slot_order === positionOrder
+      );
+      if (!activeVersion || occupied) return [];
+      const row = {
+        id, version_id: versionId, day_of_week: dayOfWeek, slot_order: slotOrder,
+        subject_id: subjectId, start_time: startTime, end_time: endTime,
+      };
+      this.tables.schedule_slots.push(row);
+      return [row];
+    }
+
+    // Device-session lifecycle: model the conditional D1 writes used by authentication.
+    if (/^DELETE FROM sessions WHERE user_id = \? AND \(expires_at <= \? OR device_id = \?\)$/i.test(normalized)) {
+      const [userId, now, deviceId] = params;
+      const rows = this.tables.sessions || [];
+      const removed = rows.filter(row =>
+        row.user_id === userId && (Number(row.expires_at) <= Number(now) || row.device_id === deviceId)
+      );
+      this.tables.sessions = rows.filter(row => !removed.includes(row));
+      return removed;
+    }
+
+    if (/^INSERT INTO sessions \(id, user_id, device_id, refresh_token_hash, expires_at, created_at\) SELECT/i.test(normalized)) {
+      const [id, userId, deviceId, tokenHash, expiresAt, createdAt, countUserId, now, maxDevices] = params;
+      const activeDeviceIds = new Set(
+        (this.tables.sessions || [])
+          .filter(row => row.user_id === countUserId && Number(row.expires_at) > Number(now))
+          .map(row => row.device_id)
+      );
+      if (activeDeviceIds.size >= Number(maxDevices)) return [];
+      const row = {
+        id,
+        user_id: userId,
+        device_id: deviceId,
+        refresh_token_hash: tokenHash,
+        expires_at: expiresAt,
+        created_at: createdAt,
+      };
+      this.tables.sessions.push(row);
+      return [row];
+    }
+
+    if (/^INSERT INTO devices \(device_id, user_id, platform, app_version, push_token, last_seen\) SELECT/i.test(normalized)) {
+      const [deviceId, userId, platform, appVersion, lastSeen, sessionId, expectedUserId, expectedTokenHash] = params;
+      const session = (this.tables.sessions || []).find(row =>
+        row.id === sessionId && row.user_id === expectedUserId && row.refresh_token_hash === expectedTokenHash
+      );
+      if (!session) return [];
+      const existing = (this.tables.devices || []).find(row => row.device_id === deviceId);
+      if (existing) {
+        Object.assign(existing, { user_id: userId, platform, app_version: appVersion, last_seen: lastSeen });
+        return [existing];
+      }
+      const row = {
+        device_id: deviceId,
+        user_id: userId,
+        platform,
+        app_version: appVersion,
+        push_token: null,
+        last_seen: lastSeen,
+      };
+      this.tables.devices.push(row);
+      return [row];
+    }
+
+    // Schedule proposal INSERT has a literal PENDING status and vote counters,
+    // so its bound created_at value is the ninth parameter, not the status column.
+    if (/^INSERT INTO schedule_proposals/i.test(normalized)) {
+      const [id, groupId, proposedBy, dayOfWeek, slotOrder, oldSubjectId, newSubjectId, reason, createdAt] = params;
+      const row = {
+        id,
+        group_id: groupId,
+        proposed_by: proposedBy,
+        day_of_week: dayOfWeek,
+        slot_order: slotOrder,
+        old_subject_id: oldSubjectId,
+        new_subject_id: newSubjectId,
+        reason,
+        status: 'PENDING',
+        votes_for: 1,
+        votes_against: 0,
+        created_at: createdAt,
+      };
+      this.tables.schedule_proposals.push(row);
+      return [row];
+    }
+
+    // INSERT INTO / INSERT OR IGNORE INTO
+    // D1 reports zero changes for an ignored duplicate; otherwise it inserts
+    // the row. The previous fake matched only INSERT INTO and silently skipped
+    // INSERT OR IGNORE, which made integration tests invent false 409 conflicts.
+    if (/^INSERT (?:OR IGNORE )?INTO/i.test(normalized)) {
       const match = normalized.match(/INSERT (?:OR IGNORE )?INTO (\w+)/i);
       if (match) {
         const table = match[1];
@@ -115,15 +249,76 @@ class MockD1Database {
 
     // DELETE
     if (/^DELETE FROM/i.test(normalized)) {
+      if (/^DELETE FROM sessions WHERE id = \? AND user_id = \? AND device_id = \?$/i.test(normalized)) {
+        const [sessionId, userId, deviceId] = params;
+        const rows = this.tables.sessions || [];
+        const removed = rows.filter(row =>
+          row.id === sessionId && row.user_id === userId && row.device_id === deviceId
+        );
+        this.tables.sessions = rows.filter(row => !removed.includes(row));
+        return removed;
+      }
+
+      if (/^DELETE FROM sessions WHERE user_id = \? AND device_id = \?$/i.test(normalized)) {
+        const [userId, deviceId] = params;
+        const rows = this.tables.sessions || [];
+        const removed = rows.filter(row => row.user_id === userId && row.device_id === deviceId);
+        this.tables.sessions = rows.filter(row => !removed.includes(row));
+        return removed;
+      }
+
+      if (/^DELETE FROM devices WHERE user_id = \? AND device_id = \?$/i.test(normalized)) {
+        const [userId, deviceId] = params;
+        const rows = this.tables.devices || [];
+        const removed = rows.filter(row => row.user_id === userId && row.device_id === deviceId);
+        this.tables.devices = rows.filter(row => !removed.includes(row));
+        return removed;
+      }
+
+      if (/^DELETE FROM devices WHERE user_id = \? AND NOT EXISTS/i.test(normalized)) {
+        const [userId, sessionUserId, now] = params;
+        const rows = this.tables.devices || [];
+        const removed = rows.filter(device =>
+          device.user_id === userId &&
+          !(this.tables.sessions || []).some(session =>
+            session.user_id === sessionUserId &&
+            session.device_id === device.device_id &&
+            Number(session.expires_at) > Number(now)
+          )
+        );
+        this.tables.devices = rows.filter(row => !removed.includes(row));
+        return removed;
+      }
+
       const match = normalized.match(/DELETE FROM (\w+)/i);
       if (match) {
         const table = match[1];
 
         if (this.tables[table]) {
-          if (normalized.includes('WHERE version_id = ? AND day_of_week = ? AND slot_order = ?')) {
+          if (
+            normalized.includes('WHERE id = ? AND version_id = ? AND day_of_week = ? AND slot_order = ?') &&
+            normalized.includes('schedule_versions')
+          ) {
+            const [slotId, versionId, day, slot, activeVersionId, groupId] = params;
+            const activeVersion = (this.tables.schedule_versions || []).some(
+              (v) => v.id === activeVersionId && v.group_id === groupId && v.is_active === 1
+            );
+            if (activeVersion) {
+              this.tables[table] = this.tables[table].filter(
+                (r) => !(r.id === slotId && r.version_id === versionId &&
+                  r.day_of_week === day && r.slot_order === slot)
+              );
+            }
+          } else if (normalized.includes('WHERE version_id = ? AND day_of_week = ? AND slot_order = ?')) {
             const [versionId, day, slot] = params;
-
-            this.tables[table] = this.tables[table].filter(
+            const before = this.tables[table];
+            const removed = before.filter(
+              (r) =>
+                r.version_id === versionId &&
+                r.day_of_week === day &&
+                r.slot_order === slot
+            );
+            this.tables[table] = before.filter(
               (r) =>
                 !(
                   r.version_id === versionId &&
@@ -131,6 +326,7 @@ class MockD1Database {
                   r.slot_order === slot
                 )
             );
+            return removed;
           } else if (
             normalized.includes('WHERE group_id = ? AND day_of_week = ? AND slot_order = ?')
           ) {
@@ -151,13 +347,151 @@ class MockD1Database {
       }
     }
 
+    // Server-authoritative group chat policy query (groups + active membership + current global role).
+    if (normalized.includes('SELECT g.chat_policy, gm.role AS member_role, u.role AS global_role')) {
+      const [userId, groupId] = params;
+      const group = (this.tables.groups || []).find(row => row.id === groupId);
+      const membership = (this.tables.group_members || []).find(row =>
+        row.group_id === groupId && row.user_id === userId && row.status === 'ACTIVE'
+      );
+      const account = (this.tables.users || []).find(row => row.id === userId);
+      if (!group || !membership || !account) return [];
+      return [{
+        chat_policy: group.chat_policy || 'MEMBERS',
+        member_role: membership.role || 'STUDENT',
+        global_role: account.role || 'STUDENT',
+      }];
+    }
+
     // SELECT
     if (/^SELECT/i.test(normalized)) {
+      // These list reads contain correlated subqueries whose FROM appears before
+      // the outer table. Resolve the outer table explicitly instead of mistaking
+      // homework_completions / exam_completions / issue_comments for the list.
+      if (normalized.includes('FROM homeworks h')) {
+        const groupId = params[1];
+        return (this.tables.homeworks || []).filter(row => row.group_id === groupId);
+      }
+      if (normalized.includes('FROM exams e')) {
+        const groupId = params[1];
+        return (this.tables.exams || []).filter(row => row.group_id === groupId);
+      }
+      if (normalized.includes('FROM events e')) {
+        const [groupId, userId] = params;
+        const dismissed = this.tables.user_dismissed_announcements || [];
+        return (this.tables.events || []).filter(row => {
+          const inScope = row.group_id === groupId || row.group_id === 'all';
+          const hiddenForUser = row.group_id === 'all' &&
+            String(row.category || '').toUpperCase() === 'ANNOUNCEMENT' &&
+            dismissed.some(item => item.user_id === userId && item.event_id === row.id);
+          return inScope && !hiddenForUser;
+        });
+      }
+      if (normalized.includes('FROM issues i')) {
+        const groupId = params[0];
+        return (this.tables.issues || []).filter(row => row.group_id === groupId);
+      }
+
       const fromMatch = normalized.match(/FROM (\w+)/i);
       if (!fromMatch) return [];
 
       const table = fromMatch[1];
+
+      if (normalized.toLowerCase().includes('count(*) as total_count')) {
+        const rows = [...(this.tables[table] || [])];
+        if (table.toLowerCase() === 'events') {
+          const [groupId, userId] = params;
+          const dismissed = this.tables.user_dismissed_announcements || [];
+          const visible = rows.filter(row => {
+            const inScope = row.group_id === groupId || row.group_id === 'all';
+            const isDismissedAnnouncement = row.group_id === 'all' &&
+              String(row.category || '').toUpperCase() === 'ANNOUNCEMENT' &&
+              dismissed.some(item => item.user_id === userId && item.event_id === row.id);
+            return inScope && !isDismissedAnnouncement;
+          });
+          return [{ total_count: visible.length }];
+        }
+
+        const groupId = params[0];
+        return [{
+          total_count: rows.filter(row => row.group_id === groupId).length
+        }];
+      }
+
+      if (table.toLowerCase() === 'sessions' && normalized.includes('COUNT(DISTINCT device_id)')) {
+        const [userId, now, excludedDeviceId] = params;
+        const devices = new Set(
+          (this.tables.sessions || [])
+            .filter(row =>
+              row.user_id === userId &&
+              Number(row.expires_at) > Number(now) &&
+              row.device_id !== excludedDeviceId
+            )
+            .map(row => row.device_id)
+        );
+        return [{ count: devices.size }];
+      }
+
       let rows = [...(this.tables[table] || [])];
+
+      // Match the aliased academic list queries' parameter order exactly.
+      // Homework/exam reads bind userId for completion subqueries before groupId.
+      if (table.toLowerCase() === 'homeworks' && normalized.includes('h.group_id = ?')) {
+        const groupId = params[1];
+        rows = rows.filter(row => row.group_id === groupId);
+      } else if (table.toLowerCase() === 'exams' && normalized.includes('e.group_id = ?')) {
+        const groupId = params[1];
+        rows = rows.filter(row => row.group_id === groupId);
+      } else if (table.toLowerCase() === 'events' && normalized.includes('e.group_id = ?')) {
+        const [groupId, userId] = params;
+        const dismissed = this.tables.user_dismissed_announcements || [];
+        rows = rows.filter(row => {
+          const inScope = row.group_id === groupId || row.group_id === 'all';
+          const isDismissedAnnouncement = row.group_id === 'all' &&
+            String(row.category || '').toUpperCase() === 'ANNOUNCEMENT' &&
+            dismissed.some(item => item.user_id === userId && item.event_id === row.id);
+          return inScope && !isDismissedAnnouncement;
+        });
+      }
+
+      if (normalized.includes("type = 'TEMP_PASSWORD'")) {
+        rows = rows.filter((row) => row.type === 'TEMP_PASSWORD');
+      }
+      if (normalized.includes("type = 'RECOVERY_CODE'")) {
+        rows = rows.filter((row) => row.type === 'RECOVERY_CODE');
+      }
+
+      // Device management: return only active per-installation sessions.
+      if (table.toLowerCase() === 'sessions' && normalized.includes('LEFT JOIN devices')) {
+        const [userId, now] = params;
+        const activeSessions = (this.tables.sessions || []).filter(
+          row => row.user_id === userId && Number(row.expires_at) > Number(now)
+        );
+        const deviceIds = [...new Set(activeSessions.map(row => row.device_id))];
+        return deviceIds.map(deviceId => {
+          const latest = activeSessions
+            .filter(row => row.device_id === deviceId)
+            .reduce((a, b) => Number(a.created_at) > Number(b.created_at) ? a : b);
+          const device = (this.tables.devices || []).find(
+            row => row.user_id === userId && row.device_id === deviceId
+          ) || {};
+          return {
+            deviceId,
+            platform: device.platform || 'Android',
+            appVersion: device.app_version || '',
+            lastSeen: latest.created_at,
+            connectedAt: latest.created_at,
+          };
+        });
+      }
+
+      if (table.toLowerCase() === 'sessions' && /^SELECT 1 FROM sessions WHERE user_id = \? AND device_id = \? AND expires_at > \?/i.test(normalized)) {
+        const [userId, deviceId, now] = params;
+        const active = (this.tables.sessions || []).some(row =>
+          row.user_id === userId && row.device_id === deviceId && Number(row.expires_at) > Number(now)
+        );
+        return active ? [{ 1: 1 }] : [];
+      }
 
       // Handle JOIN query for sessions and users
       if (table.toLowerCase() === 'sessions' && normalized.includes('JOIN users')) {
@@ -221,18 +555,22 @@ class MockD1Database {
       }
 
       if (table.toLowerCase() === 'group_members') {
-        // Find member with group_id and user_id and active status
         const groupId = params[0];
-        const userId = params[1];
+        // Schedule voting snapshots query all active members in a group, not one user's membership.
+        if (normalized.includes('SELECT user_id FROM group_members') && !normalized.includes('user_id = ?')) {
+          return (this.tables.group_members || [])
+            .filter(m => m.group_id === groupId && m.status === 'ACTIVE' && m.role !== 'BANNED')
+            .map(m => ({ user_id: m.user_id }));
+        }
 
-        const matching = (this.tables.group_members || []).filter(
+        // Other member checks are scoped to the current user.
+        const userId = params[1];
+        return (this.tables.group_members || []).filter(
           (m) =>
             m.group_id === groupId &&
             m.user_id === userId &&
             (m.status === 'ACTIVE' || !m.status)
         );
-
-        return matching;
       }
 
       if (normalized.includes('user_id = ? AND group_id = ?')) {
@@ -300,7 +638,10 @@ describe('End-to-End System Integration Flow', () => {
       CHAT: {
         idFromName: () => 'mock-id',
         get: () => ({
-          fetch: async () => new Response('ws'),
+          fetch: async (request: Request) => {
+            if (new URL(request.url).pathname === '/rate-limit') return new Response(JSON.stringify({ success: true, allowed: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          },
         }),
       } as any,
       JWT_SECRET: 'test-jwt-secret-key-12345678901234567890',
@@ -343,6 +684,17 @@ describe('End-to-End System Integration Flow', () => {
       joined_at: Date.now(),
     });
 
+    // This class has multiple eligible voters, so the schedule proposal remains
+    // pending for the unified community-decision quorum instead of auto-applying.
+    mockDb.tables.group_members.push({
+      id: 'mem_2',
+      group_id: 'class_10_A',
+      user_id: 'usr_second_voter',
+      role: 'STUDENT',
+      status: 'ACTIVE',
+      joined_at: Date.now(),
+    });
+
     // 2. Login User
     const loginReq = new Request('http://localhost/api/v1/auth/login', {
       method: 'POST',
@@ -362,10 +714,84 @@ describe('End-to-End System Integration Flow', () => {
     expect(loginRes.status).toBe(200);
     expect(loginJson.token).toBeDefined();
 
+    // Logging in again from the same installation replaces the previous session token.
+    token = loginJson.token;
+
     const authHeaders = {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     };
+
+    // Verify the account can register exactly three distinct installations.
+    for (const deviceId of ['device-test-002', 'device-test-003']) {
+      const additionalLogin = await app.fetch(new Request('http://localhost/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phoneNumber: '771234567',
+          password: 'Password@123',
+          deviceId,
+          platform: 'Android',
+          appVersion: '1.2.0-staging',
+        }),
+      }), env, {} as any);
+      expect(additionalLogin.status).toBe(200);
+    }
+
+    const fourthDeviceLogin = await app.fetch(new Request('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phoneNumber: '771234567',
+        password: 'Password@123',
+        deviceId: 'device-test-004',
+        platform: 'Android',
+        appVersion: '1.2.0-staging',
+      }),
+    }), env, {} as any);
+    expect(fourthDeviceLogin.status).toBe(403);
+    expect(await fourthDeviceLogin.json()).toMatchObject({
+      success: false,
+      error: { code: 'DEVICE_LIMIT_REACHED' },
+    });
+
+    const devicesResponse = await app.fetch(new Request('http://localhost/api/v1/auth/devices', {
+      method: 'GET',
+      headers: authHeaders,
+    }), env, {} as any);
+    const devicesBody = await devicesResponse.json() as any;
+    expect(devicesResponse.status).toBe(200);
+    expect(devicesBody.activeDevicesCount).toBe(3);
+    expect(devicesBody.maxActiveDevices).toBe(3);
+
+    const revokeOldDevice = await app.fetch(new Request(
+      'http://localhost/api/v1/auth/devices/device-test-002',
+      { method: 'DELETE', headers: authHeaders }
+    ), env, {} as any);
+    expect(revokeOldDevice.status).toBe(200);
+
+    const replacementLogin = await app.fetch(new Request('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phoneNumber: '771234567',
+        password: 'Password@123',
+        deviceId: 'device-test-004',
+        platform: 'Android',
+        appVersion: '1.2.0-staging',
+      }),
+    }), env, {} as any);
+    expect(replacementLogin.status).toBe(200);
+
+    const devicesAfterReplacement = await app.fetch(new Request('http://localhost/api/v1/auth/devices', {
+      method: 'GET',
+      headers: authHeaders,
+    }), env, {} as any);
+    const devicesAfterBody = await devicesAfterReplacement.json() as any;
+    expect(devicesAfterReplacement.status).toBe(200);
+    expect(devicesAfterBody.activeDevicesCount).toBe(3);
+    expect(devicesAfterBody.devices.some((device: any) => device.deviceId === 'device-test-004')).toBe(true);
+    expect(devicesAfterBody.devices.some((device: any) => device.deviceId === 'device-test-002')).toBe(false);
 
     // 3. Get User Profile & Groups
     const profileReq = new Request('http://localhost/api/v1/me', {
@@ -447,7 +873,7 @@ describe('End-to-End System Integration Flow', () => {
           dayOfWeek: 1,
           slotOrder: 1,
           oldSubjectId: 'sub_science',
-          newSubjectId: 'sub_math',
+          newSubjectId: 'sub_science',
           reason: 'يوجد تعارض في الحصة الأولى ونحتاج نقل الرياضيات إلى هذا الموعد.',
         }),
       }
@@ -472,7 +898,8 @@ describe('End-to-End System Integration Flow', () => {
       proposed_by: regJson.user.id,
       day_of_week: 1,
       slot_order: 1,
-      new_subject_id: 'sub_math',
+      old_subject_id: 'sub_math',
+      new_subject_id: 'sub_science',
       status: 'PENDING',
     });
 
@@ -668,6 +1095,14 @@ describe('End-to-End System Integration Flow', () => {
     );
 
     expect(getHwRes.status).toBe(200);
+    const getHwJson = await getHwRes.json() as {
+      success: boolean;
+      totalCount: number;
+      homeworks: unknown[];
+    };
+    expect(getHwJson.success).toBe(true);
+    expect(getHwJson.totalCount).toBe(getHwJson.homeworks.length);
+    expect(getHwJson.totalCount).toBe(1);
 
     // 8. Create Exam
     const examReq = new Request(
@@ -693,6 +1128,24 @@ describe('End-to-End System Integration Flow', () => {
 
     expect(examRes.status).toBe(200);
 
+    const getExamsRes = await app.fetch(
+      new Request('http://localhost/api/v1/exams?groupId=class_10_A', {
+        method: 'GET',
+        headers: authHeaders,
+      }),
+      env,
+      {} as any
+    );
+    expect(getExamsRes.status).toBe(200);
+    const getExamsJson = await getExamsRes.json() as {
+      success: boolean;
+      totalCount: number;
+      exams: unknown[];
+    };
+    expect(getExamsJson.success).toBe(true);
+    expect(getExamsJson.totalCount).toBe(getExamsJson.exams.length);
+    expect(getExamsJson.totalCount).toBe(1);
+
     // 9. Create Issue & Add Comment
     const issueReq = new Request(
       'http://localhost/api/v1/issues',
@@ -717,6 +1170,24 @@ describe('End-to-End System Integration Flow', () => {
     const issueJson = (await issueRes.json()) as any;
 
     expect(issueRes.status).toBe(200);
+
+    const getIssuesRes = await app.fetch(
+      new Request('http://localhost/api/v1/issues?groupId=class_10_A', {
+        method: 'GET',
+        headers: authHeaders,
+      }),
+      env,
+      {} as any
+    );
+    expect(getIssuesRes.status).toBe(200);
+    const getIssuesJson = await getIssuesRes.json() as {
+      success: boolean;
+      totalCount: number;
+      issues: unknown[];
+    };
+    expect(getIssuesJson.success).toBe(true);
+    expect(getIssuesJson.totalCount).toBe(getIssuesJson.issues.length);
+    expect(getIssuesJson.totalCount).toBe(1);
 
     const commentReq = new Request(
       `http://localhost/api/v1/issues/${issueJson.issueId || issueJson.id || 'iss_1'}/comments`,

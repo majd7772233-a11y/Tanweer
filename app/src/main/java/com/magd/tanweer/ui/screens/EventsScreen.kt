@@ -49,12 +49,6 @@ fun EventsScreen(
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
-    LaunchedEffect(activeGroupId) {
-        if (activeGroupId.isNotBlank()) {
-            viewModel.repository.syncEvents(activeGroupId)
-        }
-    }
-
     val todayStr = remember { TanweerViewModel.getTodayDateString() }
 
     var selectedCategory by remember { mutableStateOf("ALL") }
@@ -70,6 +64,7 @@ fun EventsScreen(
         "CELEBRATION" to "مناسبات واحتفالات 🎉",
         "HOLIDAY" to "عطل وإجازات 🏖️",
         "WORKSHOP" to "ورش ومراجعات 💡",
+        "ANNOUNCEMENT" to "تعاميم رسمية 📢",
         "GENERAL" to "عام 📌"
     )
 
@@ -134,13 +129,13 @@ fun EventsScreen(
                         Column {
                             Text(
                                 text = "الفعاليات والأنشطة المدرسية 🎪",
-                                fontSize = 18.sp,
+                                fontSize = tanweerTextSize(18f),
                                 fontWeight = FontWeight.Black,
                                 color = CyanAccent
                             )
                             Text(
                                 text = "المسابقات، المناسبات، الإجازات وورش العمل",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                         }
@@ -177,7 +172,7 @@ fun EventsScreen(
                     ) {
                         Text(
                             text = "الفعاليات القادمة (${events.count { it.eventDate >= todayStr }}) ⏳",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = if (activeTab == 0) FontWeight.Bold else FontWeight.Normal,
                             color = if (activeTab == 0) PurpleAccent else TextSecondary
                         )
@@ -195,7 +190,7 @@ fun EventsScreen(
                     ) {
                         Text(
                             text = "الأرشيف والسابقات (${events.count { it.eventDate < todayStr }}) 📦",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = if (activeTab == 1) FontWeight.Bold else FontWeight.Normal,
                             color = if (activeTab == 1) CyanAccent else TextSecondary
                         )
@@ -225,7 +220,7 @@ fun EventsScreen(
                         ) {
                             Text(
                                 text = catLabel,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) PurpleAccent else TextSecondary
                             )
@@ -270,20 +265,21 @@ fun EventsScreen(
                                             "CELEBRATION" -> "🎉"
                                             "HOLIDAY" -> "🏖️"
                                             "WORKSHOP" -> "💡"
+                                            "ANNOUNCEMENT" -> "📢"
                                             else -> "📌"
                                         },
-                                        fontSize = 20.sp
+                                        fontSize = tanweerTextSize(20f)
                                     )
                                     Column {
                                         Text(
                                             text = event.title,
-                                            fontSize = 15.sp,
+                                            fontSize = tanweerTextSize(15f),
                                             fontWeight = FontWeight.Bold,
                                             color = TextPrimary
                                         )
                                         Text(
                                             text = "التاريخ: ${event.eventDate} ${event.timeStr?.let { "• $it" } ?: ""}",
-                                            fontSize = 12.sp,
+                                            fontSize = tanweerTextSize(12f),
                                             color = if (isToday) EmeraldGreen else CyanAccent,
                                             fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal
                                         )
@@ -296,6 +292,7 @@ fun EventsScreen(
                                         "CELEBRATION" -> "مناسبة 🎉"
                                         "HOLIDAY" -> "إجازة 🏖️"
                                         "WORKSHOP" -> "ورشة 💡"
+                                        "ANNOUNCEMENT" -> "تعميم رسمي 📢"
                                         else -> "فعالية 📌"
                                     },
                                     color = if (isToday) EmeraldGreen else PurpleAccent,
@@ -303,12 +300,32 @@ fun EventsScreen(
                                 )
                             }
 
+                            if (event.isOfficial || event.category.equals("ANNOUNCEMENT", ignoreCase = true)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    GlassPill(
+                                        text = "صادر عن ${event.sourceName ?: "إدارة المدرسة"}",
+                                        color = WarmAmber,
+                                        bgColor = AmberGlow
+                                    )
+                                    Text(
+                                        text = "رسمي ✓",
+                                        fontSize = tanweerTextSize(10f),
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldGreen
+                                    )
+                                }
+                            }
+
                             if (!event.description.isNullOrBlank()) {
                                 Text(
                                     text = event.description,
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     color = TextSecondary,
-                                    lineHeight = 18.sp
+                                    lineHeight = tanweerLineHeight(18f)
                                 )
                             }
 
@@ -325,7 +342,7 @@ fun EventsScreen(
                                     )
                                     Text(
                                         text = "المكان: ${event.location}",
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         color = WarmAmber
                                     )
                                 }
@@ -365,7 +382,7 @@ fun EventsScreen(
                 ) {
                     Text(
                         text = "🎪 إضافة فعالية أو مناسبة جديدة",
-                        fontSize = 16.sp,
+                        fontSize = tanweerTextSize(16f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent
                     )
@@ -373,8 +390,8 @@ fun EventsScreen(
                     OutlinedTextField(
                         value = title,
                         onValueChange = { title = it },
-                        label = { Text("عنوان الفعالية *", fontSize = 12.sp) },
-                        placeholder = { Text("مثال: معرض العلوم السنوي", fontSize = 12.sp) },
+                        label = { Text("عنوان الفعالية *", fontSize = tanweerTextSize(12f)) },
+                        placeholder = { Text("مثال: معرض العلوم السنوي", fontSize = tanweerTextSize(12f)) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         singleLine = true
@@ -382,7 +399,7 @@ fun EventsScreen(
 
                     // Category dropdown / selector
                     Column {
-                        Text("التصنيف:", fontSize = 11.sp, color = TextSecondary)
+                        Text("التصنيف:", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -408,7 +425,7 @@ fun EventsScreen(
                                 ) {
                                     Text(
                                         text = catName,
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         fontWeight = if (isCat) FontWeight.Bold else FontWeight.Normal,
                                         color = if (isCat) PurpleAccent else TextSecondary
                                     )
@@ -424,7 +441,7 @@ fun EventsScreen(
                         OutlinedTextField(
                             value = eventDate,
                             onValueChange = { eventDate = it },
-                            label = { Text("التاريخ (YYYY-MM-DD) *", fontSize = 11.sp) },
+                            label = { Text("التاريخ (YYYY-MM-DD) *", fontSize = tanweerTextSize(11f)) },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp),
                             singleLine = true
@@ -433,8 +450,8 @@ fun EventsScreen(
                         OutlinedTextField(
                             value = timeStr,
                             onValueChange = { timeStr = it },
-                            label = { Text("الوقت (اختياري)", fontSize = 11.sp) },
-                            placeholder = { Text("09:00 ص", fontSize = 11.sp) },
+                            label = { Text("الوقت (اختياري)", fontSize = tanweerTextSize(11f)) },
+                            placeholder = { Text("09:00 ص", fontSize = tanweerTextSize(11f)) },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp),
                             singleLine = true
@@ -444,8 +461,8 @@ fun EventsScreen(
                     OutlinedTextField(
                         value = location,
                         onValueChange = { location = it },
-                        label = { Text("المكان / القاعة (اختياري)", fontSize = 12.sp) },
-                        placeholder = { Text("مسرح المدرسة / القاعة الرياضية", fontSize = 12.sp) },
+                        label = { Text("المكان / القاعة (اختياري)", fontSize = tanweerTextSize(12f)) },
+                        placeholder = { Text("مسرح المدرسة / القاعة الرياضية", fontSize = tanweerTextSize(12f)) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         singleLine = true
@@ -454,7 +471,7 @@ fun EventsScreen(
                     OutlinedTextField(
                         value = description,
                         onValueChange = { description = it },
-                        label = { Text("تفاصيل وملاحظات الفعالية", fontSize = 12.sp) },
+                        label = { Text("تفاصيل وملاحظات الفعالية", fontSize = tanweerTextSize(12f)) },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2,
                         maxLines = 4,

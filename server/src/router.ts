@@ -2,9 +2,11 @@ import { Env } from './env';
 import { authenticateRequest } from './middleware/auth';
 import { errorResponse, jsonResponse } from './lib/response';
 import { handleLogin, handleRegister, handleLoginWithRecoveryCode } from './services/auth';
+import { handleGenerateMyRecoveryCode, handleGetMyNotifications } from './services/notifications';
 import {
   handleGetGroups,
   handleJoinGroupRequest,
+  handleLeaveGroup,
   handleGetGroupMembers,
   handleUpdateGroupMemberRole,
   handleRemoveGroupMember,
@@ -19,16 +21,13 @@ import {
   handleDeleteScheduleSlot,
   handleGetScheduleProposals,
   handleProposeScheduleChange,
-  handleVoteScheduleProposal,
-  handleApproveScheduleProposal,
-  handleRejectScheduleProposal,
   handleGetScheduleVersions,
 } from './services/schedule';
 import { handleGetCalendarOverview, handleGetDayDetail } from './services/calendar';
 import { handleCreateContent, handleVoteUseful, handleUpdateContent, handleDeleteContent, handleGetContents, handleGetAcademicArchive } from './services/content';
 import { handleCreateHomework, handleGetHomeworks, handleToggleHomeworkCompletion, handleUpdateHomework, handleDeleteHomework } from './services/homework';
 import { handleCreateExam, handleGetExams, handleUpdateExam, handleDeleteExam, handleToggleExamCompletion } from './services/exams';
-import { handleCreateEvent, handleGetEvents, handleUpdateEvent, handleDeleteEvent } from './services/events';
+import { handleCreateEvent, handleGetEvents, handleUpdateEvent, handleDeleteEvent, handleDismissSchoolAnnouncement } from './services/events';
 import {
   handleAddIssueComment,
   handleCreateIssue,
@@ -53,9 +52,32 @@ import {
   handleGetAdminDashboardData,
 } from './services/governance';
 import { handleGetGroupMessages, handlePostGroupMessage, handleDeleteGroupMessage } from './services/chat';
-import { handleGetProfile, handleUpdateProfile } from './services/users';
+import { handleGetProfile, handleUpdateProfile, handleUpdateSchoolStudentStatus, handleRemoveSchoolStudentFromClass } from './services/users';
 import { handleGetMedia, handleUploadMedia } from './services/media';
+import { handleGetMyDevices, handleRevokeMyDevice, handleLogoutCurrentDevice } from './services/devices';
 import { handleCreateRoleRequest, handleGetMyRoleRequests, handleGetRoleMetadata, handleRedeemRoleCode } from './services/roleRequests';
+
+async function handleUnifiedScheduleProposalVote(
+  proposalId: string,
+  user: import('./env').UserContext,
+  env: Env,
+  voteChoice: number
+): Promise<Response> {
+  const decision = await env.DB.prepare(
+    `SELECT id FROM community_decisions
+     WHERE target_id = ? AND request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')
+     LIMIT 1`
+  ).bind(proposalId).first<{ id: string }>();
+  if (!decision) {
+    return errorResponse('DECISION_NOT_FOUND', 'لا يوجد قرار جماعي مرتبط بهذا المقترح. حدّث قائمة القرارات ثم حاول مجدداً.', 404);
+  }
+  const voteRequest = new Request('https://tanweer.internal/api/v1/decisions/vote', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ voteChoice: voteChoice === 1 ? 1 : 0 }),
+  });
+  return handleVoteCommunityDecision(decision.id, user, voteRequest, env);
+}
 
 export async function handleApiRoute(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -86,6 +108,16 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
 
   // System Version & Release Check (Dynamic GitHub Release fetcher with fallback)
   if (path === '/api/v1/system/version' && method === 'GET') {
+    // data_generation is a destructive client-side control signal. Never fabricate it.
+    let dataGeneration = '';
+    try {
+      const genRow = await env.DB.prepare('SELECT value FROM system_settings WHERE key = ?').bind('data_generation').first<{ value: string }>();
+      dataGeneration = typeof genRow?.value === 'string' ? genRow.value.trim() : '';
+      if (!dataGeneration) return errorResponse('SYSTEM_GENERATION_UNAVAILABLE', 'تعذر التحقق من إصدار بيانات المنظومة. حاول مجدداً لاحقاً.', 503);
+    } catch {
+      return errorResponse('SYSTEM_GENERATION_UNAVAILABLE', 'تعذر التحقق من إصدار بيانات المنظومة. حاول مجدداً لاحقاً.', 503);
+    }
+
     try {
       const ghRes = await fetch('https://api.github.com/repos/majd7772233-a11y/Tanweer/releases/latest', {
         headers: {
@@ -120,11 +152,6 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
           if (bodyMatch) sha256Hex = bodyMatch[1].toLowerCase();
         }
 
-        let dataGeneration = 'gen_initial_1';
-        try {
-          const genRow = await env.DB.prepare('SELECT value FROM system_settings WHERE key = ?').bind('data_generation').first<{ value: string }>();
-          if (genRow?.value) dataGeneration = genRow.value;
-        } catch {}
 
         return jsonResponse({
           currentVersion: verName,
@@ -141,16 +168,11 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
       }
     } catch (_: any) {}
 
-    let fallbackDataGeneration = 'gen_initial_1';
-    try {
-      const genRow = await env.DB.prepare('SELECT value FROM system_settings WHERE key = ?').bind('data_generation').first<{ value: string }>();
-      if (genRow?.value) fallbackDataGeneration = genRow.value;
-    } catch {}
 
     return jsonResponse({
       currentVersion: '1.2.0',
       versionCode: 120,
-      dataGeneration: fallbackDataGeneration,
+      dataGeneration,
       minSupportedVersion: '1.0.0',
       minSupportedVersionCode: 1,
       isUpdateRequired: false,
@@ -176,6 +198,27 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   // Authenticated routes
   const { user, error } = await authenticateRequest(request, env);
   if (error || !user) return error!;
+
+  // School Admin: intentionally limited to student accounts and class membership.
+  if (path.startsWith('/api/v1/admin/users/') && path.endsWith('/status') && method === 'PATCH') {
+    const targetUserId = path.split('/')[5];
+    return handleUpdateSchoolStudentStatus(targetUserId, user, request, env);
+  }
+  if (path.startsWith('/api/v1/admin/students/') && path.endsWith('/class-membership') && method === 'DELETE') {
+    const targetUserId = path.split('/')[5];
+    return handleRemoveSchoolStudentFromClass(targetUserId, user, env);
+  }
+  // Account-owned active device management. These endpoints never use the Owner Dashboard.
+  if (path === '/api/v1/auth/devices' && method === 'GET') {
+    return handleGetMyDevices(user, env);
+  }
+  if (path.startsWith('/api/v1/auth/devices/') && method === 'DELETE') {
+    const deviceId = decodeURIComponent(path.substring('/api/v1/auth/devices/'.length));
+    return handleRevokeMyDevice(deviceId, user, env);
+  }
+  if (path === '/api/v1/auth/logout' && method === 'POST') {
+    return handleLogoutCurrentDevice(user, env);
+  }
 
   // Role Upgrade Requests
   if (path === '/api/v1/role-requests' && method === 'POST') {
@@ -206,6 +249,10 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path.startsWith('/api/v1/groups/') && path.endsWith('/join-request') && method === 'POST') {
     const groupId = path.split('/')[4];
     return handleJoinGroupRequest(groupId, user, request, env);
+  }
+  if (path.startsWith('/api/v1/groups/') && path.endsWith('/leave') && (method === 'POST' || method === 'DELETE')) {
+    const groupId = path.split('/')[4];
+    return handleLeaveGroup(groupId, user, env);
   }
   if (path.startsWith('/api/v1/groups/') && path.endsWith('/members') && method === 'GET') {
     const groupId = path.split('/')[4];
@@ -288,15 +335,16 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/vote') && method === 'POST') {
     const proposalId = path.split('/')[5];
-    return handleVoteScheduleProposal(proposalId, user, request, env);
+    const body = await request.json() as { voteType?: string };
+    return handleUnifiedScheduleProposalVote(proposalId, user, env, body.voteType === 'AGAINST' ? 0 : 1);
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/approve') && method === 'POST') {
     const proposalId = path.split('/')[5];
-    return handleApproveScheduleProposal(proposalId, user, env);
+    return handleUnifiedScheduleProposalVote(proposalId, user, env, 1);
   }
   if (path.startsWith('/api/v1/schedule/proposals/') && path.endsWith('/reject') && method === 'POST') {
     const proposalId = path.split('/')[5];
-    return handleRejectScheduleProposal(proposalId, user, request, env);
+    return handleUnifiedScheduleProposalVote(proposalId, user, env, 0);
   }
   if ((path === '/api/v1/schedule/proposals' || (path.startsWith('/api/v1/schedule/') && path.endsWith('/proposals'))) && method === 'POST') {
     return handleProposeScheduleChange(user, request, env);
@@ -406,6 +454,10 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path === '/api/v1/events' && method === 'POST') {
     return handleCreateEvent(user, request, env);
   }
+  if (path.startsWith('/api/v1/events/') && path.endsWith('/dismiss') && method === 'POST') {
+    const eventId = path.split('/')[4];
+    return handleDismissSchoolAnnouncement(eventId, user, env);
+  }
   if (path.startsWith('/api/v1/events/')) {
     const eventId = path.split('/')[4];
     if (method === 'PUT' || method === 'PATCH' || method === 'POST') {
@@ -490,6 +542,14 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   if (path.startsWith('/api/v1/decisions/') && path.endsWith('/vote') && method === 'POST') {
     const decisionId = path.split('/')[4];
     return handleVoteCommunityDecision(decisionId, user, request, env);
+  }
+
+  // Private account notifications and self-service recovery-code rotation.
+  if (path === '/api/v1/notifications' && method === 'GET') {
+    return handleGetMyNotifications(user, env);
+  }
+  if (path === '/api/v1/me/recovery-code' && method === 'POST') {
+    return handleGenerateMyRecoveryCode(user, env);
   }
 
   // In-App Role Dashboards

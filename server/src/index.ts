@@ -4,6 +4,7 @@ import { checkRateLimit } from './middleware/rateLimit';
 import { errorResponse, jsonResponse } from './lib/response';
 import { getUserFromToken } from './middleware/auth';
 import { requireGroupMember } from './middleware/permissions';
+import { getGroupChatSendPermission } from './services/chat';
 import {
   renderLoginHtml,
   renderDashboardHtml,
@@ -18,6 +19,7 @@ import {
   handleEnableUser,
   handleRevokeUserSessions,
   handleReissueUserCredentials,
+  handleRevokeUserRecoveryCode,
   handleGetRoleRequests,
   handleApproveRoleRequest,
   handleRejectRoleRequest,
@@ -70,6 +72,13 @@ export default {
 
     const url = new URL(request.url);
 
+    // Apply the same per-IP request budget before WebSocket authentication/upgrade.
+    // Keeping this ahead of the upgrade path prevents unauthenticated handshake floods
+    // from bypassing the Worker-level limiter. Message sends still use the persisted
+    // per-user/per-group Durable Object quota in addition to this connection guard.
+    const rateLimitError = checkRateLimit(request);
+    if (rateLimitError) return rateLimitError;
+
     // WebSocket upgrade for Group Chat with strict authentication & membership validation
     if (url.pathname.startsWith('/ws/groups/') || url.pathname.startsWith('/wss/groups/')) {
       const groupId = url.pathname.split('/')[3];
@@ -96,6 +105,8 @@ export default {
           return memberCheck;
         }
 
+        const chatPermission = await getGroupChatSendPermission(groupId, user.userId, user.role, env);
+
         const gradeNameMap: Record<number, string> = {
           7: 'سابع', 8: 'ثامن', 9: 'تاسع', 10: 'أول ثانوي', 11: 'ثاني ثانوي', 12: 'ثالث ثانوي'
         };
@@ -108,6 +119,7 @@ export default {
         modifiedHeaders.set('X-User-Grade-Section', encodeURIComponent(gradeSection));
         modifiedHeaders.set('X-User-Role', user.role);
         modifiedHeaders.set('X-Group-Id', groupId);
+        modifiedHeaders.set('X-Can-Send', chatPermission.allowed ? '1' : '0');
 
         const doRequest = new Request(request.url, {
           headers: modifiedHeaders,
@@ -120,10 +132,6 @@ export default {
         return errorResponse('AUTH_ERROR', err?.message || 'خطأ أثناء مصادقة جلسة المحادثة', 500);
       }
     }
-
-    // Apply Rate Limiting
-    const rateLimitError = checkRateLimit(request);
-    if (rateLimitError) return rateLimitError;
 
     // Owner Dashboard HTML Pages & API Endpoints
     if (url.pathname === '/dashboard/login' && request.method === 'GET') {
@@ -171,6 +179,10 @@ export default {
       if (url.pathname.startsWith('/api/dashboard/users/') && url.pathname.endsWith('/revoke-sessions') && request.method === 'POST') {
         const userId = url.pathname.split('/')[4];
         return handleRevokeUserSessions(userId, auth.ownerId, request, env);
+      }
+      if (url.pathname.startsWith('/api/dashboard/users/') && url.pathname.endsWith('/revoke-recovery-code') && request.method === 'POST') {
+        const userId = url.pathname.split('/')[4];
+        return handleRevokeUserRecoveryCode(userId, auth.ownerId, request, env);
       }
       if (url.pathname.startsWith('/api/dashboard/users/') && url.pathname.endsWith('/reissue-credentials') && request.method === 'POST') {
         const userId = url.pathname.split('/')[4];

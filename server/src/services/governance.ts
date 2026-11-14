@@ -1,9 +1,151 @@
 import { Env, UserContext } from '../env';
+import { mapHomework, mapExam } from '../lib/mappers';
 import { generateId } from '../lib/ids';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
 import { Role, normalizeRole } from '../lib/roles';
+import { applyScheduleProposalToActiveSchedule } from './schedule';
+import { isValidIsoDate } from '../lib/validation';
+
+type CorrectionField = 'TITLE' | 'DESCRIPTION' | 'STUDY_DATE' | 'PAGE_NUMBERS';
+
+function normalizeCorrectionField(value: string): CorrectionField | null {
+  const normalized = value.trim().toUpperCase();
+  if (normalized === 'TITLE' || normalized === 'العنوان') return 'TITLE';
+  if (normalized === 'DESCRIPTION' || normalized === 'الوصف' || normalized === 'الشرح') return 'DESCRIPTION';
+  if (
+    normalized === 'STUDY_DATE' || normalized === 'STUDYDATE' ||
+    normalized === 'DATE' || normalized === 'التاريخ'
+  ) return 'STUDY_DATE';
+  if (
+    normalized === 'PAGE_NUMBERS' || normalized === 'ORDER' ||
+    normalized === 'الصفحات'
+  ) return 'PAGE_NUMBERS';
+  return null;
+}
+
+interface CorrectionApplication {
+  id: string;
+  content_id: string;
+  group_id: string;
+  field_name: string;
+  proposed_value: string;
+  status?: string;
+}
+
+/**
+ * Applies only correction fields with an implemented, group-scoped update.
+ * Both the content mutation and correction state transition run in one D1 batch.
+ */
+async function applyContentCorrection(
+  db: D1Database,
+  correction: CorrectionApplication,
+  reviewerId: string,
+  now: number
+): Promise<{ success: boolean; code?: string; message: string }> {
+  const field = normalizeCorrectionField(correction.field_name || '');
+  const value = correction.proposed_value?.trim();
+
+  if (!field) {
+    return {
+      success: false,
+      code: 'UNSUPPORTED_CORRECTION_FIELD',
+      message: 'حقل التصحيح غير مدعوم ولا يمكن اعتماده تلقائياً',
+    };
+  }
+
+  if (!value) {
+    return {
+      success: false,
+      code: 'INVALID_CORRECTION_VALUE',
+      message: 'القيمة المقترحة للتصحيح فارغة',
+    };
+  }
+
+  if (field === 'STUDY_DATE' && !isValidIsoDate(value)) {
+    return {
+      success: false,
+      code: 'INVALID_CORRECTION_VALUE',
+      message: 'تاريخ التصحيح غير صالح. استخدم تاريخاً تقويمياً بصيغة YYYY-MM-DD',
+    };
+  }
+
+  let updateSql: string;
+  let updateParams: unknown[];
+
+  if (field === 'TITLE') {
+    updateSql = `UPDATE contents
+      SET title = ?, updated_at = ?
+      WHERE id = ? AND group_id = ?
+        AND EXISTS (
+          SELECT 1 FROM content_corrections
+          WHERE id = ? AND group_id = ? AND status = 'PENDING'
+        )`;
+    updateParams = [value, now, correction.content_id, correction.group_id, correction.id, correction.group_id];
+  } else if (field === 'DESCRIPTION') {
+    updateSql = `UPDATE contents
+      SET description = ?, updated_at = ?
+      WHERE id = ? AND group_id = ?
+        AND EXISTS (
+          SELECT 1 FROM content_corrections
+          WHERE id = ? AND group_id = ? AND status = 'PENDING'
+        )`;
+    updateParams = [value, now, correction.content_id, correction.group_id, correction.id, correction.group_id];
+  } else if (field === 'STUDY_DATE') {
+    updateSql = `UPDATE contents
+      SET study_date = ?, updated_at = ?
+      WHERE id = ? AND group_id = ?
+        AND EXISTS (
+          SELECT 1 FROM content_corrections
+          WHERE id = ? AND group_id = ? AND status = 'PENDING'
+        )`;
+    updateParams = [value, now, correction.content_id, correction.group_id, correction.id, correction.group_id];
+  } else {
+    updateSql = `UPDATE contents
+      SET description = COALESCE(description, '') || ?, updated_at = ?
+      WHERE id = ? AND group_id = ?
+        AND EXISTS (
+          SELECT 1 FROM content_corrections
+          WHERE id = ? AND group_id = ? AND status = 'PENDING'
+        )`;
+    updateParams = [
+      `\n[أرقام الصفحات المصوبة: ${value}]`,
+      now,
+      correction.content_id,
+      correction.group_id,
+      correction.id,
+      correction.group_id,
+    ];
+  }
+
+  const results = await db.batch([
+    db.prepare(updateSql).bind(...updateParams),
+    db.prepare(
+      `UPDATE content_corrections
+       SET status = 'APPROVED', reviewed_by = ?, reviewed_at = ?
+       WHERE id = ? AND group_id = ? AND status = 'PENDING'
+         AND EXISTS (SELECT 1 FROM contents WHERE id = ? AND group_id = ?)`
+    ).bind(
+      reviewerId,
+      now,
+      correction.id,
+      correction.group_id,
+      correction.content_id,
+      correction.group_id
+    ),
+  ]);
+
+  if (results[1]?.meta?.changes !== 1) {
+    return {
+      success: false,
+      code: 'CORRECTION_NOT_APPLIED',
+      message: 'تعذر تطبيق التصحيح؛ ربما حُسم الطلب مسبقاً أو لم يعد المحتوى موجوداً في المجموعة',
+    };
+  }
+
+  return { success: true, message: 'تم تطبيق التصحيح واعتماده بنجاح' };
+}
 
 /**
  * -------------------------------------------------------------
@@ -40,8 +182,27 @@ export async function handleCreateContentCorrection(
     reason?: string;
   };
 
-  if (!body.fieldName || !body.proposedValue || !body.reason) {
+  if (
+    typeof body.fieldName !== 'string' ||
+    typeof body.proposedValue !== 'string' ||
+    !body.proposedValue.trim() ||
+    typeof body.reason !== 'string' ||
+    !body.reason.trim()
+  ) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد الحقل، القيمة المصوبة وسبب التعديل');
+  }
+
+  const correctionField = normalizeCorrectionField(body.fieldName);
+  if (!correctionField) {
+    return errorResponse(
+      'INVALID_CORRECTION_FIELD',
+      'الحقول القابلة للتصحيح حالياً هي العنوان والوصف وتاريخ الدرس وأرقام الصفحات فقط'
+    );
+  }
+
+  const proposedValue = body.proposedValue.trim();
+  if (correctionField === 'STUDY_DATE' && !isValidIsoDate(proposedValue)) {
+    return errorResponse('INVALID_CORRECTION_VALUE', 'تاريخ التصحيح غير صالح. استخدم الصيغة YYYY-MM-DD');
   }
 
   const corrId = generateId('cor');
@@ -56,9 +217,9 @@ export async function handleCreateContentCorrection(
     content.group_id,
     user.userId,
     user.fullName,
-    body.fieldName,
+    correctionField,
     body.originalValue || null,
-    body.proposedValue.trim(),
+    proposedValue,
     body.reason.trim(),
     'PENDING',
     now
@@ -100,14 +261,7 @@ export async function handleApproveCorrection(
 ): Promise<Response> {
   const corr = await env.DB.prepare(
     `SELECT * FROM content_corrections WHERE id = ?`
-  ).bind(correctionId).first<{
-    id: string;
-    content_id: string;
-    group_id: string;
-    field_name: string;
-    proposed_value: string;
-    status: string;
-  }>();
+  ).bind(correctionId).first<CorrectionApplication>();
 
   if (!corr) {
     return errorResponse('CORRECTION_NOT_FOUND', 'طلب التصحيح غير موجود', 404);
@@ -124,23 +278,11 @@ export async function handleApproveCorrection(
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية مراجعة وتطبيق التصحيحات', 403);
   }
 
-  const now = Date.now();
-  const normField = (corr.field_name || '').toUpperCase().trim();
-
-  // Apply to content table safely within group
-  if (normField === 'TITLE' || normField === 'العنوان') {
-    await env.DB.prepare(`UPDATE contents SET title = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-  } else if (normField === 'DESCRIPTION' || normField === 'الوصف' || normField === 'الشرح') {
-    await env.DB.prepare(`UPDATE contents SET description = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-  } else if (normField === 'STUDY_DATE' || normField === 'STUDYDATE' || normField === 'DATE' || normField === 'التاريخ') {
-    await env.DB.prepare(`UPDATE contents SET study_date = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-  } else if (normField === 'PAGE_NUMBERS' || normField === 'ORDER' || normField === 'الصفحات') {
-    await env.DB.prepare(`UPDATE contents SET description = description || ' \n[أرقام الصفحات المصوبة: ' || ? || ']', updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
+  const result = await applyContentCorrection(env.DB, corr, user.userId, Date.now());
+  if (!result.success) {
+    const status = result.code === 'UNSUPPORTED_CORRECTION_FIELD' || result.code === 'INVALID_CORRECTION_VALUE' ? 400 : 409;
+    return errorResponse(result.code || 'CORRECTION_NOT_APPLIED', result.message, status);
   }
-
-  await env.DB.prepare(
-    `UPDATE content_corrections SET status = 'APPROVED', reviewed_by = ?, reviewed_at = ? WHERE id = ? AND group_id = ?`
-  ).bind(user.userId, now, correctionId, corr.group_id).run();
 
   return jsonResponse({
     success: true,
@@ -173,9 +315,15 @@ export async function handleRejectCorrection(
   }
 
   const now = Date.now();
-  await env.DB.prepare(
-    `UPDATE content_corrections SET status = 'REJECTED', reviewed_by = ?, reviewed_at = ? WHERE id = ? AND group_id = ?`
+  const rejection = await env.DB.prepare(
+    `UPDATE content_corrections
+     SET status = 'REJECTED', reviewed_by = ?, reviewed_at = ?
+     WHERE id = ? AND group_id = ? AND status = 'PENDING'`
   ).bind(user.userId, now, correctionId, corr.group_id).run();
+
+  if (rejection.meta?.changes !== 1) {
+    return errorResponse('CORRECTION_RESOLVED', 'تم حسم طلب التصحيح مسبقاً');
+  }
 
   return jsonResponse({
     success: true,
@@ -210,7 +358,7 @@ export async function applyDecisionExecution(
   groupId: string,
   actorId: string,
   env: Env
-): Promise<{ success: boolean; message: string }> {
+): Promise<{ success: boolean; message: string; conflict?: boolean }> {
   const now = Date.now();
   const normType = requestType.toUpperCase();
 
@@ -220,55 +368,145 @@ export async function applyDecisionExecution(
 
   try {
     if (normType === 'DELETION' || normType === 'CONTENT_DELETION') {
-      await env.DB.prepare(`DELETE FROM content_media WHERE content_id IN (SELECT id FROM contents WHERE id = ? AND group_id = ?)`).bind(targetId, groupId).run();
-      await env.DB.prepare(`DELETE FROM content_corrections WHERE content_id = ? AND group_id = ?`).bind(targetId, groupId).run();
-      await env.DB.prepare(`DELETE FROM contents WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
-      await env.DB.prepare(`DELETE FROM homeworks WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
-      await env.DB.prepare(`DELETE FROM exams WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
-      await env.DB.prepare(`DELETE FROM issues WHERE id = ? AND group_id = ?`).bind(targetId, groupId).run();
+      type DeletionTargetType = 'CONTENT' | 'HOMEWORK' | 'EXAM' | 'ISSUE';
+      const decisionMeta = await env.DB.prepare(
+        `SELECT description FROM community_decisions WHERE id = ? AND group_id = ?`
+      ).bind(decisionId, groupId).first<{ description: string | null }>();
+
+      let declaredTargetType: string | null = null;
+      if (decisionMeta?.description) {
+        try {
+          const parsed = JSON.parse(decisionMeta.description);
+          if (parsed && typeof parsed.targetType === 'string') {
+            declaredTargetType = parsed.targetType;
+          }
+        } catch {
+          // Older decisions stored plain-text descriptions and need safe type resolution below.
+        }
+      }
+
+      const targetQueries: Record<DeletionTargetType, string> = {
+        CONTENT: `SELECT id FROM contents WHERE id = ? AND group_id = ?`,
+        HOMEWORK: `SELECT id FROM homeworks WHERE id = ? AND group_id = ?`,
+        EXAM: `SELECT id FROM exams WHERE id = ? AND group_id = ?`,
+        ISSUE: `SELECT id FROM issues WHERE id = ? AND group_id = ?`,
+      };
+      const allTargetTypes: DeletionTargetType[] = ['CONTENT', 'HOMEWORK', 'EXAM', 'ISSUE'];
+
+      if (declaredTargetType && !allTargetTypes.includes(declaredTargetType as DeletionTargetType)) {
+        return { success: false, message: 'نوع المورد المسجل في قرار الحذف غير معروف؛ أوقفنا التنفيذ لحماية البيانات' };
+      }
+
+      const candidates = declaredTargetType
+        ? [declaredTargetType as DeletionTargetType]
+        : allTargetTypes;
+
+      const matches: DeletionTargetType[] = [];
+      for (const candidate of candidates) {
+        const target = await env.DB.prepare(targetQueries[candidate])
+          .bind(targetId, groupId)
+          .first<{ id: string }>();
+        if (target) matches.push(candidate);
+      }
+
+      if (matches.length === 0) {
+        return { success: false, message: 'المورد المستهدف للحذف لم يعد موجوداً في هذه المجموعة' };
+      }
+      if (matches.length > 1) {
+        return {
+          success: false,
+          message: 'معرّف المورد يطابق أكثر من نوع في المجموعة. أوقفنا الحذف لتجنب حذف بيانات أخرى.',
+        };
+      }
+
+      // Each parent table has ON DELETE CASCADE for its owned child records.
+      // Delete exactly one typed resource; never run the same ID against every table.
+      const deleteResult = await env.DB.prepare(
+        `DELETE FROM ${matches[0] === 'CONTENT' ? 'contents' :
+          matches[0] === 'HOMEWORK' ? 'homeworks' :
+          matches[0] === 'EXAM' ? 'exams' : 'issues'}
+         WHERE id = ? AND group_id = ?`
+      ).bind(targetId, groupId).run();
+
+      if (deleteResult.meta?.changes !== 1) {
+        return {
+          success: false,
+          message: 'تغيرت حالة المورد قبل الحذف. لم نكمل العملية، أعد تحميل القرار وحاول مجدداً.',
+        };
+      }
     } else if (normType === 'CORRECTION') {
       const corr = await env.DB.prepare(
         `SELECT * FROM content_corrections WHERE id = ? AND group_id = ?`
-      ).bind(targetId, groupId).first<{
-        content_id: string;
-        group_id: string;
-        field_name: string;
-        proposed_value: string;
-      }>();
-      if (corr) {
-        const normField = (corr.field_name || '').toUpperCase().trim();
-        if (normField === 'TITLE' || normField === 'العنوان') {
-          await env.DB.prepare(`UPDATE contents SET title = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-        } else if (normField === 'DESCRIPTION' || normField === 'الوصف' || normField === 'الشرح') {
-          await env.DB.prepare(`UPDATE contents SET description = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-        } else if (normField === 'STUDY_DATE' || normField === 'STUDYDATE' || normField === 'DATE' || normField === 'التاريخ') {
-          await env.DB.prepare(`UPDATE contents SET study_date = ?, updated_at = ? WHERE id = ? AND group_id = ?`).bind(corr.proposed_value, now, corr.content_id, corr.group_id).run();
-        }
-        await env.DB.prepare(
-          `UPDATE content_corrections SET status = 'APPROVED', reviewed_by = 'COMMUNITY_CONSENSUS', reviewed_at = ? WHERE id = ? AND group_id = ?`
-        ).bind(now, targetId, groupId).run();
+      ).bind(targetId, groupId).first<CorrectionApplication>();
+
+      if (!corr) {
+        return { success: false, message: 'طلب التصحيح المرتبط بالقرار لم يعد موجوداً في هذه المجموعة' };
+      }
+      if (corr.status !== 'PENDING') {
+        return { success: false, message: 'طلب التصحيح لم يعد في حالة تسمح بتطبيقه' };
+      }
+
+      const correctionResult = await applyContentCorrection(
+        env.DB,
+        corr,
+        actorId || 'COMMUNITY_CONSENSUS',
+        now
+      );
+
+      if (!correctionResult.success) {
+        return {
+          success: false,
+          message: correctionResult.message,
+        };
       }
     } else if (normType === 'SCHEDULE' || normType === 'SCHEDULE_CHANGE') {
       const prop = await env.DB.prepare(
-        `SELECT * FROM schedule_proposals WHERE id = ? AND group_id = ?`
+        `SELECT id, group_id, day_of_week, slot_order, old_subject_id, new_subject_id, status, proposed_by
+         FROM schedule_proposals WHERE id = ? AND group_id = ?`
       ).bind(targetId, groupId).first<{
+        id: string;
         group_id: string;
         day_of_week: number;
         slot_order: number;
+        old_subject_id: string | null;
         new_subject_id: string;
+        status: string;
+        proposed_by: string;
       }>();
-      if (prop) {
-        const activeVer = await env.DB.prepare(
-          `SELECT id, version_number FROM schedule_versions WHERE group_id = ? AND is_active = 1 ORDER BY version_number DESC LIMIT 1`
-        ).bind(prop.group_id).first<{ id: string; version_number: number }>();
-        if (activeVer) {
+
+      if (!prop) {
+        await env.DB.prepare(
+          `UPDATE community_decisions SET status = 'REJECTED' WHERE id = ? AND group_id = ?`
+        ).bind(decisionId, groupId).run();
+        return { success: false, message: 'مقترح الجدول المرتبط بهذا القرار لم يعد موجوداً' };
+      }
+
+      if (prop.status !== 'PENDING' && prop.status !== 'ACCEPTED') {
+        await env.DB.prepare(
+          `UPDATE community_decisions SET status = 'REJECTED' WHERE id = ? AND group_id = ?`
+        ).bind(decisionId, groupId).run();
+        return { success: false, message: 'مقترح الجدول لم يعد في حالة تسمح باعتماده' };
+      }
+
+      // Reuse the schedule service's versioned, conflict-aware application path.
+      // This avoids writing non-existent review columns and preserves schedule history.
+      const scheduleResult = await applyScheduleProposalToActiveSchedule(
+        prop,
+        actorId || 'COMMUNITY_CONSENSUS',
+        env
+      );
+
+      if (!scheduleResult.success) {
+        if (scheduleResult.conflict) {
           await env.DB.prepare(
-            `UPDATE schedule_slots SET subject_id = ? WHERE version_id = ? AND day_of_week = ? AND slot_order = ?`
-          ).bind(prop.new_subject_id, activeVer.id, prop.day_of_week, prop.slot_order).run();
-          await env.DB.prepare(
-            `UPDATE schedule_proposals SET status = 'ACCEPTED', reviewed_by = 'COMMUNITY_CONSENSUS', reviewed_at = ? WHERE id = ? AND group_id = ?`
-          ).bind(now, targetId, groupId).run();
+            `UPDATE community_decisions SET status = 'REJECTED' WHERE id = ? AND group_id = ?`
+          ).bind(decisionId, groupId).run();
         }
+        return {
+          success: false,
+          conflict: scheduleResult.conflict,
+          message: scheduleResult.message,
+        };
       }
     } else if (normType === 'VERIFICATION' || normType === 'OFFICIAL_VERIFICATION') {
       await env.DB.prepare(
@@ -324,15 +562,31 @@ export async function handleCreateCommunityDecision(
     );
   }
 
-  // Strict Cross-group isolation: Verify targetId belongs to groupId
+  // Strict cross-group isolation and unambiguous resource typing for deletion decisions.
+  let deletionTargetType: 'CONTENT' | 'HOMEWORK' | 'EXAM' | 'ISSUE' | null = null;
   if (normType === 'DELETION' || normType === 'CONTENT_DELETION') {
-    const content = await env.DB.prepare(`SELECT id FROM contents WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first();
-    const hw = !content ? await env.DB.prepare(`SELECT id FROM homeworks WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first() : null;
-    const exam = (!content && !hw) ? await env.DB.prepare(`SELECT id FROM exams WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first() : null;
-    const issue = (!content && !hw && !exam) ? await env.DB.prepare(`SELECT id FROM issues WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first() : null;
-    if (!content && !hw && !exam && !issue) {
+    const candidates = await Promise.all([
+      env.DB.prepare(`SELECT id FROM contents WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first(),
+      env.DB.prepare(`SELECT id FROM homeworks WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first(),
+      env.DB.prepare(`SELECT id FROM exams WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first(),
+      env.DB.prepare(`SELECT id FROM issues WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first(),
+    ]);
+
+    const matches = (['CONTENT', 'HOMEWORK', 'EXAM', 'ISSUE'] as const)
+      .filter((_, index) => Boolean(candidates[index]));
+
+    if (matches.length === 0) {
       return errorResponse('TARGET_NOT_FOUND', 'المورد المستهدف للحذف غير موجود أو لا ينتمي إلى هذه المجموعة', 404);
     }
+    if (matches.length > 1) {
+      return errorResponse(
+        'AMBIGUOUS_DELETE_TARGET',
+        'معرّف المورد مستخدم لأكثر من نوع داخل المجموعة. حدّد المورد المقصود بمعرّف مستقل قبل إنشاء قرار الحذف.',
+        409
+      );
+    }
+
+    deletionTargetType = matches[0];
   } else if (normType === 'CORRECTION') {
     const corr = await env.DB.prepare(`SELECT id FROM content_corrections WHERE id = ? AND group_id = ?`).bind(body.targetId, groupId).first();
     if (!corr) {
@@ -392,6 +646,7 @@ export async function handleCreateCommunityDecision(
   const metaPackage = JSON.stringify({
     text: body.description?.trim() || '',
     voters: eligibleVoterIds,
+    targetType: deletionTargetType,
   });
 
   await env.DB.prepare(
@@ -423,7 +678,18 @@ export async function handleCreateCommunityDecision(
 
   // If only 1 voter in the entire group, auto-apply immediately
   if (totalEligible <= 1) {
-    await applyDecisionExecution(decisionId, normType, body.targetId, groupId, user.userId, env);
+    const execution = await applyDecisionExecution(decisionId, normType, body.targetId, groupId, user.userId, env);
+    if (!execution.success) {
+      await env.DB.prepare(
+        `UPDATE community_decisions SET votes_for = 1, votes_against = 0, status = ? WHERE id = ?`
+      ).bind(execution.conflict ? 'REJECTED' : 'PENDING', decisionId).run();
+      return errorResponse(
+        execution.conflict ? 'SCHEDULE_CONFLICT' : 'DECISION_EXECUTION_FAILED',
+        execution.message,
+        execution.conflict ? 409 : 500
+      );
+    }
+
     return jsonResponse({
       success: true,
       decisionId,
@@ -450,10 +716,40 @@ export async function handleGetCommunityDecisions(
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
 
+  const now = Date.now();
+  await env.DB.prepare(
+    `UPDATE community_decisions
+     SET status = 'EXPIRED'
+     WHERE group_id = ? AND status = 'PENDING'
+       AND expires_at IS NOT NULL AND expires_at < ?`
+  ).bind(groupId, now).run();
+  await env.DB.prepare(
+    `UPDATE schedule_proposals
+     SET status = 'EXPIRED'
+     WHERE group_id = ? AND status = 'PENDING'
+       AND id IN (
+         SELECT target_id FROM community_decisions
+         WHERE group_id = ? AND request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE') AND status = 'EXPIRED'
+       )`
+  ).bind(groupId, groupId).run();
+
   const decisions = await env.DB.prepare(
     `SELECT cd.*,
-            (SELECT vote_choice FROM community_votes cv WHERE cv.decision_id = cd.id AND cv.user_id = ?) as my_vote
+            (SELECT vote_choice FROM community_votes cv WHERE cv.decision_id = cd.id AND cv.user_id = ?) as my_vote,
+            sp.day_of_week AS schedule_day_of_week,
+            sp.slot_order AS schedule_slot_order,
+            sp.old_subject_id AS schedule_old_subject_id,
+            sp.new_subject_id AS schedule_new_subject_id,
+            COALESCE(s_old.name_ar, sp.old_subject_id) AS schedule_old_subject_name,
+            COALESCE(s_new.name_ar, sp.new_subject_id) AS schedule_new_subject_name,
+            COALESCE(s_new.icon, '📚') AS schedule_new_subject_icon
      FROM community_decisions cd
+     LEFT JOIN schedule_proposals sp
+       ON sp.id = cd.target_id
+      AND sp.group_id = cd.group_id
+      AND cd.request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')
+     LEFT JOIN subjects s_old ON s_old.id = sp.old_subject_id
+     LEFT JOIN subjects s_new ON s_new.id = sp.new_subject_id
      WHERE cd.group_id = ?
      ORDER BY CASE WHEN cd.status = 'PENDING' THEN 0 ELSE 1 END, cd.created_at DESC`
   ).bind(user.userId, groupId).all();
@@ -461,13 +757,31 @@ export async function handleGetCommunityDecisions(
   return jsonResponse({
     success: true,
     decisions: (decisions.results || []).map((d: any) => {
-      let descText = d.description || '';
+      let reasonText = d.description || '';
       try {
-        if (descText.startsWith('{')) {
-          const parsed = JSON.parse(descText);
-          descText = parsed.text || '';
+        if (reasonText.startsWith('{')) {
+          const parsed = JSON.parse(reasonText);
+          reasonText = typeof parsed.text === 'string' ? parsed.text : '';
         }
       } catch {}
+
+      let descText = reasonText;
+      if (
+        (d.request_type === 'SCHEDULE' || d.request_type === 'SCHEDULE_CHANGE') &&
+        d.schedule_slot_order !== null &&
+        d.schedule_slot_order !== undefined
+      ) {
+        const dayNames = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'];
+        const dayName = dayNames[Number(d.schedule_day_of_week)] || 'يوم دراسي';
+        const oldSubject = d.schedule_old_subject_name || d.schedule_old_subject_id || 'فارغة';
+        const newSubject = d.schedule_new_subject_name || d.schedule_new_subject_id || 'مادة غير محددة';
+        const newIcon = d.schedule_new_subject_icon || '📚';
+        descText = [
+          `اليوم: ${dayName} • الحصة: ${d.schedule_slot_order}`,
+          `المادة الحالية: ${oldSubject} ← المادة المقترحة: ${newIcon} ${newSubject}`,
+          reasonText ? `السبب: ${reasonText}` : '',
+        ].filter(Boolean).join(' • ');
+      }
 
       return {
         id: d.id,
@@ -517,13 +831,33 @@ export async function handleVoteCommunityDecision(
     return errorResponse('DECISION_NOT_FOUND', 'القرار الجماعي غير موجود', 404);
   }
 
+  // Do not allow a non-member who guessed a decision ID to mutate its expiry state.
+  const memberCheck = await requireGroupMember(user, decision.group_id, env.DB);
+  if (memberCheck) return memberCheck;
+
   if (decision.status !== 'PENDING') {
     return errorResponse('DECISION_CLOSED', 'تم إغلاق التصويت على هذا القرار');
   }
 
-  // Check expiration
+  // Expire the decision and its linked schedule proposal together.
   if (decision.expires_at && decision.expires_at < Date.now()) {
-    await env.DB.prepare(`UPDATE community_decisions SET status = 'EXPIRED' WHERE id = ?`).bind(decisionId).run();
+    if (decision.request_type === 'SCHEDULE' || decision.request_type === 'SCHEDULE_CHANGE') {
+      await env.DB.batch([
+        env.DB.prepare(
+          `UPDATE community_decisions SET status = 'EXPIRED'
+           WHERE id = ? AND group_id = ? AND status = 'PENDING'`
+        ).bind(decisionId, decision.group_id),
+        env.DB.prepare(
+          `UPDATE schedule_proposals SET status = 'EXPIRED'
+           WHERE id = ? AND group_id = ? AND status = 'PENDING'`
+        ).bind(decision.target_id, decision.group_id),
+      ]);
+    } else {
+      await env.DB.prepare(
+        `UPDATE community_decisions SET status = 'EXPIRED'
+         WHERE id = ? AND group_id = ? AND status = 'PENDING'`
+      ).bind(decisionId, decision.group_id).run();
+    }
     return errorResponse('DECISION_EXPIRED', 'انتهت المهلة المحددة للتصويت على هذا القرار', 410);
   }
 
@@ -545,9 +879,6 @@ export async function handleVoteCommunityDecision(
       403
     );
   }
-
-  const memberCheck = await requireGroupMember(user, decision.group_id, env.DB);
-  if (memberCheck) return memberCheck;
 
   const body = await request.json() as { voteChoice: number }; // 1 = For, 0 = Against
   const choice = body.voteChoice === 1 ? 1 : 0;
@@ -578,7 +909,29 @@ export async function handleVoteCommunityDecision(
 
   if (vFor >= requiredVotes && vFor > vAgainst) {
     // Quorum reached with strict majority -> Execute automated outcome
-    await applyDecisionExecution(decisionId, decision.request_type, decision.target_id, decision.group_id, user.userId, env);
+    const execution = await applyDecisionExecution(
+      decisionId,
+      decision.request_type,
+      decision.target_id,
+      decision.group_id,
+      user.userId,
+      env
+    );
+
+    if (!execution.success) {
+      // The vote is durable even when applying the resulting action fails.
+      // Persist the latest counters but keep the decision pending so it can be retried.
+      await env.DB.prepare(
+        `UPDATE community_decisions SET votes_for = ?, votes_against = ?, status = ? WHERE id = ?`
+      ).bind(vFor, vAgainst, execution.conflict ? 'REJECTED' : 'PENDING', decisionId).run();
+
+      return errorResponse(
+        execution.conflict ? 'SCHEDULE_CONFLICT' : 'DECISION_EXECUTION_FAILED',
+        execution.message,
+        execution.conflict ? 409 : 500
+      );
+    }
+
     newStatus = 'APPLIED';
     appliedMsg = ' — واكتمل النصاب وتم اعتماد وتطبيق القرار تلقائياً بنجاح ✨';
   } else if (vAgainst > (decision.total_eligible_voters - requiredVotes) || (vFor + vAgainst >= decision.total_eligible_voters && vFor <= vAgainst)) {
@@ -593,6 +946,15 @@ export async function handleVoteCommunityDecision(
   await env.DB.prepare(
     `UPDATE community_decisions SET votes_for = ?, votes_against = ?, status = ? WHERE id = ?`
   ).bind(vFor, vAgainst, newStatus, decisionId).run();
+
+  if (decision.request_type === 'SCHEDULE' || decision.request_type === 'SCHEDULE_CHANGE') {
+    const scheduleStatus = newStatus === 'APPLIED' ? 'ACCEPTED' : newStatus;
+    await env.DB.prepare(
+      `UPDATE schedule_proposals
+       SET status = ?, votes_for = ?, votes_against = ?
+       WHERE id = ? AND group_id = ?`
+    ).bind(scheduleStatus, vFor, vAgainst, decision.target_id, decision.group_id).run();
+  }
 
   return jsonResponse({
     success: true,
@@ -612,7 +974,7 @@ export async function handleVoteCommunityDecision(
 // Teacher Teaching Center
 export async function handleGetTeacherDashboardData(user: UserContext, env: Env): Promise<Response> {
   const normRole = normalizeRole(user.role);
-  if (normRole !== Role.TEACHER && normRole !== Role.ADMIN && normRole !== Role.SYSTEM_OWNER) {
+  if (normRole !== Role.TEACHER && normRole !== Role.ADMIN) {
     return errorResponse('FORBIDDEN', 'هذا المركز مخصص للأساتذة المعتمدين', 403);
   }
 
@@ -629,11 +991,21 @@ export async function handleGetTeacherDashboardData(user: UserContext, env: Env)
   ).bind(user.userId).first<{ count: number }>();
 
   const myRecentHomeworks = await env.DB.prepare(
-    `SELECT h.*, s.name_ar as subject_name FROM homeworks h LEFT JOIN subjects s ON h.subject_id = s.id WHERE h.created_by = ? ORDER BY h.created_at DESC LIMIT 5`
+    `SELECT h.*, COALESCE(s.name_ar, h.subject_id) as subject_name,
+            COALESCE(s.icon, '📝') as subject_icon, s.color_hex
+     FROM homeworks h
+     LEFT JOIN subjects s ON h.subject_id = s.id
+     WHERE h.created_by = ? AND h.is_official = 1
+     ORDER BY h.created_at DESC LIMIT 50`
   ).bind(user.userId).all();
 
   const myRecentExams = await env.DB.prepare(
-    `SELECT e.*, s.name_ar as subject_name FROM exams e LEFT JOIN subjects s ON e.subject_id = s.id WHERE e.created_by = ? ORDER BY e.created_at DESC LIMIT 5`
+    `SELECT e.*, COALESCE(s.name_ar, e.subject_id) as subject_name,
+            COALESCE(s.icon, '🔴') as subject_icon, s.color_hex
+     FROM exams e
+     LEFT JOIN subjects s ON e.subject_id = s.id
+     WHERE e.created_by = ? AND e.is_official = 1
+     ORDER BY e.created_at DESC LIMIT 50`
   ).bind(user.userId).all();
 
   return jsonResponse({
@@ -649,8 +1021,8 @@ export async function handleGetTeacherDashboardData(user: UserContext, env: Env)
       officialExamsCount: officialExamsCount?.count || 0,
       teacherAnswersCount: teacherAnswersCount?.count || 0,
     },
-    recentHomeworks: myRecentHomeworks.results || [],
-    recentExams: myRecentExams.results || [],
+    recentHomeworks: (myRecentHomeworks.results || []).map(mapHomework),
+    recentExams: (myRecentExams.results || []).map(mapExam),
   });
 }
 
@@ -701,21 +1073,107 @@ export async function handleGetAdminDashboardData(user: UserContext, env: Env): 
     return errorResponse('FORBIDDEN', 'هذا المركز مخصص لمدير المدرسة', 403);
   }
 
-  const totalUsers = await env.DB.prepare(`SELECT COUNT(*) as count FROM users`).first<{ count: number }>();
-  const totalTeachers = await env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'TEACHER'`).first<{ count: number }>();
-  const totalModerators = await env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'MODERATOR'`).first<{ count: number }>();
-  const totalGroups = await env.DB.prepare(`SELECT COUNT(*) as count FROM groups`).first<{ count: number }>();
-  const totalLessons = await env.DB.prepare(`SELECT COUNT(*) as count FROM contents`).first<{ count: number }>();
-  const totalHomeworks = await env.DB.prepare(`SELECT COUNT(*) as count FROM homeworks`).first<{ count: number }>();
-  const totalExams = await env.DB.prepare(`SELECT COUNT(*) as count FROM exams`).first<{ count: number }>();
+  // Resolve one effective school role per account from global role and active group roles.
+  // System Owner is deliberately excluded from all user directories.
+  const roleCte = `WITH active_memberships AS (
+      SELECT gm.user_id,
+             MAX(CASE WHEN UPPER(gm.role) IN ('ADMIN', 'ADMINISTRATOR') THEN 4
+                      WHEN UPPER(gm.role) IN ('TEACHER', 'VERIFIED_TEACHER') THEN 3
+                      WHEN UPPER(gm.role) = 'MODERATOR' THEN 2 ELSE 1 END) AS group_rank,
+             COUNT(DISTINCT gm.group_id) AS active_group_count
+      FROM group_members gm
+      WHERE gm.status = 'ACTIVE'
+      GROUP BY gm.user_id
+    ),
+    scoped_users AS (
+      SELECT u.id, u.full_name, u.phone_number, u.grade_id, u.section_id,
+             COALESCE(u.status, 'ACTIVE') AS status, u.last_seen, u.created_at,
+             CASE
+               WHEN CASE WHEN UPPER(u.role) IN ('ADMIN', 'ADMINISTRATOR') THEN 4
+                         WHEN UPPER(u.role) IN ('TEACHER', 'VERIFIED_TEACHER') THEN 3
+                         WHEN UPPER(u.role) = 'MODERATOR' THEN 2 ELSE 1 END >= COALESCE(am.group_rank, 1)
+               THEN CASE WHEN UPPER(u.role) IN ('ADMIN', 'ADMINISTRATOR') THEN 4
+                         WHEN UPPER(u.role) IN ('TEACHER', 'VERIFIED_TEACHER') THEN 3
+                         WHEN UPPER(u.role) = 'MODERATOR' THEN 2 ELSE 1 END
+               ELSE COALESCE(am.group_rank, 1)
+             END AS role_rank,
+             COALESCE(am.active_group_count, 0) AS active_group_count
+      FROM users u
+      LEFT JOIN active_memberships am ON am.user_id = u.id
+      WHERE UPPER(u.role) NOT IN ('SYSTEM_OWNER', 'OWNER')
+    )`;
 
-  const teachersList = await env.DB.prepare(
-    `SELECT id, full_name, phone_number, role, grade_id, section_id FROM users WHERE role = 'TEACHER' LIMIT 20`
-  ).all();
-
-  const moderatorsList = await env.DB.prepare(
-    `SELECT id, full_name, phone_number, role, grade_id, section_id FROM users WHERE role = 'MODERATOR' LIMIT 20`
-  ).all();
+  const [
+    counts,
+    teachersList,
+    moderatorsList,
+    studentsList,
+    adminsList,
+    totalGroups,
+    totalLessons,
+    totalHomeworks,
+    totalExams,
+    totalEvents,
+    totalAnnouncements,
+    totalIssues,
+    totalActiveMemberships,
+    mediaStats,
+  ] = await Promise.all([
+    env.DB.prepare(`${roleCte}
+      SELECT COUNT(*) AS total_users,
+             SUM(CASE WHEN role_rank = 1 THEN 1 ELSE 0 END) AS total_students,
+             SUM(CASE WHEN role_rank = 2 THEN 1 ELSE 0 END) AS total_moderators,
+             SUM(CASE WHEN role_rank = 3 THEN 1 ELSE 0 END) AS total_teachers,
+             SUM(CASE WHEN role_rank = 4 THEN 1 ELSE 0 END) AS total_admins,
+             SUM(CASE WHEN UPPER(status) = 'DISABLED' THEN 1 ELSE 0 END) AS total_disabled_users
+      FROM scoped_users`).first<{
+        total_users: number;
+        total_students: number;
+        total_moderators: number;
+        total_teachers: number;
+        total_admins: number;
+        total_disabled_users: number;
+      }>(),
+    env.DB.prepare(`${roleCte}
+      SELECT id, full_name, phone_number, 'TEACHER' AS role, grade_id, section_id,
+             active_group_count, status, last_seen, created_at
+      FROM scoped_users
+      WHERE role_rank = 3
+      ORDER BY full_name COLLATE NOCASE
+      LIMIT 500`).all(),
+    env.DB.prepare(`${roleCte}
+      SELECT id, full_name, phone_number, 'MODERATOR' AS role, grade_id, section_id,
+             active_group_count, status, last_seen, created_at
+      FROM scoped_users
+      WHERE role_rank = 2
+      ORDER BY full_name COLLATE NOCASE
+      LIMIT 500`).all(),
+    env.DB.prepare(`${roleCte}
+      SELECT id, full_name, phone_number, 'STUDENT' AS role, grade_id, section_id,
+             active_group_count, status, last_seen, created_at
+      FROM scoped_users
+      WHERE role_rank = 1
+      ORDER BY full_name COLLATE NOCASE
+      LIMIT 1000`).all(),
+    env.DB.prepare(`${roleCte}
+      SELECT id, full_name, phone_number, 'ADMIN' AS role, grade_id, section_id,
+             active_group_count, status, last_seen, created_at
+      FROM scoped_users
+      WHERE role_rank = 4
+      ORDER BY full_name COLLATE NOCASE
+      LIMIT 200`).all(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM groups`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM contents`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM homeworks`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM exams`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM events`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM events
+      WHERE group_id = 'all' AND UPPER(category) = 'ANNOUNCEMENT'`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM issues`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM group_members WHERE status = 'ACTIVE'`).first<{ count: number }>(),
+    env.DB.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(file_size), 0) AS bytes
+      FROM media_blobs`).first<{ count: number; bytes: number }>(),
+  ]);
 
   return jsonResponse({
     success: true,
@@ -725,15 +1183,26 @@ export async function handleGetAdminDashboardData(user: UserContext, env: Env): 
       adminPhone: user.phoneNumber,
     },
     stats: {
-      totalUsers: totalUsers?.count || 0,
-      totalTeachers: totalTeachers?.count || 0,
-      totalModerators: totalModerators?.count || 0,
+      totalUsers: counts?.total_users || 0,
+      totalStudents: counts?.total_students || 0,
+      totalTeachers: counts?.total_teachers || 0,
+      totalModerators: counts?.total_moderators || 0,
+      totalAdmins: counts?.total_admins || 0,
+      totalDisabledUsers: counts?.total_disabled_users || 0,
       totalGroups: totalGroups?.count || 0,
+      totalActiveMemberships: totalActiveMemberships?.count || 0,
       totalLessons: totalLessons?.count || 0,
       totalHomeworks: totalHomeworks?.count || 0,
       totalExams: totalExams?.count || 0,
+      totalEvents: totalEvents?.count || 0,
+      totalAnnouncements: totalAnnouncements?.count || 0,
+      totalIssues: totalIssues?.count || 0,
+      totalMedia: mediaStats?.count || 0,
+      totalMediaBytes: mediaStats?.bytes || 0,
     },
     teachers: teachersList.results || [],
     moderators: moderatorsList.results || [],
+    students: studentsList.results || [],
+    admins: adminsList.results || [],
   });
 }

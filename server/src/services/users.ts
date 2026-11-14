@@ -38,6 +38,7 @@ export async function handleGetProfile(user: UserContext, env: Env): Promise<Res
       gradeName: gradeNameMap[user.gradeId] || `الصف ${user.gradeId}`,
       sectionId: user.sectionId,
       role: sanitizePublicRole(user.role),
+      defaultGroupId: `class_${user.gradeId}_${user.sectionId}`,
       stats: {
         lessonsCount: contributions?.lessons_count || 0,
         homeworksCount: contributions?.homeworks_count || 0,
@@ -181,5 +182,136 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
       role: sanitizePublicRole(user.role),
       defaultGroupId: `class_${user.gradeId}_${user.sectionId}`,
     },
+  });
+}
+
+/**
+ * Resolve the highest active school role for one account, across its global role and
+ * all active group memberships. This mirrors the ranking used by the admin directory.
+ */
+async function getEffectiveSchoolRoleRank(targetUserId: string, env: Env): Promise<number | null> {
+  const result = await env.DB.prepare(
+    `SELECT MAX(CASE
+        WHEN UPPER(u.role) IN ('ADMIN', 'ADMINISTRATOR') THEN 4
+        WHEN UPPER(u.role) IN ('TEACHER', 'VERIFIED_TEACHER') THEN 3
+        WHEN UPPER(u.role) = 'MODERATOR' THEN 2
+        WHEN UPPER(gm.role) IN ('ADMIN', 'ADMINISTRATOR') THEN 4
+        WHEN UPPER(gm.role) IN ('TEACHER', 'VERIFIED_TEACHER') THEN 3
+        WHEN UPPER(gm.role) = 'MODERATOR' THEN 2
+        ELSE 1
+      END) AS role_rank
+     FROM users u
+     LEFT JOIN group_members gm ON gm.user_id = u.id AND gm.status = 'ACTIVE'
+     WHERE u.id = ?
+     GROUP BY u.id`
+  ).bind(targetUserId).first<{ role_rank: number }>();
+  return result ? Number(result.role_rank) : null;
+}
+/**
+ * School admins may freeze or reactivate student accounts. Staff, admins, and the
+ * concealed system owner are deliberately outside this lower-privilege operation.
+ */
+export async function handleUpdateSchoolStudentStatus(
+  targetUserId: string,
+  user: UserContext,
+  request: Request,
+  env: Env
+): Promise<Response> {
+  if (normalizeRole(user.role) !== Role.ADMIN) {
+    return errorResponse('FORBIDDEN', 'تغيير حالة الحسابات متاح لمدير المدرسة فقط', 403);
+  }
+  if (!targetUserId || targetUserId === user.userId) {
+    return errorResponse('INVALID_ACTION', 'لا يمكنك تغيير حالة حسابك من هذه اللوحة', 400);
+  }
+
+  let requestedStatus = '';
+  try {
+    const body = await request.json() as { status?: unknown };
+    requestedStatus = typeof body.status === 'string' ? body.status.trim().toUpperCase() : '';
+  } catch {
+    return errorResponse('INVALID_INPUT', 'صيغة طلب تغيير الحالة غير صالحة', 400);
+  }
+  if (requestedStatus !== 'ACTIVE' && requestedStatus !== 'DISABLED') {
+    return errorResponse('INVALID_STATUS', 'الحالات المسموحة هي ACTIVE أو DISABLED فقط', 400);
+  }
+
+  const target = await env.DB.prepare(
+    "SELECT id, role, COALESCE(status, 'ACTIVE') AS status FROM users WHERE id = ?"
+  ).bind(targetUserId).first<{ id: string; role: string; status: string }>();
+  if (!target) return errorResponse('USER_NOT_FOUND', 'الطالب غير موجود', 404);
+  const effectiveRoleRank = await getEffectiveSchoolRoleRank(targetUserId, env);
+  if (effectiveRoleRank !== 1) {
+    return errorResponse('ROLE_PROTECTED', 'لا يمكن إيقاف حساب يملك رتبة معلم أو مشرف أو مدير في أي مجموعة', 403);
+  }
+
+  if (target.status.toUpperCase() === requestedStatus) {
+    return jsonResponse({ success: true, status: requestedStatus, message: 'الحساب بالفعل على الحالة المطلوبة' });
+  }
+
+  const update = await env.DB.prepare(
+    `UPDATE users SET status = ?, updated_at = ?
+     WHERE id = ?
+       AND UPPER(role) NOT IN ('ADMIN', 'ADMINISTRATOR', 'SYSTEM_OWNER', 'OWNER', 'TEACHER', 'VERIFIED_TEACHER', 'MODERATOR')
+       AND NOT EXISTS (
+         SELECT 1 FROM group_members gm
+         WHERE gm.user_id = users.id AND gm.status = 'ACTIVE'
+           AND UPPER(gm.role) IN ('ADMIN', 'ADMINISTRATOR', 'TEACHER', 'VERIFIED_TEACHER', 'MODERATOR')
+       )`
+  ).bind(requestedStatus, Date.now(), targetUserId).run();
+  if (update.meta?.changes !== 1) {
+    return errorResponse('USER_STATE_CHANGED', 'تغيرت حالة الحساب قبل إتمام العملية. حدّث لوحة الإدارة وحاول مجدداً.', 409);
+  }
+
+  if (requestedStatus === 'DISABLED') {
+    // Existing bearer tokens are backed by server sessions; revoke them immediately.
+    await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(targetUserId).run();
+  }
+
+  return jsonResponse({
+    success: true,
+    status: requestedStatus,
+    message: requestedStatus === 'DISABLED'
+      ? 'تم إيقاف حساب الطالب وإنهاء جلساته. لن يستطيع الدخول حتى إعادة تفعيله.'
+      : 'تم تفعيل حساب الطالب. سيحتاج إلى تسجيل الدخول من جديد.',
+  });
+}
+
+/**
+ * Removes a student from the class that matches their current grade and section.
+ * Their account, contributions, messages, and academic history are not deleted.
+ */
+export async function handleRemoveSchoolStudentFromClass(
+  targetUserId: string,
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  if (normalizeRole(user.role) !== Role.ADMIN) {
+    return errorResponse('FORBIDDEN', 'فصل الطلاب من الشعب متاح لمدير المدرسة فقط', 403);
+  }
+  if (!targetUserId || targetUserId === user.userId) {
+    return errorResponse('INVALID_ACTION', 'لا يمكنك فصل حسابك من هذه اللوحة', 400);
+  }
+
+  const target = await env.DB.prepare(
+    'SELECT id, role, grade_id, section_id FROM users WHERE id = ?'
+  ).bind(targetUserId).first<{ id: string; role: string; grade_id: number; section_id: string }>();
+  if (!target) return errorResponse('USER_NOT_FOUND', 'الطالب غير موجود', 404);
+  const effectiveRoleRank = await getEffectiveSchoolRoleRank(targetUserId, env);
+  if (effectiveRoleRank !== 1) {
+    return errorResponse('ROLE_PROTECTED', 'لا يمكن فصل حساب يملك رتبة معلم أو مشرف أو مدير في أي مجموعة', 403);
+  }
+
+  const groupId = `class_${target.grade_id}_${target.section_id}`;
+  const removal = await env.DB.prepare(
+    "DELETE FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'ACTIVE' AND UPPER(role) IN ('STUDENT', 'MEMBER')"
+  ).bind(groupId, targetUserId).run();
+  if (removal.meta?.changes !== 1) {
+    return errorResponse('CLASS_MEMBERSHIP_NOT_FOUND', 'لم نعثر على عضوية نشطة لهذا الطالب في شعبته الحالية', 404);
+  }
+
+  return jsonResponse({
+    success: true,
+    groupId,
+    message: 'تم فصل الطالب من شعبته. بقي حسابه وسجله الأكاديمي ومساهماته محفوظة.',
   });
 }

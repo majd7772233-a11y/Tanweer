@@ -105,12 +105,39 @@ fun NotebookTranscriptionDialog(
     // Offline caching state
     var isSavingOffline by remember { mutableStateOf(false) }
     var isDownloadingAll by remember { mutableStateOf(false) }
+    var isLoadingCurrentPage by remember(content.id) { mutableStateOf(false) }
+    var currentPageLoadError by remember(content.id) { mutableStateOf<String?>(null) }
     var refreshLocalTrigger by remember { mutableIntStateOf(0) }
 
     val localBoardFile = remember(content.id, currentPageIndex, refreshLocalTrigger) {
         File(com.magd.tanweer.util.StudentNotebookManager.getOfflineDir(context), "board_${content.id}_${currentPageIndex}.jpg")
     }
     val isLocallySaved = localBoardFile.exists() && localBoardFile.length() > 0
+
+    // Fetch only the visible page using the authenticated media endpoint.
+    LaunchedEffect(content.id, currentPageIndex, refreshLocalTrigger, isDownloadingAll) {
+        if (currentMedia == null) return@LaunchedEffect
+        if (isLocallySaved) {
+            currentPageLoadError = null
+            return@LaunchedEffect
+        }
+        if (isDownloadingAll) return@LaunchedEffect
+
+        isLoadingCurrentPage = true
+        currentPageLoadError = null
+        val result = com.magd.tanweer.util.StudentNotebookManager.cacheLessonPageLocally(
+            context = context,
+            content = content,
+            pageIndex = currentPageIndex
+        )
+        result.fold(
+            onSuccess = { refreshLocalTrigger++ },
+            onFailure = { error ->
+                currentPageLoadError = error.message ?: "تعذر تنزيل صورة الدرس"
+            }
+        )
+        isLoadingCurrentPage = false
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -138,7 +165,7 @@ fun NotebookTranscriptionDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("✍️ وضع نقل الدرس للدفتر", fontSize = 16.sp, fontWeight = FontWeight.Black, color = CyanAccent)
+                            Text("✍️ وضع نقل الدرس للدفتر", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Black, color = CyanAccent)
                             GlassPill(
                                 text = if (isLocallySaved) "محلي على جهازك ✓" else "متاح سحابياً ☁️",
                                 color = if (isLocallySaved) EmeraldGreen else WarmAmber,
@@ -147,7 +174,7 @@ fun NotebookTranscriptionDialog(
                         }
                         Text(
                             text = "${content.subjectName} • ${content.title} (${content.studyDate})",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary,
                             maxLines = 1
                         )
@@ -192,29 +219,49 @@ fun NotebookTranscriptionDialog(
                             )
                         } else null
 
-                        val imageModel = if (localBoardFile.exists() && localBoardFile.length() > 0) localBoardFile else currentMedia.url
-
-                        AsyncImage(
-                            model = imageModel,
-                            contentDescription = "لوحة السبورة صفحة ${currentPageIndex + 1}",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer(
-                                    scaleX = scale,
-                                    scaleY = scale,
-                                    translationX = offsetX,
-                                    translationY = offsetY
-                                ),
-                            contentScale = ContentScale.Fit,
-                            colorFilter = colorFilter
-                        )
+                        if (isLocallySaved) {
+                            AsyncImage(
+                                model = localBoardFile,
+                                contentDescription = "لوحة السبورة صفحة ${currentPageIndex + 1}",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer(
+                                        scaleX = scale,
+                                        scaleY = scale,
+                                        translationX = offsetX,
+                                        translationY = offsetY
+                                    ),
+                                contentScale = ContentScale.Fit,
+                                colorFilter = colorFilter
+                            )
+                        } else {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                if (isLoadingCurrentPage || isDownloadingAll) {
+                                    CircularProgressIndicator(color = CyanAccent, strokeWidth = 2.dp)
+                                    Text("يجري تنزيل صفحة الدرس بأمان...", fontSize = tanweerTextSize(12f), color = TextSecondary)
+                                } else {
+                                    Text(
+                                        currentPageLoadError ?: "الصورة غير محفوظة على هذا الجهاز بعد",
+                                        fontSize = tanweerTextSize(12f),
+                                        color = TextSecondary,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    TextButton(onClick = { refreshLocalTrigger++ }) {
+                                        Text("إعادة محاولة التنزيل", color = CyanAccent)
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Text("📝 لا تتوفر لوحات مصورة لهذا الدرس", fontSize = 14.sp, color = TextSecondary)
-                            Text("يمكنك نسخ ملخص الدرس المكتوب بالأسفل مباشرة إلى دفترك.", fontSize = 11.sp, color = TextSecondary)
+                            Text("📝 لا تتوفر لوحات مصورة لهذا الدرس", fontSize = tanweerTextSize(14f), color = TextSecondary)
+                            Text("يمكنك نسخ ملخص الدرس المكتوب بالأسفل مباشرة إلى دفترك.", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                     }
 
@@ -245,7 +292,8 @@ fun NotebookTranscriptionDialog(
                                             context = context,
                                             imageSource = sourcePath,
                                             title = content.title,
-                                            pageIndex = currentPageIndex
+                                            pageIndex = currentPageIndex,
+                                            groupId = content.groupId
                                         )
                                         saveResult.fold(
                                             onSuccess = {
@@ -259,7 +307,7 @@ fun NotebookTranscriptionDialog(
                                 }
                                 .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
-                            Text("حفظ في المعرض 🖼️", fontSize = 10.sp, color = TextPrimary, fontWeight = FontWeight.Bold)
+                            Text("حفظ في المعرض 🖼️", fontSize = tanweerTextSize(10f), color = TextPrimary, fontWeight = FontWeight.Bold)
                         }
 
                         // High Contrast Toggle
@@ -272,7 +320,7 @@ fun NotebookTranscriptionDialog(
                         ) {
                             Text(
                                 text = if (isHighContrast) "تباين عالٍ 👁️" else "تباين عادي",
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 fontWeight = FontWeight.Bold,
                                 color = if (isHighContrast) TextOnAccent else TextPrimary
                             )
@@ -291,7 +339,7 @@ fun NotebookTranscriptionDialog(
                                 }
                                 .padding(horizontal = 8.dp, vertical = 5.dp)
                             ) {
-                                Text("إعادة الحجم 🔍", fontSize = 10.sp, color = TextPrimary)
+                                Text("إعادة الحجم 🔍", fontSize = tanweerTextSize(10f), color = TextPrimary)
                             }
                         }
                     }
@@ -308,7 +356,7 @@ fun NotebookTranscriptionDialog(
                         ) {
                             Text(
                                 text = "اللوحة ${currentPageIndex + 1} من ${mediaList.size}",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 fontWeight = FontWeight.Bold,
                                 color = CyanAccent
                             )
@@ -364,7 +412,7 @@ fun NotebookTranscriptionDialog(
                             }
                             Text(
                                 text = statusTitle,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = FontWeight.Bold,
                                 color = if (isCurrentPageCompleted) EmeraldGreen else TextPrimary
                             )
@@ -376,7 +424,7 @@ fun NotebookTranscriptionDialog(
                             }
                             Text(
                                 text = progressSubtitle,
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 color = TextSecondary
                             )
                         }

@@ -13,6 +13,8 @@ import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.notifications.TanweerNotificationManager
+import com.magd.tanweer.data.remote.NetworkModule
+import com.magd.tanweer.util.DeviceIdentity
 import com.magd.tanweer.ui.TanweerApp
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.theme.TanweerTheme
@@ -29,6 +31,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NetworkModule.setDeviceId(DeviceIdentity.getOrCreate(applicationContext))
         enableEdgeToEdge()
         TanweerNotificationManager.initChannel(this)
         TanweerNotificationManager.scheduleDailyReminder(this)
@@ -94,6 +97,7 @@ class MainActivity : ComponentActivity() {
                 .putBoolean("notifications_permission_granted", hasPermission)
                 .apply()
         }
+        viewModel.onAppResumed()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {

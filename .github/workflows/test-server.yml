@@ -32,14 +32,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
           cache-dependency-path: server/package-lock.json
 
@@ -58,6 +58,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Enforce dependency security baseline
+        run: npm audit --audit-level=moderate
+
       - name: Typecheck
         run: npm run types
 
@@ -69,6 +72,7 @@ jobs:
       - name: Validate Wrangler production bundle
         run: |
           ./node_modules/.bin/wrangler deploy --dry-run
+          ./node_modules/.bin/wrangler deploy --dry-run --env staging
 
       - name: Show migration files
         run: |

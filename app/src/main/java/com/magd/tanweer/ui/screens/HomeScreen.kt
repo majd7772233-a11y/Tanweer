@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,6 +37,7 @@ import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -43,6 +45,7 @@ import java.util.*
 fun HomeScreen(
     viewModel: TanweerViewModel
 ) {
+    val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     var activeViewingContent by remember { mutableStateOf<ContentItem?>(null) }
@@ -74,6 +77,13 @@ fun HomeScreen(
 
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val schoolAnnouncements = remember(events) {
+        events.asSequence()
+            .filter { it.groupId == "all" && it.category.equals("ANNOUNCEMENT", ignoreCase = true) }
+            .sortedByDescending { it.createdAt }
+            .take(3)
+            .toList()
+    }
 
     val dailyPlanItems by viewModel.getDailyPlanForDate(todayDate)
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -179,13 +189,13 @@ fun HomeScreen(
                         Column {
                             Text(
                                 text = "$greeting $studentFirstName 👋",
-                                fontSize = 20.sp,
+                                fontSize = tanweerTextSize(20f),
                                 fontWeight = FontWeight.Black,
                                 color = CyanAccent
                             )
                             Text(
                                 text = "📍 $gradeName — شعبة ($sectionAr)",
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(top = 2.dp)
@@ -218,17 +228,17 @@ fun HomeScreen(
                                     // Current Period
                                     Column(modifier = Modifier.weight(1f)) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            Text("الآن:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                                            Text("الآن:", fontSize = tanweerTextSize(11f), color = TextMuted, fontWeight = FontWeight.Bold)
                                             Text(
                                                 text = "${status.activeSlot.subjectIcon} ${status.activeSlot.subjectName}",
-                                                fontSize = 14.sp,
+                                                fontSize = tanweerTextSize(14f),
                                                 fontWeight = FontWeight.Black,
                                                 color = CyanAccent
                                             )
                                         }
                                         Text(
                                             text = "الحصة ${status.activeSlot.slotOrder} • ${status.startTime} — ${status.endTime}",
-                                            fontSize = 11.sp,
+                                            fontSize = tanweerTextSize(11f),
                                             color = TextSecondary
                                         )
                                     }
@@ -248,17 +258,17 @@ fun HomeScreen(
                                         ) {
                                             val (nextStart, _) = com.magd.tanweer.util.AcademicTimeEngine.getSlotEffectiveTimes(status.nextSlot)
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                Text("التالي:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                                                Text("التالي:", fontSize = tanweerTextSize(11f), color = TextMuted, fontWeight = FontWeight.Bold)
                                                 Text(
                                                     text = "${status.nextSlot.subjectIcon} ${status.nextSlot.subjectName}",
-                                                    fontSize = 13.sp,
+                                                    fontSize = tanweerTextSize(13f),
                                                     fontWeight = FontWeight.Bold,
                                                     color = TextPrimary
                                                 )
                                             }
                                             Text(
                                                 text = "الحصة ${status.nextSlot.slotOrder} • $nextStart",
-                                                fontSize = 11.sp,
+                                                fontSize = tanweerTextSize(11f),
                                                 color = TextSecondary
                                             )
                                         }
@@ -282,17 +292,17 @@ fun HomeScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text("☕ استراحة بين الحصص", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
-                                        Text("استعد للحصة القادمة", fontSize = 11.sp, color = TextSecondary)
+                                        Text("☕ استراحة بين الحصص", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = WarmAmber)
+                                        Text("استعد للحصة القادمة", fontSize = tanweerTextSize(11f), color = TextSecondary)
                                     }
                                     Column(horizontalAlignment = Alignment.End) {
                                         Text(
                                             text = "الحصة ${status.nextSlot.slotOrder}: ${status.nextSlot.subjectName}",
-                                            fontSize = 12.sp,
+                                            fontSize = tanweerTextSize(12f),
                                             fontWeight = FontWeight.Bold,
                                             color = TextPrimary
                                         )
-                                        Text("تبدأ الساعة ${status.nextStartTime}", fontSize = 11.sp, color = CyanAccent)
+                                        Text("تبدأ الساعة ${status.nextStartTime}", fontSize = tanweerTextSize(11f), color = CyanAccent)
                                     }
                                 }
                             }
@@ -313,8 +323,8 @@ fun HomeScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column {
-                                        Text("🌅 يبدأ الدوام قريبًا", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                        Text("الحصة الأولى: ${status.firstSlot.subjectName}", fontSize = 11.sp, color = TextSecondary)
+                                        Text("🌅 يبدأ الدوام قريبًا", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                                        Text("الحصة الأولى: ${status.firstSlot.subjectName}", fontSize = tanweerTextSize(11f), color = TextSecondary)
                                     }
                                     GlassPill(
                                         text = "تبدأ ${status.startTime}",
@@ -339,10 +349,10 @@ fun HomeScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text("🏁", fontSize = 20.sp)
+                                    Text("🏁", fontSize = tanweerTextSize(20f))
                                     Column {
-                                        Text("انتهى اليوم الدراسي لهذا اليوم ✓", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                        Text("أحسنت! راجع واجباتك ومهامك المدرسية القادمة", fontSize = 11.sp, color = TextSecondary)
+                                        Text("انتهى اليوم الدراسي لهذا اليوم ✓", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                                        Text("أحسنت! راجع واجباتك ومهامك المدرسية القادمة", fontSize = tanweerTextSize(11f), color = TextSecondary)
                                     }
                                 }
                             }
@@ -370,15 +380,15 @@ fun HomeScreen(
                         .padding(10.dp)
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                        Text("📝", fontSize = 20.sp)
+                        Text("📝", fontSize = tanweerTextSize(20f))
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = if (upcomingHwCount > 0) "$upcomingHwCount متبقية" else "منجزة ✓",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Bold,
                             color = if (upcomingHwCount > 0) WarmAmber else EmeraldGreen
                         )
-                        Text(text = "الواجبات", fontSize = 10.sp, color = TextMuted)
+                        Text(text = "الواجبات", fontSize = tanweerTextSize(10f), color = TextMuted)
                     }
                 }
 
@@ -393,7 +403,7 @@ fun HomeScreen(
                         .padding(10.dp)
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                        Text("🎯", fontSize = 20.sp)
+                        Text("🎯", fontSize = tanweerTextSize(20f))
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = when (nearestExamDaysLeft) {
@@ -402,12 +412,12 @@ fun HomeScreen(
                                 1 -> "اختبار غداً"
                                 else -> "بعد $nearestExamDaysLeft أيام"
                             },
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             fontWeight = FontWeight.Bold,
                             color = RubyRed,
                             maxLines = 1
                         )
-                        Text(text = "الاختبارات", fontSize = 10.sp, color = TextMuted)
+                        Text(text = "الاختبارات", fontSize = tanweerTextSize(10f), color = TextMuted)
                     }
                 }
 
@@ -422,15 +432,108 @@ fun HomeScreen(
                         .padding(10.dp)
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                        Text("📷", fontSize = 20.sp)
+                        Text("📷", fontSize = tanweerTextSize(20f))
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = if (pendingSubjectsMap.isNotEmpty()) "${pendingSubjectsMap.size} للتوثيق" else "مكتملة ✨",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Bold,
                             color = CyanAccent
                         )
-                        Text(text = "التوثيق", fontSize = 10.sp, color = TextMuted)
+                        Text(text = "التوثيق", fontSize = tanweerTextSize(10f), color = TextMuted)
+                    }
+                }
+            }
+        }
+
+        // Official school announcements are published by the school admin to group "all".
+        if (schoolAnnouncements.isNotEmpty()) {
+            item {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        viewModel.setSubScreen(SubScreen.EVENTS)
+                    },
+                    borderColor = WarmAmber.copy(alpha = 0.7f),
+                    backgroundColor = GlassSurface
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("📢", fontSize = tanweerTextSize(20f))
+                                Column {
+                                    Text(
+                                        text = "تعاميم المدرسة الرسمية",
+                                        fontSize = tanweerTextSize(14f),
+                                        fontWeight = FontWeight.Bold,
+                                        color = WarmAmber
+                                    )
+                                    Text(
+                                        text = "إعلانات صادرة عن إدارة المدرسة",
+                                        fontSize = tanweerTextSize(10f),
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+                            GlassPill(text = "رسمي", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.12f))
+                        }
+                        schoolAnnouncements.forEachIndexed { index, announcement ->
+                            if (index > 0) HorizontalDivider(color = GlassBorderSubtle, thickness = 0.5.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = announcement.title,
+                                        modifier = Modifier.weight(1f),
+                                        fontSize = tanweerTextSize(13f),
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            viewModel.dismissSchoolAnnouncement(announcement.id) { success, message ->
+                                                if (!success) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        modifier = Modifier.size(26.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "إخفاء التعميم من حسابي",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
+                                if (!announcement.description.isNullOrBlank()) {
+                                    Text(
+                                        text = announcement.description,
+                                        fontSize = tanweerTextSize(11f),
+                                        color = TextSecondary,
+                                        lineHeight = tanweerLineHeight(16f),
+                                        maxLines = 3
+                                    )
+                                }
+                                Text(
+                                    text = "${announcement.sourceName ?: "إدارة المدرسة"} • ${announcement.eventDate}",
+                                    fontSize = tanweerTextSize(9f),
+                                    color = TextMuted
+                                )
+                            }
+                        }
+                        Text(
+                            text = "عرض جميع التعاميم والفعاليات ←",
+                            fontSize = tanweerTextSize(10f),
+                            fontWeight = FontWeight.Bold,
+                            color = CyanAccent,
+                            modifier = Modifier.align(Alignment.End)
+                        )
                     }
                 }
             }
@@ -452,17 +555,17 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("📌", fontSize = 18.sp)
+                                Text("📌", fontSize = tanweerTextSize(18f))
                                 Text(
                                     text = "خطة إنجاز اليوم (${completedPlanCount}/${dailyPlanItems.size})",
-                                    fontSize = 15.sp,
+                                    fontSize = tanweerTextSize(15f),
                                     fontWeight = FontWeight.Bold,
                                     color = WarmAmber
                                 )
                             }
                             Text(
                                 text = "${((completedPlanCount.toFloat() / dailyPlanItems.size.toFloat()) * 100).toInt()}%",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = FontWeight.Bold,
                                 color = if (completedPlanCount == dailyPlanItems.size) EmeraldGreen else WarmAmber
                             )
@@ -494,7 +597,7 @@ fun HomeScreen(
                                     Column {
                                         Text(
                                             text = planItem.title,
-                                            fontSize = 13.sp,
+                                            fontSize = tanweerTextSize(13f),
                                             fontWeight = if (planItem.isCompleted) FontWeight.Normal else FontWeight.Medium,
                                             color = if (planItem.isCompleted) TextMuted else TextPrimary,
                                             style = if (planItem.isCompleted) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle()
@@ -502,7 +605,7 @@ fun HomeScreen(
                                         if (!planItem.subjectName.isNullOrBlank()) {
                                             Text(
                                                 text = planItem.subjectName,
-                                                fontSize = 11.sp,
+                                                fontSize = tanweerTextSize(11f),
                                                 color = CyanAccent
                                             )
                                         }
@@ -539,17 +642,17 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(text = "🌴", fontSize = 24.sp)
+                            Text(text = "🌴", fontSize = tanweerTextSize(24f))
                             Column {
                                 Text(
                                     text = "عطلة نهاية الأسبوع — لا توجد حصص اليوم",
-                                    fontSize = 15.sp,
+                                    fontSize = tanweerTextSize(15f),
                                     fontWeight = FontWeight.Bold,
                                     color = CyanAccent
                                 )
                                 Text(
                                     text = "استعد لليوم الدراسي القادم: ${TanweerViewModel.getNextSchoolDayName()}",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary
                                 )
                             }
@@ -561,25 +664,25 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = "📚", fontSize = 20.sp)
+                                Text(text = "📚", fontSize = tanweerTextSize(20f))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Column {
                                     Text(
                                         text = "إنجاز توثيق مواد اليوم الأكاديمية",
-                                        fontSize = 15.sp,
+                                        fontSize = tanweerTextSize(15f),
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
                                     Text(
                                         text = "التوثيق معتمد حسب المادة ($docCount من $totalSubjectsCount مواد) لضمان عدم تكرار الحصص",
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         color = TextSecondary
                                     )
                                 }
                             }
                             Text(
                                 text = "${(progressPercent * 100).toInt()}% مكتمل",
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 fontWeight = FontWeight.Bold,
                                 color = if (progressPercent >= 0.8f) EmeraldGreen else WarmAmber
                             )
@@ -598,19 +701,19 @@ fun HomeScreen(
                         ) {
                             Text(
                                 text = "${slots.size} حصص مجدولة • $totalSubjectsCount مواد أصلية",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
                                     text = "✅ $docCount مواد موثقة",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = EmeraldGreen,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
                                     text = "🟡 ${pendingSubjectsMap.size} متبقية",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = WarmAmber,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -640,17 +743,17 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(text = "🎒", fontSize = 22.sp)
+                            Text(text = "🎒", fontSize = tanweerTextSize(22f))
                             Column {
                                 Text(
                                     text = "ماذا فاتك أثناء الغياب؟",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = CyanAccent
                                 )
                                 Text(
                                     text = "تصفح ما وثقه زملاؤك منذ $lastOpenDate وحتى اليوم",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextSecondary
                                 )
                             }
@@ -684,7 +787,7 @@ fun HomeScreen(
             item {
                 Text(
                     text = "✅ المواد الموثقة اليوم (${documentedSubjectsMap.size} من $totalSubjectsCount مواد أصلية)",
-                    fontSize = 15.sp,
+                    fontSize = tanweerTextSize(15f),
                     fontWeight = FontWeight.Bold,
                     color = EmeraldGreen,
                     modifier = Modifier.padding(top = 4.dp)
@@ -718,14 +821,14 @@ fun HomeScreen(
                 ) {
                     Text(
                         text = "🟡 مواد تحتاج توثيق اليوم",
-                        fontSize = 15.sp,
+                        fontSize = tanweerTextSize(15f),
                         fontWeight = FontWeight.Bold,
                         color = WarmAmber
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "(${pendingSubjectsMap.size} مواد)",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         color = TextMuted
                     )
                 }
@@ -791,19 +894,19 @@ fun DocumentedSubjectCard(
                             .border(1.dp, EmeraldGreen.copy(alpha = 0.4f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = slot.subjectIcon, fontSize = 18.sp)
+                        Text(text = slot.subjectIcon, fontSize = tanweerTextSize(18f))
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
                             text = slot.subjectName,
-                            fontSize = 15.sp,
+                            fontSize = tanweerTextSize(15f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
                         Text(
                             text = "الحصة ${slot.slotOrder} • ${lessons.size} دروس موثقة (اضغط ${if (expanded) "للإغلاق" else "لفتح الصور"})",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = if (expanded) CyanAccent else TextSecondary
                         )
                     }
@@ -822,7 +925,7 @@ fun DocumentedSubjectCard(
                         Text(
                             text = if (expanded) "▲" else "▼",
                             color = CyanAccent,
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -837,7 +940,7 @@ fun DocumentedSubjectCard(
                 if (lessons.isEmpty()) {
                     Text(
                         text = "لا توجد صفحات مسجلة لهذه المادة بعد",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         color = TextMuted,
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
@@ -864,7 +967,7 @@ fun DocumentedSubjectCard(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = lesson.title.ifBlank { "درس مادة ${slot.subjectName}" },
-                                                fontSize = 14.sp,
+                                                fontSize = tanweerTextSize(14f),
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = TextPrimary
                                             )
@@ -874,7 +977,7 @@ fun DocumentedSubjectCard(
                                             if (metaText.isNotBlank()) {
                                                 Text(
                                                     text = metaText,
-                                                    fontSize = 11.sp,
+                                                    fontSize = tanweerTextSize(11f),
                                                     color = TextMuted
                                                 )
                                             }
@@ -890,7 +993,7 @@ fun DocumentedSubjectCard(
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
                                             text = lesson.description,
-                                            fontSize = 12.sp,
+                                            fontSize = tanweerTextSize(12f),
                                             color = TextSecondary,
                                             maxLines = 2
                                         )
@@ -943,19 +1046,19 @@ fun NeedsContributionSubjectCard(
                         .border(1.dp, WarmAmber.copy(alpha = 0.35f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = slot.subjectIcon, fontSize = 18.sp)
+                    Text(text = slot.subjectIcon, fontSize = tanweerTextSize(18f))
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text(
                         text = slot.subjectName,
-                        fontSize = 15.sp,
+                        fontSize = tanweerTextSize(15f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
                     Text(
                         text = "الحصة ${slot.slotOrder} • لم توثق بعد",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         color = TextSecondary
                     )
                 }

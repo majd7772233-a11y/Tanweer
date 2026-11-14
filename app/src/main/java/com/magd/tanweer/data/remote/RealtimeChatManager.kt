@@ -36,7 +36,7 @@ class RealtimeChatManager(
         onMessageReceived = onMessage
         _status.value = ConnectionStatus.CONNECTING
 
-        val wsUrl = "wss://tanweer.magd.workers.dev/ws/groups/$groupId"
+        val wsUrl = NetworkModule.resolveWebSocketUrl("/ws/groups/$groupId")
         val request = Request.Builder().url(wsUrl).build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {

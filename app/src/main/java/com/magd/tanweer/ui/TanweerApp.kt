@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,6 +54,7 @@ fun TanweerApp(
     val uploadInitialSubjectId by viewModel.uploadInitialSubjectId.collectAsStateWithLifecycle()
     val recoveryCodeDialog by viewModel.recoveryCodeDialog.collectAsStateWithLifecycle()
     val isCheckingAuth by viewModel.isCheckingAuth.collectAsStateWithLifecycle()
+    val navigationStateHolder = rememberSaveableStateHolder()
 
     if (isCheckingAuth) {
         Box(
@@ -76,12 +78,12 @@ fun TanweerApp(
                 ) {
                     Text(
                         text = "📚",
-                        fontSize = 34.sp
+                        fontSize = tanweerTextSize(34f)
                     )
                 }
                 Text(
                     text = "تنوير",
-                    fontSize = 22.sp,
+                    fontSize = tanweerTextSize(22f),
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
@@ -110,7 +112,8 @@ fun TanweerApp(
                                     viewModel.setSubScreen(SubScreen.EXTRA_SECTIONS_HUB)
                                 }
                             } else {
-                                viewModel.setSubScreen(SubScreen.NONE)
+                                // setTab() already returns to the root and refreshes the
+                                // selected tab; avoid syncing the previous tab first.
                                 viewModel.setTab(tab)
                             }
                         }
@@ -203,42 +206,46 @@ fun TanweerApp(
                                         SubScreen.STORAGE_MANAGER -> "إدارة تخزين ومساحة الكتب 💾"
                                         else -> ""
                                     },
-                                    fontSize = 17.sp,
+                                    fontSize = tanweerTextSize(17f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                             }
                         }
 
-                        when (subScreen) {
-                            SubScreen.EXTRA_SECTIONS_HUB -> ExtraSectionsHubScreen(viewModel = viewModel)
-                            SubScreen.GROUPS -> GroupsScreen(viewModel = viewModel)
-                            SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> LibraryScreen(viewModel = viewModel)
-                            SubScreen.SCHEDULE -> ScheduleScreen(viewModel = viewModel)
-                            SubScreen.TIMELINE -> SubjectTimelineScreen(viewModel = viewModel)
-                            SubScreen.PROFILE -> ProfileScreen(viewModel = viewModel)
-                            SubScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
-                            SubScreen.WHAT_DID_I_MISS -> WhatDidIMissScreen(viewModel = viewModel)
-                            SubScreen.SEARCH -> SearchScreen(viewModel = viewModel)
-                            SubScreen.SUBJECT_KNOWLEDGE_BASE -> ClassKnowledgeBaseScreen(viewModel = viewModel)
-                            SubScreen.ACADEMIC_HISTORY -> AcademicHistoryScreen(viewModel = viewModel)
-                            SubScreen.TEACHER_DASHBOARD -> TeacherDashboardScreen(viewModel = viewModel)
-                            SubScreen.MODERATOR_DASHBOARD -> ModeratorDashboardScreen(viewModel = viewModel)
-                            SubScreen.ADMIN_DASHBOARD -> AdminDashboardScreen(viewModel = viewModel)
-                            SubScreen.COMMUNITY_DECISIONS -> CommunityDecisionsScreen(viewModel = viewModel)
-                            SubScreen.EVENTS -> EventsScreen(viewModel = viewModel)
-                            SubScreen.VERSION_CHECK -> VersionCheckScreen(viewModel = viewModel)
-                            else -> HomeScreen(viewModel = viewModel)
+                        navigationStateHolder.SaveableStateProvider(key = "subscreen-${subScreen.name}") {
+                            when (subScreen) {
+                                SubScreen.EXTRA_SECTIONS_HUB -> ExtraSectionsHubScreen(viewModel = viewModel)
+                                SubScreen.GROUPS -> GroupsScreen(viewModel = viewModel)
+                                SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> LibraryScreen(viewModel = viewModel)
+                                SubScreen.SCHEDULE -> ScheduleScreen(viewModel = viewModel)
+                                SubScreen.TIMELINE -> SubjectTimelineScreen(viewModel = viewModel)
+                                SubScreen.PROFILE -> ProfileScreen(viewModel = viewModel)
+                                SubScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
+                                SubScreen.WHAT_DID_I_MISS -> WhatDidIMissScreen(viewModel = viewModel)
+                                SubScreen.SEARCH -> SearchScreen(viewModel = viewModel)
+                                SubScreen.SUBJECT_KNOWLEDGE_BASE -> ClassKnowledgeBaseScreen(viewModel = viewModel)
+                                SubScreen.ACADEMIC_HISTORY -> AcademicHistoryScreen(viewModel = viewModel)
+                                SubScreen.TEACHER_DASHBOARD -> TeacherDashboardScreen(viewModel = viewModel)
+                                SubScreen.MODERATOR_DASHBOARD -> ModeratorDashboardScreen(viewModel = viewModel)
+                                SubScreen.ADMIN_DASHBOARD -> AdminDashboardScreen(viewModel = viewModel)
+                                SubScreen.COMMUNITY_DECISIONS -> CommunityDecisionsScreen(viewModel = viewModel)
+                                SubScreen.EVENTS -> EventsScreen(viewModel = viewModel)
+                                SubScreen.VERSION_CHECK -> VersionCheckScreen(viewModel = viewModel)
+                                else -> HomeScreen(viewModel = viewModel)
+                            }
                         }
                     }
                 } else {
-                    when (currentTab) {
-                        NavigationTab.TODAY -> HomeScreen(viewModel = viewModel)
-                        NavigationTab.CALENDAR -> CalendarScreen(viewModel = viewModel)
-                        NavigationTab.HOMEWORK -> HomeworkScreen(viewModel = viewModel)
-                        NavigationTab.EXAMS -> ExamsScreen(viewModel = viewModel)
-                        NavigationTab.ISSUES -> IssuesScreen(viewModel = viewModel)
-                        NavigationTab.MORE -> HomeScreen(viewModel = viewModel)
+                    navigationStateHolder.SaveableStateProvider(key = "tab-${currentTab.name}") {
+                        when (currentTab) {
+                            NavigationTab.TODAY -> HomeScreen(viewModel = viewModel)
+                            NavigationTab.CALENDAR -> CalendarScreen(viewModel = viewModel)
+                            NavigationTab.HOMEWORK -> HomeworkScreen(viewModel = viewModel)
+                            NavigationTab.EXAMS -> ExamsScreen(viewModel = viewModel)
+                            NavigationTab.ISSUES -> IssuesScreen(viewModel = viewModel)
+                            NavigationTab.MORE -> HomeScreen(viewModel = viewModel)
+                        }
                     }
                 }
 
@@ -261,14 +268,14 @@ fun TanweerApp(
                                 text = "🔑 رقمك السري ورمز الاسترداد (هام جداً)",
                                 color = WarmAmber,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp
+                                fontSize = tanweerTextSize(17f)
                             )
                         },
                         text = {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text(
                                     text = "احتفظ بهذا الرقم السري! يمكنك استخدامه لتسجيل الدخول مباشرة إلى حسابك من أي مكان، أو استعادة حسابك إذا نسيت كلمة المرور:",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     color = TextSecondary
                                 )
                                 Box(
@@ -282,7 +289,7 @@ fun TanweerApp(
                                 ) {
                                     Text(
                                         text = codeToCopy,
-                                        fontSize = 17.sp,
+                                        fontSize = tanweerTextSize(17f),
                                         fontWeight = FontWeight.Black,
                                         color = WarmAmber,
                                         textAlign = TextAlign.Center
@@ -384,7 +391,7 @@ fun GlassBottomNavigationBar(
                 label = {
                     Text(
                         text = label,
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     )
                 },
@@ -431,7 +438,7 @@ fun GlassBottomNavigationBar(
                 ) { targetLabel ->
                     Text(
                         text = targetLabel,
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         fontWeight = if (isMoreSelected) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1
                     )

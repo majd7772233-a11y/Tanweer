@@ -10,9 +10,16 @@ import com.magd.tanweer.data.remote.ConnectionStatus
 import com.magd.tanweer.data.remote.NetworkModule
 import com.magd.tanweer.data.repository.SyncResult
 import com.magd.tanweer.data.repository.TanweerRepository
+import com.magd.tanweer.util.AcademicSessionSelection
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -54,8 +61,12 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     val repository = TanweerRepository(db)
 
     // App Settings State (Persisted in SharedPreferences)
-    // Default Font Scale is 1.0f (Base 12sp default)
-    private val _fontSizeScale = MutableStateFlow(prefs.getFloat("font_size_scale", 1.0f))
+    // Supported base sizes are 12sp, 14sp and 16sp; normalize legacy values on restore.
+    private val _fontSizeScale = MutableStateFlow(
+        com.magd.tanweer.ui.theme.normalizeTanweerFontScale(
+            prefs.getFloat("font_size_scale", 1.0f)
+        )
+    )
     val fontSizeScale: StateFlow<Float> = _fontSizeScale.asStateFlow()
 
     private val _appTheme = MutableStateFlow(prefs.getString("app_theme", "DARK") ?: "DARK")
@@ -98,6 +109,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _isCheckingAuth = MutableStateFlow(true)
     val isCheckingAuth: StateFlow<Boolean> = _isCheckingAuth.asStateFlow()
+    private val localSessionReady = CompletableDeferred<Unit>()
+    @Volatile private var dataGenerationVerified = false
 
     fun updateUserSessionState(userId: String) {
         if (userId.isBlank()) return
@@ -122,6 +135,37 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun restoreAcademicSelection(user: User, resetGroup: Boolean = false) {
+        val groupKey = "selected_group_id_${user.id}"
+        val savedGroupId = prefs.getString(groupKey, null)
+        val groupId = if (resetGroup) {
+            AcademicSessionSelection.resolveGroupId(null, user.defaultGroupId)
+        } else {
+            AcademicSessionSelection.resolveGroupId(savedGroupId, user.defaultGroupId)
+        }
+        _selectedGroupId.value = groupId
+
+        val dateKey = "selected_study_date_${user.id}"
+        val savedDate = prefs.getString(dateKey, null)
+        val studyDate = AcademicSessionSelection.resolveStudyDate(savedDate, todayDateStr)
+        _selectedDate.value = studyDate
+
+        prefs.edit()
+            .putString(groupKey, groupId)
+            .putString(dateKey, studyDate)
+            .commit()
+    }
+
+    private fun persistSelectedGroup(groupId: String) {
+        val userId = currentUser.value?.id ?: currentActiveUserId ?: return
+        prefs.edit().putString("selected_group_id_${userId}", groupId).commit()
+    }
+
+    private fun persistSelectedStudyDate(date: String) {
+        val userId = currentUser.value?.id ?: currentActiveUserId ?: return
+        prefs.edit().putString("selected_study_date_${userId}", date).commit()
+    }
+
     fun dismissCatchUpCard() {
         _shouldShowCatchUpCard.value = false
         val userId = currentActiveUserId ?: currentUser.value?.id
@@ -142,14 +186,21 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         repository.mutationQueue.isAutoSyncEnabled = _autoSyncEnabled.value
 
         viewModelScope.launch {
-            val user = db.userDao().getUserSync()
-            if (user != null) {
-                NetworkModule.setAuthToken(user.token)
-                updateUserSessionState(user.id)
+            try {
+                val user = db.userDao().getUserSync()
+                if (user != null) {
+                    NetworkModule.setAuthToken(user.token)
+                    updateUserSessionState(user.id)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("TanweerViewModel", "Failed restoring local session", e)
+            } finally {
+                // Startup synchronization must not race the first local session/token read.
+                localSessionReady.complete(Unit)
             }
-            _isCheckingAuth.value = false
 
-            // Observe future user changes (e.g., login or account switch)
+            // Observe future user changes (e.g., login or account switch).
+            // The startup coordinator below decides when the app may leave the splash screen.
             repository.currentUser.collect { u ->
                 if (u != null && u.id != currentActiveUserId) {
                     updateUserSessionState(u.id)
@@ -159,8 +210,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setFontScale(scale: Float) {
-        _fontSizeScale.value = scale
-        prefs.edit().putFloat("font_size_scale", scale).apply()
+        val normalizedScale = com.magd.tanweer.ui.theme.normalizeTanweerFontScale(scale)
+        _fontSizeScale.value = normalizedScale
+        prefs.edit().putFloat("font_size_scale", normalizedScale).apply()
     }
 
     fun setAppTheme(theme: String) {
@@ -292,8 +344,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _selectedKnowledgeBaseSubjectId = MutableStateFlow<String?>(null)
     val selectedKnowledgeBaseSubjectId: StateFlow<String?> = _selectedKnowledgeBaseSubjectId.asStateFlow()
 
-    private val _selectedAcademicYear = MutableStateFlow("2026-2027")
+    private val _selectedAcademicYear = MutableStateFlow(
+        com.magd.tanweer.util.AcademicYearManager.getCurrentAcademicYear()
+    )
     val selectedAcademicYear: StateFlow<String> = _selectedAcademicYear.asStateFlow()
+
+    private val _academicArchiveSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val academicArchiveSyncState: StateFlow<SyncState> = _academicArchiveSyncState.asStateFlow()
 
     fun openSubjectKnowledgeBase(subjectId: String? = null) {
         _selectedKnowledgeBaseSubjectId.value = subjectId
@@ -344,6 +401,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _issuesSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val issuesSyncState: StateFlow<SyncState> = _issuesSyncState.asStateFlow()
 
+    private val _eventsSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val eventsSyncState: StateFlow<SyncState> = _eventsSyncState.asStateFlow()
+
     private val _librarySyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val librarySyncState: StateFlow<SyncState> = _librarySyncState.asStateFlow()
 
@@ -356,85 +416,423 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     val chatConnectionStatus: StateFlow<ConnectionStatus> = repository.chatManager.status
     private val dataGenerationReady = CompletableDeferred<Unit>()
+    private val dataGenerationMutex = Mutex()
+    private var hasSeenInitialResume = false
+    private var lastForegroundGenerationCheckAt = 0L
 
     init {
-        // TA-20: Block outbox queue draining until data generation check is verified
         repository.mutationQueue.isDrainAllowed = false
 
         viewModelScope.launch {
+            localSessionReady.await()
             try {
-                val res = repository.getSystemVersion()
-                if (res.isSuccess) {
-                    val sysVer = res.getOrNull()
-                    val purged = repository.checkAndApplyDataGeneration(getApplication(), sysVer?.dataGeneration)
-                    if (purged) {
-                        logout()
-                    }
-                }
-            } catch (_: Exception) {
+                verifyServerDataGeneration()
+            } catch (e: Exception) {
+                android.util.Log.w("TanweerViewModel", "Server data-generation verification failed; local cache is retained", e)
             } finally {
-                repository.mutationQueue.isDrainAllowed = true
                 dataGenerationReady.complete(Unit)
-                if (_autoSyncEnabled.value) {
-                    repository.mutationQueue.triggerDrain()
-                }
             }
         }
 
         viewModelScope.launch {
-            // TA-20: Guarantee that initial sync NEVER starts before data_generation verification completes
+            localSessionReady.await()
             dataGenerationReady.await()
             currentUser
                 .distinctUntilChangedBy { it?.id }
                 .collect { user ->
-                    if (user != null) {
-                        if (_selectedGroupId.value.isEmpty()) {
-                            _selectedGroupId.value = user.defaultGroupId
-                        }
-                        if (_autoSyncEnabled.value) {
-                            syncInitialData(user.defaultGroupId, _selectedDate.value)
-                            syncBooks(user.gradeId)
+                    if (user == null) {
+                        dataGenerationVerified = false
+                        repository.mutationQueue.isDrainAllowed = false
+                        resetUserScopedUiState()
+                        _isCheckingAuth.value = false
+                    } else {
+                        _isCheckingAuth.value = true
+                        restoreAcademicSelection(user)
+                        try {
+                            if (!dataGenerationVerified) {
+                                val purged = verifyServerDataGeneration()
+                                if (purged) {
+                                    _isCheckingAuth.value = false
+                                    return@collect
+                                }
+                            }
+
+                            if (dataGenerationVerified) {
+                                repository.mutationQueue.isDrainAllowed = true
+                                val outboxResult = repository.processOutboxQueue()
+                                outboxResult.exceptionOrNull()?.let {
+                                    android.util.Log.w("TanweerViewModel", "Startup outbox drain was incomplete", it)
+                                }
+                            } else {
+                                repository.mutationQueue.isDrainAllowed = false
+                                android.util.Log.w("TanweerViewModel", "Skipping startup outbox drain because server data generation was not verified")
+                            }
+
+                            val syncResult = repository.syncInitial(getActiveGroupId(), _selectedDate.value)
+                            val refreshedUser = db.userDao().getUserSync()
+                            val activeGroupIds = db.groupDao().getMyGroupsSync().map { it.id }
+                            val authorizedGroupId = AcademicSessionSelection.resolveAuthorizedGroupId(
+                                savedGroupId = _selectedGroupId.value,
+                                defaultGroupId = refreshedUser?.defaultGroupId ?: user.defaultGroupId,
+                                availableGroupIds = activeGroupIds
+                            )
+                            _selectedGroupId.value = authorizedGroupId
+                            prefs.edit().putString("selected_group_id_${user.id}", authorizedGroupId).commit()
+
+                            refreshStartupAuxiliaryData(user, authorizedGroupId, activeGroupIds)
+                            applyStartupSyncResult(syncResult)
+                        } catch (e: Exception) {
+                            android.util.Log.e("TanweerViewModel", "Startup server reconciliation failed", e)
+                            applyStartupSyncResult(SyncResult.Offline("تعذر الاتصال بالخادم؛ يتم عرض النسخة المحفوظة محليًا"))
+                        } finally {
+                            repository.mutationQueue.isDrainAllowed = dataGenerationVerified
+                            _isCheckingAuth.value = false
+                            if (_autoSyncEnabled.value && dataGenerationVerified) {
+                                repository.mutationQueue.start()
+                                repository.mutationQueue.triggerDrain()
+                            }
                         }
                     }
                 }
         }
     }
 
-    private fun getActiveGroupId(): String {
-        return _selectedGroupId.value.ifEmpty { currentUser.value?.defaultGroupId ?: "" }
+    fun onAppResumed() {
+        val now = System.currentTimeMillis()
+        if (!hasSeenInitialResume) {
+            hasSeenInitialResume = true
+            lastForegroundGenerationCheckAt = now
+            return
+        }
+        if (now - lastForegroundGenerationCheckAt < 10_000L) return
+        lastForegroundGenerationCheckAt = now
+
+        viewModelScope.launch {
+            localSessionReady.await()
+            dataGenerationReady.await()
+            if (db.userDao().getUserSync() == null) return@launch
+            _isCheckingAuth.value = true
+            try {
+                val purged = verifyServerDataGeneration()
+                if (!purged && dataGenerationVerified && _autoSyncEnabled.value) {
+                    repository.mutationQueue.triggerDrain()
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("TanweerViewModel", "Foreground data-generation verification failed", e)
+            } finally {
+                _isCheckingAuth.value = false
+            }
+        }
     }
+
+    private suspend fun verifyServerDataGeneration(): Boolean = dataGenerationMutex.withLock {
+        if (db.userDao().getUserSync() == null) {
+            dataGenerationVerified = false
+            repository.mutationQueue.isDrainAllowed = false
+            return@withLock false
+        }
+        repository.mutationQueue.isDrainAllowed = false
+        repository.mutationQueue.stopAndAwait()
+        val versionResult = repository.getSystemVersion()
+        val generation = versionResult.getOrNull()?.dataGeneration
+        if (!versionResult.isSuccess || generation.isNullOrBlank()) {
+            dataGenerationVerified = false
+            return@withLock false
+        }
+        val purged = repository.checkAndApplyDataGeneration(getApplication(), generation)
+        if (purged) {
+            dataGenerationVerified = false
+            resetUserScopedUiState()
+            return@withLock true
+        }
+        dataGenerationVerified = true
+        repository.mutationQueue.isDrainAllowed = true
+        repository.mutationQueue.start()
+        false
+    }
+
+    private fun resetUserScopedUiState() {
+        currentActiveUserId = null
+        _shouldShowCatchUpCard.value = false
+        _lastOpenDate.value = todayDateStr
+        _isNewAccountOrFirstLaunch.value = false
+        _previousSessionTimestamp.value = System.currentTimeMillis()
+        _selectedGroupId.value = ""
+        _selectedDate.value = todayDateStr
+        _currentTab.value = NavigationTab.TODAY
+        _subScreen.value = SubScreen.NONE
+        _activeReadingBook.value = null
+        _activeReadingInitialPage.value = null
+        _isUploadModalOpen.value = false
+        _uploadInitialSubjectId.value = null
+        _isAddHomeworkModalOpen.value = false
+        _initialHomeworkDueDate.value = null
+        _isAddExamModalOpen.value = false
+        _initialExamDate.value = null
+        _isAddEventModalOpen.value = false
+        _initialEventDate.value = null
+        _pendingDeepLinkChatGroupId.value = null
+        _pendingDeepLinkMessageId.value = null
+        _recoveryCodeDialog.value = null
+        _searchQuery.value = ""
+        _selectedKnowledgeBaseSubjectId.value = null
+        _selectedAcademicYear.value = com.magd.tanweer.util.AcademicYearManager.getCurrentAcademicYear()
+        _academicArchiveSyncState.value = SyncState.Idle
+        _homeSyncState.value = SyncState.Idle
+        _scheduleSyncState.value = SyncState.Idle
+        _homeworkSyncState.value = SyncState.Idle
+        _examsSyncState.value = SyncState.Idle
+        _calendarSyncState.value = SyncState.Idle
+        _issuesSyncState.value = SyncState.Idle
+        _eventsSyncState.value = SyncState.Idle
+        _librarySyncState.value = SyncState.Idle
+        _groupsSyncState.value = SyncState.Idle
+        _scheduleMeta.value = null
+        _scheduleVersion.value = null
+        _scheduleProposals.value = emptyList()
+        _groupMembersState.value = null
+        _groupMembersError.value = null
+        _teacherDashboard.value = null
+        _moderatorDashboard.value = null
+        _adminDashboard.value = null
+        _adminDashboardError.value = null
+        _myNotifications.value = emptyList()
+        _groupCorrections.value = emptyList()
+        _communityDecisions.value = emptyList()
+        _myRoleRequests.value = emptyList()
+    }
+
+    private suspend fun refreshStartupAuxiliaryData(user: User, groupId: String, activeGroupIds: List<String>) = coroutineScope {
+        val tasks = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
+
+        tasks += async(Dispatchers.IO) {
+            _myRoleRequests.value = repository.getMyRoleRequests()
+        }
+
+        // Pull recent chat history for every server-confirmed active membership.
+        // No WebSocket is opened until the user enters that group's chat.
+        activeGroupIds.distinct().forEach { activeGroupId ->
+            tasks += async(Dispatchers.IO) {
+                repository.syncGroupChatHistory(activeGroupId)
+                Unit
+            }
+        }
+
+        if (groupId.isNotBlank()) {
+            tasks += async(Dispatchers.IO) {
+                repository.getGroupMembers(groupId).onSuccess { data ->
+                    _groupMembersState.value = data
+                }
+                Unit
+            }
+            tasks += async(Dispatchers.IO) {
+                repository.getScheduleProposals(groupId).onSuccess { proposals ->
+                    _scheduleProposals.value = proposals
+                }
+                Unit
+            }
+            tasks += async(Dispatchers.IO) {
+                repository.getGroupCorrections(groupId).onSuccess { corrections ->
+                    _groupCorrections.value = corrections
+                }
+                Unit
+            }
+            tasks += async(Dispatchers.IO) {
+                repository.getCommunityDecisions(groupId).onSuccess { decisions ->
+                    _communityDecisions.value = decisions
+                }
+                Unit
+            }
+            tasks += async(Dispatchers.IO) {
+                repository.getScheduleMetaAndSlots(groupId).onSuccess { schedule ->
+                    _scheduleMeta.value = schedule.meta
+                    _scheduleVersion.value = schedule.version
+                }
+                Unit
+            }
+        }
+
+        when (user.role.uppercase(Locale.ROOT)) {
+            "TEACHER" -> tasks += async(Dispatchers.IO) {
+                repository.getTeacherDashboard().onSuccess { _teacherDashboard.value = it }
+                Unit
+            }
+            "MODERATOR" -> tasks += async(Dispatchers.IO) {
+                repository.getModeratorDashboard().onSuccess { _moderatorDashboard.value = it }
+                Unit
+            }
+            "ADMIN" -> tasks += async(Dispatchers.IO) {
+                repository.getAdminDashboard().onSuccess { _adminDashboard.value = it }
+                Unit
+            }
+        }
+
+        tasks.awaitAll()
+    }
+
+    private fun applyStartupSyncResult(result: SyncResult) {
+        when (result) {
+            is SyncResult.Success -> {
+                _homeSyncState.value = SyncState.Success()
+                _scheduleSyncState.value = SyncState.Success()
+                _homeworkSyncState.value = SyncState.Success()
+                _examsSyncState.value = SyncState.Success()
+                _calendarSyncState.value = SyncState.Success()
+                _issuesSyncState.value = SyncState.Success()
+                _librarySyncState.value = SyncState.Success()
+                _groupsSyncState.value = SyncState.Success()
+            }
+            is SyncResult.Offline -> {
+                _homeSyncState.value = SyncState.OfflineCached()
+                _scheduleSyncState.value = SyncState.OfflineCached()
+                _homeworkSyncState.value = SyncState.OfflineCached()
+                _examsSyncState.value = SyncState.OfflineCached()
+                _calendarSyncState.value = SyncState.OfflineCached()
+                _issuesSyncState.value = SyncState.OfflineCached()
+                _librarySyncState.value = SyncState.OfflineCached()
+                _groupsSyncState.value = SyncState.OfflineCached()
+            }
+            is SyncResult.Error -> {
+                _homeSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _scheduleSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _homeworkSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _examsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _calendarSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _issuesSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _librarySyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                _groupsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+            }
+        }
+    }
+
+    private fun getActiveGroupId(): String = _selectedGroupId.value
 
     // =========================================================================
     // NAVIGATION & ON-DEMAND SYNCING
     // =========================================================================
 
+    private fun syncTabOnEntry(tab: NavigationTab) {
+        val groupId = getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() }
+        when (tab) {
+            NavigationTab.TODAY -> {
+                syncHome(groupId, _selectedDate.value, isRefresh = true)
+                syncSchedule(groupId, isRefresh = true)
+                syncHomeworks(groupId, isRefresh = true)
+                syncExams(groupId, isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+            }
+            NavigationTab.CALENDAR -> {
+                syncCalendar(groupId, isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+            }
+            NavigationTab.HOMEWORK -> syncHomeworks(groupId, isRefresh = true)
+            NavigationTab.EXAMS -> syncExams(groupId, isRefresh = true)
+            NavigationTab.ISSUES -> syncIssues(groupId, isRefresh = true)
+            NavigationTab.MORE -> {
+                syncGroups(isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+            }
+        }
+    }
+
+    private fun syncSubScreenOnEntry(screen: SubScreen) {
+        val groupId = getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() }
+        when (screen) {
+            SubScreen.NONE -> syncTabOnEntry(_currentTab.value)
+            SubScreen.EXTRA_SECTIONS_HUB -> {
+                syncGroups(isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+            }
+            SubScreen.SCHEDULE -> {
+                syncSchedule(groupId, isRefresh = true)
+                loadScheduleData()
+            }
+            SubScreen.GROUPS -> syncGroups(isRefresh = true)
+            SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER ->
+                syncBooks(currentUser.value?.gradeId ?: 10, isRefresh = true)
+
+            SubScreen.TIMELINE -> {
+                syncSectionContents(groupId, isRefresh = true)
+                syncHomeworks(groupId, isRefresh = true)
+                syncExams(groupId, isRefresh = true)
+            }
+
+            SubScreen.SUBJECT_KNOWLEDGE_BASE -> {
+                syncSectionContents(groupId, isRefresh = true)
+                syncHomeworks(groupId, isRefresh = true)
+                syncExams(groupId, isRefresh = true)
+                // The unified subject workspace also displays the class's
+                // questions/discussions; refresh them on entry as well.
+                syncIssues(groupId, isRefresh = true)
+            }
+
+            SubScreen.ACADEMIC_HISTORY -> syncAcademicArchive(isRefresh = true)
+
+            SubScreen.SEARCH -> {
+                syncSectionContents(groupId, isRefresh = true)
+                syncHomeworks(groupId, isRefresh = true)
+                syncExams(groupId, isRefresh = true)
+                syncIssues(groupId, isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+                syncGroups(isRefresh = true)
+            }
+
+            SubScreen.WHAT_DID_I_MISS -> {
+                syncSectionContents(groupId, isRefresh = true)
+                syncHomeworks(groupId, isRefresh = true)
+                syncExams(groupId, isRefresh = true)
+                syncEvents(groupId, isRefresh = true)
+                syncSchedule(groupId, isRefresh = true)
+            }
+
+            SubScreen.EVENTS -> syncEvents(groupId, isRefresh = true)
+
+            SubScreen.COMMUNITY_DECISIONS -> {
+                loadCommunityDecisions(groupId)
+                loadScheduleProposals()
+            }
+
+            SubScreen.TEACHER_DASHBOARD -> loadTeacherDashboard()
+            SubScreen.MODERATOR_DASHBOARD -> {
+                loadModeratorDashboard()
+                loadGroupCorrections(groupId)
+                loadCommunityDecisions(groupId)
+                loadGroupMembers(groupId)
+                loadScheduleProposals()
+            }
+            SubScreen.ADMIN_DASHBOARD -> loadAdminDashboard()
+
+            SubScreen.PROFILE, SubScreen.SETTINGS -> viewModelScope.launch {
+                repository.syncProfile()
+            }
+
+            SubScreen.VERSION_CHECK -> viewModelScope.launch {
+                repository.getSystemVersion()
+            }
+
+            SubScreen.PDF_VIEWER -> Unit
+        }
+    }
+
+    private fun syncCurrentDestinationOnEntry() {
+        if (_subScreen.value == SubScreen.NONE) {
+            syncTabOnEntry(_currentTab.value)
+        } else {
+            syncSubScreenOnEntry(_subScreen.value)
+        }
+    }
+
     fun setTab(tab: NavigationTab) {
         triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _currentTab.value = tab
         _subScreen.value = SubScreen.NONE
-
-        val groupId = getActiveGroupId()
-        when (tab) {
-            NavigationTab.TODAY -> syncHome(groupId, _selectedDate.value, isRefresh = false)
-            NavigationTab.HOMEWORK -> syncHomeworks(groupId, isRefresh = false)
-            NavigationTab.EXAMS -> syncExams(groupId, isRefresh = false)
-            NavigationTab.CALENDAR -> syncCalendar(groupId, isRefresh = false)
-            NavigationTab.ISSUES -> syncIssues(groupId, isRefresh = false)
-            NavigationTab.MORE -> {}
-        }
+        syncTabOnEntry(tab)
     }
 
     fun setSubScreen(screen: SubScreen) {
         triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _subScreen.value = screen
-        val groupId = getActiveGroupId()
-        when (screen) {
-            SubScreen.SCHEDULE -> syncSchedule(groupId, isRefresh = false)
-            SubScreen.GROUPS -> syncGroups(isRefresh = false)
-            SubScreen.LIBRARY -> syncBooks(currentUser.value?.gradeId ?: 10, isRefresh = false)
-            SubScreen.TIMELINE -> syncHome(groupId, _selectedDate.value, isRefresh = false)
-            else -> {}
-        }
+        syncSubScreenOnEntry(screen)
     }
 
     fun navigateBack() {
@@ -442,6 +840,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             closePdfReader()
             return
         }
+        val previousScreen = _subScreen.value
         when (_subScreen.value) {
             SubScreen.NONE -> {
                 // Already on root screen
@@ -474,6 +873,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 closePdfReader()
             }
         }
+        if (previousScreen != SubScreen.PDF_VIEWER && _subScreen.value != previousScreen) {
+            syncCurrentDestinationOnEntry()
+        }
     }
 
     fun openBookInPdfReader(book: BookItem, targetPage: Int? = null) {
@@ -486,18 +888,21 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _activeReadingBook.value = null
         _activeReadingInitialPage.value = null
         _subScreen.value = SubScreen.LIBRARY
+        syncSubScreenOnEntry(SubScreen.LIBRARY)
     }
 
     fun setSelectedGroup(groupId: String) {
+        if (groupId.isBlank()) return
         _selectedGroupId.value = groupId
-        if (_autoSyncEnabled.value) {
-            syncInitialData(groupId, _selectedDate.value)
-        }
+        persistSelectedGroup(groupId)
+        syncInitialData(groupId, _selectedDate.value, isExplicitAction = true)
     }
 
     fun setSelectedDate(date: String) {
+        if (!AcademicSessionSelection.isValidIsoDate(date)) return
         _selectedDate.value = date
-        syncHome(getActiveGroupId(), date, isRefresh = false)
+        persistSelectedStudyDate(date)
+        syncHome(getActiveGroupId(), date, isRefresh = true)
     }
 
     fun setSearchQuery(query: String) {
@@ -560,6 +965,39 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     // =========================================================================
     // SYNC METHODS (Server -> Room -> Compose)
     // =========================================================================
+
+    /**
+     * Refreshes the active group's complete lesson snapshot for screens whose content
+     * spans more than the currently selected day (timeline, search and knowledge base).
+     */
+    fun syncSectionContents(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
+        if ((!_autoSyncEnabled.value && !isRefresh) || groupId.isBlank()) return
+        viewModelScope.launch {
+            when (val result = repository.syncContents(groupId)) {
+                is SyncResult.Success -> Unit
+                is SyncResult.Offline -> android.util.Log.i("TanweerViewModel", "Section contents remain on the local snapshot")
+                is SyncResult.Error -> android.util.Log.w("TanweerViewModel", "Section contents sync failed: ${result.message}")
+            }
+        }
+    }
+
+    /**
+     * Pulls the account-wide academic archive and the snapshots for every active group.
+     * This is intentionally separate from day-scoped sync so historical years stay current.
+     */
+    fun syncAcademicArchive(isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
+        viewModelScope.launch {
+            _academicArchiveSyncState.value =
+                if (isRefresh) SyncState.Refreshing else SyncState.Loading
+            when (val result = repository.syncStudentAcademicArchive(_selectedDate.value.take(7))) {
+                is SyncResult.Success -> _academicArchiveSyncState.value = SyncState.Success()
+                is SyncResult.Offline -> _academicArchiveSyncState.value = SyncState.OfflineCached()
+                is SyncResult.Error -> _academicArchiveSyncState.value =
+                    SyncState.Error(result.message, result.isNetworkError)
+            }
+        }
+    }
 
     fun syncInitialData(groupId: String, date: String, isExplicitAction: Boolean = false) {
         if (!_autoSyncEnabled.value && !isExplicitAction) return
@@ -678,6 +1116,19 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun syncEvents(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
+        if (groupId.isBlank()) return
+        viewModelScope.launch {
+            _eventsSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
+            when (val result = repository.syncEvents(groupId)) {
+                is SyncResult.Success -> _eventsSyncState.value = SyncState.Success()
+                is SyncResult.Offline -> _eventsSyncState.value = SyncState.OfflineCached()
+                is SyncResult.Error -> _eventsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+            }
+        }
+    }
+
     fun syncGroups(isRefresh: Boolean = false) {
         if (!_autoSyncEnabled.value && !isRefresh) return
         viewModelScope.launch {
@@ -719,6 +1170,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun refreshExams() = syncExams(isRefresh = true)
     fun refreshCalendar() = syncCalendar(isRefresh = true)
     fun refreshIssues() = syncIssues(isRefresh = true)
+    fun refreshEvents() = syncEvents(isRefresh = true)
     fun refreshGroups() = syncGroups(isRefresh = true)
     fun refreshBooks() = syncBooks(isRefresh = true)
 
@@ -779,7 +1231,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 onSuccess = { mutation ->
                     when (mutation) {
                         is com.magd.tanweer.data.local.ScheduleMutationResult.SavedDirectly -> {
-                            _scheduleSyncState.value = SyncState.Success()
+                            _scheduleSyncState.value = SyncState.Refreshing
+                            when (val syncResult = repository.syncSchedule(groupId)) {
+                                is SyncResult.Success -> _scheduleSyncState.value = SyncState.Success()
+                                is SyncResult.Offline -> _scheduleSyncState.value = SyncState.OfflineCached()
+                                is SyncResult.Error -> _scheduleSyncState.value =
+                                    SyncState.Error(syncResult.message, syncResult.isNetworkError)
+                            }
                         }
                         is com.magd.tanweer.data.local.ScheduleMutationResult.QueuedOffline -> {
                             _scheduleSyncState.value = SyncState.OfflineCached()
@@ -810,7 +1268,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 onSuccess = { deleteRes ->
                     triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                     if (deleteRes.isSynced) {
-                        _scheduleSyncState.value = SyncState.Success()
+                        _scheduleSyncState.value = SyncState.Refreshing
+                        when (val syncResult = repository.syncSchedule(groupId)) {
+                            is SyncResult.Success -> _scheduleSyncState.value = SyncState.Success()
+                            is SyncResult.Offline -> _scheduleSyncState.value = SyncState.OfflineCached()
+                            is SyncResult.Error -> _scheduleSyncState.value =
+                                SyncState.Error(syncResult.message, syncResult.isNetworkError)
+                        }
                     } else {
                         _scheduleSyncState.value = SyncState.OfflineCached(message = deleteRes.message)
                     }
@@ -842,6 +1306,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _groupMembersState = MutableStateFlow<com.magd.tanweer.data.model.GroupMembersResponse?>(null)
     val groupMembersState: StateFlow<com.magd.tanweer.data.model.GroupMembersResponse?> = _groupMembersState.asStateFlow()
+    private val _isGroupMembersLoading = MutableStateFlow(false)
+    val isGroupMembersLoading: StateFlow<Boolean> = _isGroupMembersLoading.asStateFlow()
+    private val _groupMembersError = MutableStateFlow<String?>(null)
+    val groupMembersError: StateFlow<String?> = _groupMembersError.asStateFlow()
 
     // Dashboard State Flows
     private val _teacherDashboard = MutableStateFlow<TeacherDashboardResponse?>(null)
@@ -852,6 +1320,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _adminDashboard = MutableStateFlow<AdminDashboardResponse?>(null)
     val adminDashboard: StateFlow<AdminDashboardResponse?> = _adminDashboard.asStateFlow()
+    private val _adminDashboardError = MutableStateFlow<String?>(null)
+    val adminDashboardError: StateFlow<String?> = _adminDashboardError.asStateFlow()
+
+    private val _myNotifications = MutableStateFlow<List<AppNotification>>(emptyList())
+    val myNotifications: StateFlow<List<AppNotification>> = _myNotifications.asStateFlow()
 
     private val _groupCorrections = MutableStateFlow<List<ContentCorrectionItem>>(emptyList())
     val groupCorrections: StateFlow<List<ContentCorrectionItem>> = _groupCorrections.asStateFlow()
@@ -887,10 +1360,71 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun loadAdminDashboard() {
         viewModelScope.launch {
             _isDashboardLoading.value = true
-            val res = repository.getAdminDashboard()
-            _isDashboardLoading.value = false
-            res.onSuccess { data ->
-                _adminDashboard.value = data
+            _adminDashboardError.value = null
+            try {
+                repository.getAdminDashboard()
+                    .onSuccess { data ->
+                        if (data.success) {
+                            _adminDashboard.value = data
+                        } else {
+                            _adminDashboard.value = null
+                            _adminDashboardError.value = "رد الخادم لم يؤكد صلاحية بيانات لوحة الإدارة"
+                        }
+                    }
+                    .onFailure { error ->
+                        _adminDashboard.value = null
+                        _adminDashboardError.value = error.message ?: "تعذر تحميل بيانات لوحة الإدارة"
+                    }
+            } finally {
+                _isDashboardLoading.value = false
+            }
+        }
+    }
+
+    fun setSchoolStudentStatus(
+        userId: String,
+        status: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            repository.updateSchoolStudentStatus(userId, status)
+                .onSuccess { message ->
+                    loadAdminDashboard()
+                    onResult(true, message)
+                }
+                .onFailure { error -> onResult(false, error.message ?: "تعذر تحديث حساب الطالب") }
+        }
+    }
+
+    fun removeStudentFromClass(
+        userId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            repository.removeSchoolStudentFromClass(userId)
+                .onSuccess { message ->
+                    loadAdminDashboard()
+                    onResult(true, message)
+                }
+                .onFailure { error -> onResult(false, error.message ?: "تعذر فصل الطالب من شعبته") }
+        }
+    }
+    fun loadMyNotifications() {
+        viewModelScope.launch {
+            repository.getMyNotifications().onSuccess { notifications ->
+                _myNotifications.value = notifications
+            }
+        }
+    }
+
+    fun generateMyRecoveryCode(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = repository.generateMyRecoveryCode()
+            result.onSuccess { code ->
+                loadMyNotifications()
+                onResult(true, code)
+            }.onFailure { error ->
+                onResult(false, error.message ?: "تعذر تغيير رمز الاسترداد")
             }
         }
     }
@@ -974,10 +1508,17 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val res = repository.voteCommunityDecision(decisionId, voteChoice)
             res.onSuccess { msg ->
+                // A unified decision may have just changed the active schedule.
+                // Refresh both sources so the schedule and governance screens cannot drift.
                 loadCommunityDecisions()
                 loadModeratorDashboard()
+                loadScheduleData()
                 onResult(true, msg)
             }.onFailure { err ->
+                // The server may have closed an expired decision while rejecting this vote.
+                // Refresh to display its authoritative terminal state immediately.
+                loadCommunityDecisions()
+                loadScheduleData()
                 onResult(false, err.message ?: "تعذر تسجيل التصويت")
             }
         }
@@ -1083,9 +1624,23 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun loadGroupMembers(groupId: String = getActiveGroupId()) {
         if (groupId.isBlank()) return
         viewModelScope.launch {
-            val res = repository.getGroupMembers(groupId)
-            res.onSuccess { data ->
-                _groupMembersState.value = data
+            _groupMembersState.value = null
+            _groupMembersError.value = null
+            _isGroupMembersLoading.value = true
+            try {
+                repository.getGroupMembers(groupId)
+                    .onSuccess { data ->
+                        if (data.success) {
+                            _groupMembersState.value = data
+                        } else {
+                            _groupMembersError.value = "تعذر تحميل قائمة أعضاء المجموعة من الخادم."
+                        }
+                    }
+                    .onFailure { error ->
+                        _groupMembersError.value = error.message ?: "تعذر تحميل أعضاء المجموعة. تحقق من الاتصال ثم أعد المحاولة."
+                    }
+            } finally {
+                _isGroupMembersLoading.value = false
             }
         }
     }
@@ -1182,6 +1737,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 reason = reason
             )
             result.onSuccess { msg ->
+                // A schedule proposal is also a unified community decision.
+                // Take the user straight to that shared decision list after the server confirms it.
+                loadCommunityDecisions()
+                setSubScreen(SubScreen.COMMUNITY_DECISIONS)
                 onResult(true, msg)
             }.onFailure { err ->
                 onResult(false, err.message ?: "تعذر إرسال المقترح")
@@ -1265,17 +1824,18 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
+        _isCheckingAuth.value = true
         viewModelScope.launch {
             val result = repository.register(fullName, phone, pass, gradeId, sectionId)
             result.onSuccess { pair ->
-                _selectedGroupId.value = pair.first.defaultGroupId
+                restoreAcademicSelection(pair.first)
                 if (pair.second.isNotEmpty()) {
                     _recoveryCodeDialog.value = pair.second
                 }
-                syncInitialData(pair.first.defaultGroupId, _selectedDate.value, isExplicitAction = true)
-                syncBooks(pair.first.gradeId, isRefresh = true)
+                // The current-user startup coordinator performs the required server pull.
                 onSuccess()
             }.onFailure { err ->
+                _isCheckingAuth.value = false
                 onError(err.message ?: "فشل إنشاء الحساب")
             }
         }
@@ -1287,14 +1847,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
+        _isCheckingAuth.value = true
         viewModelScope.launch {
             val result = repository.login(phone, pass)
             result.onSuccess { user ->
-                _selectedGroupId.value = user.defaultGroupId
-                syncInitialData(user.defaultGroupId, _selectedDate.value, isExplicitAction = true)
-                syncBooks(user.gradeId, isRefresh = true)
+                restoreAcademicSelection(user)
+                // The current-user startup coordinator performs the required server pull.
                 onSuccess()
             }.onFailure { err ->
+                _isCheckingAuth.value = false
                 onError(err.message ?: "فشل تسجيل الدخول")
             }
         }
@@ -1305,14 +1866,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
+        _isCheckingAuth.value = true
         viewModelScope.launch {
             val result = repository.loginWithRecoveryCode(code)
             result.onSuccess { user ->
-                _selectedGroupId.value = user.defaultGroupId
-                syncInitialData(user.defaultGroupId, _selectedDate.value, isExplicitAction = true)
-                syncBooks(user.gradeId, isRefresh = true)
+                restoreAcademicSelection(user)
+                // The current-user startup coordinator performs the required server pull.
                 onSuccess()
             }.onFailure { err ->
+                _isCheckingAuth.value = false
                 onError(err.message ?: "فشل تسجيل الدخول بالرقم السري")
             }
         }
@@ -1326,11 +1888,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         onError: (String) -> Unit
     ) {
         viewModelScope.launch {
+            val previousDefaultGroupId = currentUser.value?.defaultGroupId
             val result = repository.updateProfile(fullName, gradeId, sectionId)
             result.onSuccess { user ->
-                _selectedGroupId.value = user.defaultGroupId
-                syncInitialData(user.defaultGroupId, _selectedDate.value, isExplicitAction = true)
-                syncBooks(user.gradeId, isRefresh = true)
+                restoreAcademicSelection(user, resetGroup = previousDefaultGroupId != user.defaultGroupId)
+                syncInitialData(getActiveGroupId(), _selectedDate.value, isExplicitAction = true)
                 onSuccess()
             }.onFailure { err ->
                 onError(err.message ?: "فشل تحديث البيانات")
@@ -1339,21 +1901,17 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun logout() {
+        _isCheckingAuth.value = true
         viewModelScope.launch {
-            repository.logout(getApplication())
-            currentActiveUserId = null
-            _shouldShowCatchUpCard.value = false
-            _lastOpenDate.value = todayDateStr
-            _isNewAccountOrFirstLaunch.value = false
-            _selectedGroupId.value = ""
-            _homeSyncState.value = SyncState.Idle
-            _scheduleSyncState.value = SyncState.Idle
-            _homeworkSyncState.value = SyncState.Idle
-            _examsSyncState.value = SyncState.Idle
-            _calendarSyncState.value = SyncState.Idle
-            _issuesSyncState.value = SyncState.Idle
-            _librarySyncState.value = SyncState.Idle
-            _groupsSyncState.value = SyncState.Idle
+            try {
+                repository.logout(getApplication())
+            } catch (e: Exception) {
+                android.util.Log.e("TanweerViewModel", "Local logout cleanup failed", e)
+            } finally {
+                dataGenerationVerified = false
+                resetUserScopedUiState()
+                _isCheckingAuth.value = false
+            }
         }
     }
 
@@ -1456,6 +2014,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         dueDate: String,
         taskType: String = "HOMEWORK",
         pages: List<com.magd.tanweer.util.ProcessedPageResult> = emptyList(),
+        isOfficial: Boolean = false,
         onResult: ((Result<PublicationResult>) -> Unit)? = null,
         onComplete: (() -> Unit)? = null
     ) {
@@ -1473,7 +2032,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                     pageNumbers = pageNumbers,
                     questionNumbers = questionNumbers,
                     taskType = taskType,
-                    pages = pages
+                    pages = pages,
+                    isOfficial = isOfficial
                 )
             } else {
                 repository.addHomework(
@@ -1485,7 +2045,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                     details = details,
                     pageNumbers = pageNumbers,
                     questionNumbers = questionNumbers,
-                    taskType = taskType
+                    taskType = taskType,
+                    isOfficial = isOfficial
                 )
             }
             onResult?.invoke(result)
@@ -1517,6 +2078,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         notes: String?,
         examDate: String,
         examType: String = "MONTHLY",
+        isOfficial: Boolean = false,
         onResult: ((Result<com.magd.tanweer.data.local.ExamAddResult>) -> Unit)? = null
     ) {
         val user = currentUser.value ?: return
@@ -1529,7 +2091,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 title = title,
                 requiredChapters = requiredChapters,
                 notes = notes,
-                examType = examType
+                examType = examType,
+                isOfficial = isOfficial
             )
             onResult?.invoke(res)
         }
@@ -1753,6 +2316,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val result = repository.joinGroup(groupId, reason)
             result.onSuccess { response ->
+                syncGroups(isRefresh = true)
                 val status = response.status ?: "ACTIVE"
                 val msg = response.message ?: if (status == "ACTIVE") "تم الانضمام إلى المجموعة بنجاح" else "تم إرسال طلب الانضمام، بانتظار موافقة المشرف"
                 onResult(true, status, msg)
@@ -1766,15 +2330,70 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         name: String,
         description: String? = null,
         icon: String? = "👥",
+        visibility: String = "PUBLIC",
+        chatPolicy: String = "MEMBERS",
         onResult: (Boolean, String) -> Unit
     ) {
         viewModelScope.launch {
-            val res = repository.createPublicGroup(name, description, icon)
+            val res = repository.createPublicGroup(name, description, icon, visibility, chatPolicy)
             res.onSuccess {
                 syncGroups(isRefresh = true)
                 onResult(true, it.message ?: "تم إنشاء المجموعة بنجاح")
             }.onFailure {
                 onResult(false, it.message ?: "تعذر إنشاء المجموعة")
+            }
+        }
+    }
+
+    fun leaveGroup(groupId: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            repository.leaveGroup(groupId)
+                .onSuccess { message ->
+                    syncGroups(isRefresh = true)
+                    if (_selectedGroupId.value == groupId) {
+                        currentUser.value?.defaultGroupId?.takeIf { it.isNotBlank() && it != groupId }?.let {
+                            setSelectedGroup(it)
+                        }
+                    }
+                    onResult(true, message)
+                }
+                .onFailure { error ->
+                    onResult(false, error.message ?: "تعذر مغادرة المجموعة")
+                }
+        }
+    }
+
+    fun dismissSchoolAnnouncement(
+        eventId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            repository.dismissSchoolAnnouncement(eventId)
+                .onSuccess { onResult(true, "تم إخفاء التعميم من هذا الحساب فقط") }
+                .onFailure { error -> onResult(false, error.message ?: "تعذر إخفاء التعميم") }
+        }
+    }
+    fun publishSchoolAnnouncement(
+        title: String,
+        content: String,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = repository.addEvent(
+                groupId = "all",
+                eventDate = getTodayDateString(),
+                title = title.trim(),
+                timeStr = null,
+                category = "ANNOUNCEMENT",
+                description = content.trim(),
+                location = null
+            )
+            result.onSuccess {
+                val groupId = getActiveGroupId()
+                if (groupId.isNotBlank()) repository.syncEvents(groupId)
+                onResult(true, "تم نشر التعميم رسمياً، وسيظهر في الصفحة الرئيسية والفعاليات لجميع أعضاء المدرسة.")
+            }.onFailure { error ->
+                onResult(false, error.message ?: "تعذر نشر التعميم المدرسي")
             }
         }
     }

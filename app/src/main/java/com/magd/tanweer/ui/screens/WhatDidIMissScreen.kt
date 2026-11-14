@@ -168,14 +168,14 @@ fun WhatDidIMissScreen(
                         Column {
                             Text(
                                 text = "ماذا فاتني أثناء الغياب؟ 🎒",
-                                fontSize = 18.sp,
+                                fontSize = tanweerTextSize(18f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             val lastVisitStr = lastOpenDate.ifBlank { "سابقاً" }
                             Text(
                                 text = "ملخص الاستدراك الذكي (آخر دخول: $lastVisitStr)",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                         }
@@ -200,7 +200,7 @@ fun WhatDidIMissScreen(
                             ) {
                                 Text(
                                     text = range.label,
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isSelected) TextOnAccent else TextSecondary
                                 )
@@ -274,16 +274,16 @@ fun WhatDidIMissScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(text = "✨", fontSize = 32.sp)
+                        Text(text = "✨", fontSize = tanweerTextSize(32f))
                         Text(
                             text = "لا توجد مواد أو واجبات أو أحداث جديدة خلال هذه الفترة!",
-                            fontSize = 14.sp,
+                            fontSize = tanweerTextSize(14f),
                             color = EmeraldGreen,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = "أنت مواكب لكافة متطلبات الشعبة الدراسية بنجاح ✓",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             color = TextSecondary
                         )
                     }
@@ -302,17 +302,17 @@ fun WhatDidIMissScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "📝", fontSize = 18.sp)
+                        Text(text = "📝", fontSize = tanweerTextSize(18f))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "الدروس وشروحات السبورة الموثقة (${missedLessons.size})",
-                            fontSize = 15.sp,
+                            fontSize = tanweerTextSize(15f),
                             fontWeight = FontWeight.Bold,
                             color = CyanAccent
                         )
                     }
                     TextButton(onClick = { viewModel.setTab(NavigationTab.TODAY) }) {
-                        Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                        Text(text = "عرض الكل", color = CyanAccent, fontSize = tanweerTextSize(12f))
                     }
                 }
             }
@@ -336,21 +336,21 @@ fun WhatDidIMissScreen(
                             )
                             Text(
                                 text = "📅 ${lesson.studyDate}",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextMuted
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = lesson.title,
-                            fontSize = 15.sp,
+                            fontSize = tanweerTextSize(15f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
                         if (!lesson.description.isNullOrBlank()) {
                             Text(
                                 text = lesson.description,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextSecondary,
                                 maxLines = 2
                             )
@@ -359,7 +359,7 @@ fun WhatDidIMissScreen(
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "📷 يتضمن ${lesson.media.size} صور موثقة للسبورة/الدفتر",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = CyanAccent,
                                 fontWeight = FontWeight.Medium
                             )
@@ -380,17 +380,17 @@ fun WhatDidIMissScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "📋", fontSize = 18.sp)
+                        Text(text = "📋", fontSize = tanweerTextSize(18f))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "الواجبات والتكليفات المدرسية (${missedHomeworks.size})",
-                            fontSize = 15.sp,
+                            fontSize = tanweerTextSize(15f),
                             fontWeight = FontWeight.Bold,
                             color = WarmAmber
                         )
                     }
                     TextButton(onClick = { viewModel.setTab(NavigationTab.HOMEWORK) }) {
-                        Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                        Text(text = "عرض الكل", color = CyanAccent, fontSize = tanweerTextSize(12f))
                     }
                 }
             }
@@ -438,21 +438,21 @@ fun WhatDidIMissScreen(
                                 }
                                 Text(
                                     text = "تاريخ الحصة: ${hw.studyDate}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextMuted
                                 )
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = hw.title,
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             if (!hw.details.isNullOrBlank()) {
                                 Text(
                                     text = hw.details,
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary,
                                     maxLines = 2
                                 )
@@ -461,7 +461,7 @@ fun WhatDidIMissScreen(
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = "⏳ موعد التسليم: ${hw.dueDate}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = WarmAmber,
                                     fontWeight = FontWeight.Medium
                                 )
@@ -511,17 +511,17 @@ fun WhatDidIMissScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "⏳", fontSize = 18.sp)
+                        Text(text = "⏳", fontSize = tanweerTextSize(18f))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "واجبات وتكليفات قادمة (${upcomingHomeworks.size})",
-                            fontSize = 15.sp,
+                            fontSize = tanweerTextSize(15f),
                             fontWeight = FontWeight.Bold,
                             color = CyanAccent
                         )
                     }
                     TextButton(onClick = { viewModel.setTab(NavigationTab.HOMEWORK) }) {
-                        Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                        Text(text = "عرض الكل", color = CyanAccent, fontSize = tanweerTextSize(12f))
                     }
                 }
             }
@@ -553,21 +553,21 @@ fun WhatDidIMissScreen(
                                 )
                                 Text(
                                     text = "تاريخ الحصة: ${hw.studyDate}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextMuted
                                 )
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = hw.title,
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             if (!hw.details.isNullOrBlank()) {
                                 Text(
                                     text = hw.details,
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary,
                                     maxLines = 2
                                 )
@@ -576,7 +576,7 @@ fun WhatDidIMissScreen(
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = "⏳ موعد التسليم: ${hw.dueDate}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = CyanAccent,
                                     fontWeight = FontWeight.Medium
                                 )
@@ -627,17 +627,17 @@ fun WhatDidIMissScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "🔴", fontSize = 18.sp)
+                            Text(text = "🔴", fontSize = tanweerTextSize(18f))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "اختبارات أُجريت أثناء فترة الغياب (${missedExams.size})",
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = RubyRed
                             )
                         }
                         TextButton(onClick = { viewModel.setTab(NavigationTab.EXAMS) }) {
-                            Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                            Text(text = "عرض الكل", color = CyanAccent, fontSize = tanweerTextSize(12f))
                         }
                     }
                 }
@@ -660,7 +660,7 @@ fun WhatDidIMissScreen(
                                 )
                                 Text(
                                     text = "📅 ${exam.examDate} (مضى)",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     fontWeight = FontWeight.Bold,
                                     color = RubyRed
                                 )
@@ -668,14 +668,14 @@ fun WhatDidIMissScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = exam.title,
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             if (!exam.requiredChapters.isNullOrBlank()) {
                                 Text(
                                     text = "المقرر: ${exam.requiredChapters}",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary,
                                     maxLines = 2
                                 )
@@ -693,11 +693,11 @@ fun WhatDidIMissScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "🗓️", fontSize = 18.sp)
+                            Text(text = "🗓️", fontSize = tanweerTextSize(18f))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "اختبارات قادمة تم الإعلان عنها (${upcomingExams.size})",
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = WarmAmber
                             )
@@ -723,7 +723,7 @@ fun WhatDidIMissScreen(
                                 )
                                 Text(
                                     text = "📅 موعده: ${exam.examDate}",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     fontWeight = FontWeight.Bold,
                                     color = WarmAmber
                                 )
@@ -731,14 +731,14 @@ fun WhatDidIMissScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = exam.title,
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             if (!exam.requiredChapters.isNullOrBlank()) {
                                 Text(
                                     text = "المقرر: ${exam.requiredChapters}",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary,
                                     maxLines = 2
                                 )
@@ -761,11 +761,11 @@ fun WhatDidIMissScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "🎪", fontSize = 18.sp)
+                            Text(text = "🎪", fontSize = tanweerTextSize(18f))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "فعاليات أقيمت أثناء فترة الغياب (${missedEvents.size})",
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = EmeraldGreen
                             )
@@ -791,14 +791,14 @@ fun WhatDidIMissScreen(
                                 )
                                 Text(
                                     text = "📅 ${event.eventDate} ${event.timeStr ?: ""}".trim(),
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextMuted
                                 )
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = event.title,
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
@@ -815,17 +815,17 @@ fun WhatDidIMissScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "🎪", fontSize = 18.sp)
+                            Text(text = "🎪", fontSize = tanweerTextSize(18f))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "فعاليات قادمة (${upcomingEvents.size})",
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = CyanAccent
                             )
                         }
                         TextButton(onClick = { viewModel.setSubScreen(SubScreen.EVENTS) }) {
-                            Text(text = "عرض الكل", color = CyanAccent, fontSize = 12.sp)
+                            Text(text = "عرض الكل", color = CyanAccent, fontSize = tanweerTextSize(12f))
                         }
                     }
                 }
@@ -848,14 +848,14 @@ fun WhatDidIMissScreen(
                                 )
                                 Text(
                                     text = "📅 ${event.eventDate} ${event.timeStr ?: ""}".trim(),
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextMuted
                                 )
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = event.title,
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
@@ -918,17 +918,17 @@ private fun StatPillCard(
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text = icon, fontSize = 18.sp)
+            Text(text = icon, fontSize = tanweerTextSize(18f))
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "$count",
-                fontSize = 16.sp,
+                fontSize = tanweerTextSize(16f),
                 fontWeight = FontWeight.Bold,
                 color = if (isSelected) color else TextPrimary
             )
             Text(
                 text = label,
-                fontSize = 10.sp,
+                fontSize = tanweerTextSize(10f),
                 color = if (isSelected) color else TextSecondary,
                 maxLines = 1
             )

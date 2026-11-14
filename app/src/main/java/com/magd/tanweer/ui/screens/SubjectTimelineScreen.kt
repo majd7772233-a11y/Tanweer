@@ -25,19 +25,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.data.model.ContentItem
+import com.magd.tanweer.data.model.HomeworkItem
+import com.magd.tanweer.data.model.ExamItem
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 
 data class RealTimelineItem(
+    val id: String,
     val rawDate: String,
     val formattedDate: String,
     val title: String,
     val description: String,
     val author: String,
     val type: String, // "LESSON", "HOMEWORK", "EXAM"
-    val isCompleted: Boolean = false
+    val isCompleted: Boolean = false,
+    val content: ContentItem? = null,
+    val homework: HomeworkItem? = null,
+    val exam: ExamItem? = null
 )
 
 @Composable
@@ -61,6 +68,9 @@ fun SubjectTimelineScreen(
     }
 
     var sortDescending by remember { mutableStateOf(true) }
+    var previewContent by remember { mutableStateOf<ContentItem?>(null) }
+    var previewHomework by remember { mutableStateOf<HomeworkItem?>(null) }
+    var previewExam by remember { mutableStateOf<ExamItem?>(null) }
 
     // Fetch ALL lessons for the selected subject
     val subjectContents by viewModel.repository.getContentsBySubject(activeGroupId, selectedSubject.id)
@@ -81,12 +91,14 @@ fun SubjectTimelineScreen(
         subjectContents.forEach { c ->
             list.add(
                 RealTimelineItem(
+                    id = "lesson:${c.id}",
                     rawDate = c.studyDate,
                     formattedDate = TanweerViewModel.getFormattedArabicDate(c.studyDate),
                     title = "درس: ${c.title}",
                     description = c.description ?: "توثيق درس رسمي للشعبة",
                     author = c.authorName.ifBlank { "طالب مساهم" },
-                    type = "LESSON"
+                    type = "LESSON",
+                    content = c
                 )
             )
         }
@@ -94,13 +106,15 @@ fun SubjectTimelineScreen(
         homeworks.filter { it.subjectId == selectedSubject.id }.forEach { h ->
             list.add(
                 RealTimelineItem(
+                    id = "homework:${h.id}",
                     rawDate = h.dueDate.ifBlank { h.studyDate },
                     formattedDate = "تسليم: ${h.dueDate}",
                     title = "واجب: ${h.title}",
                     description = h.details ?: (h.pageNumbers?.let { "صفحات: $it" } ?: "واجب منزلي مقرر"),
                     author = if (h.isCompleted) "منجز بواسطةك ✓" else "مهمة شعبة",
                     type = "HOMEWORK",
-                    isCompleted = h.isCompleted
+                    isCompleted = h.isCompleted,
+                    homework = h
                 )
             )
         }
@@ -108,12 +122,14 @@ fun SubjectTimelineScreen(
         exams.filter { it.subjectId == selectedSubject.id }.forEach { e ->
             list.add(
                 RealTimelineItem(
+                    id = "exam:${e.id}",
                     rawDate = e.examDate,
                     formattedDate = "موعد: ${e.examDate}",
                     title = "اختبار: ${e.title}",
                     description = e.requiredChapters ?: "اختبار رسمي معتمد",
                     author = e.notes ?: "إدارة الشعبة",
-                    type = "EXAM"
+                    type = "EXAM",
+                    exam = e
                 )
             )
         }
@@ -164,13 +180,13 @@ fun SubjectTimelineScreen(
                     Column {
                         Text(
                             text = "🗺️ رحلة المادة والخط الزمني",
-                            fontSize = 18.sp,
+                            fontSize = tanweerTextSize(18f),
                             fontWeight = FontWeight.Black,
                             color = CyanAccent
                         )
                         Text(
                             text = "التسلسل الزمني الكامل للدروس والواجبات والاختبارات",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary
                         )
                     }
@@ -209,10 +225,10 @@ fun SubjectTimelineScreen(
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(text = subj.icon, fontSize = 16.sp)
+                            Text(text = subj.icon, fontSize = tanweerTextSize(16f))
                             Text(
                                 text = subj.name,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) CyanAccent else TextPrimary,
                                 maxLines = 1,
@@ -237,18 +253,18 @@ fun SubjectTimelineScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(selectedSubject.icon, fontSize = 24.sp)
+                        Text(selectedSubject.icon, fontSize = tanweerTextSize(24f))
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
                                 text = selectedSubject.name,
-                                fontSize = 15.sp,
+                                fontSize = tanweerTextSize(15f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             Text(
                                 text = "${subjectContents.size} دروس • ${homeworks.filter { it.subjectId == selectedSubject.id }.size} واجبات • ${exams.filter { it.subjectId == selectedSubject.id }.size} اختبارات",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                         }
@@ -274,7 +290,7 @@ fun SubjectTimelineScreen(
                 )
             }
         } else {
-            items(realTimelineEvents) { event ->
+            items(realTimelineEvents, key = { it.id }) { event ->
                 val isToday = event.rawDate == todayStr
                 val isFuture = event.rawDate > todayStr
 
@@ -316,7 +332,14 @@ fun SubjectTimelineScreen(
                     GlassCard(
                         modifier = Modifier
                             .weight(1f)
-                            .padding(bottom = 6.dp),
+                            .padding(bottom = 6.dp)
+                            .clickable {
+                                when (event.type) {
+                                    "LESSON" -> event.content?.let { previewContent = it }
+                                    "HOMEWORK" -> event.homework?.let { previewHomework = it }
+                                    "EXAM" -> event.exam?.let { previewExam = it }
+                                }
+                            },
                         backgroundColor = GlassSurface,
                         borderColor = if (isToday) CyanAccent else GlassBorderSubtle
                     ) {
@@ -328,7 +351,7 @@ fun SubjectTimelineScreen(
                             ) {
                                 Text(
                                     text = event.title,
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
@@ -352,7 +375,7 @@ fun SubjectTimelineScreen(
                             }
                             Text(
                                 text = event.description,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextSecondary,
                                 modifier = Modifier.padding(top = 4.dp)
                             )
@@ -365,12 +388,12 @@ fun SubjectTimelineScreen(
                             ) {
                                 Text(
                                     text = "بواسطة: ${event.author}",
-                                    fontSize = 10.sp,
+                                    fontSize = tanweerTextSize(10f),
                                     color = TextMuted
                                 )
                                 Text(
                                     text = event.formattedDate,
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = if (isToday) CyanAccent else TextSecondary,
                                     fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal
                                 )
@@ -380,5 +403,25 @@ fun SubjectTimelineScreen(
                 }
             }
         }
+    }
+
+    // Reuse the detail previews already used by the academic archive.
+    previewContent?.let { item ->
+        AcademicContentPreviewDialog(
+            content = item,
+            onDismiss = { previewContent = null }
+        )
+    }
+    previewHomework?.let { item ->
+        AcademicHomeworkPreviewDialog(
+            homework = item,
+            onDismiss = { previewHomework = null }
+        )
+    }
+    previewExam?.let { item ->
+        AcademicExamPreviewDialog(
+            exam = item,
+            onDismiss = { previewExam = null }
+        )
     }
 }
