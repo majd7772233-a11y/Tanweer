@@ -133,3 +133,10 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - The persisted per-user/per-group Durable Object quota applies to both send-message and delete-message actions. Consume it before D1 authorization reads for supported actions.
 - Ignore unsupported JSON control frames before D1 reads, while retaining live permission checks for supported chat actions.
 - Reject invalid delete-message identifiers (blank, non-string or longer than 128 characters).
+
+## Chat transport byte-limit enforcement
+
+- Reject known oversized REST Content-Length values before reading; then independently cap the actual streamed Request.body at 16 KiB and cancel immediately when it crosses the limit.
+- Count WebSocket binary frames using their original ArrayBuffer or ArrayBufferView byte length before UTF-8 decoding.
+- Keep malformed/unreadable REST payloads as explicit input errors; do not silently convert a truncated body into a valid message.
+- Keep the existing Worker IP throttle ahead of WebSocket upgrades and the Durable Object per-user/per-group action quota as independent controls.

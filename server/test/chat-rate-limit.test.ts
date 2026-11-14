@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GroupChatDO } from '../src/realtime/GroupChatDO';
 import { Env } from '../src/env';
-import { CHAT_RATE_LIMIT_MAX_BURST, CHAT_RATE_LIMIT_MAX_PER_WINDOW, consumeChatRateLimit, MAX_CHAT_MESSAGE_CHARACTERS, validateChatMessageText } from '../src/services/chat';
+import { CHAT_RATE_LIMIT_MAX_BURST, CHAT_RATE_LIMIT_MAX_PER_WINDOW, consumeChatRateLimit, getChatFrameByteLength, MAX_CHAT_BODY_BYTES, MAX_CHAT_FRAME_BYTES, MAX_CHAT_MESSAGE_CHARACTERS, readChatRequestBody, validateChatMessageText } from '../src/services/chat';
 class MemoryStorage {
   private values = new Map<string, unknown>();
   async get<T = unknown>(key: string): Promise<T | undefined> { return this.values.get(key) as T | undefined; }
@@ -34,6 +34,26 @@ describe('group chat guardrails', () => {
     for (let i = 0; i < CHAT_RATE_LIMIT_MAX_BURST; i++) expect((await one.fetch(quotaRequest('student-1'))).status).toBe(200);
     expect((await two.fetch(quotaRequest('student-1'))).status).toBe(429);
     expect((await two.fetch(quotaRequest('student-2'))).status).toBe(200);
+  });
+  it('cancels an oversized streamed REST body as soon as it crosses the byte limit', async () => {
+    let pullCount = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pullCount++;
+        if (pullCount === 1) controller.enqueue(new Uint8Array(MAX_CHAT_BODY_BYTES + 1));
+        else controller.close();
+      },
+      cancel() { cancelled = true; },
+    });
+    const result = await readChatRequestBody(body);
+    expect(result).toEqual({ ok: false, reason: 'TOO_LARGE' });
+    expect(pullCount).toBe(1);
+    expect(cancelled).toBe(true);
+  });
+  it('counts binary WebSocket frame bytes before decoding', () => {
+    expect(getChatFrameByteLength('😀')).toBe(4);
+    expect(getChatFrameByteLength(new Uint8Array(MAX_CHAT_FRAME_BYTES + 1).buffer)).toBe(MAX_CHAT_FRAME_BYTES + 1);
   });
   it('serializes concurrent quota checks inside one Durable Object instance', async () => {
     const storage = new MemoryStorage(); const object = new GroupChatDO({ storage } as any, {} as Env);

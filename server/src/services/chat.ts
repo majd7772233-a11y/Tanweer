@@ -16,6 +16,39 @@ export const CHAT_RATE_LIMIT_MAX_PER_WINDOW = 30;
 export const CHAT_RATE_LIMIT_MAX_BURST = 8;
 export type ChatMessageValidation = { valid: true; text: string } | { valid: false; code: 'INVALID_INPUT' | 'MESSAGE_TOO_LONG'; message: string };
 export interface ChatRateLimitStorage { get<T = unknown>(key: string): Promise<T | undefined>; put<T = unknown>(key: string, value: T): Promise<void>; }
+export type ChatRequestBodyReadResult = { ok: true; text: string } | { ok: false; reason: 'TOO_LARGE' | 'UNREADABLE' };
+export async function readChatRequestBody(body: ReadableStream<Uint8Array> | null): Promise<ChatRequestBodyReadResult> {
+  if (!body) return { ok: true, text: '' };
+  const reader = body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let totalBytes = 0;
+  let text = '';
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      totalBytes += chunk.value.byteLength;
+      if (totalBytes > MAX_CHAT_BODY_BYTES) {
+        try { await reader.cancel('Request body exceeds the chat payload limit'); } catch {}
+        return { ok: false, reason: 'TOO_LARGE' };
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    text += decoder.decode();
+    return { ok: true, text };
+  } catch {
+    try { await reader.cancel(); } catch {}
+    return { ok: false, reason: 'UNREADABLE' };
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+}
+export function getChatFrameByteLength(data: unknown): number {
+  if (typeof data === 'string') return new TextEncoder().encode(data).byteLength;
+  if (data instanceof ArrayBuffer) return data.byteLength;
+  if (ArrayBuffer.isView(data)) return data.byteLength;
+  return Number.POSITIVE_INFINITY;
+}
 export function validateChatMessageText(value: unknown): ChatMessageValidation {
   if (typeof value !== 'string' || !value.trim()) return { valid: false, code: 'INVALID_INPUT', message: 'يرجى كتابة نص الرسالة' };
   const text = value.trim();
@@ -123,9 +156,12 @@ export async function handlePostGroupMessage(
 
   const contentLength = Number(request.headers.get('Content-Length') || 0);
   if (Number.isFinite(contentLength) && contentLength > MAX_CHAT_BODY_BYTES) return errorResponse('MESSAGE_BODY_TOO_LARGE', 'حجم طلب الرسالة أكبر من الحد المسموح.', 413);
-  let rawBody: string;
-  try { rawBody = await request.text(); } catch { return errorResponse('INVALID_INPUT', 'تعذر قراءة نص الرسالة.', 400); }
-  if (new TextEncoder().encode(rawBody).byteLength > MAX_CHAT_BODY_BYTES) return errorResponse('MESSAGE_BODY_TOO_LARGE', 'حجم طلب الرسالة أكبر من الحد المسموح.', 413);
+  const bodyRead = await readChatRequestBody(request.body);
+  if (!bodyRead.ok) {
+    if (bodyRead.reason === 'TOO_LARGE') return errorResponse('MESSAGE_BODY_TOO_LARGE', 'حجم طلب الرسالة أكبر من الحد المسموح.', 413);
+    return errorResponse('INVALID_INPUT', 'تعذر قراءة نص الرسالة.', 400);
+  }
+  const rawBody = bodyRead.text;
   let parsed: unknown;
   try { parsed = JSON.parse(rawBody) as unknown; } catch { return errorResponse('INVALID_INPUT', 'صيغة طلب الرسالة غير صالحة.', 400); }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return errorResponse('INVALID_INPUT', 'صيغة طلب الرسالة غير صالحة.', 400);

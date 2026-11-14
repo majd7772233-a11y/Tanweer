@@ -2145,3 +2145,11 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Ignore unsupported control frames before D1 work. Keep per-action live membership and chat-policy verification for supported actions.
 - Validate WebSocket delete IDs as nonblank strings up to 128 characters.
 - Test concurrent quota calls and both storage get/put failure paths; fail closed on either failure.
+
+## Phase 1 follow-up — enforce byte caps during transport reads (2026-11-14)
+
+- Keep the early Content-Length rejection, but do not use request.text() for untrusted chat bodies. Consume Request.body incrementally, count bytes, and cancel as soon as the 16 KiB cap is exceeded.
+- Measure WebSocket binary frame length from the original ArrayBuffer/ArrayBufferView byte count before decoding. A decoded-and-re-encoded text length is not authoritative for malformed UTF-8.
+- Add regression tests for cancellation on the first oversized chunk, absence of further stream reads, and raw binary frame byte counting.
+- Preserve the previously added per-IP handshake limiter and per-user/per-group Durable Object action quota (send/delete, burst and minute ceilings, fail-closed storage behavior).
+- The PDF reader, page curl, gesture routing, zoom/pan and animations remain unchanged.

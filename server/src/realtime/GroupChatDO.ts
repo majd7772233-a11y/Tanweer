@@ -1,6 +1,6 @@
 import { Env } from '../env';
 import { generateId } from '../lib/ids';
-import { consumeChatRateLimit, getGroupChatSendPermission, isSamePersistedChatMessage, MAX_CHAT_FRAME_BYTES, PersistedChatMessageIdentity, validateChatMessageText } from '../services/chat';
+import { consumeChatRateLimit, getGroupChatSendPermission, isSamePersistedChatMessage, MAX_CHAT_FRAME_BYTES, PersistedChatMessageIdentity, getChatFrameByteLength, validateChatMessageText } from '../services/chat';
 
 interface ClientSession {
   ws: WebSocket;
@@ -86,11 +86,12 @@ export class GroupChatDO {
 
       server.addEventListener('message', async (event) => {
         try {
-          const raw = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
-          if (new TextEncoder().encode(raw).byteLength > MAX_CHAT_FRAME_BYTES) {
+          const frameBytes = getChatFrameByteLength(event.data);
+          if (frameBytes > MAX_CHAT_FRAME_BYTES) {
             try { server.send(JSON.stringify({ type: 'message_error', code: 'MESSAGE_BODY_TOO_LARGE', error: 'حجم الرسالة أكبر من الحد المسموح.' })); } catch {}
             server.close(1009, 'Message frame too large'); return;
           }
+          const raw = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
           const parsed = JSON.parse(raw);
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
           const data = parsed as Record<string, any>;

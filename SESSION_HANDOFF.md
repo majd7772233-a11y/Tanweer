@@ -117,3 +117,11 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - The next patch applies the same persisted Durable Object per-user/per-group quota to supported WS send and delete actions before D1 permission reads, returns early for unsupported control frames, and validates delete IDs.
 - Regression coverage adds concurrent quota consumption and fail-closed Durable Object storage read/write tests.
 - PDF reader code and animation paths remain untouched. Staging/live two-account WS+REST acceptance is still required; no deployment or Production operation is authorized.
+
+## Phase 1 — REST stream and WebSocket frame byte bounds
+
+- Base checkpoint: `1064e404a38a36a82a7d725b586b462b6964a364` (`fix(chat): rate limit websocket delete actions`). It already included the pre-upgrade IP limiter, delete/send shared WS quota, invalid delete-ID rejection, concurrent quota tests and fail-closed storage tests.
+- The remaining transport gap was that REST body size was checked only after `request.text()`, and binary WebSocket size was calculated after decoding. The follow-up now reads REST streams incrementally to 16 KiB and cancels on the first over-limit chunk; WS binary byte length is checked before decoding.
+- Regression coverage verifies stream cancellation/no second read and raw ArrayBuffer length.
+- Re-run the full server suite/typecheck/Wrangler validation and Android unit/build workflow on the resulting commit. CI from the parent commit does not validate these changes.
+- Do not deploy Staging or Production, change secrets, mutate D1, or merge to `main` without explicit authorization. PDF reader files/animation/zoom/gesture paths remain out of scope and untouched.
