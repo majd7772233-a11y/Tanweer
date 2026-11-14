@@ -2620,27 +2620,31 @@ class TanweerRepository(
         }
     }
 
-    suspend fun connectToGroupChat(groupId: String, myUserId: String) = withContext(Dispatchers.IO) {
-        try {
-            val res = api.getGroupMessages(groupId)
-            if (res.isSuccessful && res.body()?.success == true) {
-                val msgs = res.body()!!.messages.map {
-                    ChatMessageEntity(
-                        id = it.id,
-                        groupId = it.groupId,
-                        senderId = it.senderId,
-                        senderName = it.senderName,
-                        senderGradeSection = it.senderGradeSection,
-                        text = it.text,
-                        timestamp = it.timestamp,
-                        status = "SENT"
-                    )
-                }
-                db.chatDao().insertMessages(msgs)
-            }
-        } catch (_: Exception) {}
+    private val chatConnectionLock = Any()
+    @Volatile private var chatConnectionGeneration = 0L
+    @Volatile private var activeChatGroupId: String? = null
 
+    private fun isActiveChatConnection(groupId: String, generation: Long): Boolean =
+        activeChatGroupId == groupId && chatConnectionGeneration == generation
+
+    private val chatConnectionLock = Any()
+    @Volatile private var chatConnectionGeneration = 0L
+    @Volatile private var activeChatGroupId: String? = null
+
+    private fun isActiveChatConnection(groupId: String, generation: Long): Boolean =
+        activeChatGroupId == groupId && chatConnectionGeneration == generation
+
+    suspend fun connectToGroupChat(groupId: String, myUserId: String) = withContext(Dispatchers.IO) {
+        val generation = synchronized(chatConnectionLock) {
+            chatConnectionGeneration += 1
+            activeChatGroupId = groupId
+            chatConnectionGeneration
+        }
+
+        // Open/switch the live channel immediately. A slow history request must not
+        // keep the previous group's socket alive or later replace a newer selection.
         chatManager.connect(groupId) { json ->
+            if (!isActiveChatConnection(groupId, generation)) return@connect
             try {
                 val type = json.optString("type", "")
                 if (type == "ack") {
@@ -2649,7 +2653,9 @@ class TanweerRepository(
                         recentMessageIds.add(ackId)
                         pendingChatAcks.remove(ackId)?.complete(true)
                         CoroutineScope(Dispatchers.IO).launch {
-                            db.chatDao().updateMessageStatus(ackId, "SENT")
+                            if (isActiveChatConnection(groupId, generation)) {
+                                db.chatDao().updateMessageStatus(ackId, "SENT")
+                            }
                         }
                     }
                     return@connect
@@ -2660,7 +2666,9 @@ class TanweerRepository(
                     if (errId.isNotBlank()) {
                         pendingChatAcks.remove(errId)?.complete(false)
                         CoroutineScope(Dispatchers.IO).launch {
-                            db.chatDao().updateMessageStatus(errId, "FAILED")
+                            if (isActiveChatConnection(groupId, generation)) {
+                                db.chatDao().updateMessageStatus(errId, "FAILED")
+                            }
                         }
                     }
                     return@connect
@@ -2675,26 +2683,26 @@ class TanweerRepository(
 
                 if (text.isNotBlank() && id.isNotBlank()) {
                     if (senderId == myUserId) {
-                        // Server broadcast echo is also a persistence confirmation.
                         recentMessageIds.add(id)
                         pendingChatAcks.remove(id)?.complete(true)
                         CoroutineScope(Dispatchers.IO).launch {
-                            db.chatDao().updateMessageStatus(id, "SENT")
+                            if (isActiveChatConnection(groupId, generation)) {
+                                db.chatDao().updateMessageStatus(id, "SENT")
+                            }
                         }
-                    } else {
-                        // Message from another member: insert if not already received
-                        if (recentMessageIds.add(id)) {
-                            val entity = ChatMessageEntity(
-                                id = id,
-                                groupId = groupId,
-                                senderId = senderId,
-                                senderName = senderName,
-                                senderGradeSection = senderGradeSection,
-                                text = text,
-                                timestamp = timestamp,
-                                status = "SENT"
-                            )
-                            CoroutineScope(Dispatchers.IO).launch {
+                    } else if (recentMessageIds.add(id)) {
+                        val entity = ChatMessageEntity(
+                            id = id,
+                            groupId = groupId,
+                            senderId = senderId,
+                            senderName = senderName,
+                            senderGradeSection = senderGradeSection,
+                            text = text,
+                            timestamp = timestamp,
+                            status = "SENT"
+                        )
+                        CoroutineScope(Dispatchers.IO).launch {
+                            if (isActiveChatConnection(groupId, generation)) {
                                 db.chatDao().insertMessage(entity)
                             }
                         }
@@ -2704,9 +2712,42 @@ class TanweerRepository(
                 Log.e("TanweerRepository", "Error handling incoming chat WS frame", e)
             }
         }
+
+        // History is a snapshot for the selected generation only. If the user has
+        // switched groups or left the chat while this request was in flight, discard it.
+        try {
+            val res = api.getGroupMessages(groupId)
+            if (isActiveChatConnection(groupId, generation) &&
+                res.isSuccessful && res.body()?.success == true
+            ) {
+                val messages = res.body()!!.messages.map {
+                    ChatMessageEntity(
+                        id = it.id,
+                        groupId = it.groupId,
+                        senderId = it.senderId,
+                        senderName = it.senderName,
+                        senderGradeSection = it.senderGradeSection,
+                        text = it.text,
+                        timestamp = it.timestamp,
+                        status = "SENT"
+                    )
+                }
+                if (isActiveChatConnection(groupId, generation) && messages.isNotEmpty()) {
+                    db.chatDao().insertMessages(messages)
+                }
+            }
+        } catch (e: Exception) {
+            if (isActiveChatConnection(groupId, generation)) {
+                Log.w("TanweerRepository", "Could not refresh history for active chat group $groupId", e)
+            }
+        }
     }
 
     suspend fun disconnectFromGroupChat() = withContext(Dispatchers.IO) {
+        synchronized(chatConnectionLock) {
+            chatConnectionGeneration += 1
+            activeChatGroupId = null
+        }
         chatManager.disconnect()
     }
 
