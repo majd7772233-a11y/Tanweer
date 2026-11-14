@@ -72,6 +72,13 @@ export default {
 
     const url = new URL(request.url);
 
+    // Apply the same per-IP request budget before WebSocket authentication/upgrade.
+    // Keeping this ahead of the upgrade path prevents unauthenticated handshake floods
+    // from bypassing the Worker-level limiter. Message sends still use the persisted
+    // per-user/per-group Durable Object quota in addition to this connection guard.
+    const rateLimitError = checkRateLimit(request);
+    if (rateLimitError) return rateLimitError;
+
     // WebSocket upgrade for Group Chat with strict authentication & membership validation
     if (url.pathname.startsWith('/ws/groups/') || url.pathname.startsWith('/wss/groups/')) {
       const groupId = url.pathname.split('/')[3];
@@ -125,10 +132,6 @@ export default {
         return errorResponse('AUTH_ERROR', err?.message || 'خطأ أثناء مصادقة جلسة المحادثة', 500);
       }
     }
-
-    // Apply Rate Limiting
-    const rateLimitError = checkRateLimit(request);
-    if (rateLimitError) return rateLimitError;
 
     // Owner Dashboard HTML Pages & API Endpoints
     if (url.pathname === '/dashboard/login' && request.method === 'GET') {
