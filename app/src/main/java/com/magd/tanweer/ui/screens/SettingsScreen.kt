@@ -466,8 +466,14 @@ fun SettingsScreen(
                             GlassOutlinedButton(
                                 text = "إعادة المحاولة 🔄",
                                 onClick = {
-                                    viewModel.repository.mutationQueue.triggerDrain()
-                                    Toast.makeText(context, "جاري إعادة محاولة إرسال العمليات المتعثرة...", Toast.LENGTH_SHORT).show()
+                                    viewModel.retryFailedOutboxMutations { requeued ->
+                                        val message = if (requeued > 0) {
+                                            "تمت إعادة $requeued عمليات إلى قائمة الانتظار، وجارٍ إعادة المحاولة..."
+                                        } else {
+                                            "لا توجد عمليات فاشلة قابلة لإعادة المحاولة."
+                                        }
+                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                    }
                                 },
                                 modifier = Modifier.height(32.dp)
                             )

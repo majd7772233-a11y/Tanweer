@@ -2296,6 +2296,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun retryFailedOutboxMutations(onResult: (Int) -> Unit = {}) {
+        viewModelScope.launch {
+            val requeued = repository.mutationQueue.retryFailedMutations()
+            onResult(requeued)
+        }
+    }
+
     fun retrySyncContent(contentId: String) {
         viewModelScope.launch {
             repository.retrySyncContent(contentId)
