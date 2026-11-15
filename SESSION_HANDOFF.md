@@ -158,7 +158,7 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Summary reminders are updated or cancelled from current Room snapshots. Empty local data cancels an alert only when all four sync methods report SyncResult.Success (or auto-sync is intentionally off); network/offline/error and read exceptions retain prior alerts.
 - Individual alarms now verify the current task/exam, group membership, completion, date and preference before display.
 - PendingIntent alarm cancellation includes its original action. Added AcademicReminderPolicyTest.
-- Phase 3 scope TNR-006, TNR-007 and TNR-009 is now implemented with regression tests. Await CI before calling code validation green. Real acceptance across device/Staging is deferred to Phase 5.
+- Phase 3 scope TNR-006, TNR-007 and TNR-009 is implemented with regression tests. CI passed on the later code checkpoint df1cca02c0e0fda33e58f20dae0960c9bdf2f0f9: Server run 43734220778 and Android run 43734220722. Physical device/Staging acceptance remains deferred to Phase 5.
 - Roadmap total: five phases. Two remain after Phase 3: Phase 4 and Phase 5.
 
 - Follow-up regression covers the text-only lesson summary checkbox with zero image pages and validates completion page indices.
@@ -168,3 +168,19 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Notebook cache retry hardened: pre-existing board files are reconciled into the notebook record; batch and single-page cache upserts merge the latest record and fail closed on corruption.
 
 - Notebook read path shares the same synchronized manager lock as writes/upserts to prevent in-process read/write overlap during AtomicFile replacement.
+
+
+## Latest handoff — Phase 3 code implementation complete (2026-11-15)
+
+- Verified working branch: `work/release-readiness`.
+- Latest code commit: `df1cca02c0e0fda33e58f20dae0960c9bdf2f0f9` ([commit](https://github.com/majd7772233-a11y/Tanweer/commit/df1cca02c0e0fda33e58f20dae0960c9bdf2f0f9)).
+- Phase 3 implementation is complete and automated validation passed:
+  - Server CI [43734220778](https://github.com/majd7772233-a11y/Tanweer/actions/runs/43734220778): security baseline, typecheck, tests and Wrangler validation passed.
+  - Android CI [43734220722](https://github.com/majd7772233-a11y/Tanweer/actions/runs/43734220722): unit tests, Debug APK assembly and artifact upload passed. Signed Release steps were skipped.
+  - Debug APK artifact name: `Tanweer-debug-fe05758342c6bf86a5c9df4148b2c092978e374e` (30,812,924 bytes).
+- Phase 3 includes TNR-006 AtomicFile notebook persistence/corruption guard/atomic cache-record merges/text-only checkbox; TNR-007 target-bounded rendering, capped bitmap cache, validator-backed resume and verified PDF promotion; TNR-009 summary/individual notification state validation.
+- Do not start manual device or Staging acceptance yet. The user explicitly deferred all real acceptance until every implementation phase is complete.
+- Phase 4 remains: SQL Studio response contract, update channel truth, search history, screen state/data truth, Owner Dashboard operations and responsive/accessibility audit.
+- Phase 5 remains: cross-role, multi-device, network-failure, file, PDF, notebook, notification, security and physical-device/Staging acceptance.
+- Roadmap has five phases; exactly two remain. No Worker deploy, D1 migration apply (0033 remains unapplied), secret change, Production mutation or merge to main was performed.
+- Preserve the PDF reader/page curl/zoom/gesture files; Phase 3 did not modify them.

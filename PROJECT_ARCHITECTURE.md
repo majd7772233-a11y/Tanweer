@@ -181,3 +181,13 @@ No PDF reader or page-curl path is in Phase 2 scope.
 - One-off reminder alarms must re-read Room at firing time and verify item state, current group membership, completion, date and preferences. Do not display stale text from broadcast extras.
 - Cancel PendingIntent using the exact original action to identify the scheduled alarm.
 - Actual Android notification delivery and network-failure acceptance remains deferred to Phase 5.
+
+
+## Phase 3 automated closure checkpoint — 2026-11-15
+
+- Code checkpoint: `df1cca02c0e0fda33e58f20dae0960c9bdf2f0f9`.
+- Server CI [43734220778](https://github.com/majd7772233-a11y/Tanweer/actions/runs/43734220778): typecheck, dependency baseline, unit/integration tests and Wrangler bundle validation passed.
+- Android CI [43734220722](https://github.com/majd7772233-a11y/Tanweer/actions/runs/43734220722): unit tests and Debug APK assembly/upload passed; signed Release steps were skipped.
+- The three Phase 3 work areas are implemented: TNR-006 student notebook atomic/recoverable persistence; TNR-007 bounded PDF rendering and validator-backed partial downloads; TNR-009 trustworthy reminder reconciliation and fresh alarm validation.
+- Device/Staging tests are intentionally held for Phase 5. CI does not replace physical acceptance.
+- Five phases total; Phases 4 and 5 remain.

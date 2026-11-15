@@ -2196,3 +2196,14 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Notebook cache retry follow-up: an already-present board image repairs its missing notebook path record instead of returning premature success. Single-page/batch cache writes merge into the latest valid record and refuse to begin against corrupt notebook data.
 
 - Notebook reads and writes now share the manager lock, preventing an in-process reader from observing an AtomicFile replacement mid-transaction.
+
+
+## Phase 3 final code checkpoint — 2026-11-15
+
+- Phase 3 (TNR-006 notebook durability, TNR-007 PDF rendering/download storage, TNR-009 reminder lifecycle) is implementation-complete and CI-green at code commit `df1cca02c0e0fda33e58f20dae0960c9bdf2f0f9`.
+- Server workflow 43734220778 passed dependency security baseline, TypeScript typecheck, unit/integration tests and Wrangler bundle validation.
+- Android workflow 43734220722 passed Android unit tests, Debug APK assembly and artifact upload. Signed Release steps were skipped in this PR validation.
+- Follow-up fixes are included: serialized AtomicFile notebook reads/writes, repair of notebook page paths on cache retries, text-only completion persistence, and CancellationException propagation for resumable PDF downloads.
+- This is automated verification only. Physical-device and live Staging acceptance—including long-book memory, real HTTP Range resume, low storage, notification/alarm lifecycle and corrupt notebook recovery—remains deferred to Phase 5 as requested.
+- The roadmap contains five phases. Two remain: Phase 4 (SQL Studio/update status/search history/UI and Owner Dashboard truthfulness) and Phase 5 (comprehensive real-device/Staging acceptance and staged release).
+- No Worker deployment, D1 migration apply (0033 remains unapplied), secret change, Production mutation or merge to `main` occurred.
