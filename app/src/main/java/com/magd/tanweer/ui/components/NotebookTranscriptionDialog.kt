@@ -379,12 +379,22 @@ fun NotebookTranscriptionDialog(
                         )
                         .clickable {
                             val nextState = !isCurrentPageCompleted
-                            completedPages[currentPageIndex] = nextState
-                            com.magd.tanweer.util.StudentNotebookManager.markPageCompleted(context, content, currentPageIndex, nextState)
-                            com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = if (nextState) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS else com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
-                            if (nextState) {
-                                val label = if (mediaList.isNotEmpty()) "اللوحة ${currentPageIndex + 1}" else "ملخص الدرس"
-                                Toast.makeText(context, "أحسنت! تم حفظ نقل $label إلى دفترك ✓", Toast.LENGTH_SHORT).show()
+                            val saved = com.magd.tanweer.util.StudentNotebookManager.markPageCompleted(
+                                context, content, currentPageIndex, nextState
+                            )
+                            if (saved) {
+                                completedPages[currentPageIndex] = nextState
+                                com.magd.tanweer.util.TanweerHapticManager.performHaptic(
+                                    context,
+                                    type = if (nextState) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS
+                                    else com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK
+                                )
+                                if (nextState) {
+                                    val label = if (mediaList.isNotEmpty()) "اللوحة ${currentPageIndex + 1}" else "ملخص الدرس"
+                                    Toast.makeText(context, "أحسنت! تم حفظ نقل $label إلى دفترك ✓", Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                Toast.makeText(context, "تعذر حفظ التقدم بأمان. تم الاحتفاظ بملف الدفتر لاستعادته.", Toast.LENGTH_LONG).show()
                             }
                         }
                         .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -395,9 +405,19 @@ fun NotebookTranscriptionDialog(
                         Checkbox(
                             checked = isCurrentPageCompleted,
                             onCheckedChange = { checked ->
-                                completedPages[currentPageIndex] = checked
-                                com.magd.tanweer.util.StudentNotebookManager.markPageCompleted(context, content, currentPageIndex, checked)
-                                com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = if (checked) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS else com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
+                                val saved = com.magd.tanweer.util.StudentNotebookManager.markPageCompleted(
+                                    context, content, currentPageIndex, checked
+                                )
+                                if (saved) {
+                                    completedPages[currentPageIndex] = checked
+                                    com.magd.tanweer.util.TanweerHapticManager.performHaptic(
+                                        context,
+                                        type = if (checked) com.magd.tanweer.util.TanweerHapticManager.HapticType.SUCCESS
+                                        else com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK
+                                    )
+                                } else {
+                                    Toast.makeText(context, "تعذر حفظ التقدم بأمان؛ لم يتم تغيير حالة الصفحة.", Toast.LENGTH_LONG).show()
+                                }
                             },
                             colors = CheckboxDefaults.colors(
                                 checkedColor = EmeraldGreen,

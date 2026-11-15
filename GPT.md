@@ -2169,3 +2169,12 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Snapshot validation/reconciliation preserves local pending/in-flight/failed rows and gives local pending rows precedence over server rows with the same ID. Tests cover collision and retention.
 - Do not touch PDF reader/page-curl/zoom/gesture files. No Worker deployment, D1 migration application, secrets, Production operation, or merge to main without explicit authorization.
 - Staging two-account REST/WS, reconnect/group-switch/logout race, Outbox offline/retry, and post-migration schedule/vote acceptance remain separate release gates. CI does not establish physical-device acceptance.
+
+
+## Phase 3 — TNR-006 notebook durability — 2026-11-15
+
+- Notebook JSON parsing distinguishes a missing file from an unreadable existing file. Corrupt/empty content is preserved as student_notebook_records.json.corrupt and blocks subsequent writes rather than replacing the notebook with an empty list.
+- Writes use Android AtomicFile, file-descriptor sync and pre-write JSON validation. saveLessonRecord and markPageCompleted return a persistence result, which the transcription UI now honors.
+- Caching a board image reports failure if the related notebook metadata could not be saved.
+- Regression coverage: StudentNotebookManagerTest (valid round trip, corrupt file preservation/no overwrite, zero-byte file).
+- Stage 3 continues with PDF storage and reminder accuracy. Physical-device/live Staging acceptance remains deferred until Phase 5.

@@ -2,6 +2,7 @@ package com.magd.tanweer.util
 
 import android.content.Context
 import android.util.Log
+import android.util.AtomicFile
 import com.magd.tanweer.data.model.ContentItem
 import com.magd.tanweer.data.remote.NetworkModule
 import kotlinx.coroutines.Dispatchers
@@ -48,50 +49,140 @@ object StudentNotebookManager {
         return File(context.filesDir, DIR_NAME).apply { mkdirs() }
     }
 
+    private sealed class NotebookReadResult {
+        data class Valid(val records: List<TranscribedLessonRecord>) : NotebookReadResult()
+        data class Invalid(val error: Exception) : NotebookReadResult()
+    }
+
+    private fun parseNotebookRecords(json: String): List<TranscribedLessonRecord> {
+        val array = JSONArray(json)
+        val records = mutableListOf<TranscribedLessonRecord>()
+        for (i in 0 until array.length()) {
+            val obj = array.getJSONObject(i)
+            val contentId = obj.getString("contentId").trim()
+            if (contentId.isEmpty()) throw IOException("Notebook record has an empty content ID")
+            val totalPages = obj.optInt("totalPages", 0)
+            if (totalPages < 0) throw IOException("Notebook record has a negative page count")
+            val completedPages = mutableSetOf<Int>()
+            val completedArray = obj.optJSONArray("completedPages") ?: JSONArray()
+            for (j in 0 until completedArray.length()) {
+                val pageIndex = completedArray.getInt(j)
+                if (pageIndex >= 0 && pageIndex < totalPages) completedPages.add(pageIndex)
+            }
+            val imagePaths = mutableMapOf<Int, String>()
+            val imageObject = obj.optJSONObject("localImagePaths") ?: JSONObject()
+            val keys = imageObject.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val pageIndex = key.toIntOrNull()
+                if (pageIndex != null && pageIndex >= 0 && pageIndex < totalPages) {
+                    val path = imageObject.getString(key)
+                    if (path.isNotBlank()) imagePaths[pageIndex] = path
+                }
+            }
+            records.add(TranscribedLessonRecord(
+                contentId = contentId,
+                subjectId = obj.optString("subjectId", ""),
+                subjectName = obj.optString("subjectName", ""),
+                title = obj.optString("title", ""),
+                studyDate = obj.optString("studyDate", ""),
+                totalPages = totalPages,
+                completedPages = completedPages,
+                localImagePaths = imagePaths,
+                transcribedAt = obj.optLong("transcribedAt", System.currentTimeMillis())
+            ))
+        }
+        return records
+    }
+
+    private fun preserveCorruptNotebook(file: File) {
+        val source = if (file.exists()) file else File(file.path + ".bak")
+        if (!source.exists()) return
+        val backup = File(file.parentFile, file.name + ".corrupt")
+        if (backup.exists()) return
+        try {
+            FileInputStream(source).use { input ->
+                FileOutputStream(backup).use { output ->
+                    input.copyTo(output)
+                    output.fd.sync()
+                }
+            }
+        } catch (error: Exception) {
+            Log.e(TAG, "Could not preserve the unreadable notebook file", error)
+        }
+    }
+
+    private fun readNotebookRecords(context: Context): NotebookReadResult {
+        val file = getStorageFile(context)
+        val atomicFile = AtomicFile(file)
+        if (!file.exists() && !File(file.path + ".bak").exists()) {
+            return NotebookReadResult.Valid(emptyList())
+        }
+        return try {
+            val json = atomicFile.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() }
+            NotebookReadResult.Valid(parseNotebookRecords(json))
+        } catch (error: Exception) {
+            preserveCorruptNotebook(file)
+            NotebookReadResult.Invalid(error)
+        }
+    }
+
+    private fun encodeNotebookRecords(records: List<TranscribedLessonRecord>): String {
+        val array = JSONArray()
+        records.forEach { item ->
+            val obj = JSONObject().apply {
+                put("contentId", item.contentId)
+                put("subjectId", item.subjectId)
+                put("subjectName", item.subjectName)
+                put("title", item.title)
+                put("studyDate", item.studyDate)
+                put("totalPages", item.totalPages)
+                put("transcribedAt", item.transcribedAt)
+                val completedArray = JSONArray()
+                item.completedPages.forEach { completedArray.put(it) }
+                put("completedPages", completedArray)
+                val imageObject = JSONObject()
+                item.localImagePaths.forEach { (page, path) -> imageObject.put(page.toString(), path) }
+                put("localImagePaths", imageObject)
+            }
+            array.put(obj)
+        }
+        return array.toString()
+    }
+
+    private fun writeNotebookRecordsAtomically(
+        context: Context,
+        records: List<TranscribedLessonRecord>
+    ): Boolean {
+        val json = try {
+            encodeNotebookRecords(records).also { parseNotebookRecords(it) }
+        } catch (error: Exception) {
+            Log.e(TAG, "Notebook serialization validation failed", error)
+            return false
+        }
+        val atomicFile = AtomicFile(getStorageFile(context))
+        var stream: FileOutputStream? = null
+        return try {
+            stream = atomicFile.startWrite()
+            stream.write(json.toByteArray(Charsets.UTF_8))
+            stream.fd.sync()
+            atomicFile.finishWrite(stream)
+            true
+        } catch (error: Exception) {
+            stream?.let { runCatching { atomicFile.failWrite(it) } }
+            Log.e(TAG, "Failed to atomically save notebook records", error)
+            false
+        }
+    }
+
     @Synchronized
     fun getAllNotebookLessons(context: Context): List<TranscribedLessonRecord> {
-        val file = getStorageFile(context)
-        if (!file.exists()) return emptyList()
-        return try {
-            val jsonStr = file.readText()
-            val array = JSONArray(jsonStr)
-            val list = mutableListOf<TranscribedLessonRecord>()
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                val completedPagesSet = mutableSetOf<Int>()
-                val compArr = obj.optJSONArray("completedPages") ?: JSONArray()
-                for (j in 0 until compArr.length()) {
-                    completedPagesSet.add(compArr.getInt(j))
-                }
-
-                val imagePathsMap = mutableMapOf<Int, String>()
-                val imgObj = obj.optJSONObject("localImagePaths") ?: JSONObject()
-                val keys = imgObj.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    k.toIntOrNull()?.let { pageIdx ->
-                        imagePathsMap[pageIdx] = imgObj.getString(k)
-                    }
-                }
-
-                list.add(
-                    TranscribedLessonRecord(
-                        contentId = obj.getString("contentId"),
-                        subjectId = obj.optString("subjectId", ""),
-                        subjectName = obj.optString("subjectName", ""),
-                        title = obj.optString("title", ""),
-                        studyDate = obj.optString("studyDate", ""),
-                        totalPages = obj.optInt("totalPages", 0),
-                        completedPages = completedPagesSet,
-                        localImagePaths = imagePathsMap,
-                        transcribedAt = obj.optLong("transcribedAt", System.currentTimeMillis())
-                    )
-                )
+        return when (val result = readNotebookRecords(context)) {
+            is NotebookReadResult.Valid -> result.records
+            is NotebookReadResult.Invalid -> {
+                Log.e(TAG, "Notebook is unreadable; original data was preserved for recovery", result.error)
+                emptyList()
             }
-            list
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to read notebook records", e)
-            emptyList()
         }
     }
 
@@ -100,46 +191,25 @@ object StudentNotebookManager {
         return getAllNotebookLessons(context).find { it.contentId == contentId }
     }
 
+    /**
+     * Returns false when the existing notebook cannot be read or the atomic write fails.
+     * An unreadable source is never treated as an empty notebook and is never overwritten.
+     */
     @Synchronized
-    fun saveLessonRecord(context: Context, record: TranscribedLessonRecord) {
-        val current = getAllNotebookLessons(context).toMutableList()
+    fun saveLessonRecord(context: Context, record: TranscribedLessonRecord): Boolean {
+        val loaded = readNotebookRecords(context)
+        if (loaded is NotebookReadResult.Invalid) {
+            Log.e(TAG, "Refusing to overwrite an unreadable notebook", loaded.error)
+            return false
+        }
+        val current = (loaded as NotebookReadResult.Valid).records.toMutableList()
         val index = current.indexOfFirst { it.contentId == record.contentId }
-        if (index >= 0) {
-            current[index] = record
-        } else {
-            current.add(0, record)
-        }
-
-        try {
-            val array = JSONArray()
-            current.forEach { item ->
-                val obj = JSONObject().apply {
-                    put("contentId", item.contentId)
-                    put("subjectId", item.subjectId)
-                    put("subjectName", item.subjectName)
-                    put("title", item.title)
-                    put("studyDate", item.studyDate)
-                    put("totalPages", item.totalPages)
-                    put("transcribedAt", item.transcribedAt)
-
-                    val compArr = JSONArray()
-                    item.completedPages.forEach { compArr.put(it) }
-                    put("completedPages", compArr)
-
-                    val imgObj = JSONObject()
-                    item.localImagePaths.forEach { (k, v) -> imgObj.put(k.toString(), v) }
-                    put("localImagePaths", imgObj)
-                }
-                array.put(obj)
-            }
-            getStorageFile(context).writeText(array.toString())
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save notebook record", e)
-        }
+        if (index >= 0) current[index] = record else current.add(0, record)
+        return writeNotebookRecordsAtomically(context, current)
     }
 
     @Synchronized
-    fun markPageCompleted(context: Context, content: ContentItem, pageIndex: Int, isCompleted: Boolean) {
+    fun markPageCompleted(context: Context, content: ContentItem, pageIndex: Int, isCompleted: Boolean): Boolean {
         val existing = getLessonRecord(context, content.id) ?: TranscribedLessonRecord(
             contentId = content.id,
             subjectId = content.subjectId,
@@ -152,7 +222,7 @@ object StudentNotebookManager {
             if (isCompleted) add(pageIndex) else remove(pageIndex)
         }
         val updated = existing.copy(completedPages = updatedSet)
-        saveLessonRecord(context, updated)
+        return saveLessonRecord(context, updated)
     }
 
 data class LessonCachingResult(
@@ -240,13 +310,14 @@ data class LessonCachingResult(
                 studyDate = content.studyDate,
                 totalPages = content.media.size
             )
-            saveLessonRecord(
+            val saved = saveLessonRecord(
                 context,
                 existing.copy(
                     totalPages = content.media.size,
                     localImagePaths = existing.localImagePaths + (pageIndex to destination.absolutePath)
                 )
             )
+            if (!saved) throw IOException("تم تنزيل الصورة، لكن تعذر حفظ سجل الدفتر بأمان")
             Result.success(destination)
         } catch (error: Exception) {
             partial.delete()
@@ -346,7 +417,9 @@ data class LessonCachingResult(
             totalPages = content.media.size,
             localImagePaths = pathsMap
         )
-        saveLessonRecord(context, updatedRecord)
+        if (!saveLessonRecord(context, updatedRecord)) {
+            return@withContext Result.failure(IOException("تم تنزيل الصور، لكن تعذر حفظ سجل الدفتر بأمان"))
+        }
 
         val totalPages = content.media.size
         val successfulCount = pathsMap.keys.count { it in content.media.indices }

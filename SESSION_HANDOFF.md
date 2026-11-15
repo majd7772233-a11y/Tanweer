@@ -143,3 +143,11 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - No PDF reader/page-curl/zoom/gesture paths were changed.
 - Migration 0033 has not been applied. No Worker deploy, D1 write, secret update, Production change or merge to main has occurred.
 - Remaining release acceptance: live Staging test using two accounts and REST+WS; switch groups during slow history load; disconnect/reconnect, normal close and logout races; Outbox pending/failure/backoff/manual retry/idempotency across network loss; schedule/vote tests against a Staging DB after authorized migration; physical Android acceptance.
+
+
+## Phase 3 — TNR-006 notebook checkpoint — 2026-11-15
+
+- Corrupt/empty notebook JSON is backed up and is never overwritten as an empty collection.
+- AtomicFile persistence and a Boolean save result are wired through notebook state and the transcription UI.
+- Regression tests cover valid round trips, corrupt data preservation and prevention of overwrite.
+- Remaining Stage 3 work: PDF render/download storage and notification lifecycle. Real acceptance remains deferred until all roadmap implementation phases are complete.
