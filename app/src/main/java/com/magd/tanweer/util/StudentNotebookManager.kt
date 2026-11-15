@@ -113,6 +113,7 @@ object StudentNotebookManager {
         }
     }
 
+    @Synchronized
     private fun readNotebookRecords(context: Context): NotebookReadResult {
         val file = getStorageFile(context)
         val atomicFile = AtomicFile(file)

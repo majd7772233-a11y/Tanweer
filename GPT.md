@@ -2194,3 +2194,5 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - PDF follow-up: flow cancellation is rethrown rather than swallowed as a download error, leaving the validator-backed partial file for a later safe resume. Bitmap LRU now uses exactly the lesser of one eighth of the app heap or 64 MiB.
 
 - Notebook cache retry follow-up: an already-present board image repairs its missing notebook path record instead of returning premature success. Single-page/batch cache writes merge into the latest valid record and refuse to begin against corrupt notebook data.
+
+- Notebook reads and writes now share the manager lock, preventing an in-process reader from observing an AtomicFile replacement mid-transaction.
