@@ -40,6 +40,18 @@ class StudentNotebookManagerTest {
     }
 
     @Test
+    fun `text-only lesson summary completion survives with zero image pages`() {
+        val textOnly = record("lesson-text-only", setOf(0)).copy(
+            totalPages = 0,
+            localImagePaths = emptyMap()
+        )
+        assertTrue(StudentNotebookManager.saveLessonRecord(context, textOnly))
+        val restored = StudentNotebookManager.getLessonRecord(context, "lesson-text-only")
+        assertEquals(0, restored?.totalPages)
+        assertEquals(setOf(0), restored?.completedPages)
+    }
+
+    @Test
     fun `corrupt notebook is backed up and cannot be overwritten`() {
         val original = """[{"contentId":"lesson-old","completedPages":[0],"totalPages":2},BROKEN]"""
         notebookFile.writeText(original)

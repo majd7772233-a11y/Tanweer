@@ -67,7 +67,8 @@ object StudentNotebookManager {
             val completedArray = obj.optJSONArray("completedPages") ?: JSONArray()
             for (j in 0 until completedArray.length()) {
                 val pageIndex = completedArray.getInt(j)
-                if (pageIndex >= 0 && pageIndex < totalPages) completedPages.add(pageIndex)
+                // Text-only lessons still expose one "summary completed" checkbox (page 0).
+                if (pageIndex >= 0 && pageIndex < totalPages.coerceAtLeast(1)) completedPages.add(pageIndex)
             }
             val imagePaths = mutableMapOf<Int, String>()
             val imageObject = obj.optJSONObject("localImagePaths") ?: JSONObject()
@@ -210,6 +211,8 @@ object StudentNotebookManager {
 
     @Synchronized
     fun markPageCompleted(context: Context, content: ContentItem, pageIndex: Int, isCompleted: Boolean): Boolean {
+        val validPageCount = content.media.size.coerceAtLeast(1)
+        if (pageIndex !in 0 until validPageCount) return false
         val existing = getLessonRecord(context, content.id) ?: TranscribedLessonRecord(
             contentId = content.id,
             subjectId = content.subjectId,

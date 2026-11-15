@@ -160,3 +160,5 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - PendingIntent alarm cancellation includes its original action. Added AcademicReminderPolicyTest.
 - Phase 3 scope TNR-006, TNR-007 and TNR-009 is now implemented with regression tests. Await CI before calling code validation green. Real acceptance across device/Staging is deferred to Phase 5.
 - Roadmap total: five phases. Two remain after Phase 3: Phase 4 and Phase 5.
+
+- Follow-up regression covers the text-only lesson summary checkbox with zero image pages and validates completion page indices.

@@ -2188,3 +2188,5 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Individual alarm broadcasts re-read the current Room item and verify existence, deletion status, active group membership, completion, date and preference. Intent title/subject extras are not used as authority.
 - PendingIntent cancellation now uses the matching action identity. Regression coverage: AcademicReminderPolicyTest.
 - Physical Android and live Staging acceptance remains deferred until Phase 5.
+
+- Additional notebook regression: the text-only lesson summary checkbox remains persisted even when the lesson has zero image pages; completion indices are range-checked.
