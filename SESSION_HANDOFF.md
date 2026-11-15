@@ -164,3 +164,5 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Follow-up regression covers the text-only lesson summary checkbox with zero image pages and validates completion page indices.
 
 - PDF follow-up: download cancellation is propagated and preserves the resumable partial file; the bitmap cache cap is one eighth of app heap, with 64 MiB maximum.
+
+- Notebook cache retry hardened: pre-existing board files are reconciled into the notebook record; batch and single-page cache upserts merge the latest record and fail closed on corruption.

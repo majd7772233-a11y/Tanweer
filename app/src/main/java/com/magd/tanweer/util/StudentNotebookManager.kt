@@ -210,6 +210,68 @@ object StudentNotebookManager {
     }
 
     @Synchronized
+    private fun persistCachedPageRecord(
+        context: Context,
+        content: ContentItem,
+        pageIndex: Int,
+        imageFile: File
+    ): Boolean {
+        val loaded = readNotebookRecords(context)
+        if (loaded is NotebookReadResult.Invalid) {
+            Log.e(TAG, "Refusing to attach a cached page to an unreadable notebook", loaded.error)
+            return false
+        }
+        val records = (loaded as NotebookReadResult.Valid).records.toMutableList()
+        val recordIndex = records.indexOfFirst { it.contentId == content.id }
+        val existing = records.getOrNull(recordIndex) ?: TranscribedLessonRecord(
+            contentId = content.id,
+            subjectId = content.subjectId,
+            subjectName = content.subjectName,
+            title = content.title,
+            studyDate = content.studyDate,
+            totalPages = content.media.size
+        )
+        val validPaths = existing.localImagePaths.filterKeys { it in content.media.indices }
+        val updated = existing.copy(
+            totalPages = content.media.size,
+            localImagePaths = validPaths + (pageIndex to imageFile.absolutePath)
+        )
+        if (recordIndex >= 0) records[recordIndex] = updated else records.add(0, updated)
+        return writeNotebookRecordsAtomically(context, records)
+    }
+
+    @Synchronized
+    private fun persistCachedPagesRecord(
+        context: Context,
+        content: ContentItem,
+        pagePaths: Map<Int, String>
+    ): Boolean {
+        val loaded = readNotebookRecords(context)
+        if (loaded is NotebookReadResult.Invalid) {
+            Log.e(TAG, "Refusing to attach cached pages to an unreadable notebook", loaded.error)
+            return false
+        }
+        val records = (loaded as NotebookReadResult.Valid).records.toMutableList()
+        val recordIndex = records.indexOfFirst { it.contentId == content.id }
+        val existing = records.getOrNull(recordIndex) ?: TranscribedLessonRecord(
+            contentId = content.id,
+            subjectId = content.subjectId,
+            subjectName = content.subjectName,
+            title = content.title,
+            studyDate = content.studyDate,
+            totalPages = content.media.size
+        )
+        val validPaths = existing.localImagePaths.filterKeys { it in content.media.indices }
+        val newPaths = pagePaths.filterKeys { it in content.media.indices }
+        val updated = existing.copy(
+            totalPages = content.media.size,
+            localImagePaths = validPaths + newPaths
+        )
+        if (recordIndex >= 0) records[recordIndex] = updated else records.add(0, updated)
+        return writeNotebookRecordsAtomically(context, records)
+    }
+
+    @Synchronized
     fun markPageCompleted(context: Context, content: ContentItem, pageIndex: Int, isCompleted: Boolean): Boolean {
         val validPageCount = content.media.size.coerceAtLeast(1)
         if (pageIndex !in 0 until validPageCount) return false
@@ -253,11 +315,16 @@ data class LessonCachingResult(
     ): Result<File> = withContext(Dispatchers.IO) {
         val mediaItem = content.media.getOrNull(pageIndex)
             ?: return@withContext Result.failure(IOException("صفحة الدرس المطلوبة غير موجودة"))
+        if (readNotebookRecords(context) is NotebookReadResult.Invalid) {
+            return@withContext Result.failure(IOException("ملف دفتر الطالب تالف؛ تم الاحتفاظ بنسخة للاستعادة ولا يمكن الكتابة فوقها"))
+        }
 
         val offlineDir = getOfflineDir(context)
         val destination = File(offlineDir, "board_" + content.id + "_" + pageIndex + ".jpg")
         if (destination.exists() && destination.length() > 0) {
-            return@withContext Result.success(destination)
+            val saved = persistCachedPageRecord(context, content, pageIndex, destination)
+            return@withContext if (saved) Result.success(destination)
+            else Result.failure(IOException("الصورة موجودة، لكن تعذر تحديث سجل دفتر الطالب بأمان"))
         }
 
         val partial = File(offlineDir, destination.name + ".part")
@@ -305,21 +372,7 @@ data class LessonCachingResult(
                 throw IOException("فشل حفظ الصورة في التخزين المحلي")
             }
 
-            val existing = getLessonRecord(context, content.id) ?: TranscribedLessonRecord(
-                contentId = content.id,
-                subjectId = content.subjectId,
-                subjectName = content.subjectName,
-                title = content.title,
-                studyDate = content.studyDate,
-                totalPages = content.media.size
-            )
-            val saved = saveLessonRecord(
-                context,
-                existing.copy(
-                    totalPages = content.media.size,
-                    localImagePaths = existing.localImagePaths + (pageIndex to destination.absolutePath)
-                )
-            )
+            val saved = persistCachedPageRecord(context, content, pageIndex, destination)
             if (!saved) throw IOException("تم تنزيل الصورة، لكن تعذر حفظ سجل الدفتر بأمان")
             Result.success(destination)
         } catch (error: Exception) {
@@ -336,8 +389,13 @@ data class LessonCachingResult(
      * Respects section privacy by attaching the student's Authorization token and Group ID.
      */
     suspend fun cacheAllLessonPagesLocally(context: Context, content: ContentItem): Result<LessonCachingResult> = withContext(Dispatchers.IO) {
+        val loaded = readNotebookRecords(context)
+        if (loaded is NotebookReadResult.Invalid) {
+            return@withContext Result.failure(IOException("ملف دفتر الطالب تالف؛ تم الاحتفاظ بنسخة للاستعادة ولا يمكن الكتابة فوقها"))
+        }
+        val existing = (loaded as NotebookReadResult.Valid).records.firstOrNull { it.contentId == content.id }
         val offlineDir = getOfflineDir(context)
-        val existing = getLessonRecord(context, content.id) ?: TranscribedLessonRecord(
+        val existingRecord = existing ?: TranscribedLessonRecord(
             contentId = content.id,
             subjectId = content.subjectId,
             subjectName = content.subjectName,
@@ -346,7 +404,7 @@ data class LessonCachingResult(
             totalPages = content.media.size
         )
 
-        val pathsMap = existing.localImagePaths.toMutableMap()
+        val pathsMap = existingRecord.localImagePaths.toMutableMap()
         var newlyDownloadedCount = 0
         var failedCount = 0
 
@@ -416,11 +474,7 @@ data class LessonCachingResult(
             }
         }
 
-        val updatedRecord = existing.copy(
-            totalPages = content.media.size,
-            localImagePaths = pathsMap
-        )
-        if (!saveLessonRecord(context, updatedRecord)) {
+        if (!persistCachedPagesRecord(context, content, pathsMap)) {
             return@withContext Result.failure(IOException("تم تنزيل الصور، لكن تعذر حفظ سجل الدفتر بأمان"))
         }
 
