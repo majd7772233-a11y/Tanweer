@@ -161,3 +161,13 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - Keep the settings retry affordance connected to the explicit retry API, not merely to a generic automatic drain.
 
 No PDF reader or page-curl path is in Phase 2 scope.
+
+
+## Phase 3 — PDF rendering and local book storage (2026-11-15)
+
+- PDF render dimensions must preserve aspect ratio and fit within requested target bounds; do not force minimum upscaling for thumbnails.
+- Bitmap LRU cache is bounded to one eighth of the app heap and at most 64 MiB. Renderer close is serialized with page rendering, and a failed PdfRenderer construction closes its file descriptor.
+- Store downloads in a stable .pdf.part file. Resume only with a persisted strong ETag or Last-Modified validator and a 206 Content-Range whose start equals the existing byte count; require the returned validator to match before appending. A 200 response restarts from byte zero.
+- Check free space before and during writes, fsync partial output, verify the PDF header and PdfRenderer page count, then promote by same-directory rename. Preserve the previous damaged file as a recovery artifact.
+- Include partial, validator and corrupt artifacts in book storage accounting and explicit book deletion. Ordinary logout retains shared book downloads.
+- Long-book and real HTTP range/low-storage acceptance is deferred to Phase 5.
