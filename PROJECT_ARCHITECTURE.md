@@ -171,3 +171,13 @@ No PDF reader or page-curl path is in Phase 2 scope.
 - Check free space before and during writes, fsync partial output, verify the PDF header and PdfRenderer page count, then promote by same-directory rename. Preserve the previous damaged file as a recovery artifact.
 - Include partial, validator and corrupt artifacts in book storage accounting and explicit book deletion. Ordinary logout retains shared book downloads.
 - Long-book and real HTTP range/low-storage acceptance is deferred to Phase 5.
+
+
+## Phase 3 — reminder lifecycle (2026-11-15)
+
+- Summary notifications update when corresponding Room records exist. Cancel a stable summary ID only when the relevant snapshot is empty and trusted, or the user disables that notification preference.
+- Sync calls return SyncResult; when auto-sync is enabled, all required refreshes must be Success before an empty Room result can clear an existing reminder. Offline/Error and DAO read exceptions retain the existing notification.
+- Exclude DELETE_PENDING homework and completed or DELETE_PENDING exams from summaries.
+- One-off reminder alarms must re-read Room at firing time and verify item state, current group membership, completion, date and preferences. Do not display stale text from broadcast extras.
+- Cancel PendingIntent using the exact original action to identify the scheduled alarm.
+- Actual Android notification delivery and network-failure acceptance remains deferred to Phase 5.

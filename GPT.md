@@ -2178,3 +2178,13 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Caching a board image reports failure if the related notebook metadata could not be saved.
 - Regression coverage: StudentNotebookManagerTest (valid round trip, corrupt file preservation/no overwrite, zero-byte file).
 - Stage 3 continues with PDF storage and reminder accuracy. Physical-device/live Staging acceptance remains deferred until Phase 5.
+
+
+## Phase 3 — TNR-009 reminder lifecycle — 2026-11-15
+
+- Summary notifications for homework, exams and schedule are reconciled on every check: update/post when items exist, cancel on trusted empty snapshots, and cancel immediately when a category preference is disabled.
+- Reminder sync methods return SyncResult. Clearing on an empty local query is permitted only when all four server refreshes return Success. Any Offline/Error, or a Room read failure, retains the existing alert rather than treating incomplete data as an empty snapshot.
+- Summary reminders omit DELETE_PENDING homework and completed/DELETE_PENDING exams.
+- Individual alarm broadcasts re-read the current Room item and verify existence, deletion status, active group membership, completion, date and preference. Intent title/subject extras are not used as authority.
+- PendingIntent cancellation now uses the matching action identity. Regression coverage: AcademicReminderPolicyTest.
+- Physical Android and live Staging acceptance remains deferred until Phase 5.

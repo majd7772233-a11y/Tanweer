@@ -151,3 +151,12 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - AtomicFile persistence and a Boolean save result are wired through notebook state and the transcription UI.
 - Regression tests cover valid round trips, corrupt data preservation and prevention of overwrite.
 - Remaining Stage 3 work: PDF render/download storage and notification lifecycle. Real acceptance remains deferred until all roadmap implementation phases are complete.
+
+
+## Phase 3 — TNR-009 reminder checkpoint — 2026-11-15
+
+- Summary reminders are updated or cancelled from current Room snapshots. Empty local data cancels an alert only when all four sync methods report SyncResult.Success (or auto-sync is intentionally off); network/offline/error and read exceptions retain prior alerts.
+- Individual alarms now verify the current task/exam, group membership, completion, date and preference before display.
+- PendingIntent alarm cancellation includes its original action. Added AcademicReminderPolicyTest.
+- Phase 3 scope TNR-006, TNR-007 and TNR-009 is now implemented with regression tests. Await CI before calling code validation green. Real acceptance across device/Staging is deferred to Phase 5.
+- Roadmap total: five phases. Two remain after Phase 3: Phase 4 and Phase 5.

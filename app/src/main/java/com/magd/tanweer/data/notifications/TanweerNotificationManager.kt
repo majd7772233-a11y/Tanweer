@@ -130,118 +130,138 @@ object TanweerNotificationManager {
         val autoSyncEnabled = prefs.getBoolean("auto_sync_enabled", true)
 
         initChannel(context)
-
-        // Run independent background maintenance (books + updates) regardless of notification settings
         performBackgroundMaintenance(context)
 
         CoroutineScope(Dispatchers.IO).launch {
+            val notifications = NotificationManagerCompat.from(context)
             try {
                 val db = TanweerDatabase.getInstance(context)
-                val user = db.userDao().getUserSync() ?: return@launch
+                val user = db.userDao().getUserSync()
+                if (user == null || user.defaultGroupId.isBlank()) {
+                    notifications.cancel(NOTIFICATION_HOMEWORK_ID)
+                    notifications.cancel(NOTIFICATION_EXAM_ID)
+                    notifications.cancel(NOTIFICATION_SCHEDULE_ID)
+                    return@launch
+                }
+
                 val groupId = user.defaultGroupId
-                if (groupId.isBlank()) return@launch
-
-                // Pre-sync with server before sending notifications so data is fresh (only if auto-sync is enabled)
+                var syncSucceeded = !autoSyncEnabled
                 if (autoSyncEnabled) {
-                    try {
+                    val syncResults = try {
                         val repo = com.magd.tanweer.data.repository.TanweerRepository(db)
-                        repo.syncHomeworks(groupId)
-                        repo.syncExams(groupId)
-                        repo.syncSchedule(groupId)
-                        repo.syncEvents(groupId)
-                    } catch (_: Exception) {}
+                        listOf(
+                            repo.syncHomeworks(groupId),
+                            repo.syncExams(groupId),
+                            repo.syncSchedule(groupId),
+                            repo.syncEvents(groupId)
+                        )
+                    } catch (error: Exception) {
+                        Log.w("TanweerNotifications", "Reminder refresh failed; retaining existing alerts", error)
+                        emptyList()
+                    }
+                    syncSucceeded = syncResults.size == 4 &&
+                        syncResults.all { it is com.magd.tanweer.data.repository.SyncResult.Success }
+                    if (!syncSucceeded) {
+                        Log.w("TanweerNotifications", "At least one reminder source did not return a complete server snapshot")
+                    }
                 }
+                val mayDismissEmptySnapshot =
+                    com.magd.tanweer.util.AcademicReminderPolicy
+                        .mayDismissEmptySnapshot(autoSyncEnabled, syncSucceeded)
 
-                val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
-                val todayStr = sdf.format(Date())
-
-                val openHomeworkIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                    putExtra(EXTRA_NAVIGATE_TO, "HOMEWORK")
-                }
+                val today = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date())
                 val pendingHwIntent = PendingIntent.getActivity(
-                    context,
-                    101,
-                    openHomeworkIntent,
+                    context, 101,
+                    Intent(context, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        putExtra(EXTRA_NAVIGATE_TO, "HOMEWORK")
+                    },
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
-
-                val openExamIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                    putExtra(EXTRA_NAVIGATE_TO, "EXAMS")
-                }
                 val pendingExamIntent = PendingIntent.getActivity(
-                    context,
-                    102,
-                    openExamIntent,
+                    context, 102,
+                    Intent(context, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        putExtra(EXTRA_NAVIGATE_TO, "EXAMS")
+                    },
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
-
-                val openScheduleIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                    putExtra(EXTRA_NAVIGATE_TO, "SCHEDULE")
-                }
                 val pendingScheduleIntent = PendingIntent.getActivity(
-                    context,
-                    103,
-                    openScheduleIntent,
+                    context, 103,
+                    Intent(context, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        putExtra(EXTRA_NAVIGATE_TO, "SCHEDULE")
+                    },
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
 
-                // 1. Check Homeworks if user enabled it
-                if (notifyHw) {
-                    val homeworks = db.homeworkDao().getHomeworks(groupId).first()
-                    val completions = db.homeworkDao().getCompletionsForUser(user.id).first()
-                    val completedIds = completions.map { it.homeworkId }.toSet()
-                    val pendingHw = homeworks.filter { !completedIds.contains(it.id) }
-
-                    if (pendingHw.isNotEmpty()) {
-                        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                            .setSmallIcon(R.mipmap.ic_launcher)
-                            .setContentTitle("📝 تذكير الواجبات المدرسية")
-                            .setContentText("لديك ${pendingHw.size} واجبات مدرسية قيد الإنجاز للشعبة.")
-                            .setStyle(NotificationCompat.BigTextStyle().bigText("لديك ${pendingHw.size} واجبات غير مكتملة، منها: ${pendingHw.first().title}."))
-                            .setPriority(NotificationCompat.PRIORITY_HIGH)
-                            .setContentIntent(pendingHwIntent)
-                            .setAutoCancel(true)
-                            .build()
-
-                        try {
-                            NotificationManagerCompat.from(context).notify(NOTIFICATION_HOMEWORK_ID, notification)
-                        } catch (_: SecurityException) {}
+                if (!notifyHw) {
+                    notifications.cancel(NOTIFICATION_HOMEWORK_ID)
+                } else {
+                    try {
+                        val homeworks = db.homeworkDao().getHomeworks(groupId).first()
+                        val completions = db.homeworkDao().getCompletionsForUser(user.id).first()
+                        val completedIds = completions.map { it.homeworkId }.toSet()
+                        val pending = homeworks.filter {
+                            it.id !in completedIds && it.syncStatus != "DELETE_PENDING"
+                        }
+                        if (pending.isNotEmpty()) {
+                            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                                .setSmallIcon(R.mipmap.ic_launcher)
+                                .setContentTitle("📝 تذكير الواجبات المدرسية")
+                                .setContentText("لديك ${pending.size} واجبات مدرسية قيد الإنجاز للشعبة.")
+                                .setStyle(NotificationCompat.BigTextStyle().bigText("لديك ${pending.size} واجبات غير مكتملة، منها: ${pending.first().title}."))
+                                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                                .setContentIntent(pendingHwIntent)
+                                .setAutoCancel(true)
+                                .build()
+                            try { notifications.notify(NOTIFICATION_HOMEWORK_ID, notification) }
+                            catch (_: SecurityException) {}
+                        } else if (mayDismissEmptySnapshot) {
+                            notifications.cancel(NOTIFICATION_HOMEWORK_ID)
+                        }
+                    } catch (error: Exception) {
+                        Log.w("TanweerNotifications", "Could not verify homework state; keeping the existing alert", error)
                     }
                 }
 
-                // 2. Check Upcoming Exams if user enabled it
-                if (notifyExm) {
-                    val exams = db.examDao().getExams(groupId).first()
-                    val upcoming = exams.filter { it.examDate >= todayStr }
-                    if (upcoming.isNotEmpty()) {
-                        val nextExam = upcoming.first()
-                        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                            .setSmallIcon(R.mipmap.ic_launcher)
-                            .setContentTitle("🔴 تذكير بالاختبارات القادمة")
-                            .setContentText("اختبار ${nextExam.subjectName} بتاريخ ${nextExam.examDate}")
-                            .setStyle(NotificationCompat.BigTextStyle().bigText("اختبار ${nextExam.subjectName}: ${nextExam.title}، المقرر: ${nextExam.requiredChapters ?: "كامل المنهج"}."))
-                            .setPriority(NotificationCompat.PRIORITY_HIGH)
-                            .setContentIntent(pendingExamIntent)
-                            .setAutoCancel(true)
-                            .build()
-
-                        try {
-                            NotificationManagerCompat.from(context).notify(NOTIFICATION_EXAM_ID, notification)
-                        } catch (_: SecurityException) {}
+                if (!notifyExm) {
+                    notifications.cancel(NOTIFICATION_EXAM_ID)
+                } else {
+                    try {
+                        val exams = db.examDao().getExams(groupId).first()
+                        val upcoming = exams.filter {
+                            it.examDate >= today && !it.isCompleted && it.syncStatus != "DELETE_PENDING"
+                        }
+                        if (upcoming.isNotEmpty()) {
+                            val nextExam = upcoming.minByOrNull { it.examDate }!!
+                            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                                .setSmallIcon(R.mipmap.ic_launcher)
+                                .setContentTitle("🔴 تذكير بالاختبارات القادمة")
+                                .setContentText("اختبار ${nextExam.subjectName} بتاريخ ${nextExam.examDate}")
+                                .setStyle(NotificationCompat.BigTextStyle().bigText("اختبار ${nextExam.subjectName}: ${nextExam.title}، المقرر: ${nextExam.requiredChapters ?: "كامل المنهج"}."))
+                                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                                .setContentIntent(pendingExamIntent)
+                                .setAutoCancel(true)
+                                .build()
+                            try { notifications.notify(NOTIFICATION_EXAM_ID, notification) }
+                            catch (_: SecurityException) {}
+                        } else if (mayDismissEmptySnapshot) {
+                            notifications.cancel(NOTIFICATION_EXAM_ID)
+                        }
+                    } catch (error: Exception) {
+                        Log.w("TanweerNotifications", "Could not verify exam state; keeping the existing alert", error)
                     }
                 }
 
-                // 3. Check Schedule if user enabled it (Point 20: Fix DAY_OF_WEEK conversion from Calendar to App indices)
-                if (notifySch) {
-                    val calendar = Calendar.getInstance()
-                    val rawDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK) // 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
-                    val appDayOfWeek = calendarDayToAppDayIndex(rawDayOfWeek)
-
-                    if (appDayOfWeek >= 0) {
-                        val slots = db.scheduleDao().getSlotsForDay(groupId, appDayOfWeek).first()
+                if (!notifySch) {
+                    notifications.cancel(NOTIFICATION_SCHEDULE_ID)
+                } else {
+                    try {
+                        val appDay = calendarDayToAppDayIndex(Calendar.getInstance().get(Calendar.DAY_OF_WEEK))
+                        val slots = if (appDay >= 0) {
+                            db.scheduleDao().getSlotsForDay(groupId, appDay).first()
+                        } else emptyList()
                         if (slots.isNotEmpty()) {
                             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                                 .setSmallIcon(R.mipmap.ic_launcher)
@@ -251,15 +271,17 @@ object TanweerNotificationManager {
                                 .setContentIntent(pendingScheduleIntent)
                                 .setAutoCancel(true)
                                 .build()
-
-                            try {
-                                NotificationManagerCompat.from(context).notify(NOTIFICATION_SCHEDULE_ID, notification)
-                            } catch (_: SecurityException) {}
+                            try { notifications.notify(NOTIFICATION_SCHEDULE_ID, notification) }
+                            catch (_: SecurityException) {}
+                        } else if (mayDismissEmptySnapshot) {
+                            notifications.cancel(NOTIFICATION_SCHEDULE_ID)
                         }
+                    } catch (error: Exception) {
+                        Log.w("TanweerNotifications", "Could not verify schedule state; keeping the existing alert", error)
                     }
                 }
-            } catch (e: Exception) {
-                Log.e("TanweerNotifications", "Error checking academic reminders", e)
+            } catch (error: Exception) {
+                Log.e("TanweerNotifications", "Error checking academic reminders; existing alerts retained", error)
             }
         }
     }
@@ -552,23 +574,31 @@ object TanweerNotificationManager {
         }
     }
 
-    fun cancelReminder(context: Context, itemId: String) {
+    fun cancelReminder(context: Context, itemId: String, action: String? = null) {
         try {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-            val intent = Intent(context, TanweerAlarmReceiver::class.java)
-            val requestCode = (itemId.hashCode() and 0x7FFFFFFF)
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                requestCode,
-                intent,
-                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            val requestCode = itemId.hashCode() and 0x7FFFFFFF
+            val actions = action?.let { listOf(it) } ?: listOf(
+                TanweerAlarmReceiver.ACTION_HOMEWORK_REMINDER,
+                TanweerAlarmReceiver.ACTION_EXAM_REMINDER
             )
-            if (pendingIntent != null && alarmManager != null) {
-                alarmManager.cancel(pendingIntent)
-                pendingIntent.cancel()
+            actions.forEach { reminderAction ->
+                val intent = Intent(context, TanweerAlarmReceiver::class.java).apply {
+                    this.action = reminderAction
+                }
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context, requestCode, intent,
+                    PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+                )
+                if (pendingIntent != null) {
+                    alarmManager?.cancel(pendingIntent)
+                    pendingIntent.cancel()
+                }
             }
             NotificationManagerCompat.from(context).cancel(requestCode)
-        } catch (_: Exception) {}
+        } catch (error: Exception) {
+            Log.w("TanweerNotifications", "Could not cancel reminder for " + itemId, error)
+        }
     }
 
     fun showIndividualExamNotification(
