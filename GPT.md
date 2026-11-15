@@ -2190,3 +2190,5 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Physical Android and live Staging acceptance remains deferred until Phase 5.
 
 - Additional notebook regression: the text-only lesson summary checkbox remains persisted even when the lesson has zero image pages; completion indices are range-checked.
+
+- PDF follow-up: flow cancellation is rethrown rather than swallowed as a download error, leaving the validator-backed partial file for a later safe resume. Bitmap LRU now uses exactly the lesser of one eighth of the app heap or 64 MiB.

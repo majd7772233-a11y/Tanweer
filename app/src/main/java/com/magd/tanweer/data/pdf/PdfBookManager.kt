@@ -7,6 +7,7 @@ import android.os.ParcelFileDescriptor
 import android.os.StatFs
 import android.util.Log
 import android.util.LruCache
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -72,10 +73,9 @@ class PdfBookManager(private val context: Context) {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    // 25% of available memory for rendered PDF Bitmaps LRU Cache
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-    // Bound the bitmap cache to 1/8 of the app heap and never exceed 64 MiB.
-    private val cacheSize = (maxMemory / 8).coerceAtMost(64 * 1024).coerceAtLeast(4 * 1024)
+    // Keep rendered pages within one eighth of the app heap and at most 64 MiB.
+    private val cacheSize = (maxMemory / 8).coerceAtMost(64 * 1024)
 
     private val bitmapCache = object : LruCache<String, Bitmap>(cacheSize) {
         override fun sizeOf(key: String, bitmap: Bitmap): Int {
@@ -364,6 +364,7 @@ class PdfBookManager(private val context: Context) {
             val openedPages = initRenderer(bookId, targetFile)
             emit(PdfDownloadState.Ready(targetFile, if (openedPages > 0) openedPages else pages))
         } catch (error: Exception) {
+            if (error is CancellationException) throw error
             Log.e("PdfBookManager", "Error downloading book PDF", error)
             emit(PdfDownloadState.Error(error.message ?: "حدث خطأ غير متوقع أثناء تحميل الكتاب"))
         }
