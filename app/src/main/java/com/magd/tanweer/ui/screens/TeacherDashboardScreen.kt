@@ -39,7 +39,7 @@ fun TeacherDashboardScreen(
 ) {
     val dashboardData by viewModel.teacherDashboard.collectAsStateWithLifecycle()
     val dashboardError by viewModel.teacherDashboardError.collectAsStateWithLifecycle()
-    val isLoading by viewModel.isDashboardLoading.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isTeacherDashboardLoading.collectAsStateWithLifecycle()
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Overview & Stats, 1: Official Homeworks, 2: Official Exams

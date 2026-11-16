@@ -7,6 +7,7 @@ import com.magd.tanweer.ui.components.aggregateSyncStates
 import com.magd.tanweer.ui.components.shouldShowConfirmedEmptyState
 import com.magd.tanweer.util.ArabicSearchEngine
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before

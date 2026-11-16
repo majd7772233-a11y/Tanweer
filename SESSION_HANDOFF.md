@@ -184,3 +184,11 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Phase 5 remains: cross-role, multi-device, network-failure, file, PDF, notebook, notification, security and physical-device/Staging acceptance.
 - Roadmap has five phases; exactly two remain. No Worker deploy, D1 migration apply (0033 remains unapplied), secret change, Production mutation or merge to main was performed.
 - Preserve the PDF reader/page curl/zoom/gesture files; Phase 3 did not modify them.
+
+
+## Continuation — Phase 4 hardening (2026-11-16)
+- Latest reviewed HEAD before this continuation: b04693d1d5923f2f6fdc7f76609188a96ff144b2. The working branch remains work/release-readiness; main is not to be modified.
+- Fixes included in the next commit: independent teacher/moderator/admin loading states; explicit exception handling with cancellation propagation for dashboard and moderator-list repositories; blank active-group errors; visible loading/retry feedback for moderator corrections/decisions/members; assertFalse import for the confirmed-empty policy tests.
+- CI on b04693d1d5923f2f6fdc7f76609188a96ff144b2: Server passed; Android test compilation failed because assertFalse was missing from the test imports. This patch adds it and also fixes the request-state race found in review.
+- Same patch updates GPT.md and DEEP_CODE_AUDIT_REPORT_2026-11-14.md. Wait for CI on the new exact HEAD before declaring Phase 4 closed.
+- No Worker deployment, D1 migration apply, secret rotation, Production write/deploy, merge to main, or physical-device acceptance.

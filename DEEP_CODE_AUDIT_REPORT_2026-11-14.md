@@ -791,3 +791,21 @@
 - لم يتم نشر Worker، ولم تُطبق Migration 0033 على D1، ولم تتغير الأسرار أو Production، ولم يُدمج PR #6 إلى main.
 - قارئ PDF وحركات التقليب والتكبير/التحريك لم تدخل في فرق المرحلة الثالثة.
 - إجمالي الخطة خمس مراحل؛ بعد إكمال المرحلة الثالثة تبقى مرحلتان: الرابعة والخامسة.
+
+
+## Phase 4 continuation — 2026-11-16
+
+### Android dashboard reliability
+- Replaced the shared dashboard loading Boolean with independent teacher, moderator and admin loading streams. This prevents overlapping role-dashboard requests from prematurely clearing another dashboard's loading state.
+- Teacher, moderator and admin requests now handle both failed Result values and thrown exceptions; coroutine cancellation is explicitly rethrown. Existing teacher/moderator data is not cleared merely because a refresh failed.
+- Moderator corrections, decisions and group-member requests now have independent loading/error outcomes. A missing active group is an explicit state rather than a silent early return.
+- The moderator screen distinguishes pending network loading from a confirmed empty list and exposes retry for corrections, decisions and members. Dashboard statistics avoid presenting failed list counts as zero.
+- Teacher empty states require a previously received successful snapshot, no active request and no error. A failed refresh no longer masquerades as no official homework/exams.
+- Added/updated Robolectric policy assertions and fixed the missing assertFalse test import discovered by CI.
+
+### Current TNR-010 decision
+- Public release is not yet available; missing public release metadata remains expected during active development. Re-check update-channel correctness immediately before the first public release; do not change runtime behavior now.
+
+### Verification boundary
+- Server CI had passed on the previous owner-dashboard accessibility commit. The new Android loading/error-policy patch requires a fresh Android CI result on its own HEAD before phase closure.
+- No production deploy, D1 migration execution, key/secret change, PR merge, or real-device acceptance is implied by these source/test commits.

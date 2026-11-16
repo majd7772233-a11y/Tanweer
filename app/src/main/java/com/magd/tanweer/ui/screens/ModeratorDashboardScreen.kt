@@ -40,7 +40,7 @@ fun ModeratorDashboardScreen(
     val context = LocalContext.current
     val dashboardData by viewModel.moderatorDashboard.collectAsStateWithLifecycle()
     val dashboardError by viewModel.moderatorDashboardError.collectAsStateWithLifecycle()
-    val isDashboardLoading by viewModel.isDashboardLoading.collectAsStateWithLifecycle()
+    val isDashboardLoading by viewModel.isModeratorDashboardLoading.collectAsStateWithLifecycle()
     val groupCorrections by viewModel.groupCorrections.collectAsStateWithLifecycle()
     val groupCorrectionsError by viewModel.groupCorrectionsError.collectAsStateWithLifecycle()
     val isGroupCorrectionsLoading by viewModel.isGroupCorrectionsLoading.collectAsStateWithLifecycle()
@@ -210,6 +210,28 @@ fun ModeratorDashboardScreen(
             }
         }
 
+        if (isGroupMembersLoading && groupMembers == null) {
+            item {
+                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = CyanAccent)
+                        Text("جارٍ تحميل أعضاء الشعبة...", color = TextSecondary)
+                    }
+                }
+            }
+        }
+        if (!groupMembersError.isNullOrBlank()) {
+            item {
+                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface, borderColor = WarmAmber.copy(alpha = 0.55f)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("تعذر تحميل أعضاء الشعبة", color = WarmAmber, fontWeight = FontWeight.Bold)
+                        Text(groupMembersError ?: "", color = TextSecondary, fontSize = tanweerTextSize(11f))
+                        GlassButton(text = "إعادة محاولة الأعضاء", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadGroupMembers() })
+                    }
+                }
+            }
+        }
+
         // Section Tabs
         item {
             Row(
@@ -252,6 +274,16 @@ fun ModeratorDashboardScreen(
             0 -> {
                 // Corrections Queue
                 val pending = groupCorrections.filter { it.status == "PENDING" }
+                if (isGroupCorrectionsLoading && pending.isEmpty()) {
+                    item {
+                        GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = CyanAccent)
+                                Text("جارٍ تحميل طلبات التصويب...", color = TextSecondary)
+                            }
+                        }
+                    }
+                }
                 if (pending.isEmpty() && !isGroupCorrectionsLoading && groupCorrectionsError.isNullOrBlank()) {
                     item {
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
@@ -345,6 +377,16 @@ fun ModeratorDashboardScreen(
                     else -> decisions.size
                 }
 
+                if (isCommunityDecisionsLoading && visibleCount == 0) {
+                    item {
+                        GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = CyanAccent)
+                                Text("جارٍ تحميل القرارات...", color = TextSecondary)
+                            }
+                        }
+                    }
+                }
                 if (visibleCount == 0 && !isCommunityDecisionsLoading && communityDecisionsError.isNullOrBlank()) {
                     item {
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {

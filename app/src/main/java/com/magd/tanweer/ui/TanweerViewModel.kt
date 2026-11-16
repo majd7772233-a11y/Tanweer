@@ -12,6 +12,7 @@ import com.magd.tanweer.data.repository.SyncResult
 import com.magd.tanweer.data.repository.TanweerRepository
 import com.magd.tanweer.util.AcademicSessionSelection
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -603,8 +604,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _adminDashboardError.value = null
         _groupCorrectionsError.value = null
         _communityDecisionsError.value = null
-        _isGroupCorrectionsLoading.value = true
-        _isCommunityDecisionsLoading.value = true
+        _isGroupCorrectionsLoading.value = false
+        _isCommunityDecisionsLoading.value = false
+        _isTeacherDashboardLoading.value = false
+        _isModeratorDashboardLoading.value = false
+        _isAdminDashboardLoading.value = false
         _myNotifications.value = emptyList()
         _groupCorrections.value = emptyList()
         _communityDecisions.value = emptyList()
@@ -1346,50 +1350,65 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     val groupCorrections: StateFlow<List<ContentCorrectionItem>> = _groupCorrections.asStateFlow()
     private val _groupCorrectionsError = MutableStateFlow<String?>(null)
     val groupCorrectionsError: StateFlow<String?> = _groupCorrectionsError.asStateFlow()
-    private val _isGroupCorrectionsLoading = MutableStateFlow(true)
+    private val _isGroupCorrectionsLoading = MutableStateFlow(false)
     val isGroupCorrectionsLoading: StateFlow<Boolean> = _isGroupCorrectionsLoading.asStateFlow()
 
     private val _communityDecisions = MutableStateFlow<List<CommunityDecisionItem>>(emptyList())
     val communityDecisions: StateFlow<List<CommunityDecisionItem>> = _communityDecisions.asStateFlow()
     private val _communityDecisionsError = MutableStateFlow<String?>(null)
     val communityDecisionsError: StateFlow<String?> = _communityDecisionsError.asStateFlow()
-    private val _isCommunityDecisionsLoading = MutableStateFlow(true)
+    private val _isCommunityDecisionsLoading = MutableStateFlow(false)
     val isCommunityDecisionsLoading: StateFlow<Boolean> = _isCommunityDecisionsLoading.asStateFlow()
 
-    private val _isDashboardLoading = MutableStateFlow(false)
-    val isDashboardLoading: StateFlow<Boolean> = _isDashboardLoading.asStateFlow()
+    private val _isTeacherDashboardLoading = MutableStateFlow(false)
+    val isTeacherDashboardLoading: StateFlow<Boolean> = _isTeacherDashboardLoading.asStateFlow()
+    private val _isModeratorDashboardLoading = MutableStateFlow(false)
+    val isModeratorDashboardLoading: StateFlow<Boolean> = _isModeratorDashboardLoading.asStateFlow()
+    private val _isAdminDashboardLoading = MutableStateFlow(false)
+    val isAdminDashboardLoading: StateFlow<Boolean> = _isAdminDashboardLoading.asStateFlow()
 
     fun loadTeacherDashboard() {
         viewModelScope.launch {
-            _isDashboardLoading.value = true
+            if (_isTeacherDashboardLoading.value) return@launch
+            _isTeacherDashboardLoading.value = true
             _teacherDashboardError.value = null
             try {
                 repository.getTeacherDashboard()
                     .onSuccess { data -> _teacherDashboard.value = data }
                     .onFailure { error -> _teacherDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز المعلم" }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _teacherDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز المعلم"
             } finally {
-                _isDashboardLoading.value = false
+                _isTeacherDashboardLoading.value = false
             }
         }
     }
 
     fun loadModeratorDashboard() {
         viewModelScope.launch {
-            _isDashboardLoading.value = true
+            if (_isModeratorDashboardLoading.value) return@launch
+            _isModeratorDashboardLoading.value = true
             _moderatorDashboardError.value = null
             try {
                 repository.getModeratorDashboard()
                     .onSuccess { data -> _moderatorDashboard.value = data }
                     .onFailure { error -> _moderatorDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز الإشراف" }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _moderatorDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز الإشراف"
             } finally {
-                _isDashboardLoading.value = false
+                _isModeratorDashboardLoading.value = false
             }
         }
     }
 
     fun loadAdminDashboard() {
         viewModelScope.launch {
-            _isDashboardLoading.value = true
+            if (_isAdminDashboardLoading.value) return@launch
+            _isAdminDashboardLoading.value = true
             _adminDashboardError.value = null
             try {
                 repository.getAdminDashboard()
@@ -1405,8 +1424,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                         _adminDashboard.value = null
                         _adminDashboardError.value = error.message ?: "تعذر تحميل بيانات لوحة الإدارة"
                     }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _adminDashboard.value = null
+                _adminDashboardError.value = error.message ?: "تعذر تحميل بيانات لوحة الإدارة"
             } finally {
-                _isDashboardLoading.value = false
+                _isAdminDashboardLoading.value = false
             }
         }
     }
@@ -1460,14 +1484,23 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun loadGroupCorrections(groupId: String = getActiveGroupId()) {
-        if (groupId.isBlank()) return
+        if (groupId.isBlank()) {
+            _groupCorrectionsError.value = "لا توجد شعبة نشطة لعرض طلبات التصويب."
+            _isGroupCorrectionsLoading.value = false
+            return
+        }
         viewModelScope.launch {
+            if (_isGroupCorrectionsLoading.value) return@launch
             _isGroupCorrectionsLoading.value = true
             _groupCorrectionsError.value = null
             try {
                 repository.getGroupCorrections(groupId)
                     .onSuccess { list -> _groupCorrections.value = list }
                     .onFailure { error -> _groupCorrectionsError.value = error.message ?: "تعذر تحميل طلبات التصويب" }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _groupCorrectionsError.value = error.message ?: "تعذر تحميل طلبات التصويب"
             } finally {
                 _isGroupCorrectionsLoading.value = false
             }
@@ -1526,14 +1559,23 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun loadCommunityDecisions(groupId: String = getActiveGroupId()) {
-        if (groupId.isBlank()) return
+        if (groupId.isBlank()) {
+            _communityDecisionsError.value = "لا توجد شعبة نشطة لعرض القرارات الجماعية."
+            _isCommunityDecisionsLoading.value = false
+            return
+        }
         viewModelScope.launch {
+            if (_isCommunityDecisionsLoading.value) return@launch
             _isCommunityDecisionsLoading.value = true
             _communityDecisionsError.value = null
             try {
                 repository.getCommunityDecisions(groupId)
                     .onSuccess { list -> _communityDecisions.value = list }
                     .onFailure { error -> _communityDecisionsError.value = error.message ?: "تعذر تحميل القرارات الجماعية" }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _communityDecisionsError.value = error.message ?: "تعذر تحميل القرارات الجماعية"
             } finally {
                 _isCommunityDecisionsLoading.value = false
             }
@@ -1662,9 +1704,14 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun loadGroupMembers(groupId: String = getActiveGroupId()) {
-        if (groupId.isBlank()) return
-        viewModelScope.launch {
+        if (groupId.isBlank()) {
             _groupMembersState.value = null
+            _groupMembersError.value = "لا توجد شعبة نشطة لعرض الأعضاء."
+            _isGroupMembersLoading.value = false
+            return
+        }
+        viewModelScope.launch {
+            if (_isGroupMembersLoading.value) return@launch
             _groupMembersError.value = null
             _isGroupMembersLoading.value = true
             try {
@@ -1679,6 +1726,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                     .onFailure { error ->
                         _groupMembersError.value = error.message ?: "تعذر تحميل أعضاء المجموعة. تحقق من الاتصال ثم أعد المحاولة."
                     }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _groupMembersError.value = error.message ?: "تعذر تحميل أعضاء المجموعة"
             } finally {
                 _isGroupMembersLoading.value = false
             }

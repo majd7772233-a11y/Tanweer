@@ -79,7 +79,7 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
     val context = LocalContext.current
     val dashboardData by viewModel.adminDashboard.collectAsStateWithLifecycle()
     val dashboardError by viewModel.adminDashboardError.collectAsStateWithLifecycle()
-    val isLoading by viewModel.isDashboardLoading.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isAdminDashboardLoading.collectAsStateWithLifecycle()
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
 
     var searchQuery by rememberSaveable { mutableStateOf("") }
