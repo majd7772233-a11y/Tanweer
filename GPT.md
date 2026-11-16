@@ -2233,3 +2233,14 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - TNR-010 remains deferred until immediately before the first public release, as the user confirmed the app is still unpublished and under development. No update-channel runtime behavior was changed.
 - Phase 4 is not closed by this checkpoint. Close it only after Android CI succeeds on the latest code/documentation HEAD and the remaining route/dashboard checks are reviewed. Phase 5 physical-device/Staging acceptance remains deferred until implementation phases are complete.
 - No Worker deployment, D1 migration apply, secret rotation, Production write/deploy, merge to `main`, or physical-device acceptance was performed.
+
+
+## 2026-11-16 — Phase 4 follow-up: scoped empty states and first-schedule safety
+- Rechecked the live development branch before this patch: `work/release-readiness` at `bb61dd7a158eeb5a492cc07b057dab3583dc3c6e`; the only other branch remains `main` at `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- Previous source checkpoint `bb61dd7` had successful Android and Server CI runs (`43934387283` and `43934387390`). Those results validate that checkpoint only; this patch requires its own CI run.
+- Fixed the remaining missing empty-state guard in the Teacher Dashboard's separate Official Homeworks tab. It now claims an empty list only after a successful dashboard snapshot with no active load/error.
+- Schedule bootstrap safety: the initial empty Room Flow no longer grants all users editing rights by itself. Empty schedule slots are editable by staff, when the server explicitly marks initial setup, or after a schedule snapshot is known. The weekly grid and compact day list share the same rule; unknown state shows a pending-sync message and does not expose direct-edit actions.
+- Library grade scope: successful book sync records the grade ID it belongs to, and a request generation prevents a slower previous-grade result from replacing the status of the currently requested grade. Selecting another grade starts its own sync; an empty catalogue is displayed only after a successful sync for that exact grade. An unverified grade uses its pending/offline/error state.
+- Academic History: empty archive claims, personal empty lists and per-subject empty labels require a successful archive snapshot. When no records exist before a confirmed snapshot, the screen shows the archive sync state and avoids presenting zero as a confirmed result.
+- Added pure-policy tests for initial schedule editing and grade-scoped empty catalogues. No backend schema, migration, secret, deployment, main-branch, or production change was made.
+- Phase 4 remains open until Android and Server CI pass on this patch and the remaining UI routes are rechecked. Browser/assistive-technology acceptance and physical-device testing remain separate acceptance work.

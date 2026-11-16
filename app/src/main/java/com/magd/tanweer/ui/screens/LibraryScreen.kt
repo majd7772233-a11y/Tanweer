@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.BookItem
 import com.magd.tanweer.data.model.SchoolHierarchy
+import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.data.pdf.PdfBookManager
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
@@ -55,6 +56,8 @@ fun LibraryScreen(
     val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val isSyncing by viewModel.isSyncingBooks.collectAsStateWithLifecycle()
+    val librarySyncState by viewModel.librarySyncState.collectAsStateWithLifecycle()
+    val librarySyncGradeId by viewModel.librarySyncGradeId.collectAsStateWithLifecycle()
     val pdfManager = remember { PdfBookManager(context) }
 
     var selectedGradeId by remember(currentUser?.gradeId) { mutableIntStateOf(currentUser?.gradeId ?: 10) }
@@ -137,6 +140,13 @@ fun LibraryScreen(
     }
 
     val currentGradeName = SchoolHierarchy.getGradeName(selectedGradeId)
+    val hasConfirmedEmptyGrade = shouldShowConfirmedGradeEmptyState(
+        selectedGradeId = selectedGradeId,
+        syncedGradeId = librarySyncGradeId,
+        bookCount = gradeBooks.size,
+        syncState = librarySyncState,
+    )
+    val selectedGradeSyncState = if (librarySyncGradeId == selectedGradeId) librarySyncState else SyncState.Idle
 
     Box(
         modifier = Modifier
@@ -268,8 +278,16 @@ fun LibraryScreen(
                                         RoundedCornerShape(14.dp)
                                     )
                                     .clickable {
-                                        selectedGradeId = gid
-                                        selectedSubjectFilter = null
+                                        if (selectedGradeId != gid) {
+                                            selectedGradeId = gid
+                                            selectedSubjectFilter = null
+                                            viewModel.syncBooks(
+                                                gradeId = gid,
+                                                onResult = { success, message ->
+                                                    if (!success) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                        }
                                     }
                                     .padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
@@ -372,7 +390,13 @@ fun LibraryScreen(
                     }
                 }
             }
-            // Empty State for Grade without Books
+            // Empty catalogue claims require a successful snapshot for this exact grade.
+            else if (gradeBooks.isEmpty() && !hasConfirmedEmptyGrade) {
+                item {
+                    PendingSyncEmptyState(dataLabel = "كتب $currentGradeName", syncState = selectedGradeSyncState)
+                }
+            }
+            // Confirmed empty state for the selected grade
             else if (gradeBooks.isEmpty()) {
                 item {
                     EmptyGradeBooksView(

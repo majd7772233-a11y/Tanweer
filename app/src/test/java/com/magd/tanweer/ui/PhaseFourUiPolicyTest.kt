@@ -6,6 +6,8 @@ import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.components.aggregateSyncStates
 import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
 import com.magd.tanweer.ui.components.shouldShowConfirmedEmptyState
+import com.magd.tanweer.ui.components.shouldShowConfirmedGradeEmptyState
+import com.magd.tanweer.ui.components.shouldAllowEmptyScheduleSlotEditing
 import com.magd.tanweer.util.ArabicSearchEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -114,6 +116,23 @@ class PhaseFourUiPolicyTest {
         assertFalse(hasAuthoritativeSnapshot(SyncState.Refreshing))
         assertFalse(hasAuthoritativeSnapshot(SyncState.OfflineCached(lastSyncedAt = 50L)))
         assertFalse(hasAuthoritativeSnapshot(SyncState.Error("تعذر الاتصال")))
+    }
+
+
+    @Test
+    fun empty_schedule_editing_requires_staff_authority_initial_setup_or_a_confirmed_snapshot() {
+        assertFalse(shouldAllowEmptyScheduleSlotEditing(false, false, false))
+        assertTrue(shouldAllowEmptyScheduleSlotEditing(false, true, false))
+        assertTrue(shouldAllowEmptyScheduleSlotEditing(false, false, true))
+        assertTrue(shouldAllowEmptyScheduleSlotEditing(true, false, false))
+    }
+
+    @Test
+    fun empty_library_state_is_confirmed_only_for_the_same_grade_and_successful_sync() {
+        assertTrue(shouldShowConfirmedGradeEmptyState(10, 10, 0, SyncState.Success(100L)))
+        assertFalse(shouldShowConfirmedGradeEmptyState(11, 10, 0, SyncState.Success(100L)))
+        assertFalse(shouldShowConfirmedGradeEmptyState(10, 10, 0, SyncState.OfflineCached(lastSyncedAt = 100L)))
+        assertFalse(shouldShowConfirmedGradeEmptyState(10, 10, 2, SyncState.Success(100L)))
     }
 
 }

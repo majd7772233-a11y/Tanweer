@@ -45,6 +45,7 @@ fun AcademicHistoryScreen(
 
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val archiveSyncState by viewModel.academicArchiveSyncState.collectAsStateWithLifecycle()
+    val hasArchiveSnapshot = hasAuthoritativeSnapshot(archiveSyncState)
     val selectedYear by viewModel.selectedAcademicYear.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
@@ -368,7 +369,9 @@ fun AcademicHistoryScreen(
                             )
                         }
                         GlassPill(
-                            text = if (viewMode == 0) "${myCompletedHomeworks.size} منجز / ${myPersonalLessons.size} موثق" else "$totalYearItemsCount عنصر مسجل",
+                            text = if (!hasArchiveSnapshot && totalYearItemsCount == 0) "جارٍ التحقق من الأرشيف"
+                                   else if (viewMode == 0) "${myCompletedHomeworks.size} منجز / ${myPersonalLessons.size} موثق"
+                                   else "$totalYearItemsCount عنصر مسجل",
                             color = if (viewMode == 0) PurpleAccent else EmeraldGreen,
                             bgColor = if (viewMode == 0) PurpleAccent.copy(alpha = 0.15f) else EmeraldGreen.copy(alpha = 0.15f)
                         )
@@ -416,7 +419,7 @@ fun AcademicHistoryScreen(
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text("الفصل الدراسي الأول", fontSize = tanweerTextSize(11f), color = TextSecondary)
-                                    Text("${archiveReport.semester1Lessons} درس • ${archiveReport.semester1Homeworks} واجب", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
+                                    Text(if (!hasArchiveSnapshot && totalYearItemsCount == 0) "—" else "${archiveReport.semester1Lessons} درس • ${archiveReport.semester1Homeworks} واجب", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
                                 }
                             }
                             Box(
@@ -429,7 +432,7 @@ fun AcademicHistoryScreen(
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text("الفصل الدراسي الثاني", fontSize = tanweerTextSize(11f), color = TextSecondary)
-                                    Text("${archiveReport.semester2Lessons} درس • ${archiveReport.semester2Homeworks} واجب", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = PurpleAccent)
+                                    Text(if (!hasArchiveSnapshot && totalYearItemsCount == 0) "—" else "${archiveReport.semester2Lessons} درس • ${archiveReport.semester2Homeworks} واجب", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = PurpleAccent)
                                 }
                             }
                         }
@@ -437,35 +440,39 @@ fun AcademicHistoryScreen(
                 }
             }
 
-            // If selected archived year has no data
+            // An empty archive requires a successful account-wide archive snapshot.
             if (totalYearItemsCount == 0) {
                 item {
-                    GlassCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        backgroundColor = GlassSurface.copy(alpha = 0.4f)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 24.dp, horizontal = 16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                    if (hasArchiveSnapshot) {
+                        GlassCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = GlassSurface.copy(alpha = 0.4f)
                         ) {
-                            Text("📦", fontSize = tanweerTextSize(32f))
-                            Text(
-                                text = "لا توجد سجلات محفوظة للشعبة في عام $selectedYear",
-                                fontSize = tanweerTextSize(14f),
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary,
-                                textAlign = TextAlign.Center
-                            )
-                            Text(
-                                text = "تُعرض الأعوام التي تحتوي على سجلات فعلية، ويظل العام الحالي ${currentAcademicYear} متاحاً حتى قبل تسجيل أول نشاط.",
-                                fontSize = tanweerTextSize(12f),
-                                color = TextSecondary,
-                                textAlign = TextAlign.Center
-                            )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp, horizontal = 16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("📦", fontSize = tanweerTextSize(32f))
+                                Text(
+                                    text = "لا توجد سجلات محفوظة للشعبة في عام $selectedYear",
+                                    fontSize = tanweerTextSize(14f),
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary,
+                                    textAlign = TextAlign.Center
+                                )
+                                Text(
+                                    text = "تُعرض الأعوام التي تحتوي على سجلات فعلية، ويظل العام الحالي ${currentAcademicYear} متاحاً حتى قبل تسجيل أول نشاط.",
+                                    fontSize = tanweerTextSize(12f),
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                         }
+                    } else {
+                        PendingSyncEmptyState(dataLabel = "الأرشيف الأكاديمي", syncState = archiveSyncState)
                     }
                 }
             } else if (viewMode == 0) {
@@ -526,7 +533,7 @@ fun AcademicHistoryScreen(
                     )
                 }
 
-                if (myPersonalLessons.isEmpty()) {
+                if (myPersonalLessons.isEmpty() && hasArchiveSnapshot) {
                     item {
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface.copy(alpha = 0.3f)) {
                             Text(
@@ -579,7 +586,7 @@ fun AcademicHistoryScreen(
                     )
                 }
 
-                if (myCompletedHomeworks.isEmpty()) {
+                if (myCompletedHomeworks.isEmpty() && hasArchiveSnapshot) {
                     item {
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface.copy(alpha = 0.3f)) {
                             Text(
@@ -694,7 +701,7 @@ fun AcademicHistoryScreen(
                                     )
 
                                     Text("📚 الدروس الموثقة (${subjContents.size}):", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
-                                    if (subjContents.isEmpty()) {
+                                    if (subjContents.isEmpty() && hasArchiveSnapshot) {
                                         Text("لا توجد دروس مسجلة تحت هذا العام", fontSize = tanweerTextSize(11f), color = TextMuted)
                                     } else {
                                         subjContents.take(5).forEach { c ->
@@ -715,7 +722,7 @@ fun AcademicHistoryScreen(
                                     }
 
                                     Text("📝 الواجبات والمشاريع (${subjHomeworks.size}):", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = WarmAmber)
-                                    if (subjHomeworks.isEmpty()) {
+                                    if (subjHomeworks.isEmpty() && hasArchiveSnapshot) {
                                         Text("لا توجد واجبات مسجلة", fontSize = tanweerTextSize(11f), color = TextMuted)
                                     } else {
                                         subjHomeworks.take(5).forEach { hw ->
@@ -736,7 +743,7 @@ fun AcademicHistoryScreen(
                                     }
 
                                     Text("🔴 الاختبارات والتقييمات (${subjExams.size}):", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = RubyRed)
-                                    if (subjExams.isEmpty()) {
+                                    if (subjExams.isEmpty() && hasArchiveSnapshot) {
                                         Text("لا توجد اختبارات مسجلة", fontSize = tanweerTextSize(11f), color = TextMuted)
                                     } else {
                                         subjExams.take(5).forEach { ex ->

@@ -74,6 +74,7 @@ fun ScheduleScreen(
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val scheduleSyncState by viewModel.scheduleSyncState.collectAsStateWithLifecycle()
+    val hasScheduleSnapshot = allSlots.isNotEmpty() || hasAuthoritativeSnapshot(scheduleSyncState)
     val scheduleProposals by viewModel.scheduleProposals.collectAsStateWithLifecycle()
     val scheduleVersion by viewModel.scheduleVersion.collectAsStateWithLifecycle()
     val scheduleMeta by viewModel.scheduleMeta.collectAsStateWithLifecycle()
@@ -103,9 +104,13 @@ fun ScheduleScreen(
         (scheduleMeta?.canEditDirectly == true)
     }
 
-    val canManageSchedule = remember(currentUser, allSlots.size, scheduleMeta, isStaffWithDirectEdit) {
-        isStaffWithDirectEdit || (scheduleMeta?.isInitialSetup == true) || allSlots.isEmpty()
-    }
+    val canFillEmptyScheduleSlots = shouldAllowEmptyScheduleSlotEditing(
+        isStaffWithDirectEdit = isStaffWithDirectEdit,
+        serverConfirmsInitialSetup = scheduleMeta?.isInitialSetup == true,
+        hasScheduleSnapshot = hasScheduleSnapshot,
+    )
+    val canManageSchedule = isStaffWithDirectEdit ||
+        (allSlots.isEmpty() && canFillEmptyScheduleSlots)
 
     val filledSlotsCount = allSlots.size
     val currentGradeName = SchoolHierarchy.getGradeName(currentUser?.gradeId ?: 10)
@@ -201,6 +206,12 @@ fun ScheduleScreen(
                 )
             }
 
+            if (!canFillEmptyScheduleSlots) {
+                item {
+                    PendingSyncEmptyState(dataLabel = "الجدول الأسبوعي", syncState = scheduleSyncState)
+                }
+            }
+
             // Permission & Mode Status Banner (Points 13 & 14 Policy)
             item {
                 val userRole = currentUser?.getRoleEnum() ?: com.magd.tanweer.data.model.Role.STUDENT
@@ -219,7 +230,8 @@ fun ScheduleScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    text = if (allSlots.isEmpty()) "🌟 المساهمة في بناء الجدول"
+                                    text = if (allSlots.isEmpty() && !canFillEmptyScheduleSlots) "🔄 التحقق من الجدول"
+                                           else if (allSlots.isEmpty()) "🌟 المساهمة في بناء الجدول"
                                            else if (isStaffWithDirectEdit) "🛠️ تحرير مباشر (معلم / إدارة)"
                                            else "👁️ جدول الشعبة التشاركي",
                                     fontSize = tanweerTextSize(13f),
@@ -233,7 +245,8 @@ fun ScheduleScreen(
                                 )
                             }
                             Text(
-                                text = if (allSlots.isEmpty()) "الجدول غير معبأ بعد: يمكن لجميع الطلاب والمعلمين إدخال الحصص الأولى مباشرة!"
+                                text = if (allSlots.isEmpty() && !canFillEmptyScheduleSlots) "لا يمكن تفعيل إضافة الحصص قبل تأكيد حالة الجدول من الخادم."
+                                       else if (allSlots.isEmpty()) "الجدول غير معبأ بعد: يمكن لجميع الطلاب والمعلمين إدخال الحصص الأولى مباشرة!"
                                        else if (isStaffWithDirectEdit) "بصفتك معلماً أو مديراً، يمكنك الضغط على أي حصة لتعديلها مباشرة؛ ويُحدّث الجدول من الخادم بعد الحفظ."
                                        else "قاعدة الجدول: الخانة الفارغة تُملأ مباشرة؛ والخانة المشغولة ينقلك الضغط عليها لتقديم مقترح تعديل مع سبب للتصويت 🗳️.",
                                 fontSize = tanweerTextSize(11f),
@@ -312,18 +325,11 @@ fun ScheduleScreen(
                             allSlots = allSlots,
                             onCellClick = { dayIndex, slotOrder ->
                                 val slot = allSlots.find { it.dayOfWeek == dayIndex && it.slotOrder == slotOrder }
-                                val isStaffDirect = (isStaffWithDirectEdit) || allSlots.isEmpty()
-                                if (isStaffDirect) {
-                                    activeEditingCell = Pair(dayIndex, slotOrder)
-                                } else {
-                                    // Points 13 & 14 Policy:
-                                    // Empty slot -> directly filled!
-                                    // Occupied slot -> propose change with reason and voting!
-                                    if (slot == null) {
-                                        activeEditingCell = Pair(dayIndex, slotOrder)
-                                    } else {
-                                        activeProposalCell = Pair(dayIndex, slotOrder)
-                                    }
+                                when {
+                                    isStaffWithDirectEdit -> activeEditingCell = Pair(dayIndex, slotOrder)
+                                    slot == null && canFillEmptyScheduleSlots -> activeEditingCell = Pair(dayIndex, slotOrder)
+                                    slot != null -> activeProposalCell = Pair(dayIndex, slotOrder)
+                                    // Unknown first-snapshot state exposes no edit action.
                                 }
                             }
                         )
@@ -407,26 +413,19 @@ fun ScheduleScreen(
                 items((1..6).toList()) { periodOrder ->
                     val slot = allSlots.find { it.dayOfWeek == selectedDayForList && it.slotOrder == periodOrder }
                     val defaultTime = com.magd.tanweer.util.AcademicTimeEngine.getDefaultPeriodTime(periodOrder)
-                    val isStaffDirect = (isStaffWithDirectEdit) || allSlots.isEmpty()
+                    val isStaffDirect = isStaffWithDirectEdit
 
                     SinglePeriodSlotCard(
                         dayOfWeek = selectedDayForList,
                         periodOrder = periodOrder,
                         slot = slot,
                         defaultTime = defaultTime,
-                        canDirectEdit = isStaffDirect || slot == null,
+                        canDirectEdit = isStaffDirect || (slot == null && canFillEmptyScheduleSlots),
                         onClick = {
-                            if (isStaffDirect) {
-                                activeEditingCell = Pair(selectedDayForList, periodOrder)
-                            } else {
-                                // Points 13 & 14 Policy:
-                                // Empty slot -> directly filled!
-                                // Occupied slot -> propose change with reason and voting!
-                                if (slot == null) {
-                                    activeEditingCell = Pair(selectedDayForList, periodOrder)
-                                } else {
-                                    activeProposalCell = Pair(selectedDayForList, periodOrder)
-                                }
+                            when {
+                                isStaffDirect -> activeEditingCell = Pair(selectedDayForList, periodOrder)
+                                slot == null && canFillEmptyScheduleSlots -> activeEditingCell = Pair(selectedDayForList, periodOrder)
+                                slot != null -> activeProposalCell = Pair(selectedDayForList, periodOrder)
                             }
                         }
                     )

@@ -410,6 +410,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _librarySyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val librarySyncState: StateFlow<SyncState> = _librarySyncState.asStateFlow()
+    private val _librarySyncGradeId = MutableStateFlow<Int?>(null)
+    val librarySyncGradeId: StateFlow<Int?> = _librarySyncGradeId.asStateFlow()
+    @Volatile private var librarySyncRequestGeneration = 0
 
     val isSyncingBooks: StateFlow<Boolean> = _librarySyncState
         .map { it is SyncState.Loading || it is SyncState.Refreshing }
@@ -589,7 +592,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _calendarSyncState.value = SyncState.Idle
         _issuesSyncState.value = SyncState.Idle
         _eventsSyncState.value = SyncState.Idle
+        librarySyncRequestGeneration++
         _librarySyncState.value = SyncState.Idle
+        _librarySyncGradeId.value = null
         _groupsSyncState.value = SyncState.Idle
         _scheduleMeta.value = null
         _scheduleVersion.value = null
@@ -1259,20 +1264,32 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun syncBooks(gradeId: Int? = null, isRefresh: Boolean = false, onResult: ((Boolean, String) -> Unit)? = null) {
         if (!_autoSyncEnabled.value && !isRefresh && onResult == null) return
         val targetGrade = gradeId ?: currentUser.value?.gradeId ?: 10
+        val requestId = ++librarySyncRequestGeneration
         viewModelScope.launch {
+            _librarySyncGradeId.value = targetGrade
             _librarySyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncBooks(targetGrade, forceRefresh = isRefresh)) {
-                is SyncResult.Success -> {
-                    _librarySyncState.value = SyncState.Success()
-                    onResult?.invoke(true, "تمت مزامنة الكتب الدراسية بنجاح ✨")
+            try {
+                when (val result = repository.syncBooks(targetGrade, forceRefresh = isRefresh)) {
+                    is SyncResult.Success -> if (requestId == librarySyncRequestGeneration) {
+                        _librarySyncState.value = SyncState.Success()
+                        onResult?.invoke(true, "تمت مزامنة الكتب الدراسية بنجاح ✨")
+                    }
+                    is SyncResult.Offline -> if (requestId == librarySyncRequestGeneration) {
+                        _librarySyncState.value = SyncState.OfflineCached()
+                        onResult?.invoke(true, "عرض الكتب المحفوظة أوفلاين")
+                    }
+                    is SyncResult.Error -> if (requestId == librarySyncRequestGeneration) {
+                        _librarySyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                        onResult?.invoke(false, result.message)
+                    }
                 }
-                is SyncResult.Offline -> {
-                    _librarySyncState.value = SyncState.OfflineCached()
-                    onResult?.invoke(true, "عرض الكتب المحفوظة أوفلاين")
-                }
-                is SyncResult.Error -> {
-                    _librarySyncState.value = SyncState.Error(result.message, result.isNetworkError)
-                    onResult?.invoke(false, result.message)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (requestId == librarySyncRequestGeneration) {
+                    val message = error.message ?: "تعذر مزامنة كتب هذا الصف"
+                    _librarySyncState.value = SyncState.Error(message, false)
+                    onResult?.invoke(false, message)
                 }
             }
         }

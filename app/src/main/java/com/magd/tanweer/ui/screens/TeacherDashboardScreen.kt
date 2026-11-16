@@ -304,7 +304,7 @@ fun TeacherDashboardScreen(
             1 -> {
                 // Official Homeworks
                 val recentHw = dashboardData?.recentHomeworks ?: emptyList()
-                if (recentHw.isEmpty()) {
+                if (recentHw.isEmpty() && shouldShowConfirmedEmptyState(dashboardData != null, isLoading, dashboardError)) {
                     item {
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                             Text(
