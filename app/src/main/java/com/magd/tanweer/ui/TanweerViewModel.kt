@@ -383,6 +383,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     // -------------------------------------------------------------
     // PER-SCREEN SYNC STATES
     // -------------------------------------------------------------
+    private val _sectionContentsSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val sectionContentsSyncState: StateFlow<SyncState> = _sectionContentsSyncState.asStateFlow()
+
     private val _homeSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val homeSyncState: StateFlow<SyncState> = _homeSyncState.asStateFlow()
 
@@ -973,10 +976,12 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun syncSectionContents(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
         if ((!_autoSyncEnabled.value && !isRefresh) || groupId.isBlank()) return
         viewModelScope.launch {
+            _sectionContentsSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
             when (val result = repository.syncContents(groupId)) {
-                is SyncResult.Success -> Unit
-                is SyncResult.Offline -> android.util.Log.i("TanweerViewModel", "Section contents remain on the local snapshot")
-                is SyncResult.Error -> android.util.Log.w("TanweerViewModel", "Section contents sync failed: ${result.message}")
+                is SyncResult.Success -> _sectionContentsSyncState.value = SyncState.Success()
+                is SyncResult.Offline -> _sectionContentsSyncState.value = SyncState.OfflineCached()
+                is SyncResult.Error -> _sectionContentsSyncState.value =
+                    SyncState.Error(result.message, result.isNetworkError)
             }
         }
     }
@@ -1164,6 +1169,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Refresh wrappers called by UI components
+    fun refreshSectionContents() = syncSectionContents(isRefresh = true)
     fun refreshHome() = syncHome(isRefresh = true)
     fun refreshSchedule() = syncSchedule(isRefresh = true)
     fun refreshHomeworks() = syncHomeworks(isRefresh = true)

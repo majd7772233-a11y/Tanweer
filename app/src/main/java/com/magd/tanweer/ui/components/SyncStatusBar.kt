@@ -161,6 +161,28 @@ fun SyncStatusBar(
     }
 }
 
+/**
+ * Resolves several source sync states into one truthful screen-level status.
+ * A failed source is never hidden by another source completing successfully.
+ */
+fun aggregateSyncStates(states: List<SyncState>): SyncState {
+    if (states.isEmpty()) return SyncState.Idle
+
+    states.filterIsInstance<SyncState.Error>().firstOrNull()?.let { return it }
+    if (states.any { it is SyncState.Loading }) return SyncState.Loading
+    if (states.any { it is SyncState.Refreshing }) return SyncState.Refreshing
+
+    states.filterIsInstance<SyncState.OfflineCached>()
+        .maxByOrNull { it.lastSyncedAt }
+        ?.let { return it }
+
+    if (states.all { it is SyncState.Success }) {
+        val latestSync = states.filterIsInstance<SyncState.Success>().maxOfOrNull { it.lastSyncedAt }
+        return SyncState.Success(latestSync ?: System.currentTimeMillis())
+    }
+
+    return SyncState.Idle
+}
 private data class Quintet<A, B, C, D, E>(
     val first: A,
     val second: B,

@@ -22,6 +22,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardActions
+import androidx.compose.ui.text.input.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -197,9 +200,10 @@ fun SearchScreen(
             rankedEvents.size + rankedIssues.size + rankedChatMessages.size + rankedBooks.size
 
     fun triggerSearch(term: String) {
-        searchQuery = term
-        if (term.isNotBlank()) {
-            ArabicSearchEngine.saveRecentSearch(context, term)
+        val committedQuery = term.trim()
+        searchQuery = committedQuery
+        if (committedQuery.isNotBlank()) {
+            ArabicSearchEngine.saveRecentSearch(context, committedQuery)
             recentSearches = ArabicSearchEngine.getRecentSearches(context)
         }
     }
@@ -229,17 +233,15 @@ fun SearchScreen(
                 ) {
                     GlassTextField(
                         value = searchQuery,
-                        onValueChange = {
-                            searchQuery = it
-                            if (it.length >= 2) {
-                                ArabicSearchEngine.saveRecentSearch(context, it)
-                                recentSearches = ArabicSearchEngine.getRecentSearches(context)
-                            }
-                        },
+                        onValueChange = { searchQuery = it },
                         label = "محرك البحث الشامل الذكي",
                         placeholder = "ابحث عن درس، واجب، اختبار، فعالية، استفسار...",
                         modifier = Modifier.weight(1f),
-                        leadingIcon = Icons.Default.Search
+                        leadingIcon = Icons.Default.Search,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = { triggerSearch(searchQuery) }
+                        )
                     )
                     if (searchQuery.isNotEmpty()) {
                         IconButton(

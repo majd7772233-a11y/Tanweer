@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.Role
+import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.data.model.getRoleEnum
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.screens.*
@@ -54,7 +55,94 @@ fun TanweerApp(
     val uploadInitialSubjectId by viewModel.uploadInitialSubjectId.collectAsStateWithLifecycle()
     val recoveryCodeDialog by viewModel.recoveryCodeDialog.collectAsStateWithLifecycle()
     val isCheckingAuth by viewModel.isCheckingAuth.collectAsStateWithLifecycle()
+    val sectionContentsSyncState by viewModel.sectionContentsSyncState.collectAsStateWithLifecycle()
+    val homeSyncState by viewModel.homeSyncState.collectAsStateWithLifecycle()
+    val scheduleSyncState by viewModel.scheduleSyncState.collectAsStateWithLifecycle()
+    val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
+    val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
+    val calendarSyncState by viewModel.calendarSyncState.collectAsStateWithLifecycle()
+    val issuesSyncState by viewModel.issuesSyncState.collectAsStateWithLifecycle()
+    val eventsSyncState by viewModel.eventsSyncState.collectAsStateWithLifecycle()
+    val librarySyncState by viewModel.librarySyncState.collectAsStateWithLifecycle()
+    val groupsSyncState by viewModel.groupsSyncState.collectAsStateWithLifecycle()
+    val academicArchiveSyncState by viewModel.academicArchiveSyncState.collectAsStateWithLifecycle()
     val navigationStateHolder = rememberSaveableStateHolder()
+
+    val syncStatesForCurrentDestination: List<SyncState>? = when (subScreen) {
+        SubScreen.NONE -> when (currentTab) {
+            NavigationTab.TODAY -> listOf(homeSyncState, scheduleSyncState, homeworkSyncState, examsSyncState, eventsSyncState)
+            NavigationTab.CALENDAR -> listOf(calendarSyncState, eventsSyncState)
+            NavigationTab.HOMEWORK -> listOf(homeworkSyncState)
+            NavigationTab.EXAMS -> listOf(examsSyncState)
+            NavigationTab.ISSUES -> listOf(issuesSyncState)
+            NavigationTab.MORE -> listOf(groupsSyncState, eventsSyncState)
+        }
+        SubScreen.EXTRA_SECTIONS_HUB -> listOf(groupsSyncState, eventsSyncState)
+        SubScreen.GROUPS -> listOf(groupsSyncState)
+        SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> listOf(librarySyncState)
+        SubScreen.SCHEDULE -> listOf(scheduleSyncState)
+        SubScreen.TIMELINE -> listOf(sectionContentsSyncState, homeworkSyncState, examsSyncState)
+        SubScreen.SUBJECT_KNOWLEDGE_BASE -> listOf(sectionContentsSyncState, homeworkSyncState, examsSyncState, issuesSyncState)
+        SubScreen.ACADEMIC_HISTORY -> listOf(academicArchiveSyncState)
+        SubScreen.EVENTS -> listOf(eventsSyncState)
+        SubScreen.WHAT_DID_I_MISS -> listOf(sectionContentsSyncState, homeworkSyncState, examsSyncState, eventsSyncState, scheduleSyncState)
+        // Search combines chat and book caches with several streams and has no authoritative aggregate yet.
+        else -> null
+    }
+    val activeSyncState = syncStatesForCurrentDestination?.let(::aggregateSyncStates)
+
+    val refreshCurrentSync: () -> Unit = {
+        when (subScreen) {
+            SubScreen.NONE -> when (currentTab) {
+                NavigationTab.TODAY -> {
+                    viewModel.refreshHome()
+                    viewModel.refreshSchedule()
+                    viewModel.refreshHomeworks()
+                    viewModel.refreshExams()
+                    viewModel.refreshEvents()
+                }
+                NavigationTab.CALENDAR -> {
+                    viewModel.refreshCalendar()
+                    viewModel.refreshEvents()
+                }
+                NavigationTab.HOMEWORK -> viewModel.refreshHomeworks()
+                NavigationTab.EXAMS -> viewModel.refreshExams()
+                NavigationTab.ISSUES -> viewModel.refreshIssues()
+                NavigationTab.MORE -> {
+                    viewModel.refreshGroups()
+                    viewModel.refreshEvents()
+                }
+            }
+            SubScreen.EXTRA_SECTIONS_HUB -> {
+                viewModel.refreshGroups()
+                viewModel.refreshEvents()
+            }
+            SubScreen.GROUPS -> viewModel.refreshGroups()
+            SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> viewModel.refreshBooks()
+            SubScreen.SCHEDULE -> viewModel.refreshSchedule()
+            SubScreen.TIMELINE -> {
+                viewModel.refreshSectionContents()
+                viewModel.refreshHomeworks()
+                viewModel.refreshExams()
+            }
+            SubScreen.SUBJECT_KNOWLEDGE_BASE -> {
+                viewModel.refreshSectionContents()
+                viewModel.refreshHomeworks()
+                viewModel.refreshExams()
+                viewModel.refreshIssues()
+            }
+            SubScreen.ACADEMIC_HISTORY -> viewModel.syncAcademicArchive(isRefresh = true)
+            SubScreen.EVENTS -> viewModel.refreshEvents()
+            SubScreen.WHAT_DID_I_MISS -> {
+                viewModel.refreshSectionContents()
+                viewModel.refreshHomeworks()
+                viewModel.refreshExams()
+                viewModel.refreshEvents()
+                viewModel.refreshSchedule()
+            }
+            else -> Unit
+        }
+    }
 
     if (isCheckingAuth) {
         Box(
@@ -98,6 +186,15 @@ fun TanweerApp(
         AuthScreen(viewModel = viewModel)
     } else {
         Scaffold(
+            topBar = {
+                activeSyncState?.takeUnless { it is SyncState.Idle }?.let { state ->
+                    SyncStatusBar(
+                        syncState = state,
+                        onRefresh = refreshCurrentSync,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            },
             bottomBar = {
                 if (subScreen != SubScreen.PDF_VIEWER) {
                     GlassBottomNavigationBar(
