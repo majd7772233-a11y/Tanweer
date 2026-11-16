@@ -31,6 +31,8 @@ import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.GlassCard
 import com.magd.tanweer.ui.components.GlassPill
+import com.magd.tanweer.ui.components.PendingSyncEmptyState
+import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.AcademicArchiveEngine
 import com.magd.tanweer.util.AcademicYearManager

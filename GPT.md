@@ -2244,3 +2244,8 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Academic History: empty archive claims, personal empty lists and per-subject empty labels require a successful archive snapshot. When no records exist before a confirmed snapshot, the screen shows the archive sync state and avoids presenting zero as a confirmed result.
 - Added pure-policy tests for initial schedule editing and grade-scoped empty catalogues. No backend schema, migration, secret, deployment, main-branch, or production change was made.
 - Phase 4 remains open until Android and Server CI pass on this patch and the remaining UI routes are rechecked. Browser/assistive-technology acceptance and physical-device testing remain separate acceptance work.
+
+
+## 2026-11-16 — Android CI follow-up for archive-state import
+- Android CI on `bd6938825ce41fc7d54bf17e4a35b1da9c9576e1` compiled the source until two unresolved symbols in `AcademicHistoryScreen.kt`: missing imports for `hasAuthoritativeSnapshot` and `PendingSyncEmptyState`. The implementation itself was not reported to have additional Kotlin errors in that compile attempt.
+- Added the two explicit component imports. This follow-up requires a fresh Android CI run; the failed run is not considered a validation result.
