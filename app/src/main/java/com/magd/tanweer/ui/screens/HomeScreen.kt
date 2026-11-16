@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.ContentItem
 import com.magd.tanweer.data.model.ScheduleSlot
+import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.SubScreen
