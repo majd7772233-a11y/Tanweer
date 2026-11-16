@@ -173,12 +173,12 @@ fun aggregateSyncStates(states: List<SyncState>): SyncState {
     if (states.any { it is SyncState.Refreshing }) return SyncState.Refreshing
 
     states.filterIsInstance<SyncState.OfflineCached>()
-        .maxByOrNull { it.lastSyncedAt }
+        .minByOrNull { it.lastSyncedAt }
         ?.let { return it }
 
     if (states.all { it is SyncState.Success }) {
-        val latestSync = states.filterIsInstance<SyncState.Success>().maxOfOrNull { it.lastSyncedAt }
-        return SyncState.Success(latestSync ?: System.currentTimeMillis())
+        val oldestIncludedSync = states.filterIsInstance<SyncState.Success>().minOfOrNull { it.lastSyncedAt }
+        return SyncState.Success(oldestIncludedSync ?: System.currentTimeMillis())
     }
 
     return SyncState.Idle

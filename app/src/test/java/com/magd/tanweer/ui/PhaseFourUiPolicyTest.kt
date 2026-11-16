@@ -69,6 +69,6 @@ class PhaseFourUiPolicyTest {
     fun aggregate_sync_state_reports_success_only_when_every_source_succeeds() {
         val resolved = aggregateSyncStates(listOf(SyncState.Success(10L), SyncState.Success(25L)))
 
-        assertEquals(SyncState.Success(25L), resolved)
+        assertEquals(SyncState.Success(10L), resolved)
     }
 }
