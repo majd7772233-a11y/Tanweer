@@ -493,10 +493,14 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                             prefs.edit().putString("selected_group_id_${user.id}", authorizedGroupId).commit()
 
                             refreshStartupAuxiliaryData(user, authorizedGroupId, activeGroupIds)
-                            applyStartupSyncResult(syncResult)
+                            applyStartupSyncResult(syncResult, authorizedGroupId, refreshedUser?.gradeId ?: user.gradeId)
                         } catch (e: Exception) {
                             android.util.Log.e("TanweerViewModel", "Startup server reconciliation failed", e)
-                            applyStartupSyncResult(SyncResult.Offline("تعذر الاتصال بالخادم؛ يتم عرض النسخة المحفوظة محليًا"))
+                            applyStartupSyncResult(
+                                SyncResult.Offline("تعذر الاتصال بالخادم؛ يتم عرض النسخة المحفوظة محليًا"),
+                                getActiveGroupId().ifBlank { user.defaultGroupId },
+                                user.gradeId
+                            )
                         } finally {
                             repository.mutationQueue.isDrainAllowed = dataGenerationVerified
                             _isCheckingAuth.value = false
@@ -793,41 +797,42 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         tasks.awaitAll()
     }
 
-    private fun applyStartupSyncResult(result: SyncResult) {
-        when (result) {
-            is SyncResult.Success -> {
-                _homeSyncState.value = SyncState.Success()
-                _scheduleSyncState.value = SyncState.Success()
-                _homeworkSyncState.value = SyncState.Success()
-                _examsSyncState.value = SyncState.Success()
-                _calendarSyncState.value = SyncState.Success()
-                _issuesSyncState.value = SyncState.Success()
-                _librarySyncState.value = SyncState.Success()
-                _groupsSyncState.value = SyncState.Success()
-            }
-            is SyncResult.Offline -> {
-                _homeSyncState.value = SyncState.OfflineCached()
-                _scheduleSyncState.value = SyncState.OfflineCached()
-                _homeworkSyncState.value = SyncState.OfflineCached()
-                _examsSyncState.value = SyncState.OfflineCached()
-                _calendarSyncState.value = SyncState.OfflineCached()
-                _issuesSyncState.value = SyncState.OfflineCached()
-                _librarySyncState.value = SyncState.OfflineCached()
-                _groupsSyncState.value = SyncState.OfflineCached()
-            }
-            is SyncResult.Error -> {
-                _homeSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-                _scheduleSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-                _homeworkSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-                _examsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-                _calendarSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-                _issuesSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-                _librarySyncState.value = SyncState.Error(result.message, result.isNetworkError)
-                _groupsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-            }
+    private fun applyStartupSyncResult(result: SyncResult, groupId: String, gradeId: Int?) {
+        val resolvedState = when (result) {
+            is SyncResult.Success -> SyncState.Success()
+            is SyncResult.Offline -> SyncState.OfflineCached()
+            is SyncResult.Error -> SyncState.Error(result.message, result.isNetworkError)
         }
-    }
 
+        // syncInitial returns Success only when the server-backed startup snapshots complete.
+        // Bind that result to the resolved active group so a previous group's result cannot
+        // authorize this group's empty-state UI.
+        if (groupId.isNotBlank()) {
+            listOf(
+                GroupSyncSource.CONTENTS,
+                GroupSyncSource.HOME,
+                GroupSyncSource.SCHEDULE,
+                GroupSyncSource.HOMEWORKS,
+                GroupSyncSource.EXAMS,
+                GroupSyncSource.CALENDAR,
+                GroupSyncSource.ISSUES,
+                GroupSyncSource.EVENTS
+            ).forEach { source -> beginGroupSync(source, groupId) }
+        }
+
+        _sectionContentsSyncState.value = resolvedState
+        _homeSyncState.value = resolvedState
+        _scheduleSyncState.value = resolvedState
+        _homeworkSyncState.value = resolvedState
+        _examsSyncState.value = resolvedState
+        _calendarSyncState.value = resolvedState
+        _issuesSyncState.value = resolvedState
+        _eventsSyncState.value = resolvedState
+        _academicArchiveSyncState.value = resolvedState
+        _librarySyncState.value = resolvedState
+        _librarySyncGradeId.value = gradeId
+        _groupsSyncState.value = resolvedState
+    }
     private fun getActiveGroupId(): String = _selectedGroupId.value
 
     // =========================================================================
