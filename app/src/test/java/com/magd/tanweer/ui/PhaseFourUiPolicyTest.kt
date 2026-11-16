@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.components.aggregateSyncStates
+import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
 import com.magd.tanweer.ui.components.shouldShowConfirmedEmptyState
 import com.magd.tanweer.util.ArabicSearchEngine
 import org.junit.Assert.assertEquals
@@ -103,6 +104,16 @@ class PhaseFourUiPolicyTest {
         assertFalse(
             isCurrentDashboardRequest(7, 7, "user-a", "user-a", "TEACHER", "ADMIN")
         )
+    }
+
+    @Test
+    fun only_a_successful_server_snapshot_can_confirm_an_empty_list() {
+        assertTrue(hasAuthoritativeSnapshot(SyncState.Success(50L)))
+        assertFalse(hasAuthoritativeSnapshot(SyncState.Idle))
+        assertFalse(hasAuthoritativeSnapshot(SyncState.Loading))
+        assertFalse(hasAuthoritativeSnapshot(SyncState.Refreshing))
+        assertFalse(hasAuthoritativeSnapshot(SyncState.OfflineCached(lastSyncedAt = 50L)))
+        assertFalse(hasAuthoritativeSnapshot(SyncState.Error("تعذر الاتصال")))
     }
 
 }

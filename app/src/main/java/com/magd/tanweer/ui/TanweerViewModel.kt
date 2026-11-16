@@ -1006,7 +1006,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         if (groupId.isBlank()) return
         _selectedGroupId.value = groupId
         persistSelectedGroup(groupId)
-        syncInitialData(groupId, _selectedDate.value, isExplicitAction = true)
+        // Re-run the active destination's source syncs for the newly selected group.
+        // A previous group's Success state must not authorize an empty state here.
+        syncCurrentDestinationOnEntry()
     }
 
     fun setSelectedDate(date: String) {

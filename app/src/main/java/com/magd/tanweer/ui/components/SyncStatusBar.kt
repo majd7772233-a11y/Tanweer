@@ -161,6 +161,69 @@ fun SyncStatusBar(
     }
 }
 
+
+@Composable
+fun PendingSyncEmptyState(
+    dataLabel: String,
+    syncState: SyncState,
+    modifier: Modifier = Modifier
+) {
+    if (syncState is SyncState.Success) return
+
+    val accent = when (syncState) {
+        is SyncState.Error -> RubyRed
+        is SyncState.OfflineCached -> WarmAmber
+        else -> CyanAccent
+    }
+    val message = when (syncState) {
+        is SyncState.Loading, is SyncState.Refreshing ->
+            "جارٍ التحقق من $dataLabel مع الخادم؛ لن نعرض القائمة فارغة قبل اكتمال المزامنة."
+        is SyncState.OfflineCached ->
+            "لا توجد سجلات محفوظة محلياً لـ$dataLabel؛ لا يمكن تأكيد خلو القائمة أثناء عدم الاتصال."
+        is SyncState.Error ->
+            "تعذّر تأكيد حالة $dataLabel. أعد المحاولة من شريط المزامنة."
+        is SyncState.Idle ->
+            "لم يتم التحقق من $dataLabel بعد؛ لذلك لم نؤكد أن القائمة فارغة."
+        is SyncState.Success -> return
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(GlassSurface)
+            .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .padding(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (syncState.isBusy()) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = accent
+                )
+            } else {
+                Icon(
+                    imageVector = if (syncState is SyncState.Error) Icons.Default.Warning else Icons.Default.CloudOff,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Text(
+                text = message,
+                color = TextSecondary,
+                fontSize = tanweerTextSize(11f),
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
 /**
  * Resolves several source sync states into one truthful screen-level status.
  * A failed source is never hidden by another source completing successfully.
