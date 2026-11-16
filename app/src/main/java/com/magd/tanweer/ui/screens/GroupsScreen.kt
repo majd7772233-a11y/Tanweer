@@ -51,6 +51,7 @@ fun GroupsScreen(
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val chatStatus by viewModel.chatConnectionStatus.collectAsStateWithLifecycle()
+    val groupsSyncState by viewModel.groupsSyncState.collectAsStateWithLifecycle()
     val groupMembersState by viewModel.groupMembersState.collectAsStateWithLifecycle()
     val isGroupMembersLoading by viewModel.isGroupMembersLoading.collectAsStateWithLifecycle()
     val groupMembersError by viewModel.groupMembersError.collectAsStateWithLifecycle()
@@ -604,7 +605,11 @@ fun GroupsScreen(
                     )
                 }
 
-                if (sharedGroups.isEmpty()) {
+                if (sharedGroups.isEmpty() && !hasAuthoritativeSnapshot(groupsSyncState)) {
+                    item {
+                        PendingSyncEmptyState(dataLabel = "المجموعات المشتركة", syncState = groupsSyncState)
+                    }
+                } else if (sharedGroups.isEmpty()) {
                     item {
                         EmptyStateGlass(
                             title = if (groupSearchQuery.isBlank()) "لا توجد مجموعات مشتركة بعد" else "لا توجد مجموعات تطابق البحث",
@@ -734,7 +739,11 @@ fun GroupsScreen(
                     }
                 }
 
-                if (visibleDiscoverGroups.isEmpty()) {
+                if (visibleDiscoverGroups.isEmpty() && !hasAuthoritativeSnapshot(groupsSyncState)) {
+                    item {
+                        PendingSyncEmptyState(dataLabel = "المجموعات المتاحة للاكتشاف", syncState = groupsSyncState)
+                    }
+                } else if (visibleDiscoverGroups.isEmpty()) {
                     item {
                         EmptyStateGlass(
                             title = if (groupSearchQuery.isBlank()) "لا توجد مجموعات جديدة" else "لا توجد نتائج مطابقة",

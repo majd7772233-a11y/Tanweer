@@ -2249,3 +2249,10 @@ When giving the user a statement about the current state, re-read GitHub if it m
 ## 2026-11-16 — Android CI follow-up for archive-state import
 - Android CI on `bd6938825ce41fc7d54bf17e4a35b1da9c9576e1` compiled the source until two unresolved symbols in `AcademicHistoryScreen.kt`: missing imports for `hasAuthoritativeSnapshot` and `PendingSyncEmptyState`. The implementation itself was not reported to have additional Kotlin errors in that compile attempt.
 - Added the two explicit component imports. This follow-up requires a fresh Android CI run; the failed run is not considered a validation result.
+
+
+## 2026-11-16 — Group catalogue empty-state gate
+- `syncGroups()` is the single repository operation that retrieves and reconciles both `myGroups` and `discoverGroups`. The Groups screen previously rendered empty copy against Room flows whose initial value is `emptyList()`.
+- Both shared-group and discovery empty states now require `groupsSyncState == Success` through `hasAuthoritativeSnapshot`. Until then, the screen presents the actual idle/loading/offline/error sync state instead of claiming no groups exist.
+- This reuses the existing policy regression test that only `SyncState.Success` may confirm an empty list. No new endpoint or database behavior was introduced.
+- Android and Server CI results for the current head are still being rechecked; this UI follow-up requires its own Android CI validation.
