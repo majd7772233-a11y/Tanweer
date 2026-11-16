@@ -48,6 +48,8 @@ fun EventsScreen(
 
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val eventsSyncState by viewModel.eventsSyncState.collectAsStateWithLifecycle()
+    val hasEventsSnapshot = events.isNotEmpty() || hasAuthoritativeSnapshot(eventsSyncState)
 
     val todayStr = remember { TanweerViewModel.getTodayDateString() }
 
@@ -171,7 +173,7 @@ fun EventsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "الفعاليات القادمة (${events.count { it.eventDate >= todayStr }}) ⏳",
+                            text = if (hasEventsSnapshot) "الفعاليات القادمة (${events.count { it.eventDate >= todayStr }}) ⏳" else "الفعاليات القادمة ⏳",
                             fontSize = tanweerTextSize(12f),
                             fontWeight = if (activeTab == 0) FontWeight.Bold else FontWeight.Normal,
                             color = if (activeTab == 0) PurpleAccent else TextSecondary
@@ -189,7 +191,7 @@ fun EventsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "الأرشيف والسابقات (${events.count { it.eventDate < todayStr }}) 📦",
+                            text = if (hasEventsSnapshot) "الأرشيف والسابقات (${events.count { it.eventDate < todayStr }}) 📦" else "الأرشيف والسابقات 📦",
                             fontSize = tanweerTextSize(12f),
                             fontWeight = if (activeTab == 1) FontWeight.Bold else FontWeight.Normal,
                             color = if (activeTab == 1) CyanAccent else TextSecondary
@@ -232,13 +234,27 @@ fun EventsScreen(
             // Events List or Empty State
             if (filteredEvents.isEmpty()) {
                 item {
-                    EmptyStateGlass(
-                        title = if (activeTab == 0) "لا توجد فعاليات قادمة مجدولة" else "لا توجد فعاليات سابقة",
-                        subtitle = "يمكن لأي عضو في الشعبة أو المدرسة إضافة وتوثيق فعالية جديدة ليراها الجميع في التقويم وصفحة الفعاليات.",
-                        icon = "🎪",
-                        actionButtonText = "إضافة فعالية للشعبة",
-                        onActionClick = { isLocalAddDialog = true }
-                    )
+                    if (events.isNotEmpty() || hasAuthoritativeSnapshot(eventsSyncState)) {
+                        EmptyStateGlass(
+                            title = if (events.isEmpty()) {
+                                if (activeTab == 0) "لا توجد فعاليات قادمة مجدولة" else "لا توجد فعاليات سابقة"
+                            } else {
+                                "لا توجد فعاليات تطابق التصفية الحالية"
+                            },
+                            subtitle = "يمكن لأي عضو في الشعبة أو المدرسة إضافة وتوثيق فعالية جديدة ليراها الجميع في التقويم وصفحة الفعاليات.",
+                            icon = "🎪",
+                            actionButtonText = if (events.isEmpty()) "إضافة فعالية للشعبة" else "عرض جميع الفعاليات",
+                            onActionClick = {
+                                if (events.isEmpty()) isLocalAddDialog = true
+                                else {
+                                    selectedCategory = "ALL"
+                                    activeTab = 0
+                                }
+                            }
+                        )
+                    } else {
+                        PendingSyncEmptyState(dataLabel = "الفعاليات", syncState = eventsSyncState)
+                    }
                 }
             } else {
                 items(filteredEvents, key = { it.id }) { event ->

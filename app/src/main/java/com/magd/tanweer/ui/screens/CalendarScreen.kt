@@ -45,6 +45,8 @@ fun CalendarScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val calendarSyncState by viewModel.calendarSyncState.collectAsStateWithLifecycle()
+    val hasCalendarSnapshot = hasAuthoritativeSnapshot(calendarSyncState)
 
     var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
@@ -209,9 +211,6 @@ fun CalendarScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 val curMonthPrefix = remember(currentCalendar.timeInMillis) { monthQueryFormat.format(currentCalendar.time) }
-                val monthLessons = remember(allContents, curMonthPrefix) {
-                    allContents.count { it.studyDate?.startsWith(curMonthPrefix) == true }
-                }
 
                 Box(
                     modifier = Modifier
@@ -222,7 +221,7 @@ fun CalendarScreen(
                         .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("📖 $monthLessons دروس", fontSize = tanweerTextSize(11f), color = EmeraldGreen, fontWeight = FontWeight.Bold)
+                    Text("📖 تفاصيل الدروس", fontSize = tanweerTextSize(11f), color = EmeraldGreen, fontWeight = FontWeight.Bold)
                 }
 
                 Box(
@@ -234,7 +233,7 @@ fun CalendarScreen(
                         .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("🔴 ${exams.size} اختبارات", fontSize = tanweerTextSize(11f), color = RubyRed, fontWeight = FontWeight.Bold)
+                    Text("🔴 ${if (hasCalendarSnapshot) exams.size.toString() else "—"} اختبارات", fontSize = tanweerTextSize(11f), color = RubyRed, fontWeight = FontWeight.Bold)
                 }
 
                 Box(
@@ -246,7 +245,7 @@ fun CalendarScreen(
                         .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("📝 ${homeworks.size} واجبات", fontSize = tanweerTextSize(11f), color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Text("📝 ${if (hasCalendarSnapshot) homeworks.size.toString() else "—"} واجبات", fontSize = tanweerTextSize(11f), color = WarmAmber, fontWeight = FontWeight.Bold)
                 }
 
                 Box(
@@ -260,7 +259,7 @@ fun CalendarScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("🎪 ${events.size} فعاليات", fontSize = tanweerTextSize(11f), color = PurpleAccent, fontWeight = FontWeight.Bold)
+                        Text("🎪 ${if (hasCalendarSnapshot) events.size.toString() else "—"} فعاليات", fontSize = tanweerTextSize(11f), color = PurpleAccent, fontWeight = FontWeight.Bold)
                         Text("‹", fontSize = tanweerTextSize(13f), color = PurpleAccent)
                     }
                 }
@@ -702,19 +701,23 @@ fun CalendarScreen(
             }
         } else if (dayExams.isEmpty() && dayHomeworks.isEmpty() && dayEvents.isEmpty()) {
             item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface.copy(alpha = 0.4f)
-                ) {
-                    Text(
-                        text = "لا توجد منشورات أو واجبات أو فعاليات مسجلة لهذا اليوم حتى الآن. يمكنك إضافة وتوثيق الحصة بالضغط على زر الإضافة أعلاه.",
-                        fontSize = tanweerTextSize(13f),
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp)
-                    )
+                if (hasCalendarSnapshot) {
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = GlassSurface.copy(alpha = 0.4f)
+                    ) {
+                        Text(
+                            text = "لا توجد منشورات أو واجبات أو فعاليات مسجلة لهذا اليوم في آخر لقطة شهرية مؤكدة. يمكنك إضافة وتوثيق الحصة بالضغط على زر الإضافة أعلاه.",
+                            fontSize = tanweerTextSize(13f),
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp)
+                        )
+                    }
+                } else {
+                    PendingSyncEmptyState(dataLabel = "تقويم هذا الشهر", syncState = calendarSyncState)
                 }
             }
         }
