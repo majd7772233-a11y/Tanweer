@@ -44,6 +44,7 @@ import com.magd.tanweer.data.model.hasPermission
 import com.magd.tanweer.data.notifications.TanweerNotificationManager
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.SubScreen
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -59,11 +60,13 @@ fun ExamsScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
 
     val exams by viewModel.repository.getExams(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
-    val hasExamSnapshot = exams.isNotEmpty() || hasAuthoritativeSnapshot(examsSyncState)
+    val scopedExamsSyncState = syncStateForScope(examsSyncState, groupSyncScopeIds[GroupSyncSource.EXAMS], activeGroupId)
+    val hasExamSnapshot = exams.isNotEmpty() || hasAuthoritativeSnapshot(scopedExamsSyncState)
 
     val gradeSubjects = remember(currentUser?.gradeId) {
         viewModel.getScheduleSubjectsForCurrentGrade()
@@ -222,7 +225,7 @@ fun ExamsScreen(
                             onActionClick = { isLocalAddExamModalOpen = true }
                         )
                     } else {
-                        PendingSyncEmptyState(dataLabel = "جدول الاختبارات", syncState = examsSyncState)
+                        PendingSyncEmptyState(dataLabel = "جدول الاختبارات", syncState = scopedExamsSyncState)
                     }
                 }
             } else {

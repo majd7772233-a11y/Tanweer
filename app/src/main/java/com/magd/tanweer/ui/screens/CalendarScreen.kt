@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.*
 import com.magd.tanweer.ui.SubScreen
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -45,8 +46,10 @@ fun CalendarScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
     val calendarSyncState by viewModel.calendarSyncState.collectAsStateWithLifecycle()
-    val hasCalendarSnapshot = hasAuthoritativeSnapshot(calendarSyncState)
+    val scopedCalendarSyncState = syncStateForScope(calendarSyncState, groupSyncScopeIds[GroupSyncSource.CALENDAR], activeGroupId)
+    val hasCalendarSnapshot = hasAuthoritativeSnapshot(scopedCalendarSyncState)
 
     var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
@@ -717,7 +720,7 @@ fun CalendarScreen(
                         )
                     }
                 } else {
-                    PendingSyncEmptyState(dataLabel = "تقويم هذا الشهر", syncState = calendarSyncState)
+                    PendingSyncEmptyState(dataLabel = "تقويم هذا الشهر", syncState = scopedCalendarSyncState)
                 }
             }
         }

@@ -50,6 +50,7 @@ import com.magd.tanweer.data.remote.NetworkModule
 import com.magd.tanweer.data.notifications.TanweerNotificationManager
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.NavigationTab
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -90,11 +91,13 @@ fun HomeworkScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
 
     val homeworks by viewModel.repository.getHomeworks(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
-    val hasHomeworkSnapshot = homeworks.isNotEmpty() || hasAuthoritativeSnapshot(homeworkSyncState)
+    val scopedHomeworkSyncState = syncStateForScope(homeworkSyncState, groupSyncScopeIds[GroupSyncSource.HOMEWORKS], activeGroupId)
+    val hasHomeworkSnapshot = homeworks.isNotEmpty() || hasAuthoritativeSnapshot(scopedHomeworkSyncState)
 
     val plannedHwIds by viewModel.todayPlannedHomeworkIds
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -344,7 +347,7 @@ fun HomeworkScreen(
                             }
                         )
                     } else {
-                        PendingSyncEmptyState(dataLabel = "الواجبات", syncState = homeworkSyncState)
+                        PendingSyncEmptyState(dataLabel = "الواجبات", syncState = scopedHomeworkSyncState)
                     }
                 }
             } else {

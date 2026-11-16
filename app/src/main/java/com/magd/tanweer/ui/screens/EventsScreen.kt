@@ -29,6 +29,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.SchoolEventItem
 import com.magd.tanweer.ui.SubScreen
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -45,11 +46,13 @@ fun EventsScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
 
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val eventsSyncState by viewModel.eventsSyncState.collectAsStateWithLifecycle()
-    val hasEventsSnapshot = events.isNotEmpty() || hasAuthoritativeSnapshot(eventsSyncState)
+    val scopedEventsSyncState = syncStateForScope(eventsSyncState, groupSyncScopeIds[GroupSyncSource.EVENTS], activeGroupId)
+    val hasEventsSnapshot = events.isNotEmpty() || hasAuthoritativeSnapshot(scopedEventsSyncState)
 
     val todayStr = remember { TanweerViewModel.getTodayDateString() }
 
@@ -253,7 +256,7 @@ fun EventsScreen(
                             }
                         )
                     } else {
-                        PendingSyncEmptyState(dataLabel = "الفعاليات", syncState = eventsSyncState)
+                        PendingSyncEmptyState(dataLabel = "الفعاليات", syncState = scopedEventsSyncState)
                     }
                 }
             } else {

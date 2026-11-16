@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.IssueCommentItem
 import com.magd.tanweer.data.model.IssueItem
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -48,11 +49,13 @@ fun IssuesScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
 
     val issues by viewModel.repository.getIssues(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val issuesSyncState by viewModel.issuesSyncState.collectAsStateWithLifecycle()
-    val hasIssuesSnapshot = issues.isNotEmpty() || hasAuthoritativeSnapshot(issuesSyncState)
+    val scopedIssuesSyncState = syncStateForScope(issuesSyncState, groupSyncScopeIds[GroupSyncSource.ISSUES], activeGroupId)
+    val hasIssuesSnapshot = issues.isNotEmpty() || hasAuthoritativeSnapshot(scopedIssuesSyncState)
 
     val gradeSubjects = remember(currentUser?.gradeId) {
         viewModel.getSubjectsForCurrentGrade()
@@ -168,7 +171,7 @@ fun IssuesScreen(
                             }
                         )
                     } else {
-                        PendingSyncEmptyState(dataLabel = "الاستفسارات", syncState = issuesSyncState)
+                        PendingSyncEmptyState(dataLabel = "الاستفسارات", syncState = scopedIssuesSyncState)
                     }
                 }
             } else {
