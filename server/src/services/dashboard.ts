@@ -3685,13 +3685,14 @@ export function renderDashboardHtml(): Response {
           <h2 style="font-size:1.1rem; font-weight:800; color:var(--cyan); margin-bottom:0.75rem;">🛠️ استوديو SQL المباشر لقاعدة البيانات (D1 Studio)</h2>
           <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:1rem;">تنفيذ استعلامات SQL حرة مباشرة على قاعدة بيانات تنوير D1 مع تسجيل رقابي كامل.</p>
           <div style="display:flex; flex-direction:column; gap:0.75rem; margin-bottom:1rem;">
-            <textarea id="sqlQuery" style="width:100%; height:110px; background:rgba(3,7,18,0.8); border:1px solid var(--border-accent); border-radius:10px; padding:0.75rem; color:#A5F3FC; font-family:monospace; font-size:0.9rem;" placeholder="SELECT * FROM users LIMIT 10;"></textarea>
+            <label for="sqlQuery" style="font-size:0.82rem; color:var(--text-sec);">استعلام SQL</label>
+            <textarea id="sqlQuery" aria-label="استعلام SQL" style="width:100%; height:110px; background:rgba(3,7,18,0.8); border:1px solid var(--border-accent); border-radius:10px; padding:0.75rem; color:#A5F3FC; font-family:monospace; font-size:0.9rem;" placeholder="SELECT * FROM users LIMIT 10;"></textarea>
             <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
               <button class="action-btn" onclick="document.getElementById('sqlQuery').value='SELECT name, tbl_name FROM sqlite_master WHERE type=\\'table\\';'">عرض الجداول 📋</button>
               <button class="action-btn approve" onclick="runSqlConsole()">تنفيذ الاستعلام ⚡</button>
             </div>
           </div>
-          <div id="sqlResult" style="background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:10px; padding:1rem; font-family:monospace; font-size:0.85rem; max-height:400px; overflow:auto;">
+          <div id="sqlResult" role="region" aria-label="نتائج استعلام SQL" aria-live="polite" aria-atomic="false" tabindex="0" style="background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:10px; padding:1rem; font-family:monospace; font-size:0.85rem; max-height:400px; overflow:auto;">
             النتائج ستظهر هنا...
           </div>
         </div>
@@ -5807,16 +5808,18 @@ export function renderDashboardHtml(): Response {
       }
     }
 
-    // SQL Studio Runner (D-04)
+    // SQL Studio Runner — consumes the canonical handleExecuteSql response.
     async function runSqlConsole() {
-      const query = document.getElementById('sqlQueryInput')?.value.trim();
-      const output = document.getElementById('sqlConsoleOutput');
+      const query = document.getElementById('sqlQuery')?.value.trim() || '';
+      const output = document.getElementById('sqlResult');
+      if (!output) return;
+
       if (!query) {
-        alert('الرجاء كتابة استعلام SQL أولاً');
+        output.textContent = 'الرجاء كتابة استعلام SQL أولاً';
         return;
       }
 
-      output.innerHTML = '<div style="color:var(--text-sec); font-size:0.85rem;">جاري تنفيذ الاستعلام في قاعدة البيانات...</div>';
+      output.innerHTML = '<div role="status" style="color:var(--text-sec); font-size:0.85rem;">جاري تنفيذ الاستعلام في قاعدة البيانات...</div>';
 
       try {
         const res = await fetch('/api/dashboard/sql', {
@@ -5825,41 +5828,67 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ query })
         });
         const data = await res.json();
-        if (!data.success) {
-          output.innerHTML = \`<div style="color:var(--ruby); font-family:monospace; font-size:0.85rem; padding:0.5rem; background:rgba(239,83,80,0.1); border-radius:6px;">خطأ في التنفيذ: \${escapeHtml(data.message || 'فشل الاستعلام')}</div>\`;
+
+        if (!res.ok || data?.success !== true) {
+          const serverError = typeof data?.error === 'string' ? data.error.trim() : '';
+          const serverMessage = typeof data?.message === 'string' ? data.message.trim() : '';
+          const message = serverError || serverMessage || 'فشل الاستعلام';
+          output.innerHTML = '<div role="alert" style="color:var(--ruby); font-family:monospace; font-size:0.85rem; padding:0.5rem; background:rgba(239,83,80,0.1); border-radius:6px;">خطأ في التنفيذ: ' + escapeHtml(message) + '</div>';
           return;
         }
 
-        if (data.isMutation) {
-          output.innerHTML = \`<div style="color:var(--emerald); font-family:monospace; font-size:0.85rem; padding:0.5rem; background:rgba(0,230,118,0.1); border-radius:6px;">تم تنفيذ أمر التعديل بنجاح! تم التأثير على \${data.changes || 0} صف.</div>\`;
+        if (data.type === 'MUTATION') {
+          const rawChanges = data.meta?.changes;
+          const changes = Number(rawChanges);
+          const changesText = Number.isFinite(changes) && changes >= 0
+            ? 'تم التأثير على ' + String(changes) + ' صف.'
+            : 'عدد الصفوف المتأثرة غير متاح.';
+          const message = typeof data.message === 'string' && data.message.trim()
+            ? data.message.trim()
+            : 'تم تنفيذ أمر التعديل بنجاح.';
+          output.innerHTML = '<div role="status" style="color:var(--emerald); font-family:monospace; font-size:0.85rem; padding:0.5rem; background:rgba(0,230,118,0.1); border-radius:6px;">' + escapeHtml(message) + ' ' + escapeHtml(changesText) + '</div>';
           return;
         }
 
-        const rows = data.results || data.rows || [];
+        if (data.type !== 'SELECT' || !Array.isArray(data.data)) {
+          output.innerHTML = '<div role="alert" style="color:var(--ruby); font-family:monospace; font-size:0.85rem; padding:0.5rem;">استجابة الخادم غير متوافقة مع عقد SQL Studio.</div>';
+          return;
+        }
+
+        const rows = data.data;
+        const rowCount = Number.isInteger(data.rowCount) && data.rowCount >= 0 ? data.rowCount : rows.length;
         if (!rows.length) {
-          output.innerHTML = '<div style="color:var(--text-sec); font-size:0.85rem;">تم تنفيذ الاستعلام بنجاح. لا توجد نتائج معادة (0 صفوف).</div>';
+          output.innerHTML = '<div role="status" style="color:var(--text-sec); font-size:0.85rem;">تم تنفيذ الاستعلام بنجاح. لا توجد نتائج معادة (' + String(rowCount) + ' صفوف).</div>';
           return;
         }
 
-        const cols = Object.keys(rows[0]);
-        let tableHtml = \`<div style="margin-bottom:0.4rem; font-size:0.8rem; color:var(--cyan);">عدد السجلات المعادة: \${rows.length}</div>\`;
+        const cols = Object.keys(rows[0] || {});
+        if (!cols.length) {
+          output.innerHTML = '<div role="status" style="color:var(--text-sec); font-size:0.85rem;">أعاد الاستعلام ' + String(rowCount) + ' صفوف دون حقول قابلة للعرض.</div>';
+          return;
+        }
+
+        let tableHtml = '<div style="margin-bottom:0.4rem; font-size:0.8rem; color:var(--cyan);">عدد السجلات المعادة: ' + String(rowCount) + '</div>';
         tableHtml += '<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:0.75rem; font-family:monospace;"><thead><tr style="background:rgba(255,255,255,0.05);">';
         cols.forEach(col => {
-          tableHtml += \`<th style="padding:0.4rem 0.6rem; border:1px solid var(--border); text-align:right;">\${escapeHtml(col)}</th>\`;
+          tableHtml += '<th scope="col" style="padding:0.4rem 0.6rem; border:1px solid var(--border); text-align:right;">' + escapeHtml(col) + '</th>';
         });
         tableHtml += '</tr></thead><tbody>';
-        rows.forEach(r => {
+        rows.forEach(row => {
           tableHtml += '<tr>';
           cols.forEach(col => {
-            const val = r[col];
-            tableHtml += \`<td style="padding:0.4rem 0.6rem; border:1px solid var(--border); text-align:right;">\${escapeHtml(val === null ? 'NULL' : String(val))}</td>\`;
+            const value = row[col];
+            tableHtml += '<td style="padding:0.4rem 0.6rem; border:1px solid var(--border); text-align:right;">' + escapeHtml(value === null || value === undefined ? 'NULL' : String(value)) + '</td>';
           });
           tableHtml += '</tr>';
         });
         tableHtml += '</tbody></table></div>';
         output.innerHTML = tableHtml;
-      } catch (e) {
-        output.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ أثناء الاتصال بالخادم</div>';
+      } catch (error) {
+        const message = error && typeof error.message === 'string' && error.message
+          ? error.message
+          : 'حدث خطأ أثناء الاتصال بالخادم';
+        output.innerHTML = '<div role="alert" style="color:var(--ruby); font-size:0.85rem;">حدث خطأ: ' + escapeHtml(message) + '</div>';
       }
     }
 

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import * as ts from 'typescript';
 import {
   verifyOwnerAuth,
+  handleExecuteSql,
   handlePreviewPurge,
   handleGetDashboardHomeworkDetail,
   handleTogglePinDashboardContent,
@@ -490,4 +491,122 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
     });
   });
 
+});
+
+
+describe('SQL Studio response and DOM contract', () => {
+  function createSqlEnv(selectRows: Record<string, unknown>[] = [
+    { id: 1, full_name: 'طالب تجريبي' },
+    { id: 2, full_name: 'طالبة تجريبيّة' },
+  ]): Env {
+    const DB = {
+      prepare(sql: string) {
+        const statement: any = {
+          bind(..._params: unknown[]) {
+            return statement;
+          },
+          async all() {
+            if (sql.includes('invalid_column')) {
+              throw new Error('no such column: invalid_column');
+            }
+            return { results: selectRows };
+          },
+          async run() {
+            return { success: true, meta: { changes: /^\s*UPDATE/i.test(sql) ? 2 : 1 } };
+          },
+        };
+        return statement;
+      },
+    };
+    return { DB } as unknown as Env;
+  }
+
+  function sqlRequest(query: string): Request {
+    return new Request('https://tanweer.test/api/dashboard/sql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+  }
+
+  it('returns SELECT rows and the authoritative rowCount field', async () => {
+    const response = await handleExecuteSql(
+      sqlRequest('SELECT id, full_name FROM users'),
+      'owner-test',
+      createSqlEnv(),
+    );
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      success: true,
+      type: 'SELECT',
+      rowCount: 2,
+      data: [
+        { id: 1, full_name: 'طالب تجريبي' },
+        { id: 2, full_name: 'طالبة تجريبيّة' },
+      ],
+    });
+  });
+
+  it('keeps an empty SELECT distinguishable from a failed query', async () => {
+    const response = await handleExecuteSql(
+      sqlRequest('SELECT id FROM users WHERE id = -1'),
+      'owner-test',
+      createSqlEnv([]),
+    );
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ success: true, type: 'SELECT', rowCount: 0, data: [] });
+  });
+
+  it('returns mutation row counts through meta.changes', async () => {
+    const response = await handleExecuteSql(
+      sqlRequest("UPDATE users SET status = 'ACTIVE'"),
+      'owner-test',
+      createSqlEnv(),
+    );
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.type).toBe('MUTATION');
+    expect(body.meta.changes).toBe(2);
+  });
+
+  it('returns the actual D1 error through error when SQL is invalid', async () => {
+    const response = await handleExecuteSql(
+      sqlRequest('SELECT invalid_column FROM users'),
+      'owner-test',
+      createSqlEnv(),
+    );
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('invalid_column');
+  });
+
+  it('connects the SQL script to the actual accessible input and output elements', async () => {
+    const response = renderDashboardHtml();
+    const html = await response.text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+
+    expect(html).toContain('id="sqlQuery"');
+    expect(html).toContain('id="sqlResult"');
+    expect(html).toContain('aria-label="استعلام SQL"');
+    expect(html).toContain('aria-live="polite"');
+    expect(script).toContain("getElementById('sqlQuery')");
+    expect(script).toContain("getElementById('sqlResult')");
+    expect(script).toContain("data.type === 'MUTATION'");
+    expect(script).toContain("data.type !== 'SELECT'");
+    expect(script).toContain('data.meta?.changes');
+    expect(script).toContain('data.rowCount');
+    expect(script).toContain('data?.error');
+    expect(script).not.toContain('sqlQueryInput');
+    expect(script).not.toContain('sqlConsoleOutput');
+    expect(script).not.toContain('data.isMutation');
+    expect(script).not.toContain('data.results || data.rows');
+  });
 });
