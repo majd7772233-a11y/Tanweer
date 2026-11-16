@@ -809,3 +809,7 @@
 ### Verification boundary
 - Server CI had passed on the previous owner-dashboard accessibility commit. The new Android loading/error-policy patch requires a fresh Android CI result on its own HEAD before phase closure.
 - No production deploy, D1 migration execution, key/secret change, PR merge, or real-device acceptance is implied by these source/test commits.
+
+
+## Group-scoped request ordering — 2026-11-16
+- Group-scoped startup and screen requests now use per-source request generations. A slower response from an old group cannot overwrite the newer group's corrections, decisions or membership snapshot; switching groups clears only the old group's data, while same-group refresh failures preserve the last successful snapshot.

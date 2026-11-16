@@ -13,6 +13,7 @@ import com.magd.tanweer.data.repository.TanweerRepository
 import com.magd.tanweer.util.AcademicSessionSelection
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -594,8 +595,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _scheduleMeta.value = null
         _scheduleVersion.value = null
         _scheduleProposals.value = emptyList()
+        groupMembersRequestGeneration++
+        groupMembersSourceGroupId = null
+        groupCorrectionsRequestGeneration++
+        groupCorrectionsSourceGroupId = null
+        communityDecisionsRequestGeneration++
+        communityDecisionsSourceGroupId = null
         _groupMembersState.value = null
         _groupMembersError.value = null
+        _isGroupMembersLoading.value = false
         _teacherDashboard.value = null
         _teacherDashboardError.value = null
         _moderatorDashboard.value = null
@@ -632,34 +640,116 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
 
         if (groupId.isNotBlank()) {
+            if (groupMembersSourceGroupId != groupId) {
+                groupMembersSourceGroupId = groupId
+                _groupMembersState.value = null
+            }
+            val membersRequestId = ++groupMembersRequestGeneration
+            _groupMembersError.value = null
+            _isGroupMembersLoading.value = true
             tasks += async(Dispatchers.IO) {
-                repository.getGroupMembers(groupId).onSuccess { data ->
-                    _groupMembersState.value = data
+                try {
+                    repository.getGroupMembers(groupId)
+                        .onSuccess { data ->
+                            if (membersRequestId == groupMembersRequestGeneration && getActiveGroupId() == groupId) {
+                                if (data.success) _groupMembersState.value = data
+                                else _groupMembersError.value = "تعذر تحميل قائمة أعضاء المجموعة من الخادم."
+                            }
+                        }
+                        .onFailure { error ->
+                            if (membersRequestId == groupMembersRequestGeneration && getActiveGroupId() == groupId) {
+                                _groupMembersError.value = error.message ?: "تعذر تحميل أعضاء المجموعة."
+                            }
+                        }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    if (membersRequestId == groupMembersRequestGeneration && getActiveGroupId() == groupId) {
+                        _groupMembersError.value = error.message ?: "تعذر تحميل أعضاء المجموعة."
+                    }
+                } finally {
+                    if (membersRequestId == groupMembersRequestGeneration) _isGroupMembersLoading.value = false
                 }
                 Unit
             }
+
             tasks += async(Dispatchers.IO) {
                 repository.getScheduleProposals(groupId).onSuccess { proposals ->
-                    _scheduleProposals.value = proposals
+                    if (getActiveGroupId() == groupId) _scheduleProposals.value = proposals
                 }
                 Unit
             }
+
+            if (groupCorrectionsSourceGroupId != groupId) {
+                groupCorrectionsSourceGroupId = groupId
+                _groupCorrections.value = emptyList()
+            }
+            val correctionsRequestId = ++groupCorrectionsRequestGeneration
+            _groupCorrectionsError.value = null
+            _isGroupCorrectionsLoading.value = true
             tasks += async(Dispatchers.IO) {
-                repository.getGroupCorrections(groupId).onSuccess { corrections ->
-                    _groupCorrections.value = corrections
+                try {
+                    repository.getGroupCorrections(groupId)
+                        .onSuccess { corrections ->
+                            if (correctionsRequestId == groupCorrectionsRequestGeneration && getActiveGroupId() == groupId) {
+                                _groupCorrections.value = corrections
+                            }
+                        }
+                        .onFailure { error ->
+                            if (correctionsRequestId == groupCorrectionsRequestGeneration && getActiveGroupId() == groupId) {
+                                _groupCorrectionsError.value = error.message ?: "تعذر تحميل طلبات التصويب"
+                            }
+                        }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    if (correctionsRequestId == groupCorrectionsRequestGeneration && getActiveGroupId() == groupId) {
+                        _groupCorrectionsError.value = error.message ?: "تعذر تحميل طلبات التصويب"
+                    }
+                } finally {
+                    if (correctionsRequestId == groupCorrectionsRequestGeneration) _isGroupCorrectionsLoading.value = false
                 }
                 Unit
             }
+
+            if (communityDecisionsSourceGroupId != groupId) {
+                communityDecisionsSourceGroupId = groupId
+                _communityDecisions.value = emptyList()
+            }
+            val decisionsRequestId = ++communityDecisionsRequestGeneration
+            _communityDecisionsError.value = null
+            _isCommunityDecisionsLoading.value = true
             tasks += async(Dispatchers.IO) {
-                repository.getCommunityDecisions(groupId).onSuccess { decisions ->
-                    _communityDecisions.value = decisions
+                try {
+                    repository.getCommunityDecisions(groupId)
+                        .onSuccess { decisions ->
+                            if (decisionsRequestId == communityDecisionsRequestGeneration && getActiveGroupId() == groupId) {
+                                _communityDecisions.value = decisions
+                            }
+                        }
+                        .onFailure { error ->
+                            if (decisionsRequestId == communityDecisionsRequestGeneration && getActiveGroupId() == groupId) {
+                                _communityDecisionsError.value = error.message ?: "تعذر تحميل القرارات الجماعية"
+                            }
+                        }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    if (decisionsRequestId == communityDecisionsRequestGeneration && getActiveGroupId() == groupId) {
+                        _communityDecisionsError.value = error.message ?: "تعذر تحميل القرارات الجماعية"
+                    }
+                } finally {
+                    if (decisionsRequestId == communityDecisionsRequestGeneration) _isCommunityDecisionsLoading.value = false
                 }
                 Unit
             }
+
             tasks += async(Dispatchers.IO) {
                 repository.getScheduleMetaAndSlots(groupId).onSuccess { schedule ->
-                    _scheduleMeta.value = schedule.meta
-                    _scheduleVersion.value = schedule.version
+                    if (getActiveGroupId() == groupId) {
+                        _scheduleMeta.value = schedule.meta
+                        _scheduleVersion.value = schedule.version
+                    }
                 }
                 Unit
             }
@@ -1320,6 +1410,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _scheduleProposals = MutableStateFlow<List<com.magd.tanweer.data.model.ScheduleProposalItem>>(emptyList())
     val scheduleProposals: StateFlow<List<com.magd.tanweer.data.model.ScheduleProposalItem>> = _scheduleProposals.asStateFlow()
 
+    @Volatile private var groupMembersRequestGeneration = 0
+    @Volatile private var groupMembersSourceGroupId: String? = null
     private val _groupMembersState = MutableStateFlow<com.magd.tanweer.data.model.GroupMembersResponse?>(null)
     val groupMembersState: StateFlow<com.magd.tanweer.data.model.GroupMembersResponse?> = _groupMembersState.asStateFlow()
     private val _isGroupMembersLoading = MutableStateFlow(false)
@@ -1346,6 +1438,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _myNotifications = MutableStateFlow<List<AppNotification>>(emptyList())
     val myNotifications: StateFlow<List<AppNotification>> = _myNotifications.asStateFlow()
 
+    @Volatile private var groupCorrectionsRequestGeneration = 0
+    @Volatile private var groupCorrectionsSourceGroupId: String? = null
     private val _groupCorrections = MutableStateFlow<List<ContentCorrectionItem>>(emptyList())
     val groupCorrections: StateFlow<List<ContentCorrectionItem>> = _groupCorrections.asStateFlow()
     private val _groupCorrectionsError = MutableStateFlow<String?>(null)
@@ -1353,6 +1447,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _isGroupCorrectionsLoading = MutableStateFlow(false)
     val isGroupCorrectionsLoading: StateFlow<Boolean> = _isGroupCorrectionsLoading.asStateFlow()
 
+    @Volatile private var communityDecisionsRequestGeneration = 0
+    @Volatile private var communityDecisionsSourceGroupId: String? = null
     private val _communityDecisions = MutableStateFlow<List<CommunityDecisionItem>>(emptyList())
     val communityDecisions: StateFlow<List<CommunityDecisionItem>> = _communityDecisions.asStateFlow()
     private val _communityDecisionsError = MutableStateFlow<String?>(null)
@@ -1485,24 +1581,41 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     fun loadGroupCorrections(groupId: String = getActiveGroupId()) {
         if (groupId.isBlank()) {
+            groupCorrectionsRequestGeneration++
+            groupCorrectionsSourceGroupId = null
+            _groupCorrections.value = emptyList()
             _groupCorrectionsError.value = "لا توجد شعبة نشطة لعرض طلبات التصويب."
             _isGroupCorrectionsLoading.value = false
             return
         }
+        if (groupCorrectionsSourceGroupId != groupId) {
+            groupCorrectionsSourceGroupId = groupId
+            _groupCorrections.value = emptyList()
+        }
+        val requestId = ++groupCorrectionsRequestGeneration
         viewModelScope.launch {
-            if (_isGroupCorrectionsLoading.value) return@launch
             _isGroupCorrectionsLoading.value = true
             _groupCorrectionsError.value = null
             try {
                 repository.getGroupCorrections(groupId)
-                    .onSuccess { list -> _groupCorrections.value = list }
-                    .onFailure { error -> _groupCorrectionsError.value = error.message ?: "تعذر تحميل طلبات التصويب" }
+                    .onSuccess { list ->
+                        if (requestId == groupCorrectionsRequestGeneration && groupCorrectionsSourceGroupId == groupId) {
+                            _groupCorrections.value = list
+                        }
+                    }
+                    .onFailure { error ->
+                        if (requestId == groupCorrectionsRequestGeneration) {
+                            _groupCorrectionsError.value = error.message ?: "تعذر تحميل طلبات التصويب"
+                        }
+                    }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _groupCorrectionsError.value = error.message ?: "تعذر تحميل طلبات التصويب"
+                if (requestId == groupCorrectionsRequestGeneration) {
+                    _groupCorrectionsError.value = error.message ?: "تعذر تحميل طلبات التصويب"
+                }
             } finally {
-                _isGroupCorrectionsLoading.value = false
+                if (requestId == groupCorrectionsRequestGeneration) _isGroupCorrectionsLoading.value = false
             }
         }
     }
@@ -1560,24 +1673,41 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     fun loadCommunityDecisions(groupId: String = getActiveGroupId()) {
         if (groupId.isBlank()) {
+            communityDecisionsRequestGeneration++
+            communityDecisionsSourceGroupId = null
+            _communityDecisions.value = emptyList()
             _communityDecisionsError.value = "لا توجد شعبة نشطة لعرض القرارات الجماعية."
             _isCommunityDecisionsLoading.value = false
             return
         }
+        if (communityDecisionsSourceGroupId != groupId) {
+            communityDecisionsSourceGroupId = groupId
+            _communityDecisions.value = emptyList()
+        }
+        val requestId = ++communityDecisionsRequestGeneration
         viewModelScope.launch {
-            if (_isCommunityDecisionsLoading.value) return@launch
             _isCommunityDecisionsLoading.value = true
             _communityDecisionsError.value = null
             try {
                 repository.getCommunityDecisions(groupId)
-                    .onSuccess { list -> _communityDecisions.value = list }
-                    .onFailure { error -> _communityDecisionsError.value = error.message ?: "تعذر تحميل القرارات الجماعية" }
+                    .onSuccess { list ->
+                        if (requestId == communityDecisionsRequestGeneration && communityDecisionsSourceGroupId == groupId) {
+                            _communityDecisions.value = list
+                        }
+                    }
+                    .onFailure { error ->
+                        if (requestId == communityDecisionsRequestGeneration) {
+                            _communityDecisionsError.value = error.message ?: "تعذر تحميل القرارات الجماعية"
+                        }
+                    }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _communityDecisionsError.value = error.message ?: "تعذر تحميل القرارات الجماعية"
+                if (requestId == communityDecisionsRequestGeneration) {
+                    _communityDecisionsError.value = error.message ?: "تعذر تحميل القرارات الجماعية"
+                }
             } finally {
-                _isCommunityDecisionsLoading.value = false
+                if (requestId == communityDecisionsRequestGeneration) _isCommunityDecisionsLoading.value = false
             }
         }
     }
@@ -1705,33 +1835,42 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     fun loadGroupMembers(groupId: String = getActiveGroupId()) {
         if (groupId.isBlank()) {
+            groupMembersRequestGeneration++
+            groupMembersSourceGroupId = null
             _groupMembersState.value = null
             _groupMembersError.value = "لا توجد شعبة نشطة لعرض الأعضاء."
             _isGroupMembersLoading.value = false
             return
         }
+        if (groupMembersSourceGroupId != groupId) {
+            groupMembersSourceGroupId = groupId
+            _groupMembersState.value = null
+        }
+        val requestId = ++groupMembersRequestGeneration
         viewModelScope.launch {
-            if (_isGroupMembersLoading.value) return@launch
             _groupMembersError.value = null
             _isGroupMembersLoading.value = true
             try {
                 repository.getGroupMembers(groupId)
                     .onSuccess { data ->
-                        if (data.success) {
-                            _groupMembersState.value = data
-                        } else {
-                            _groupMembersError.value = "تعذر تحميل قائمة أعضاء المجموعة من الخادم."
+                        if (requestId == groupMembersRequestGeneration && groupMembersSourceGroupId == groupId) {
+                            if (data.success) _groupMembersState.value = data
+                            else _groupMembersError.value = "تعذر تحميل قائمة أعضاء المجموعة من الخادم."
                         }
                     }
                     .onFailure { error ->
-                        _groupMembersError.value = error.message ?: "تعذر تحميل أعضاء المجموعة. تحقق من الاتصال ثم أعد المحاولة."
+                        if (requestId == groupMembersRequestGeneration) {
+                            _groupMembersError.value = error.message ?: "تعذر تحميل أعضاء المجموعة. تحقق من الاتصال ثم أعد المحاولة."
+                        }
                     }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _groupMembersError.value = error.message ?: "تعذر تحميل أعضاء المجموعة"
+                if (requestId == groupMembersRequestGeneration) {
+                    _groupMembersError.value = error.message ?: "تعذر تحميل أعضاء المجموعة"
+                }
             } finally {
-                _isGroupMembersLoading.value = false
+                if (requestId == groupMembersRequestGeneration) _isGroupMembersLoading.value = false
             }
         }
     }

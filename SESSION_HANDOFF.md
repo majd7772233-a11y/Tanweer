@@ -192,3 +192,5 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - CI on b04693d1d5923f2f6fdc7f76609188a96ff144b2: Server passed; Android test compilation failed because assertFalse was missing from the test imports. This patch adds it and also fixes the request-state race found in review.
 - Same patch updates GPT.md and DEEP_CODE_AUDIT_REPORT_2026-11-14.md. Wait for CI on the new exact HEAD before declaring Phase 4 closed.
 - No Worker deployment, D1 migration apply, secret rotation, Production write/deploy, merge to main, or physical-device acceptance.
+
+- Group-scoped startup and screen requests now use per-source request generations. A slower response from an old group cannot overwrite the newer group's corrections, decisions or membership snapshot; switching groups clears only the old group's data, while same-group refresh failures preserve the last successful snapshot.
