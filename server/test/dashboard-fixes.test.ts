@@ -610,3 +610,54 @@ describe('SQL Studio response and DOM contract', () => {
     expect(script).not.toContain('data.results || data.rows');
   });
 });
+
+
+describe('Owner Dashboard responsive navigation and accessible controls', () => {
+  it('keeps mobile layout breakpoints and announces mobile navigation state', async () => {
+    const response = renderDashboardHtml();
+    const html = await response.text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+
+    expect(html).toContain('@media (max-width: 900px)');
+    expect(html).toContain('@media (max-width: 500px)');
+    expect(html).toContain('aria-controls="dashboardNav"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(script).toContain("menuButton.setAttribute('aria-expanded', String(isOpen))");
+    expect(script).toContain("menuButton.setAttribute('aria-label', isOpen ? 'إغلاق قائمة التنقل' : 'فتح قائمة التنقل')");
+  });
+
+  it('gives primary search, filter and destructive-action fields accessible names', async () => {
+    const response = renderDashboardHtml();
+    const html = await response.text();
+
+    const accessibleIds = [
+      'userSearch',
+      'userRoleFilter',
+      'userStatusFilter',
+      'requestStatusFilter',
+      'contentSearchInput',
+      'homeworkSearchInput',
+      'examSearchInput',
+      'eventSearch',
+      'scheduleGroupFilter',
+      'chatGroupFilter',
+      'chatOrderFilter',
+      'chatSearchInput',
+      'modalNewRole',
+      'modalRoleReason',
+      'purgeStage1Secret',
+      'purgeConfirmYesInput',
+    ];
+    for (const id of accessibleIds) {
+      const elementStart = html.indexOf('id="' + id + '"');
+      expect(elementStart, 'missing control ' + id).toBeGreaterThanOrEqual(0);
+      const element = html.slice(elementStart, html.indexOf('>', elementStart) + 1);
+      expect(element, 'control has no accessible name: ' + id).toMatch(/aria-label=/);
+    }
+
+    expect(html).toContain('<label for="holidayTitle">');
+    expect(html).toContain('<label for="holidayDate">');
+    expect(html).toContain('<label for="holidayGroupId">');
+    expect(html).toContain('<label for="holidayReason">');
+  });
+});

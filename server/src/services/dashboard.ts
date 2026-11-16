@@ -2998,7 +2998,7 @@ export function renderDashboardHtml(): Response {
           <div class="brand-sub">غرفة التحكم المركزية (God Mode)</div>
         </div>
       </div>
-      <button class="menu-toggle-btn" onclick="toggleMobileMenu()">☰</button>
+      <button type="button" class="menu-toggle-btn" aria-label="فتح قائمة التنقل" aria-controls="dashboardNav" aria-expanded="false" onclick="toggleMobileMenu()">☰</button>
     </div>
 
     <nav class="nav-links" id="dashboardNav">
@@ -3160,15 +3160,15 @@ export function renderDashboardHtml(): Response {
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">👥 إدارة المستخدمين والرتب والحسابات</h2>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="userSearch" placeholder="بحث بالاسم أو الهاتف..." oninput="debounceUserSearch()">
-              <select class="role-select" id="userRoleFilter" onchange="loadUsers()">
+              <input type="text" class="search-input" id="userSearch" aria-label="بحث المستخدمين بالاسم أو الهاتف" placeholder="بحث بالاسم أو الهاتف..." oninput="debounceUserSearch()">
+              <select class="role-select" id="userRoleFilter" aria-label="تصفية المستخدمين حسب الرتبة" onchange="loadUsers()">
                 <option value="ALL">جميع الرتب</option>
                 <option value="STUDENT">طالب (STUDENT)</option>
                 <option value="MODERATOR">مشرف (MODERATOR)</option>
                 <option value="TEACHER">أستاذ (TEACHER)</option>
                 <option value="ADMIN">مدير (ADMIN)</option>
               </select>
-              <select class="role-select" id="userStatusFilter" onchange="loadUsers()">
+              <select class="role-select" id="userStatusFilter" aria-label="تصفية المستخدمين حسب حالة الحساب" onchange="loadUsers()">
                 <option value="ALL">جميع الحالات</option>
                 <option value="ACTIVE">نشط (ACTIVE)</option>
                 <option value="DISABLED">مجمّد (DISABLED)</option>
@@ -3293,7 +3293,7 @@ export function renderDashboardHtml(): Response {
         <div class="section-card">
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">📋 طلبات ترقية الرتب (Role Requests)</h2>
-            <select class="role-select" id="requestStatusFilter" onchange="loadRequests()">
+            <select class="role-select" id="requestStatusFilter" aria-label="تصفية طلبات ترقية الرتب حسب الحالة" onchange="loadRequests()">
               <option value="PENDING">الطلبات المعلقة فقط ⏳</option>
               <option value="ALL">جميع الطلبات</option>
               <option value="APPROVED">المعتمدة ✅</option>
@@ -3356,7 +3356,7 @@ export function renderDashboardHtml(): Response {
               <div style="font-size:0.8rem; color:var(--text-sec);">انقر على أي درس لعرض تفاصيله الأكاديمية وصوره بالكامل</div>
             </div>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="contentSearchInput" placeholder="بحث بعنوان الدرس أو الكاتب..." oninput="debounceContentSearch()">
+              <input type="text" class="search-input" id="contentSearchInput" aria-label="بحث الدروس بعنوان الدرس أو الكاتب" placeholder="بحث بعنوان الدرس أو الكاتب..." oninput="debounceContentSearch()">
               <button class="action-btn" onclick="loadContents(0)">تحديث 🔄</button>
             </div>
           </div>
@@ -3389,7 +3389,7 @@ export function renderDashboardHtml(): Response {
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">📝 إدارة الواجبات المدرسية والاختبارات</h2>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="homeworkSearchInput" placeholder="بحث بالواجب أو المادة..." oninput="debounceHomeworkSearch()">
+              <input type="text" class="search-input" id="homeworkSearchInput" aria-label="بحث الواجبات بالعنوان أو المادة" placeholder="بحث بالواجب أو المادة..." oninput="debounceHomeworkSearch()">
               <button class="action-btn" onclick="loadHomeworks(0); loadExams(0);">تحديث 🔄</button>
             </div>
           </div>
@@ -3416,7 +3416,7 @@ export function renderDashboardHtml(): Response {
           <div style="display:flex; justify-content:space-between; align-items:center; margin:1.5rem 0 0.5rem; flex-wrap:wrap; gap:0.5rem;">
             <h3 style="font-size:0.95rem; color:var(--ruby); margin:0;">الاختبارات المجدولة:</h3>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="examSearchInput" placeholder="بحث بالاختبار أو المقرر..." oninput="debounceExamSearch()" style="width:220px;">
+              <input type="text" class="search-input" id="examSearchInput" aria-label="بحث الاختبارات بالاسم أو المقرر" placeholder="بحث بالاختبار أو المقرر..." oninput="debounceExamSearch()" style="width:220px;">
               <button class="action-btn" onclick="loadExams(0)">تحديث 🔄</button>
             </div>
           </div>
@@ -3448,7 +3448,7 @@ export function renderDashboardHtml(): Response {
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">🎪 الفعاليات والأنشطة المدرسية</h2>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="eventSearch" placeholder="بحث بعنوان الفعالية..." oninput="debounceEventSearch()">
+              <input type="text" class="search-input" id="eventSearch" aria-label="بحث الفعاليات بالعنوان" placeholder="بحث بعنوان الفعالية..." oninput="debounceEventSearch()">
               <button class="action-btn" onclick="loadEvents(0)">تحديث 🔄</button>
             </div>
           </div>
@@ -3542,7 +3542,7 @@ export function renderDashboardHtml(): Response {
               <div style="font-size:0.8rem; color:var(--text-sec);">استعراض جداول الشعب بالشبكة الأسبوعية (الحصص والمواد والأوقات) وتصفيرها إدارياً</div>
             </div>
             <div class="filter-bar">
-              <select class="search-input" id="scheduleGroupFilter" onchange="onScheduleGroupFilterChanged(this.value)">
+              <select class="search-input" id="scheduleGroupFilter" aria-label="تصفية الجداول حسب الشعبة" onchange="onScheduleGroupFilterChanged(this.value)">
                 <option value="">جميع الشعب (نظرة عامة)</option>
               </select>
               <button class="action-btn" onclick="loadSchedules()">تحديث 🔄</button>
@@ -3621,14 +3621,14 @@ export function renderDashboardHtml(): Response {
               <div style="font-size:0.8rem; color:var(--text-sec);">عرض رسائل الشات بتسلسل زمني سليم مع تصفية الشعب والبحث الفوري</div>
             </div>
             <div class="filter-bar" style="display:flex; flex-wrap:wrap; gap:0.5rem;">
-              <select class="search-input" id="chatGroupFilter" onchange="loadChatMessages(0)">
+              <select class="search-input" id="chatGroupFilter" aria-label="تصفية المحادثات حسب الشعبة أو المجموعة" onchange="loadChatMessages(0)">
                 <option value="">جميع الشعب والمجموعات</option>
               </select>
-              <select class="search-input" id="chatOrderFilter" onchange="loadChatMessages(0)" style="width:140px;">
+              <select class="search-input" id="chatOrderFilter" aria-label="ترتيب رسائل المحادثة زمنياً" onchange="loadChatMessages(0)" style="width:140px;">
                 <option value="ASC">الأقدم أولاً (تسلسل زمني)</option>
                 <option value="DESC">الأحدث أولاً</option>
               </select>
-              <input type="text" class="search-input" id="chatSearchInput" placeholder="بحث بنص الرسالة أو المرسل..." oninput="debounceChatSearch()" style="width:200px;">
+              <input type="text" class="search-input" id="chatSearchInput" aria-label="بحث رسائل المحادثة بالنص أو المرسل" placeholder="بحث بنص الرسالة أو المرسل..." oninput="debounceChatSearch()" style="width:200px;">
               <button class="action-btn" onclick="loadChatMessages(0)">تحديث 🔄</button>
             </div>
           </div>
@@ -3773,8 +3773,8 @@ export function renderDashboardHtml(): Response {
       <div class="modal-sub" id="roleModalUser">-</div>
 
       <div class="form-group">
-        <label>الرتبة الجديدة المعتمدة</label>
-        <select class="form-control" id="modalNewRole">
+        <label for="modalNewRole">الرتبة الجديدة المعتمدة</label>
+        <select class="form-control" id="modalNewRole" aria-label="الرتبة الجديدة">
           <option value="STUDENT">👤 طالب (STUDENT)</option>
           <option value="MODERATOR">🛡️ مسؤول / مشرف (MODERATOR)</option>
           <option value="TEACHER">🎓 أستاذ معتمد (TEACHER)</option>
@@ -3783,8 +3783,8 @@ export function renderDashboardHtml(): Response {
       </div>
 
       <div class="form-group">
-        <label>مبرر التعديل (يسجل في سجل الرقابة)</label>
-        <input type="text" class="form-control" id="modalRoleReason" placeholder="مثلاً: تكليف بإشراف الشعبة أو معلم المادة">
+        <label for="modalRoleReason">مبرر التعديل (يسجل في سجل الرقابة)</label>
+        <input type="text" class="form-control" id="modalRoleReason" aria-label="مبرر التعديل المسجل في سجل الرقابة" placeholder="مثلاً: تكليف بإشراف الشعبة أو معلم المادة">
       </div>
 
       <div class="modal-actions">
@@ -4071,7 +4071,7 @@ export function renderDashboardHtml(): Response {
           لحماية المنظومة من التصفير العرضي، لن يتم فحص أو معاينة الجداول حتى يتم التحقق من صحة مفتاح المالك السري أولاً. (لا يتم حفظ المفتاح في التخزين المحلي).
         </p>
         <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
-          <input type="password" id="purgeStage1Secret" class="form-control" placeholder="أدخل TANWEER_OWNER_SECRET" style="flex:1; min-width:240px;">
+          <input type="password" id="purgeStage1Secret" aria-label="مفتاح مالك النظام للتحقق من التصفير" class="form-control" placeholder="أدخل TANWEER_OWNER_SECRET" style="flex:1; min-width:240px;">
           <button id="purgeStage1Btn" class="action-btn approve" onclick="submitPurgeStage1()" style="padding:0.6rem 1.25rem;">
             التحقق وفحص السجلات المتأثرة 🔍
           </button>
@@ -4124,7 +4124,7 @@ export function renderDashboardHtml(): Response {
             اكتب كلمة <strong>YES</strong> بحروف كبيرة للتأكيد والبدء الفوري في تفريغ الجداول وتدوير <code>data_generation</code>:
           </p>
           <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
-            <input type="text" id="purgeConfirmYesInput" class="form-control" placeholder="اكتب YES للتأكيد" style="max-width:200px; text-align:center; font-weight:900; letter-spacing:2px; color:var(--ruby);" oninput="checkPurgeConfirmMatch()">
+            <input type="text" id="purgeConfirmYesInput" aria-label="اكتب YES لتأكيد التصفير الشامل" class="form-control" placeholder="اكتب YES للتأكيد" style="max-width:200px; text-align:center; font-weight:900; letter-spacing:2px; color:var(--ruby);" oninput="checkPurgeConfirmMatch()">
             <button id="executePurgeFinalBtn" class="action-btn reject" onclick="executePurgeFinal()" disabled style="padding:0.75rem 1.5rem; font-weight:800; opacity:0.5; cursor:not-allowed;">
               تنفيذ التصفير الشامل وتدوير الجيل فورياً 💣
             </button>
@@ -4153,24 +4153,24 @@ export function renderDashboardHtml(): Response {
       <div class="modal-sub">يتم تثبيت الإجازة في التقويم الدراسي والشعب المحددة</div>
 
       <div class="form-group">
-        <label>عنوان الإجازة (مثال: إجازة عيد الاستقلال / إجازة رسمية)</label>
+        <label for="holidayTitle">عنوان الإجازة (مثال: إجازة عيد الاستقلال / إجازة رسمية)</label>
         <input type="text" class="form-control" id="holidayTitle" placeholder="مثلاً: إجازة نهاية الأسبوع الرسمية">
       </div>
 
       <div class="form-group">
-        <label>تاريخ الإجازة (YYYY-MM-DD)</label>
+        <label for="holidayDate">تاريخ الإجازة (YYYY-MM-DD)</label>
         <input type="date" class="form-control" id="holidayDate">
       </div>
 
       <div class="form-group">
-        <label>نطاق الإجازة</label>
+        <label for="holidayGroupId">نطاق الإجازة</label>
         <select class="form-control" id="holidayGroupId">
           <option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>
         </select>
       </div>
 
       <div class="form-group">
-        <label>السبب والمبرر الإداري الرسمي (إلزامي) ⚠️</label>
+        <label for="holidayReason">السبب والمبرر الإداري الرسمي (إلزامي) ⚠️</label>
         <textarea class="form-control" id="holidayReason" rows="2" placeholder="اكتب سبب ومبرر اعتماد الإجازة لتوثيقها بالسجلات..."></textarea>
       </div>
 
@@ -4349,10 +4349,15 @@ export function renderDashboardHtml(): Response {
     function toggleMobileMenu() {
       const nav = document.getElementById('dashboardNav');
       const ownerInfo = document.querySelector('.owner-info');
+      const menuButton = document.querySelector('.menu-toggle-btn');
       if (!nav) return;
 
       const isOpen = nav.classList.toggle('mobile-open');
       if (ownerInfo) ownerInfo.classList.toggle('mobile-open', isOpen);
+      if (menuButton) {
+        menuButton.setAttribute('aria-expanded', String(isOpen));
+        menuButton.setAttribute('aria-label', isOpen ? 'إغلاق قائمة التنقل' : 'فتح قائمة التنقل');
+      }
     }
     function debounceUserSearch() {
       clearTimeout(searchTimeout);
