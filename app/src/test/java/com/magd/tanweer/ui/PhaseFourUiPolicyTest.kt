@@ -5,6 +5,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.components.aggregateSyncStates
 import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
+import com.magd.tanweer.ui.components.syncStateForScope
+import com.magd.tanweer.ui.components.hasAuthoritativeGradeSnapshot
 import com.magd.tanweer.ui.components.shouldShowConfirmedEmptyState
 import com.magd.tanweer.ui.components.shouldShowConfirmedGradeEmptyState
 import com.magd.tanweer.ui.components.shouldAllowEmptyScheduleSlotEditing
@@ -133,6 +135,24 @@ class PhaseFourUiPolicyTest {
         assertFalse(shouldShowConfirmedGradeEmptyState(11, 10, 0, SyncState.Success(100L)))
         assertFalse(shouldShowConfirmedGradeEmptyState(10, 10, 0, SyncState.OfflineCached(lastSyncedAt = 100L)))
         assertFalse(shouldShowConfirmedGradeEmptyState(10, 10, 2, SyncState.Success(100L)))
+    }
+
+    @Test
+    fun sync_state_from_another_group_cannot_authorize_an_empty_list() {
+        val success = SyncState.Success(100L)
+        assertEquals(success, syncStateForScope(success, "group-a", "group-a"))
+        assertEquals(SyncState.Idle, syncStateForScope(success, "group-a", "group-b"))
+        assertEquals(SyncState.Idle, syncStateForScope(success, null, "group-a"))
+        assertEquals(SyncState.Idle, syncStateForScope(success, "group-a", ""))
+    }
+
+    @Test
+    fun a_subject_book_empty_state_requires_a_snapshot_for_the_selected_grade() {
+        val success = SyncState.Success(100L)
+        assertTrue(hasAuthoritativeGradeSnapshot(10, 10, success))
+        assertFalse(hasAuthoritativeGradeSnapshot(11, 10, success))
+        assertFalse(hasAuthoritativeGradeSnapshot(null, 10, success))
+        assertFalse(hasAuthoritativeGradeSnapshot(10, 10, SyncState.OfflineCached(lastSyncedAt = 100L)))
     }
 
 }

@@ -36,3 +36,27 @@ fun shouldAllowEmptyScheduleSlotEditing(
     serverConfirmsInitialSetup: Boolean,
     hasScheduleSnapshot: Boolean,
 ): Boolean = isStaffWithDirectEdit || serverConfirmsInitialSetup || hasScheduleSnapshot
+
+
+/**
+ * A successful sync from a different group must never authorize an empty state for
+ * the currently selected group.
+ */
+fun syncStateForScope(
+    syncState: SyncState,
+    syncedScopeId: String?,
+    requestedScopeId: String
+): SyncState = if (requestedScopeId.isNotBlank() && syncedScopeId == requestedScopeId) {
+    syncState
+} else {
+    SyncState.Idle
+}
+
+/** A grade-specific empty result needs a successful snapshot for that exact grade. */
+fun hasAuthoritativeGradeSnapshot(
+    selectedGradeId: Int?,
+    syncedGradeId: Int?,
+    syncState: SyncState
+): Boolean = selectedGradeId != null &&
+    selectedGradeId == syncedGradeId &&
+    hasAuthoritativeSnapshot(syncState)

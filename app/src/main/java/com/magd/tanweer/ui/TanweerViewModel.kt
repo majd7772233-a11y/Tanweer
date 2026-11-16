@@ -33,6 +33,8 @@ enum class NavigationTab {
     MORE
 }
 
+enum class GroupSyncSource { CONTENTS, HOME, SCHEDULE, HOMEWORKS, EXAMS, CALENDAR, ISSUES, EVENTS }
+
 enum class SubScreen {
     NONE,
     EXTRA_SECTIONS_HUB,
@@ -384,6 +386,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     // -------------------------------------------------------------
     // PER-SCREEN SYNC STATES
     // -------------------------------------------------------------
+    private val _groupSyncScopeIds = MutableStateFlow<Map<GroupSyncSource, String>>(emptyMap())
+    val groupSyncScopeIds: StateFlow<Map<GroupSyncSource, String>> = _groupSyncScopeIds.asStateFlow()
+    private val groupSyncGenerations = mutableMapOf<GroupSyncSource, Int>()
+
     private val _sectionContentsSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val sectionContentsSyncState: StateFlow<SyncState> = _sectionContentsSyncState.asStateFlow()
 
@@ -628,6 +634,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _groupCorrections.value = emptyList()
         _communityDecisions.value = emptyList()
         _myRoleRequests.value = emptyList()
+        _groupSyncScopeIds.value = emptyMap()
     }
 
     private suspend fun refreshStartupAuxiliaryData(user: User, groupId: String, activeGroupIds: List<String>) = coroutineScope {
@@ -1084,21 +1091,66 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     // SYNC METHODS (Server -> Room -> Compose)
     // =========================================================================
 
+    @Synchronized
+    private fun beginGroupSync(source: GroupSyncSource, groupId: String): Int {
+        val requestId = (groupSyncGenerations[source] ?: 0) + 1
+        groupSyncGenerations[source] = requestId
+        _groupSyncScopeIds.value = _groupSyncScopeIds.value + (source to groupId)
+        return requestId
+    }
+
+    @Synchronized
+    private fun isCurrentGroupSync(source: GroupSyncSource, groupId: String, requestId: Int): Boolean =
+        groupSyncGenerations[source] == requestId && _groupSyncScopeIds.value[source] == groupId
+
+    private fun launchGroupScopedSync(
+        source: GroupSyncSource,
+        groupId: String,
+        state: MutableStateFlow<SyncState>,
+        isRefresh: Boolean,
+        dataLabel: String,
+        syncOperation: suspend () -> SyncResult
+    ) {
+        if (!_autoSyncEnabled.value && !isRefresh) return
+
+        val requestId = beginGroupSync(source, groupId)
+        if (groupId.isBlank()) {
+            state.value = SyncState.Error("لا توجد شعبة نشطة لمزامنة $dataLabel", false)
+            return
+        }
+
+        state.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
+        viewModelScope.launch {
+            try {
+                val result = syncOperation()
+                if (!isCurrentGroupSync(source, groupId, requestId)) return@launch
+                state.value = when (result) {
+                    is SyncResult.Success -> SyncState.Success()
+                    is SyncResult.Offline -> SyncState.OfflineCached()
+                    is SyncResult.Error -> SyncState.Error(result.message, result.isNetworkError)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (isCurrentGroupSync(source, groupId, requestId)) {
+                    state.value = SyncState.Error(error.message ?: "تعذر مزامنة $dataLabel", false)
+                }
+            }
+        }
+    }
+
     /**
      * Refreshes the active group's complete lesson snapshot for screens whose content
      * spans more than the currently selected day (timeline, search and knowledge base).
      */
     fun syncSectionContents(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
-        if ((!_autoSyncEnabled.value && !isRefresh) || groupId.isBlank()) return
-        viewModelScope.launch {
-            _sectionContentsSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncContents(groupId)) {
-                is SyncResult.Success -> _sectionContentsSyncState.value = SyncState.Success()
-                is SyncResult.Offline -> _sectionContentsSyncState.value = SyncState.OfflineCached()
-                is SyncResult.Error -> _sectionContentsSyncState.value =
-                    SyncState.Error(result.message, result.isNetworkError)
-            }
-        }
+        launchGroupScopedSync(
+            source = GroupSyncSource.CONTENTS,
+            groupId = groupId,
+            state = _sectionContentsSyncState,
+            isRefresh = isRefresh,
+            dataLabel = "الدروس"
+        ) { repository.syncContents(groupId) }
     }
 
     /**
@@ -1121,94 +1173,115 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     fun syncInitialData(groupId: String, date: String, isExplicitAction: Boolean = false) {
         if (!_autoSyncEnabled.value && !isExplicitAction) return
+        val homeRequestId = beginGroupSync(GroupSyncSource.HOME, groupId)
+        val scheduleRequestId = beginGroupSync(GroupSyncSource.SCHEDULE, groupId)
+        if (groupId.isBlank()) {
+            _homeSyncState.value = SyncState.Error("لا توجد شعبة نشطة لمزامنة بيانات اليوم", false)
+            _scheduleSyncState.value = SyncState.Error("لا توجد شعبة نشطة لمزامنة الجدول", false)
+            return
+        }
+        _homeSyncState.value = SyncState.Loading
+        _scheduleSyncState.value = SyncState.Loading
         viewModelScope.launch {
-            _homeSyncState.value = SyncState.Loading
-            when (val result = repository.syncInitial(groupId, date)) {
-                is SyncResult.Success -> {
-                    _homeSyncState.value = SyncState.Success()
-                    _scheduleSyncState.value = SyncState.Success()
+            try {
+                when (val result = repository.syncInitial(groupId, date)) {
+                    is SyncResult.Success -> {
+                        if (isCurrentGroupSync(GroupSyncSource.HOME, groupId, homeRequestId)) {
+                            _homeSyncState.value = SyncState.Success()
+                        }
+                        if (isCurrentGroupSync(GroupSyncSource.SCHEDULE, groupId, scheduleRequestId)) {
+                            _scheduleSyncState.value = SyncState.Success()
+                        }
+                    }
+                    is SyncResult.Offline -> {
+                        if (isCurrentGroupSync(GroupSyncSource.HOME, groupId, homeRequestId)) {
+                            _homeSyncState.value = SyncState.OfflineCached()
+                        }
+                        if (isCurrentGroupSync(GroupSyncSource.SCHEDULE, groupId, scheduleRequestId)) {
+                            _scheduleSyncState.value = SyncState.OfflineCached()
+                        }
+                    }
+                    is SyncResult.Error -> {
+                        if (isCurrentGroupSync(GroupSyncSource.HOME, groupId, homeRequestId)) {
+                            _homeSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                        }
+                        if (isCurrentGroupSync(GroupSyncSource.SCHEDULE, groupId, scheduleRequestId)) {
+                            _scheduleSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                        }
+                    }
                 }
-                is SyncResult.Offline -> {
-                    _homeSyncState.value = SyncState.OfflineCached()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (isCurrentGroupSync(GroupSyncSource.HOME, groupId, homeRequestId)) {
+                    _homeSyncState.value = SyncState.Error(error.message ?: "تعذر مزامنة بيانات اليوم", false)
                 }
-                is SyncResult.Error -> {
-                    _homeSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                if (isCurrentGroupSync(GroupSyncSource.SCHEDULE, groupId, scheduleRequestId)) {
+                    _scheduleSyncState.value = SyncState.Error(error.message ?: "تعذر مزامنة الجدول", false)
                 }
             }
         }
     }
 
     fun syncHome(groupId: String = getActiveGroupId(), date: String = _selectedDate.value, isRefresh: Boolean = false) {
-        if (!_autoSyncEnabled.value && !isRefresh) return
-        viewModelScope.launch {
-            _homeSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncDay(groupId, date)) {
-                is SyncResult.Success -> _homeSyncState.value = SyncState.Success()
-                is SyncResult.Offline -> _homeSyncState.value = SyncState.OfflineCached()
-                is SyncResult.Error -> _homeSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-            }
-        }
+        launchGroupScopedSync(
+            source = GroupSyncSource.HOME,
+            groupId = groupId,
+            state = _homeSyncState,
+            isRefresh = isRefresh,
+            dataLabel = "بيانات اليوم"
+        ) { repository.syncDay(groupId, date) }
     }
 
     fun syncSchedule(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
-        if (!_autoSyncEnabled.value && !isRefresh) return
-        viewModelScope.launch {
-            _scheduleSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncSchedule(groupId)) {
-                is SyncResult.Success -> _scheduleSyncState.value = SyncState.Success()
-                is SyncResult.Offline -> _scheduleSyncState.value = SyncState.OfflineCached()
-                is SyncResult.Error -> _scheduleSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-            }
-        }
+        launchGroupScopedSync(
+            source = GroupSyncSource.SCHEDULE,
+            groupId = groupId,
+            state = _scheduleSyncState,
+            isRefresh = isRefresh,
+            dataLabel = "الجدول"
+        ) { repository.syncSchedule(groupId) }
     }
 
     fun syncHomeworks(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
-        if (!_autoSyncEnabled.value && !isRefresh) return
-        viewModelScope.launch {
-            _homeworkSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncHomeworks(groupId)) {
-                is SyncResult.Success -> _homeworkSyncState.value = SyncState.Success()
-                is SyncResult.Offline -> _homeworkSyncState.value = SyncState.OfflineCached()
-                is SyncResult.Error -> _homeworkSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-            }
-        }
+        launchGroupScopedSync(
+            source = GroupSyncSource.HOMEWORKS,
+            groupId = groupId,
+            state = _homeworkSyncState,
+            isRefresh = isRefresh,
+            dataLabel = "الواجبات"
+        ) { repository.syncHomeworks(groupId) }
     }
 
     fun syncExams(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
-        if (!_autoSyncEnabled.value && !isRefresh) return
-        viewModelScope.launch {
-            _examsSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncExams(groupId)) {
-                is SyncResult.Success -> _examsSyncState.value = SyncState.Success()
-                is SyncResult.Offline -> _examsSyncState.value = SyncState.OfflineCached()
-                is SyncResult.Error -> _examsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-            }
-        }
+        launchGroupScopedSync(
+            source = GroupSyncSource.EXAMS,
+            groupId = groupId,
+            state = _examsSyncState,
+            isRefresh = isRefresh,
+            dataLabel = "الاختبارات"
+        ) { repository.syncExams(groupId) }
     }
 
     fun syncCalendar(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
-        if (!_autoSyncEnabled.value && !isRefresh) return
-        viewModelScope.launch {
-            _calendarSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            val currentMonth = SimpleDateFormat("yyyy-MM", Locale.US).format(Date())
-            when (val result = repository.syncCalendarMonth(groupId, currentMonth)) {
-                is SyncResult.Success -> _calendarSyncState.value = SyncState.Success()
-                is SyncResult.Offline -> _calendarSyncState.value = SyncState.OfflineCached()
-                is SyncResult.Error -> _calendarSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-            }
-        }
+        val currentMonth = SimpleDateFormat("yyyy-MM", Locale.US).format(Date())
+        launchGroupScopedSync(
+            source = GroupSyncSource.CALENDAR,
+            groupId = groupId,
+            state = _calendarSyncState,
+            isRefresh = isRefresh,
+            dataLabel = "التقويم"
+        ) { repository.syncCalendarMonth(groupId, currentMonth) }
     }
 
     fun syncCalendarMonth(groupId: String = getActiveGroupId(), month: String, isRefresh: Boolean = false) {
-        if (!_autoSyncEnabled.value && !isRefresh) return
-        viewModelScope.launch {
-            _calendarSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncCalendarMonth(groupId, month)) {
-                is SyncResult.Success -> _calendarSyncState.value = SyncState.Success()
-                is SyncResult.Offline -> _calendarSyncState.value = SyncState.OfflineCached()
-                is SyncResult.Error -> _calendarSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-            }
-        }
+        launchGroupScopedSync(
+            source = GroupSyncSource.CALENDAR,
+            groupId = groupId,
+            state = _calendarSyncState,
+            isRefresh = isRefresh,
+            dataLabel = "التقويم"
+        ) { repository.syncCalendarMonth(groupId, month) }
     }
 
     fun syncDayDetails(groupId: String = getActiveGroupId(), date: String) {
@@ -1225,28 +1298,23 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncIssues(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
-        if (!_autoSyncEnabled.value && !isRefresh) return
-        viewModelScope.launch {
-            _issuesSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncIssues(groupId)) {
-                is SyncResult.Success -> _issuesSyncState.value = SyncState.Success()
-                is SyncResult.Offline -> _issuesSyncState.value = SyncState.OfflineCached()
-                is SyncResult.Error -> _issuesSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-            }
-        }
+        launchGroupScopedSync(
+            source = GroupSyncSource.ISSUES,
+            groupId = groupId,
+            state = _issuesSyncState,
+            isRefresh = isRefresh,
+            dataLabel = "الاستفسارات"
+        ) { repository.syncIssues(groupId) }
     }
 
     fun syncEvents(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
-        if (!_autoSyncEnabled.value && !isRefresh) return
-        if (groupId.isBlank()) return
-        viewModelScope.launch {
-            _eventsSyncState.value = if (isRefresh) SyncState.Refreshing else SyncState.Loading
-            when (val result = repository.syncEvents(groupId)) {
-                is SyncResult.Success -> _eventsSyncState.value = SyncState.Success()
-                is SyncResult.Offline -> _eventsSyncState.value = SyncState.OfflineCached()
-                is SyncResult.Error -> _eventsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
-            }
-        }
+        launchGroupScopedSync(
+            source = GroupSyncSource.EVENTS,
+            groupId = groupId,
+            state = _eventsSyncState,
+            isRefresh = isRefresh,
+            dataLabel = "الفعاليات"
+        ) { repository.syncEvents(groupId) }
     }
 
     fun syncGroups(isRefresh: Boolean = false) {
@@ -1478,6 +1546,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     @Volatile private var communityDecisionsSourceGroupId: String? = null
     private val _communityDecisions = MutableStateFlow<List<CommunityDecisionItem>>(emptyList())
     val communityDecisions: StateFlow<List<CommunityDecisionItem>> = _communityDecisions.asStateFlow()
+    private val _communityDecisionsSnapshotGroupId = MutableStateFlow<String?>(null)
+    val communityDecisionsSnapshotGroupId: StateFlow<String?> = _communityDecisionsSnapshotGroupId.asStateFlow()
     private val _communityDecisionsError = MutableStateFlow<String?>(null)
     val communityDecisionsError: StateFlow<String?> = _communityDecisionsError.asStateFlow()
     private val _isCommunityDecisionsLoading = MutableStateFlow(false)
@@ -1776,6 +1846,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         if (groupId.isBlank()) {
             communityDecisionsRequestGeneration++
             communityDecisionsSourceGroupId = null
+            _communityDecisionsSnapshotGroupId.value = null
             _communityDecisions.value = emptyList()
             _communityDecisionsError.value = "لا توجد شعبة نشطة لعرض القرارات الجماعية."
             _isCommunityDecisionsLoading.value = false
@@ -1783,6 +1854,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
         if (communityDecisionsSourceGroupId != groupId) {
             communityDecisionsSourceGroupId = groupId
+            _communityDecisionsSnapshotGroupId.value = null
             _communityDecisions.value = emptyList()
         }
         val requestId = ++communityDecisionsRequestGeneration
@@ -1794,6 +1866,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                     .onSuccess { list ->
                         if (requestId == communityDecisionsRequestGeneration && communityDecisionsSourceGroupId == groupId) {
                             _communityDecisions.value = list
+                            _communityDecisionsSnapshotGroupId.value = groupId
                         }
                     }
                     .onFailure { error ->
