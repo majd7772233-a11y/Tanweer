@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.*
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
@@ -45,6 +46,17 @@ fun ClassKnowledgeBaseScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
+    val sectionContentsSyncState by viewModel.sectionContentsSyncState.collectAsStateWithLifecycle()
+    val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
+    val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
+    val issuesSyncState by viewModel.issuesSyncState.collectAsStateWithLifecycle()
+    val librarySyncState by viewModel.librarySyncState.collectAsStateWithLifecycle()
+    val librarySyncGradeId by viewModel.librarySyncGradeId.collectAsStateWithLifecycle()
+    val scopedContentsSyncState = syncStateForScope(sectionContentsSyncState, groupSyncScopeIds[GroupSyncSource.CONTENTS], activeGroupId)
+    val scopedHomeworkSyncState = syncStateForScope(homeworkSyncState, groupSyncScopeIds[GroupSyncSource.HOMEWORKS], activeGroupId)
+    val scopedExamsSyncState = syncStateForScope(examsSyncState, groupSyncScopeIds[GroupSyncSource.EXAMS], activeGroupId)
+    val scopedIssuesSyncState = syncStateForScope(issuesSyncState, groupSyncScopeIds[GroupSyncSource.ISSUES], activeGroupId)
 
     val selectedSubjectId by viewModel.selectedKnowledgeBaseSubjectId.collectAsStateWithLifecycle()
 
@@ -335,7 +347,13 @@ fun ClassKnowledgeBaseScreen(
             when (activeTab) {
                 0 -> {
                     if (subjectContents.isEmpty()) {
-                        item { EmptyStateKnowledge("لا توجد دروس موثقة في ${currentSubject.name} حتى الآن") }
+                        item {
+                            if (hasAuthoritativeSnapshot(scopedContentsSyncState)) {
+                                EmptyStateKnowledge("لا توجد دروس موثقة في ${currentSubject.name} حتى الآن")
+                            } else {
+                                PendingSyncEmptyState("دروس ${currentSubject.name}", scopedContentsSyncState)
+                            }
+                        }
                     } else {
                         items(subjectContents, key = { it.id }) { item ->
                             KnowledgeContentCard(
@@ -347,7 +365,13 @@ fun ClassKnowledgeBaseScreen(
                 }
                 1 -> {
                     if (subjectHomeworks.isEmpty()) {
-                        item { EmptyStateKnowledge("لا توجد واجبات مسجلة لهذه المادة") }
+                        item {
+                            if (hasAuthoritativeSnapshot(scopedHomeworkSyncState)) {
+                                EmptyStateKnowledge("لا توجد واجبات مسجلة لهذه المادة")
+                            } else {
+                                PendingSyncEmptyState("واجبات ${currentSubject.name}", scopedHomeworkSyncState)
+                            }
+                        }
                     } else {
                         items(subjectHomeworks, key = { it.id }) { hw ->
                             KnowledgeHomeworkCard(
@@ -365,7 +389,13 @@ fun ClassKnowledgeBaseScreen(
                 }
                 2 -> {
                     if (subjectExams.isEmpty()) {
-                        item { EmptyStateKnowledge("لا توجد اختبارات محددة لهذه المادة") }
+                        item {
+                            if (hasAuthoritativeSnapshot(scopedExamsSyncState)) {
+                                EmptyStateKnowledge("لا توجد اختبارات محددة لهذه المادة")
+                            } else {
+                                PendingSyncEmptyState("اختبارات ${currentSubject.name}", scopedExamsSyncState)
+                            }
+                        }
                     } else {
                         items(subjectExams, key = { it.id }) { exam ->
                             KnowledgeExamCard(exam)
@@ -374,7 +404,13 @@ fun ClassKnowledgeBaseScreen(
                 }
                 3 -> {
                     if (subjectIssues.isEmpty()) {
-                        item { EmptyStateKnowledge("لا توجد استفسارات مفتوحة في هذه المادة") }
+                        item {
+                            if (hasAuthoritativeSnapshot(scopedIssuesSyncState)) {
+                                EmptyStateKnowledge("لا توجد استفسارات مفتوحة في هذه المادة")
+                            } else {
+                                PendingSyncEmptyState("استفسارات ${currentSubject.name}", scopedIssuesSyncState)
+                            }
+                        }
                     } else {
                         items(subjectIssues, key = { it.id }) { issue ->
                             KnowledgeIssueCard(issue)
@@ -417,7 +453,11 @@ fun ClassKnowledgeBaseScreen(
                                 }
                             }
                         } else {
-                            EmptyStateKnowledge("لم يتم العثور على ملف الكتاب المنهجي لهذه المادة في المكتبة")
+                            if (hasAuthoritativeGradeSnapshot(currentUser?.gradeId, librarySyncGradeId, librarySyncState)) {
+                                EmptyStateKnowledge("لم يتم العثور على ملف الكتاب المنهجي لهذه المادة في المكتبة")
+                            } else {
+                                PendingSyncEmptyState("كتاب ${currentSubject.name}", librarySyncState)
+                            }
                         }
                     }
                 }

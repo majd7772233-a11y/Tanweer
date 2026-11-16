@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.local.HomeworkToggleResult
 import com.magd.tanweer.data.model.*
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
@@ -62,6 +63,19 @@ fun WhatDidIMissScreen(
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
     val lastOpenDate by viewModel.lastOpenDate.collectAsStateWithLifecycle()
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
+    val sectionContentsSyncState by viewModel.sectionContentsSyncState.collectAsStateWithLifecycle()
+    val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
+    val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
+    val eventsSyncState by viewModel.eventsSyncState.collectAsStateWithLifecycle()
+    val catchupSourceStates = listOf(
+        syncStateForScope(sectionContentsSyncState, groupSyncScopeIds[GroupSyncSource.CONTENTS], activeGroupId),
+        syncStateForScope(homeworkSyncState, groupSyncScopeIds[GroupSyncSource.HOMEWORKS], activeGroupId),
+        syncStateForScope(examsSyncState, groupSyncScopeIds[GroupSyncSource.EXAMS], activeGroupId),
+        syncStateForScope(eventsSyncState, groupSyncScopeIds[GroupSyncSource.EVENTS], activeGroupId)
+    )
+    val hasCatchupSnapshot = catchupSourceStates.all(::hasAuthoritativeSnapshot)
+    val catchupSyncState = aggregateSyncStates(catchupSourceStates)
 
     var selectedRange by remember { mutableStateOf(MissedTimeRange.SINCE_LAST_VISIT) }
     var selectedCategoryFilter by remember { mutableStateOf(CatchupCategoryFilter.ALL) }
@@ -266,27 +280,34 @@ fun WhatDidIMissScreen(
 
         if (totalCatchupItems == 0) {
             item {
-                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(text = "✨", fontSize = tanweerTextSize(32f))
-                        Text(
-                            text = "لا توجد مواد أو واجبات أو أحداث جديدة خلال هذه الفترة!",
-                            fontSize = tanweerTextSize(14f),
-                            color = EmeraldGreen,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "أنت مواكب لكافة متطلبات الشعبة الدراسية بنجاح ✓",
-                            fontSize = tanweerTextSize(12f),
-                            color = TextSecondary
-                        )
+                if (hasCatchupSnapshot) {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(text = "✨", fontSize = tanweerTextSize(32f))
+                            Text(
+                                text = "لا توجد مواد أو واجبات أو أحداث جديدة خلال هذه الفترة!",
+                                fontSize = tanweerTextSize(14f),
+                                color = EmeraldGreen,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "أنت مواكب لكافة متطلبات الشعبة الدراسية بنجاح ✓",
+                                fontSize = tanweerTextSize(12f),
+                                color = TextSecondary
+                            )
+                        }
                     }
+                } else {
+                    PendingSyncEmptyState(
+                        dataLabel = "ملخص الاستدراك",
+                        syncState = catchupSyncState
+                    )
                 }
             }
         }

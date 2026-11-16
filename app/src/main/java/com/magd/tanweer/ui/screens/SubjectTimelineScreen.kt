@@ -28,6 +28,7 @@ import com.magd.tanweer.data.model.SubjectItem
 import com.magd.tanweer.data.model.ContentItem
 import com.magd.tanweer.data.model.HomeworkItem
 import com.magd.tanweer.data.model.ExamItem
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
@@ -58,6 +59,16 @@ fun SubjectTimelineScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
+    val sectionContentsSyncState by viewModel.sectionContentsSyncState.collectAsStateWithLifecycle()
+    val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
+    val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
+    val scopedContentsSyncState = syncStateForScope(sectionContentsSyncState, groupSyncScopeIds[GroupSyncSource.CONTENTS], activeGroupId)
+    val scopedHomeworkSyncState = syncStateForScope(homeworkSyncState, groupSyncScopeIds[GroupSyncSource.HOMEWORKS], activeGroupId)
+    val scopedExamsSyncState = syncStateForScope(examsSyncState, groupSyncScopeIds[GroupSyncSource.EXAMS], activeGroupId)
+    val timelineSourceStates = listOf(scopedContentsSyncState, scopedHomeworkSyncState, scopedExamsSyncState)
+    val timelineSyncState = aggregateSyncStates(timelineSourceStates)
+    val hasTimelineSnapshot = timelineSourceStates.all(::hasAuthoritativeSnapshot)
 
     val gradeSubjects = remember(currentUser?.gradeId) {
         viewModel.getScheduleSubjectsForCurrentGrade()
@@ -281,13 +292,20 @@ fun SubjectTimelineScreen(
         // Timeline Section
         if (realTimelineEvents.isEmpty()) {
             item {
-                EmptyStateGlass(
-                    title = "لا توجد محطات مسجلة لمادة ${selectedSubject.name}",
-                    subtitle = "لم يقم أي طالب بتوثيق دروس أو واجبات لهذه المادة بعد. بادر بتوثيق أول درس للشعبة الآن.",
-                    icon = selectedSubject.icon,
-                    actionButtonText = "توثيق درس لمادة ${selectedSubject.name}",
-                    onActionClick = { viewModel.openUploadDialog(selectedSubject.id) }
-                )
+                if (hasTimelineSnapshot) {
+                    EmptyStateGlass(
+                        title = "لا توجد محطات مسجلة لمادة ${selectedSubject.name}",
+                        subtitle = "لم يقم أي طالب بتوثيق دروس أو واجبات لهذه المادة بعد. بادر بتوثيق أول درس للشعبة الآن.",
+                        icon = selectedSubject.icon,
+                        actionButtonText = "توثيق درس لمادة ${selectedSubject.name}",
+                        onActionClick = { viewModel.openUploadDialog(selectedSubject.id) }
+                    )
+                } else {
+                    PendingSyncEmptyState(
+                        dataLabel = "المسار الزمني لمادة ${selectedSubject.name}",
+                        syncState = timelineSyncState
+                    )
+                }
             }
         } else {
             items(realTimelineEvents, key = { it.id }) { event ->
