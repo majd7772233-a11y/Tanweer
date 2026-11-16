@@ -835,6 +835,8 @@ fun HomeScreen(
                 DocumentedSubjectCard(
                     slot = consolidatedSlot,
                     lessons = lessons,
+                    hasDocumentationSnapshot = hasDocumentationSnapshot,
+                    documentationSyncState = aggregateSyncStates(listOf(scopedHomeSyncState, scopedScheduleSyncState)),
                     onAddMore = { viewModel.openUploadDialog(subjectId) },
                     onViewLesson = { activeViewingContent = it },
                     onRetryLesson = { lessonId -> viewModel.retrySyncContent(lessonId) }
@@ -891,6 +893,8 @@ fun HomeScreen(
 fun DocumentedSubjectCard(
     slot: ScheduleSlot,
     lessons: List<ContentItem>,
+    hasDocumentationSnapshot: Boolean,
+    documentationSyncState: SyncState,
     onAddMore: () -> Unit,
     onViewLesson: (ContentItem) -> Unit,
     onRetryLesson: ((String) -> Unit)? = null
@@ -968,12 +972,19 @@ fun DocumentedSubjectCard(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 if (lessons.isEmpty()) {
-                    Text(
-                        text = "لا توجد صفحات مسجلة لهذه المادة بعد",
-                        fontSize = tanweerTextSize(12f),
-                        color = TextMuted,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
+                    if (hasDocumentationSnapshot) {
+                        Text(
+                            text = "لا توجد صفحات مسجلة لهذه المادة بعد",
+                            fontSize = tanweerTextSize(12f),
+                            color = TextMuted,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    } else {
+                        PendingSyncEmptyState(
+                            dataLabel = "صفحات ${slot.subjectName}",
+                            syncState = documentationSyncState
+                        )
+                    }
                 } else {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
