@@ -38,6 +38,7 @@ fun TeacherDashboardScreen(
     viewModel: TanweerViewModel
 ) {
     val dashboardData by viewModel.teacherDashboard.collectAsStateWithLifecycle()
+    val dashboardError by viewModel.teacherDashboardError.collectAsStateWithLifecycle()
     val isLoading by viewModel.isDashboardLoading.collectAsStateWithLifecycle()
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
 
@@ -106,12 +107,17 @@ fun TeacherDashboardScreen(
 
                         IconButton(
                             onClick = { viewModel.loadTeacherDashboard() },
+                            enabled = !isLoading,
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
                                 .background(GlassSurface)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "تحديث", tint = CyanAccent, modifier = Modifier.size(20.dp))
+                            if (isLoading) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = CyanAccent)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = "تحديث بيانات مركز المعلم", tint = CyanAccent, modifier = Modifier.size(20.dp))
+                            }
                         }
                     }
 
@@ -119,31 +125,52 @@ fun TeacherDashboardScreen(
 
                     // Stats Grid
                     val stats = dashboardData?.stats
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        TeacherStatCard(
-                            title = "واجبات رسمية",
-                            count = "${stats?.officialHomeworksCount ?: 0}",
-                            icon = "📝",
-                            color = CyanAccent,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TeacherStatCard(
-                            title = "اختبارات رسمية",
-                            count = "${stats?.officialExamsCount ?: 0}",
-                            icon = "📑",
-                            color = WarmAmber,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TeacherStatCard(
-                            title = "إجابات معتمدة",
-                            count = "${stats?.teacherAnswersCount ?: 0}",
-                            icon = "⭐",
-                            color = EmeraldGreen,
-                            modifier = Modifier.weight(1f)
-                        )
+                    if (dashboardData != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            TeacherStatCard(
+                                title = "واجبات رسمية",
+                                count = "${stats?.officialHomeworksCount ?: 0}",
+                                icon = "📝",
+                                color = CyanAccent,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TeacherStatCard(
+                                title = "اختبارات رسمية",
+                                count = "${stats?.officialExamsCount ?: 0}",
+                                icon = "📑",
+                                color = WarmAmber,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TeacherStatCard(
+                                title = "إجابات معتمدة",
+                                count = "${stats?.teacherAnswersCount ?: 0}",
+                                icon = "⭐",
+                                color = EmeraldGreen,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (dashboardData == null && isLoading) {
+            item {
+                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                    Text("جارٍ تحميل بيانات مركز المعلم...", color = TextSecondary, modifier = Modifier.padding(12.dp))
+                }
+            }
+        }
+        if (!dashboardError.isNullOrBlank()) {
+            item {
+                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface, borderColor = WarmAmber.copy(alpha = 0.55f)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("تعذر تحديث بيانات مركز المعلم", color = WarmAmber, fontWeight = FontWeight.Bold)
+                        Text(dashboardError ?: "", color = TextSecondary, fontSize = tanweerTextSize(11f))
+                        GlassButton(text = "إعادة المحاولة", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadTeacherDashboard() })
                     }
                 }
             }
@@ -255,7 +282,7 @@ fun TeacherDashboardScreen(
                 }
 
                 val recentHw = dashboardData?.recentHomeworks ?: emptyList()
-                if (recentHw.isEmpty()) {
+                if (recentHw.isEmpty() && shouldShowConfirmedEmptyState(dashboardData != null, isLoading, dashboardError)) {
                     item {
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                             Text(
@@ -299,7 +326,7 @@ fun TeacherDashboardScreen(
             2 -> {
                 // Official Exams
                 val recentExams = dashboardData?.recentExams ?: emptyList()
-                if (recentExams.isEmpty()) {
+                if (recentExams.isEmpty() && shouldShowConfirmedEmptyState(dashboardData != null, isLoading, dashboardError)) {
                     item {
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                             Text(

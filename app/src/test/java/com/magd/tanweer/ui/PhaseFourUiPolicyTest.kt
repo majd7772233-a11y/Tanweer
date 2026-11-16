@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.components.aggregateSyncStates
+import com.magd.tanweer.ui.components.shouldShowConfirmedEmptyState
 import com.magd.tanweer.util.ArabicSearchEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
@@ -71,4 +72,13 @@ class PhaseFourUiPolicyTest {
 
         assertEquals(SyncState.Success(10L), resolved)
     }
+
+    @Test
+    fun confirmed_empty_state_requires_a_successful_snapshot() {
+        assertTrue(shouldShowConfirmedEmptyState(hasSnapshot = true, isLoading = false, errorMessage = null))
+        assertFalse(shouldShowConfirmedEmptyState(hasSnapshot = false, isLoading = false, errorMessage = null))
+        assertFalse(shouldShowConfirmedEmptyState(hasSnapshot = true, isLoading = true, errorMessage = null))
+        assertFalse(shouldShowConfirmedEmptyState(hasSnapshot = true, isLoading = false, errorMessage = "network error"))
+    }
+
 }

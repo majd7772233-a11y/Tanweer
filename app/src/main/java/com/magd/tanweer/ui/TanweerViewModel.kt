@@ -596,9 +596,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _groupMembersState.value = null
         _groupMembersError.value = null
         _teacherDashboard.value = null
+        _teacherDashboardError.value = null
         _moderatorDashboard.value = null
+        _moderatorDashboardError.value = null
         _adminDashboard.value = null
         _adminDashboardError.value = null
+        _groupCorrectionsError.value = null
+        _communityDecisionsError.value = null
+        _isGroupCorrectionsLoading.value = true
+        _isCommunityDecisionsLoading.value = true
         _myNotifications.value = emptyList()
         _groupCorrections.value = emptyList()
         _communityDecisions.value = emptyList()
@@ -1320,9 +1326,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     // Dashboard State Flows
     private val _teacherDashboard = MutableStateFlow<TeacherDashboardResponse?>(null)
     val teacherDashboard: StateFlow<TeacherDashboardResponse?> = _teacherDashboard.asStateFlow()
+    private val _teacherDashboardError = MutableStateFlow<String?>(null)
+    val teacherDashboardError: StateFlow<String?> = _teacherDashboardError.asStateFlow()
 
     private val _moderatorDashboard = MutableStateFlow<ModeratorDashboardResponse?>(null)
     val moderatorDashboard: StateFlow<ModeratorDashboardResponse?> = _moderatorDashboard.asStateFlow()
+    private val _moderatorDashboardError = MutableStateFlow<String?>(null)
+    val moderatorDashboardError: StateFlow<String?> = _moderatorDashboardError.asStateFlow()
 
     private val _adminDashboard = MutableStateFlow<AdminDashboardResponse?>(null)
     val adminDashboard: StateFlow<AdminDashboardResponse?> = _adminDashboard.asStateFlow()
@@ -1334,9 +1344,17 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _groupCorrections = MutableStateFlow<List<ContentCorrectionItem>>(emptyList())
     val groupCorrections: StateFlow<List<ContentCorrectionItem>> = _groupCorrections.asStateFlow()
+    private val _groupCorrectionsError = MutableStateFlow<String?>(null)
+    val groupCorrectionsError: StateFlow<String?> = _groupCorrectionsError.asStateFlow()
+    private val _isGroupCorrectionsLoading = MutableStateFlow(true)
+    val isGroupCorrectionsLoading: StateFlow<Boolean> = _isGroupCorrectionsLoading.asStateFlow()
 
     private val _communityDecisions = MutableStateFlow<List<CommunityDecisionItem>>(emptyList())
     val communityDecisions: StateFlow<List<CommunityDecisionItem>> = _communityDecisions.asStateFlow()
+    private val _communityDecisionsError = MutableStateFlow<String?>(null)
+    val communityDecisionsError: StateFlow<String?> = _communityDecisionsError.asStateFlow()
+    private val _isCommunityDecisionsLoading = MutableStateFlow(true)
+    val isCommunityDecisionsLoading: StateFlow<Boolean> = _isCommunityDecisionsLoading.asStateFlow()
 
     private val _isDashboardLoading = MutableStateFlow(false)
     val isDashboardLoading: StateFlow<Boolean> = _isDashboardLoading.asStateFlow()
@@ -1344,10 +1362,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun loadTeacherDashboard() {
         viewModelScope.launch {
             _isDashboardLoading.value = true
-            val res = repository.getTeacherDashboard()
-            _isDashboardLoading.value = false
-            res.onSuccess { data ->
-                _teacherDashboard.value = data
+            _teacherDashboardError.value = null
+            try {
+                repository.getTeacherDashboard()
+                    .onSuccess { data -> _teacherDashboard.value = data }
+                    .onFailure { error -> _teacherDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز المعلم" }
+            } finally {
+                _isDashboardLoading.value = false
             }
         }
     }
@@ -1355,10 +1376,13 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun loadModeratorDashboard() {
         viewModelScope.launch {
             _isDashboardLoading.value = true
-            val res = repository.getModeratorDashboard()
-            _isDashboardLoading.value = false
-            res.onSuccess { data ->
-                _moderatorDashboard.value = data
+            _moderatorDashboardError.value = null
+            try {
+                repository.getModeratorDashboard()
+                    .onSuccess { data -> _moderatorDashboard.value = data }
+                    .onFailure { error -> _moderatorDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز الإشراف" }
+            } finally {
+                _isDashboardLoading.value = false
             }
         }
     }
@@ -1438,9 +1462,14 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun loadGroupCorrections(groupId: String = getActiveGroupId()) {
         if (groupId.isBlank()) return
         viewModelScope.launch {
-            val res = repository.getGroupCorrections(groupId)
-            res.onSuccess { list ->
-                _groupCorrections.value = list
+            _isGroupCorrectionsLoading.value = true
+            _groupCorrectionsError.value = null
+            try {
+                repository.getGroupCorrections(groupId)
+                    .onSuccess { list -> _groupCorrections.value = list }
+                    .onFailure { error -> _groupCorrectionsError.value = error.message ?: "تعذر تحميل طلبات التصويب" }
+            } finally {
+                _isGroupCorrectionsLoading.value = false
             }
         }
     }
@@ -1499,9 +1528,14 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun loadCommunityDecisions(groupId: String = getActiveGroupId()) {
         if (groupId.isBlank()) return
         viewModelScope.launch {
-            val res = repository.getCommunityDecisions(groupId)
-            res.onSuccess { list ->
-                _communityDecisions.value = list
+            _isCommunityDecisionsLoading.value = true
+            _communityDecisionsError.value = null
+            try {
+                repository.getCommunityDecisions(groupId)
+                    .onSuccess { list -> _communityDecisions.value = list }
+                    .onFailure { error -> _communityDecisionsError.value = error.message ?: "تعذر تحميل القرارات الجماعية" }
+            } finally {
+                _isCommunityDecisionsLoading.value = false
             }
         }
     }
