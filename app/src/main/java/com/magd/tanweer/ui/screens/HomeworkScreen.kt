@@ -93,6 +93,8 @@ fun HomeworkScreen(
 
     val homeworks by viewModel.repository.getHomeworks(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
+    val hasHomeworkSnapshot = homeworks.isNotEmpty() || hasAuthoritativeSnapshot(homeworkSyncState)
 
     val plannedHwIds by viewModel.todayPlannedHomeworkIds
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -215,7 +217,7 @@ fun HomeworkScreen(
                             style = AppTypography.SectionHeader.copy(color = CyanAccent)
                         )
                         Text(
-                            text = "${homeworks.size} واجب • $todayCount مستحق اليوم",
+                            text = if (hasHomeworkSnapshot) "${homeworks.size} واجب • $todayCount مستحق اليوم" else "جارٍ التحقق من بيانات الواجبات...",
                             style = AppTypography.Body.copy(color = TextSecondary)
                         )
                     }
@@ -237,7 +239,7 @@ fun HomeworkScreen(
                     FilterChip(
                         selected = selectedTaskTypeFilter == null,
                         onClick = { selectedTaskTypeFilter = null },
-                        label = { Text("الكل (${homeworks.size})") },
+                        label = { Text(if (hasHomeworkSnapshot) "الكل (${homeworks.size})" else "الكل") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyanAccent,
                             selectedLabelColor = TextOnAccent
@@ -277,7 +279,7 @@ fun HomeworkScreen(
                 ) {
                     items(HomeworkFilter.values()) { filter ->
                         val isSelected = selectedFilter == filter
-                        val badgeCount = when (filter) {
+                        val badgeCount = if (!hasHomeworkSnapshot) null else when (filter) {
                             HomeworkFilter.ALL -> homeworks.size
                             HomeworkFilter.TODAY -> todayCount
                             HomeworkFilter.OVERDUE -> overdueCount
@@ -327,13 +329,23 @@ fun HomeworkScreen(
 
             if (filteredHomeworks.isEmpty()) {
                 item {
-                    EmptyStateGlass(
-                        title = "لا توجد واجبات في هذا القسم",
-                        subtitle = "يمكنك إضافة واجب جديد وتضمين صور الحلول",
-                        icon = "📝",
-                        actionButtonText = "إضافة واجب جديد",
-                        onActionClick = { isLocalAddModalOpen = true }
-                    )
+                    if (homeworks.isNotEmpty() || hasAuthoritativeSnapshot(homeworkSyncState)) {
+                        EmptyStateGlass(
+                            title = if (homeworks.isEmpty()) "لا توجد واجبات في هذا القسم" else "لا توجد واجبات تطابق التصفية الحالية",
+                            subtitle = if (homeworks.isEmpty()) "يمكنك إضافة واجب جديد وتضمين صور الحلول" else "غيّر نوع الواجب أو فترة الاستحقاق لعرض نتائج أخرى.",
+                            icon = "📝",
+                            actionButtonText = if (homeworks.isEmpty()) "إضافة واجب جديد" else "عرض جميع الواجبات",
+                            onActionClick = {
+                                if (homeworks.isEmpty()) isLocalAddModalOpen = true
+                                else {
+                                    selectedFilter = HomeworkFilter.ALL
+                                    selectedTaskTypeFilter = null
+                                }
+                            }
+                        )
+                    } else {
+                        PendingSyncEmptyState(dataLabel = "الواجبات", syncState = homeworkSyncState)
+                    }
                 }
             } else {
                 items(filteredHomeworks, key = { it.id }) { hw ->

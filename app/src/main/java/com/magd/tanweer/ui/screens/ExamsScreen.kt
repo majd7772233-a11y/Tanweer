@@ -62,6 +62,8 @@ fun ExamsScreen(
 
     val exams by viewModel.repository.getExams(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
+    val hasExamSnapshot = exams.isNotEmpty() || hasAuthoritativeSnapshot(examsSyncState)
 
     val gradeSubjects = remember(currentUser?.gradeId) {
         viewModel.getScheduleSubjectsForCurrentGrade()
@@ -171,7 +173,7 @@ fun ExamsScreen(
                             color = RubyRed
                         )
                         Text(
-                            text = "${exams.size} اختبار مسجل • ${examsByMonth.size} شهر في التقويم • ${oralExams.size} شفهي مرن",
+                            text = if (hasExamSnapshot) "${exams.size} اختبار مسجل • ${examsByMonth.size} شهر في التقويم • ${oralExams.size} شفهي مرن" else "جارٍ التحقق من جدول الاختبارات...",
                             fontSize = tanweerTextSize(12f),
                             color = TextSecondary
                         )
@@ -211,13 +213,17 @@ fun ExamsScreen(
 
             if (exams.isEmpty()) {
                 item {
-                    EmptyStateGlass(
-                        title = "جدول الاختبارات فارغ",
-                        subtitle = "يمكنك جدولة مواعيد الاختبارات الشهرية والنصفي والنهائي وتحديد الفصول المقررة",
-                        icon = "📋",
-                        actionButtonText = "إضافة أول اختبار",
-                        onActionClick = { isLocalAddExamModalOpen = true }
-                    )
+                    if (hasAuthoritativeSnapshot(examsSyncState)) {
+                        EmptyStateGlass(
+                            title = "جدول الاختبارات فارغ",
+                            subtitle = "يمكنك جدولة مواعيد الاختبارات الشهرية والنصفي والنهائي وتحديد الفصول المقررة",
+                            icon = "📋",
+                            actionButtonText = "إضافة أول اختبار",
+                            onActionClick = { isLocalAddExamModalOpen = true }
+                        )
+                    } else {
+                        PendingSyncEmptyState(dataLabel = "جدول الاختبارات", syncState = examsSyncState)
+                    }
                 }
             } else {
                 // Month Filter Selector Tabs (Point 17)

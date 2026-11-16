@@ -51,6 +51,8 @@ fun IssuesScreen(
 
     val issues by viewModel.repository.getIssues(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val issuesSyncState by viewModel.issuesSyncState.collectAsStateWithLifecycle()
+    val hasIssuesSnapshot = issues.isNotEmpty() || hasAuthoritativeSnapshot(issuesSyncState)
 
     val gradeSubjects = remember(currentUser?.gradeId) {
         viewModel.getSubjectsForCurrentGrade()
@@ -112,7 +114,7 @@ fun IssuesScreen(
                             color = CyanAccent
                         )
                         Text(
-                            text = "${issues.size} استفسار • نقاشات وحلول المنهج",
+                            text = if (hasIssuesSnapshot) "${issues.size} استفسار • نقاشات وحلول المنهج" else "جارٍ التحقق من الاستفسارات...",
                             fontSize = tanweerTextSize(12f),
                             color = TextSecondary
                         )
@@ -155,13 +157,19 @@ fun IssuesScreen(
 
             if (filteredIssues.isEmpty()) {
                 item {
-                    EmptyStateGlass(
-                        title = "لا توجد استفسارات هنا",
-                        subtitle = "اطرح سؤالك أو نقطة غير واضحة ليجيبك زملاؤك في الشعبة",
-                        icon = "❓",
-                        actionButtonText = "طرح استفسار جديد",
-                        onActionClick = { isAddModalOpen = true }
-                    )
+                    if (issues.isNotEmpty() || hasAuthoritativeSnapshot(issuesSyncState)) {
+                        EmptyStateGlass(
+                            title = if (issues.isEmpty()) "لا توجد استفسارات هنا" else "لا توجد استفسارات تطابق هذا التصنيف",
+                            subtitle = "اطرح سؤالك أو غيّر التصنيف لعرض نقاشات أخرى.",
+                            icon = "❓",
+                            actionButtonText = if (issues.isEmpty()) "طرح استفسار جديد" else "عرض الكل",
+                            onActionClick = {
+                                if (issues.isEmpty()) isAddModalOpen = true else selectedFilter = IssueFilter.ALL
+                            }
+                        )
+                    } else {
+                        PendingSyncEmptyState(dataLabel = "الاستفسارات", syncState = issuesSyncState)
+                    }
                 }
             } else {
                 items(filteredIssues, key = { it.id }) { issue ->

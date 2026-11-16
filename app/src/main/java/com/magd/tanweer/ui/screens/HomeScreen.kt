@@ -48,6 +48,10 @@ fun HomeScreen(
     val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
+    val homeSyncState by viewModel.homeSyncState.collectAsStateWithLifecycle()
+    val scheduleSyncState by viewModel.scheduleSyncState.collectAsStateWithLifecycle()
+    val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
+    val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
     var activeViewingContent by remember { mutableStateOf<ContentItem?>(null) }
     val todayDate = remember { TanweerViewModel.getTodayDateString() }
     val isWeekend = remember { TanweerViewModel.isWeekend() }
@@ -77,6 +81,12 @@ fun HomeScreen(
 
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val hasHomeworkSnapshot = homeworks.isNotEmpty() || hasAuthoritativeSnapshot(homeworkSyncState)
+    val hasExamSnapshot = exams.isNotEmpty() || hasAuthoritativeSnapshot(examsSyncState)
+    val hasDocumentationSnapshot =
+        hasAuthoritativeSnapshot(homeSyncState) && hasAuthoritativeSnapshot(scheduleSyncState)
+
     val schoolAnnouncements = remember(events) {
         events.asSequence()
             .filter { it.groupId == "all" && it.category.equals("ANNOUNCEMENT", ignoreCase = true) }
@@ -106,9 +116,9 @@ fun HomeScreen(
         scheduledAcademicSubjects.filterKeys { !documentedSubjectIds.contains(it) }
     }
 
-    val totalSubjectsCount = scheduledAcademicSubjects.size.coerceAtLeast(1)
+    val totalSubjectsCount = scheduledAcademicSubjects.size
     val docCount = documentedSubjectsMap.size
-    val progressPercent = if (scheduledAcademicSubjects.isEmpty()) 0f else (docCount.toFloat() / totalSubjectsCount.toFloat())
+    val progressPercent = if (totalSubjectsCount == 0) 0f else (docCount.toFloat() / totalSubjectsCount.toFloat())
 
     val upcomingHwCount = homeworks.count { !it.isCompleted }
     val upcomingExamsCount = remember(exams, todayDate) {
@@ -383,10 +393,10 @@ fun HomeScreen(
                         Text("📝", fontSize = tanweerTextSize(20f))
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (upcomingHwCount > 0) "$upcomingHwCount متبقية" else "منجزة ✓",
+                            text = when { !hasHomeworkSnapshot -> "—"; homeworks.isEmpty() -> "لا توجد واجبات"; upcomingHwCount > 0 -> "$upcomingHwCount متبقية"; else -> "منجزة ✓" },
                             fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Bold,
-                            color = if (upcomingHwCount > 0) WarmAmber else EmeraldGreen
+                            color = if (!hasHomeworkSnapshot) TextSecondary else if (upcomingHwCount > 0) WarmAmber else EmeraldGreen
                         )
                         Text(text = "الواجبات", fontSize = tanweerTextSize(10f), color = TextMuted)
                     }
@@ -406,8 +416,8 @@ fun HomeScreen(
                         Text("🎯", fontSize = tanweerTextSize(20f))
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = when (nearestExamDaysLeft) {
-                                null -> "لا اختبارات"
+                            text = if (!hasExamSnapshot) "—" else when (nearestExamDaysLeft) {
+                                null -> "لا اختبارات قادمة"
                                 0 -> "اختبار اليوم!"
                                 1 -> "اختبار غداً"
                                 else -> "بعد $nearestExamDaysLeft أيام"
@@ -435,10 +445,10 @@ fun HomeScreen(
                         Text("📷", fontSize = tanweerTextSize(20f))
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (pendingSubjectsMap.isNotEmpty()) "${pendingSubjectsMap.size} للتوثيق" else "مكتملة ✨",
+                            text = when { !hasDocumentationSnapshot -> "—"; totalSubjectsCount == 0 -> "لا حصص اليوم"; pendingSubjectsMap.isNotEmpty() -> "${pendingSubjectsMap.size} للتوثيق"; else -> "مكتملة ✨" },
                             fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Bold,
-                            color = CyanAccent
+                            color = if (hasDocumentationSnapshot) CyanAccent else TextMuted
                         )
                         Text(text = "التوثيق", fontSize = tanweerTextSize(10f), color = TextMuted)
                     }
@@ -657,6 +667,19 @@ fun HomeScreen(
                                 )
                             }
                         }
+                    } else if (!hasDocumentationSnapshot) {
+                        PendingSyncEmptyState(
+                            dataLabel = "الحصص ومواد اليوم",
+                            syncState = aggregateSyncStates(listOf(homeSyncState, scheduleSyncState))
+                        )
+                    } else if (totalSubjectsCount == 0) {
+                        Text(
+                            text = "لا توجد مواد أكاديمية مجدولة لهذا اليوم.",
+                            fontSize = tanweerTextSize(12f),
+                            color = TextSecondary,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            textAlign = TextAlign.Center
+                        )
                     } else {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
