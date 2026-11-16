@@ -637,6 +637,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _myNotifications.value = emptyList()
         _groupCorrections.value = emptyList()
         _communityDecisions.value = emptyList()
+        _communityDecisionsSnapshotGroupId.value = null
         _myRoleRequests.value = emptyList()
         _groupSyncScopeIds.value = emptyMap()
     }
