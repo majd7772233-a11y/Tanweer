@@ -82,4 +82,27 @@ class PhaseFourUiPolicyTest {
         assertFalse(shouldShowConfirmedEmptyState(hasSnapshot = true, isLoading = false, errorMessage = "network error"))
     }
 
+    @Test
+    fun dashboard_response_is_accepted_only_for_the_active_account_role_and_generation() {
+        assertTrue(
+            isCurrentDashboardRequest(
+                requestGeneration = 7,
+                activeGeneration = 7,
+                requestedUserId = "user-a",
+                currentUserId = "user-a",
+                requestedRole = "TEACHER",
+                currentRole = "teacher"
+            )
+        )
+        assertFalse(
+            isCurrentDashboardRequest(7, 8, "user-a", "user-a", "TEACHER", "TEACHER")
+        )
+        assertFalse(
+            isCurrentDashboardRequest(7, 7, "user-a", "user-b", "TEACHER", "TEACHER")
+        )
+        assertFalse(
+            isCurrentDashboardRequest(7, 7, "user-a", "user-a", "TEACHER", "ADMIN")
+        )
+    }
+
 }

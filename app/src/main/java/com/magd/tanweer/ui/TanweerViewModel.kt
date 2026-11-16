@@ -600,6 +600,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         groupCorrectionsSourceGroupId = null
         communityDecisionsRequestGeneration++
         communityDecisionsSourceGroupId = null
+        teacherDashboardRequestGeneration++
+        moderatorDashboardRequestGeneration++
+        adminDashboardRequestGeneration++
         _groupMembersState.value = null
         _groupMembersError.value = null
         _isGroupMembersLoading.value = false
@@ -755,17 +758,23 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
 
         when (user.role.uppercase(Locale.ROOT)) {
-            "TEACHER" -> tasks += async(Dispatchers.IO) {
-                repository.getTeacherDashboard().onSuccess { _teacherDashboard.value = it }
-                Unit
+            "TEACHER" -> {
+                val requestId = ++teacherDashboardRequestGeneration
+                _teacherDashboardError.value = null
+                _isTeacherDashboardLoading.value = true
+                tasks += async(Dispatchers.IO) { runTeacherDashboardRequest(user, requestId) }
             }
-            "MODERATOR" -> tasks += async(Dispatchers.IO) {
-                repository.getModeratorDashboard().onSuccess { _moderatorDashboard.value = it }
-                Unit
+            "MODERATOR" -> {
+                val requestId = ++moderatorDashboardRequestGeneration
+                _moderatorDashboardError.value = null
+                _isModeratorDashboardLoading.value = true
+                tasks += async(Dispatchers.IO) { runModeratorDashboardRequest(user, requestId) }
             }
-            "ADMIN" -> tasks += async(Dispatchers.IO) {
-                repository.getAdminDashboard().onSuccess { _adminDashboard.value = it }
-                Unit
+            "ADMIN" -> {
+                val requestId = ++adminDashboardRequestGeneration
+                _adminDashboardError.value = null
+                _isAdminDashboardLoading.value = true
+                tasks += async(Dispatchers.IO) { runAdminDashboardRequest(user, requestId) }
             }
         }
 
@@ -1455,6 +1464,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _isCommunityDecisionsLoading = MutableStateFlow(false)
     val isCommunityDecisionsLoading: StateFlow<Boolean> = _isCommunityDecisionsLoading.asStateFlow()
 
+    @Volatile private var teacherDashboardRequestGeneration = 0
+    @Volatile private var moderatorDashboardRequestGeneration = 0
+    @Volatile private var adminDashboardRequestGeneration = 0
+
     private val _isTeacherDashboardLoading = MutableStateFlow(false)
     val isTeacherDashboardLoading: StateFlow<Boolean> = _isTeacherDashboardLoading.asStateFlow()
     private val _isModeratorDashboardLoading = MutableStateFlow(false)
@@ -1464,50 +1477,107 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     fun loadTeacherDashboard() {
         viewModelScope.launch {
-            if (_isTeacherDashboardLoading.value) return@launch
+            val user = currentUser.value ?: return@launch
+            if (!user.role.equals("TEACHER", ignoreCase = true) || _isTeacherDashboardLoading.value) return@launch
+            val requestId = ++teacherDashboardRequestGeneration
             _isTeacherDashboardLoading.value = true
             _teacherDashboardError.value = null
-            try {
-                repository.getTeacherDashboard()
-                    .onSuccess { data -> _teacherDashboard.value = data }
-                    .onFailure { error -> _teacherDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز المعلم" }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                _teacherDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز المعلم"
-            } finally {
-                _isTeacherDashboardLoading.value = false
-            }
+            runTeacherDashboardRequest(user, requestId)
+        }
+    }
+
+    private suspend fun runTeacherDashboardRequest(user: User, requestId: Int) {
+        val isCurrent = {
+            isCurrentDashboardRequest(
+                requestId,
+                teacherDashboardRequestGeneration,
+                user.id,
+                currentUser.value?.id,
+                user.role,
+                currentUser.value?.role
+            )
+        }
+        if (!isCurrent()) return
+        try {
+            repository.getTeacherDashboard()
+                .onSuccess { data -> if (isCurrent()) _teacherDashboard.value = data }
+                .onFailure { error ->
+                    if (isCurrent()) _teacherDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز المعلم"
+                }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (isCurrent()) _teacherDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز المعلم"
+        } finally {
+            if (isCurrent()) _isTeacherDashboardLoading.value = false
         }
     }
 
     fun loadModeratorDashboard() {
         viewModelScope.launch {
-            if (_isModeratorDashboardLoading.value) return@launch
+            val user = currentUser.value ?: return@launch
+            if (!user.role.equals("MODERATOR", ignoreCase = true) || _isModeratorDashboardLoading.value) return@launch
+            val requestId = ++moderatorDashboardRequestGeneration
             _isModeratorDashboardLoading.value = true
             _moderatorDashboardError.value = null
-            try {
-                repository.getModeratorDashboard()
-                    .onSuccess { data -> _moderatorDashboard.value = data }
-                    .onFailure { error -> _moderatorDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز الإشراف" }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                _moderatorDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز الإشراف"
-            } finally {
-                _isModeratorDashboardLoading.value = false
-            }
+            runModeratorDashboardRequest(user, requestId)
+        }
+    }
+
+    private suspend fun runModeratorDashboardRequest(user: User, requestId: Int) {
+        val isCurrent = {
+            isCurrentDashboardRequest(
+                requestId,
+                moderatorDashboardRequestGeneration,
+                user.id,
+                currentUser.value?.id,
+                user.role,
+                currentUser.value?.role
+            )
+        }
+        if (!isCurrent()) return
+        try {
+            repository.getModeratorDashboard()
+                .onSuccess { data -> if (isCurrent()) _moderatorDashboard.value = data }
+                .onFailure { error ->
+                    if (isCurrent()) _moderatorDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز الإشراف"
+                }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (isCurrent()) _moderatorDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز الإشراف"
+        } finally {
+            if (isCurrent()) _isModeratorDashboardLoading.value = false
         }
     }
 
     fun loadAdminDashboard() {
         viewModelScope.launch {
-            if (_isAdminDashboardLoading.value) return@launch
+            val user = currentUser.value ?: return@launch
+            if (!user.role.equals("ADMIN", ignoreCase = true) || _isAdminDashboardLoading.value) return@launch
+            val requestId = ++adminDashboardRequestGeneration
             _isAdminDashboardLoading.value = true
             _adminDashboardError.value = null
-            try {
-                repository.getAdminDashboard()
-                    .onSuccess { data ->
+            runAdminDashboardRequest(user, requestId)
+        }
+    }
+
+    private suspend fun runAdminDashboardRequest(user: User, requestId: Int) {
+        val isCurrent = {
+            isCurrentDashboardRequest(
+                requestId,
+                adminDashboardRequestGeneration,
+                user.id,
+                currentUser.value?.id,
+                user.role,
+                currentUser.value?.role
+            )
+        }
+        if (!isCurrent()) return
+        try {
+            repository.getAdminDashboard()
+                .onSuccess { data ->
+                    if (isCurrent()) {
                         if (data.success) {
                             _adminDashboard.value = data
                         } else {
@@ -1515,18 +1585,22 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                             _adminDashboardError.value = "رد الخادم لم يؤكد صلاحية بيانات لوحة الإدارة"
                         }
                     }
-                    .onFailure { error ->
+                }
+                .onFailure { error ->
+                    if (isCurrent()) {
                         _adminDashboard.value = null
                         _adminDashboardError.value = error.message ?: "تعذر تحميل بيانات لوحة الإدارة"
                     }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
+                }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (isCurrent()) {
                 _adminDashboard.value = null
                 _adminDashboardError.value = error.message ?: "تعذر تحميل بيانات لوحة الإدارة"
-            } finally {
-                _isAdminDashboardLoading.value = false
             }
+        } finally {
+            if (isCurrent()) _isAdminDashboardLoading.value = false
         }
     }
 
