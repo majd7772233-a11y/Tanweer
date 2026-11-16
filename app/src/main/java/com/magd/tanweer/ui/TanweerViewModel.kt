@@ -1497,7 +1497,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 currentUser.value?.role
             )
         }
-        if (!isCurrent()) return
+        if (!isCurrent()) {
+            if (requestId == teacherDashboardRequestGeneration) _isTeacherDashboardLoading.value = false
+            return
+        }
         try {
             repository.getTeacherDashboard()
                 .onSuccess { data -> if (isCurrent()) _teacherDashboard.value = data }
@@ -1509,7 +1512,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         } catch (error: Exception) {
             if (isCurrent()) _teacherDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز المعلم"
         } finally {
-            if (isCurrent()) _isTeacherDashboardLoading.value = false
+            if (requestId == teacherDashboardRequestGeneration) _isTeacherDashboardLoading.value = false
         }
     }
 
@@ -1535,7 +1538,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 currentUser.value?.role
             )
         }
-        if (!isCurrent()) return
+        if (!isCurrent()) {
+            if (requestId == moderatorDashboardRequestGeneration) _isModeratorDashboardLoading.value = false
+            return
+        }
         try {
             repository.getModeratorDashboard()
                 .onSuccess { data -> if (isCurrent()) _moderatorDashboard.value = data }
@@ -1547,7 +1553,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         } catch (error: Exception) {
             if (isCurrent()) _moderatorDashboardError.value = error.message ?: "تعذر تحميل بيانات مركز الإشراف"
         } finally {
-            if (isCurrent()) _isModeratorDashboardLoading.value = false
+            if (requestId == moderatorDashboardRequestGeneration) _isModeratorDashboardLoading.value = false
         }
     }
 
@@ -1573,7 +1579,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 currentUser.value?.role
             )
         }
-        if (!isCurrent()) return
+        if (!isCurrent()) {
+            if (requestId == adminDashboardRequestGeneration) _isAdminDashboardLoading.value = false
+            return
+        }
         try {
             repository.getAdminDashboard()
                 .onSuccess { data ->
@@ -1600,7 +1609,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 _adminDashboardError.value = error.message ?: "تعذر تحميل بيانات لوحة الإدارة"
             }
         } finally {
-            if (isCurrent()) _isAdminDashboardLoading.value = false
+            if (requestId == adminDashboardRequestGeneration) _isAdminDashboardLoading.value = false
         }
     }
 
