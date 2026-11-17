@@ -50,6 +50,10 @@ fun CalendarScreen(
     val calendarSyncState by viewModel.calendarSyncState.collectAsStateWithLifecycle()
     val scopedCalendarSyncState = syncStateForScope(calendarSyncState, groupSyncScopeIds[GroupSyncSource.CALENDAR], activeGroupId)
     val hasCalendarSnapshot = hasAuthoritativeSnapshot(scopedCalendarSyncState)
+    var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
+    var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
+    var showAddActionSheet by remember { mutableStateOf(false) }
+
     val dayDetailsSyncState by viewModel.dayDetailsSyncState.collectAsStateWithLifecycle()
     val dayDetailsSyncGroupId by viewModel.dayDetailsSyncGroupId.collectAsStateWithLifecycle()
     val dayDetailsSyncDate by viewModel.dayDetailsSyncDate.collectAsStateWithLifecycle()
@@ -62,10 +66,6 @@ fun CalendarScreen(
     )
     val hasDayDetailsSnapshot = hasAuthoritativeSnapshot(scopedDayDetailsSyncState)
     val hasConfirmedEmptyDay = shouldShowConfirmedCalendarEmpty(hasCalendarSnapshot, hasDayDetailsSnapshot)
-
-    var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
-    var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
-    var showAddActionSheet by remember { mutableStateOf(false) }
 
     var showAddHolidayDialog by remember { mutableStateOf(false) }
     var holidayTitle by remember { mutableStateOf("") }
