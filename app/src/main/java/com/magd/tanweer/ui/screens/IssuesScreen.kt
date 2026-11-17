@@ -160,7 +160,7 @@ fun IssuesScreen(
 
             if (filteredIssues.isEmpty()) {
                 item {
-                    if (issues.isNotEmpty() || hasAuthoritativeSnapshot(issuesSyncState)) {
+                    if (hasIssuesSnapshot) {
                         EmptyStateGlass(
                             title = if (issues.isEmpty()) "لا توجد استفسارات هنا" else "لا توجد استفسارات تطابق هذا التصنيف",
                             subtitle = "اطرح سؤالك أو غيّر التصنيف لعرض نقاشات أخرى.",

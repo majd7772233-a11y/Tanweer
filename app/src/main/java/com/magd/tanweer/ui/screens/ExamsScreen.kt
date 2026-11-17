@@ -216,7 +216,7 @@ fun ExamsScreen(
 
             if (exams.isEmpty()) {
                 item {
-                    if (hasAuthoritativeSnapshot(examsSyncState)) {
+                    if (hasExamSnapshot) {
                         EmptyStateGlass(
                             title = "جدول الاختبارات فارغ",
                             subtitle = "يمكنك جدولة مواعيد الاختبارات الشهرية والنصفي والنهائي وتحديد الفصول المقررة",

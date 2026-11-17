@@ -332,7 +332,7 @@ fun HomeworkScreen(
 
             if (filteredHomeworks.isEmpty()) {
                 item {
-                    if (homeworks.isNotEmpty() || hasAuthoritativeSnapshot(homeworkSyncState)) {
+                    if (hasHomeworkSnapshot) {
                         EmptyStateGlass(
                             title = if (homeworks.isEmpty()) "لا توجد واجبات في هذا القسم" else "لا توجد واجبات تطابق التصفية الحالية",
                             subtitle = if (homeworks.isEmpty()) "يمكنك إضافة واجب جديد وتضمين صور الحلول" else "غيّر نوع الواجب أو فترة الاستحقاق لعرض نتائج أخرى.",
