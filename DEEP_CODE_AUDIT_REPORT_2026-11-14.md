@@ -884,7 +884,8 @@
 
 ### الحالة المثبتة على GitHub
 - فرع العمل: `work/release-readiness`.
-- HEAD: `e81ab420d7599758eb3790e484f8fcf3fd00b680`.
+- آخر Commit للكود: `e81ab420d7599758eb3790e484f8fcf3fd00b680`.
+- يحتوي الفرع حالياً على تحديثات توثيقية فقط بعد Commit الكود هذا؛ لم تتغير ملفات Android أو Server source منذ `e81ab42`.
 - `main`: `64143994070bcdc410cf044379fe2801da8f9a3c` ولم يتغير في هذه الجولة.
 - الفروع الموجودة: `main` و`work/release-readiness` فقط.
 - PR #6: مفتوح وDraft وغير مدمج، والقاعدة `main`.

@@ -8,8 +8,9 @@
 ### حالة المستودع والفرع
 - المستودع: `majd7772233-a11y/Tanweer`.
 - فرع العمل الوحيد المسموح: `work/release-readiness`.
-- **آخر Commit مؤكد على فرع العمل:** `e81ab420d7599758eb3790e484f8fcf3fd00b680` — `fix(owner-dashboard): require server acknowledgement for mutations`.
-- الأب المباشر: `9ad066d585c21dc9daca0fa91ec0cd20cec75515`.
+- **آخر Commit للكود:** `e81ab420d7599758eb3790e484f8fcf3fd00b680` — `fix(owner-dashboard): require server acknowledgement for mutations`.
+- يوجد فوقه تحديث توثيقي فقط على الفرع؛ ملفات المصدر لم تتغير بعد Commit الكود المذكور.
+- الأب المباشر لآخر Commit للكود: `9ad066d585c21dc9daca0fa91ec0cd20cec75515`.
 - فرع `main` لم يتغير، وآخر SHA موثق له: `64143994070bcdc410cf044379fe2801da8f9a3c`.
 - فحص الفروع أعاد فرعين فقط: `main` و`work/release-readiness`. لا تنشئ فروعاً مؤقتة أو إضافية.
 - PR #6 ما زال **Open + Draft** من `work/release-readiness` إلى `main`، وغير مدمج. لا تدمجه.
