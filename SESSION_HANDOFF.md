@@ -231,3 +231,14 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Both shared-group and discovery empty states now require `groupsSyncState == Success` through `hasAuthoritativeSnapshot`. Until then, the screen presents the actual idle/loading/offline/error sync state instead of claiming no groups exist.
 - This reuses the existing policy regression test that only `SyncState.Success` may confirm an empty list. No new endpoint or database behavior was introduced.
 - Android and Server CI results for the current head are still being rechecked; this UI follow-up requires its own Android CI validation.
+
+
+
+## 2026-11-17 — Phase 4 continuation: group chat history truth
+
+- Verified current HEAD before this change: `d35cbd81c67d7f5b43e61dfbfbcb7c97efd135b9`. Android CI run `44075715683` and Server CI run `44075715750` both passed on that exact HEAD.
+- Continued the screen-state audit after the Groups catalogue empty-state gate. Found that the chat screen displayed its “start discussion” empty state as soon as the local Room flow was empty, even while the REST history request was still running or had failed.
+- Group chat connection now returns the actual history sync result after opening the WebSocket immediately. The ViewModel exposes a request-generation- and group-scoped chat history state; stale responses after switching/leaving chats cannot update the visible group's state. HTTP errors, thrown exceptions and cancellation are handled distinctly. History payloads are validated against the requested group before persistence.
+- The chat UI shows a pending/error/offline sync state and a retry action until a successful snapshot for the exact group is received. Only a successful empty server snapshot can show the genuine no-messages state. Existing local messages remain visible while sync status is surfaced.
+- Added Arabic and English strings and a pure regression test for exact-group success gating. This patch requires fresh Android and Server CI; the prior successful runs do not validate it.
+- No staging/production deployment, D1 migration, secret change, merge, or physical-device acceptance was performed.

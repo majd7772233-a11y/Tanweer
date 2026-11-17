@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -51,6 +52,8 @@ fun GroupsScreen(
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val chatStatus by viewModel.chatConnectionStatus.collectAsStateWithLifecycle()
+    val chatHistorySyncState by viewModel.chatHistorySyncState.collectAsStateWithLifecycle()
+    val chatHistorySyncGroupId by viewModel.chatHistorySyncGroupId.collectAsStateWithLifecycle()
     val groupsSyncState by viewModel.groupsSyncState.collectAsStateWithLifecycle()
     val groupMembersState by viewModel.groupMembersState.collectAsStateWithLifecycle()
     val isGroupMembersLoading by viewModel.isGroupMembersLoading.collectAsStateWithLifecycle()
@@ -79,6 +82,7 @@ fun GroupsScreen(
         }
     }
     var activeChatGroup by remember { mutableStateOf<GroupItem?>(null) }
+    val scopedChatHistorySyncState = syncStateForScope(chatHistorySyncState, chatHistorySyncGroupId, activeChatGroup?.id.orEmpty())
     var managingGroup by remember { mutableStateOf<GroupItem?>(null) }
     var joinRequestGroup by remember { mutableStateOf<GroupItem?>(null) }
     var joinReasonText by remember { mutableStateOf("") }
@@ -226,6 +230,14 @@ fun GroupsScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                if (!hasAuthoritativeSnapshot(scopedChatHistorySyncState)) {
+                    SyncStatusBar(
+                        syncState = scopedChatHistorySyncState,
+                        onRefresh = { activeChatGroup?.id?.let(viewModel::connectGroupChat) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
                 // Chat Messages List
                 LazyColumn(
                     state = chatListState,
@@ -235,12 +247,19 @@ fun GroupsScreen(
                     contentPadding = PaddingValues(vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (chatMessages.isEmpty()) {
+                    if (chatMessages.isEmpty() && hasAuthoritativeSnapshot(scopedChatHistorySyncState)) {
                         item {
                             EmptyStateGlass(
-                                title = "بدء النقاش المباشر في الشعبة",
-                                subtitle = "الرسائل هنا متزامنة لحظياً مع الخادم ومحفوظة أوفلاين في جهازك.",
+                                title = stringResource(com.magd.tanweer.R.string.chat_empty_title),
+                                subtitle = stringResource(com.magd.tanweer.R.string.chat_empty_subtitle),
                                 icon = "💬"
+                            )
+                        }
+                    } else if (chatMessages.isEmpty()) {
+                        item {
+                            PendingSyncEmptyState(
+                                dataLabel = stringResource(com.magd.tanweer.R.string.chat_history_label),
+                                syncState = scopedChatHistorySyncState
                             )
                         }
                     } else {

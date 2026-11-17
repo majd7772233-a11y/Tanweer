@@ -437,6 +437,12 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _groupsSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val groupsSyncState: StateFlow<SyncState> = _groupsSyncState.asStateFlow()
 
+    @Volatile private var chatHistoryRequestGeneration = 0L
+    private val _chatHistorySyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val chatHistorySyncState: StateFlow<SyncState> = _chatHistorySyncState.asStateFlow()
+    private val _chatHistorySyncGroupId = MutableStateFlow<String?>(null)
+    val chatHistorySyncGroupId: StateFlow<String?> = _chatHistorySyncGroupId.asStateFlow()
+
     val chatConnectionStatus: StateFlow<ConnectionStatus> = repository.chatManager.status
     private val dataGenerationReady = CompletableDeferred<Unit>()
     private val dataGenerationMutex = Mutex()
@@ -621,6 +627,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _librarySyncState.value = SyncState.Idle
         _librarySyncGradeId.value = null
         _groupsSyncState.value = SyncState.Idle
+        chatHistoryRequestGeneration++
+        _chatHistorySyncState.value = SyncState.Idle
+        _chatHistorySyncGroupId.value = null
         scheduleMetaRequestGeneration++
         scheduleMetaSourceGroupId = null
         _scheduleMetaGroupId.value = null
@@ -1469,15 +1478,37 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     fun connectGroupChat(groupId: String) {
         val user = currentUser.value ?: return
+        val requestedGroupId = groupId.trim()
+        if (requestedGroupId.isBlank()) return
+        val requestId = ++chatHistoryRequestGeneration
+        _chatHistorySyncGroupId.value = requestedGroupId
+        _chatHistorySyncState.value = SyncState.Loading
         viewModelScope.launch {
-            repository.connectToGroupChat(groupId, user.id)
+            try {
+                val result = repository.connectToGroupChat(requestedGroupId, user.id)
+                if (requestId != chatHistoryRequestGeneration || _chatHistorySyncGroupId.value != requestedGroupId) return@launch
+                _chatHistorySyncState.value = when (result) {
+                    is SyncResult.Success -> SyncState.Success()
+                    is SyncResult.Offline -> SyncState.OfflineCached()
+                    is SyncResult.Error -> SyncState.Error(result.message, result.isNetworkError)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (requestId == chatHistoryRequestGeneration && _chatHistorySyncGroupId.value == requestedGroupId) {
+                    _chatHistorySyncState.value = SyncState.Error(
+                        error.message ?: getApplication<Application>().getString(com.magd.tanweer.R.string.chat_history_sync_failed), false
+                    )
+                }
+            }
         }
     }
 
     fun disconnectGroupChat() {
-        viewModelScope.launch {
-            repository.disconnectFromGroupChat()
-        }
+        chatHistoryRequestGeneration++
+        _chatHistorySyncGroupId.value = null
+        _chatHistorySyncState.value = SyncState.Idle
+        viewModelScope.launch { repository.disconnectFromGroupChat() }
     }
 
     fun addScheduleSlot(

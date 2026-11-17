@@ -4,4 +4,8 @@
     <string name="calendar_day_details_label">تفاصيل يوم %1$s</string>
     <string name="calendar_retry_day_sync">إعادة التحقق من اليوم</string>
     <string name="calendar_day_sync_failed">تعذر مزامنة تفاصيل اليوم</string>
+    <string name="chat_history_label">سجل محادثة المجموعة</string>
+    <string name="chat_history_sync_failed">تعذر تحديث سجل المحادثة</string>
+    <string name="chat_empty_title">بدء النقاش المباشر في الشعبة</string>
+    <string name="chat_empty_subtitle">لا توجد رسائل في سجل هذه المجموعة حتى الآن. يمكنك بدء النقاش.</string>
 </resources>

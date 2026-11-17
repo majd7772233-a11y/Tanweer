@@ -231,4 +231,16 @@ class PhaseFourUiPolicyTest {
         assertFalse(isSnapshotForScope("group-a", ""))
     }
 
+
+    @Test
+    fun chat_history_empty_state_requires_success_for_the_exact_group() {
+        val success = SyncState.Success(100L)
+        val groupAState = syncStateForScope(success, "group-a", "group-a")
+        val groupBState = syncStateForScope(success, "group-a", "group-b")
+
+        assertTrue(hasAuthoritativeSnapshot(groupAState))
+        assertFalse(hasAuthoritativeSnapshot(groupBState))
+        assertFalse(hasAuthoritativeSnapshot(syncStateForScope(SyncState.Error("network", true), "group-a", "group-a")))
+        assertFalse(hasAuthoritativeSnapshot(syncStateForScope(SyncState.Idle, null, "group-a")))
+    }
 }

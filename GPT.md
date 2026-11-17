@@ -2256,3 +2256,10 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Both shared-group and discovery empty states now require `groupsSyncState == Success` through `hasAuthoritativeSnapshot`. Until then, the screen presents the actual idle/loading/offline/error sync state instead of claiming no groups exist.
 - This reuses the existing policy regression test that only `SyncState.Success` may confirm an empty list. No new endpoint or database behavior was introduced.
 - Android and Server CI results for the current head are still being rechecked; this UI follow-up requires its own Android CI validation.
+
+
+
+## Phase 4 continuation — group chat history truth (2026-11-17)
+- Group chat no longer treats an initially empty Room Flow as proof that a group has no messages. The chat history REST snapshot result is surfaced as a group-scoped, request-generation-guarded SyncState while the WebSocket opens immediately.
+- Only a successful snapshot for the exact active group can authorize the empty chat state. Errors/offline/initial states show the sync status and retry action; cached local messages remain visible with the sync status.
+- Chat history payloads are checked against the requested group before persistence, and cancellation propagates. Arabic/English resources and a regression test were added. Re-run both CI workflows on the new HEAD.

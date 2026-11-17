@@ -852,3 +852,13 @@
 - Both shared-group and discovery empty states now require `groupsSyncState == Success` through `hasAuthoritativeSnapshot`. Until then, the screen presents the actual idle/loading/offline/error sync state instead of claiming no groups exist.
 - This reuses the existing policy regression test that only `SyncState.Success` may confirm an empty list. No new endpoint or database behavior was introduced.
 - Android and Server CI results for the current head are still being rechecked; this UI follow-up requires its own Android CI validation.
+
+
+
+## متابعة المرحلة الرابعة — صدق سجل محادثة المجموعة (2026-11-17)
+
+- في مراجعة شاشة المجموعات بعد إصلاح حالات الفراغ للمجموعات المشتركة والمكتشفة، ظهر أن سجل المحادثة يعتمد على Room Flow يبدأ بـ`emptyList()`، بينما طلب REST لجلب آخر الرسائل كان ينفذ داخل الاتصال دون كشف نتيجة المزامنة للواجهة. لذلك كانت عبارة «بدء النقاش» تظهر قبل نجاح التحقق من سجل الخادم، حتى عند فشل الطلب.
+- أصبحت `connectToGroupChat` تعيد `SyncResult` بعد فتح WebSocket مباشرة وجلب سجل المجموعة. تتحقق الاستجابة من تطابق كل رسالة مع المجموعة المطلوبة، ولا تُحفظ لقطة غير مطابقة. يُعاد رمي `CancellationException` بدلاً من تحويله إلى خطأ شبكة.
+- أضيفت حالة مزامنة لسجل المحادثة في ViewModel مرتبطة بمعرّف المجموعة وجيل الطلب؛ تبديل المجموعة أو مغادرة الشاشة يبطل الطلب السابق. تعرض الشاشة حالة انتظار/خطأ/أوفلاين مع زر إعادة المحاولة، ولا تعرض فراغاً مؤكداً إلا بعد نجاح لقطة المجموعة نفسها. تبقى الرسائل المحلية مرئية عند فشل التحديث مع إظهار حالة المزامنة.
+- أضيفت ترجمات عربية وإنجليزية واختبار سياسة يمنع اعتبار نجاح مجموعة أخرى أو الخطأ أو الحالة الأولية دليلاً على خلو المحادثة.
+- هذا تعديل مصدر ثابت ويحتاج Android وServer CI جديدين قبل اعتباره متحققاً. لا يغني عن اختبار WebSocket وREST على Staging في المرحلة الخامسة.
