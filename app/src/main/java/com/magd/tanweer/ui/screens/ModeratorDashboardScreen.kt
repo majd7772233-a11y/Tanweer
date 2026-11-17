@@ -158,7 +158,7 @@ fun ModeratorDashboardScreen(
                     val activeGroupMembersCount = when {
                         isDashboardSnapshotForActiveGroup && stats != null -> stats.totalMembers
                         hasGroupMembersSnapshot && groupMembers?.success == true ->
-                            groupMembers.members.count { it.status.equals("ACTIVE", ignoreCase = true) }
+                            groupMembers?.members?.count { it.status.equals("ACTIVE", ignoreCase = true) }
                         else -> null
                     }
                     // Schedule proposals already exist as unified community decisions.
