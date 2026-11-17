@@ -1,0 +1,5 @@
+<resources>
+    <string name="calendar_day_details_label">Details for %1$s</string>
+    <string name="calendar_retry_day_sync">Retry day verification</string>
+    <string name="calendar_day_sync_failed">Unable to sync day details</string>
+</resources>

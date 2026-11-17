@@ -1298,22 +1298,23 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncCalendar(groupId: String = getActiveGroupId(), isRefresh: Boolean = false) {
-        val currentMonth = SimpleDateFormat("yyyy-MM", Locale.US).format(Date())
-        launchGroupScopedSync(
-            source = GroupSyncSource.CALENDAR,
-            groupId = groupId,
-            state = _calendarSyncState,
-            isRefresh = isRefresh,
-            dataLabel = "التقويم"
-        ) { repository.syncCalendarMonth(groupId, currentMonth) }
+        val month = _calendarSyncMonthScope.value
+            ?: SimpleDateFormat("yyyy-MM", Locale.US).format(Date())
+        syncCalendarMonth(groupId, month, isRefresh)
     }
 
     fun syncCalendarMonth(groupId: String = getActiveGroupId(), month: String, isRefresh: Boolean = false) {
         val requestedMonth = month.trim()
-        if (_calendarSyncMonthScope.value != requestedMonth) {
+        val monthChanged = _calendarSyncMonthScope.value != requestedMonth
+        if (monthChanged) {
             _calendarSyncMonthScope.value = requestedMonth.takeIf { it.isNotBlank() }
             // A success for another month cannot confirm this month's contents.
             _calendarSyncState.value = SyncState.Idle
+        }
+        if (!_autoSyncEnabled.value && !isRefresh) {
+            // Invalidate an older request even when automatic sync is disabled.
+            if (monthChanged) beginGroupSync(GroupSyncSource.CALENDAR, groupId)
+            return
         }
         launchGroupScopedSync(
             source = GroupSyncSource.CALENDAR,
@@ -1361,7 +1362,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 throw error
             } catch (error: Exception) {
                 if (requestId == dayDetailsSyncRequestGeneration) {
-                    _dayDetailsSyncState.value = SyncState.Error(error.message ?: "تعذر مزامنة تفاصيل اليوم", false)
+                    _dayDetailsSyncState.value = SyncState.Error(getApplication<Application>().getString(com.magd.tanweer.R.string.calendar_day_sync_failed), false)
                 }
             }
         }

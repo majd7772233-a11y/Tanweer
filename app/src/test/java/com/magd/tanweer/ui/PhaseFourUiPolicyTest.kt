@@ -164,6 +164,16 @@ class PhaseFourUiPolicyTest {
 
 
 
+
+    @Test
+    fun calendar_refresh_keeps_the_tracked_month_instead_of_falling_back_to_the_current_month() {
+        val trackedMonth = "2026-10"
+        val currentMonth = "2026-11"
+        assertTrue(trackedMonth != currentMonth)
+        assertTrue(hasAuthoritativeCalendarMonthSnapshot(SyncState.Success(), trackedMonth, trackedMonth))
+        assertFalse(hasAuthoritativeCalendarMonthSnapshot(SyncState.Success(), trackedMonth, currentMonth))
+    }
+
     @Test
     fun calendar_month_snapshot_is_authoritative_only_for_the_requested_month() {
         val success = SyncState.Success(100L)

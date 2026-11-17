@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">تنوير</string>
     <string name="app_tagline">كل يوم له محتواه، وكل مادة لها مكان، ولا يضيع درس</string>
+    <string name="calendar_day_details_label">تفاصيل يوم %1$s</string>
+    <string name="calendar_retry_day_sync">إعادة التحقق من اليوم</string>
+    <string name="calendar_day_sync_failed">تعذر مزامنة تفاصيل اليوم</string>
 </resources>
