@@ -132,21 +132,21 @@ fun TeacherDashboardScreen(
                         ) {
                             TeacherStatCard(
                                 title = "واجبات رسمية",
-                                count = "${stats?.officialHomeworksCount ?: 0}",
+                                count = formatVerifiedCount(stats?.officialHomeworksCount, stats != null),
                                 icon = "📝",
                                 color = CyanAccent,
                                 modifier = Modifier.weight(1f)
                             )
                             TeacherStatCard(
                                 title = "اختبارات رسمية",
-                                count = "${stats?.officialExamsCount ?: 0}",
+                                count = formatVerifiedCount(stats?.officialExamsCount, stats != null),
                                 icon = "📑",
                                 color = WarmAmber,
                                 modifier = Modifier.weight(1f)
                             )
                             TeacherStatCard(
                                 title = "إجابات معتمدة",
-                                count = "${stats?.teacherAnswersCount ?: 0}",
+                                count = formatVerifiedCount(stats?.teacherAnswersCount, stats != null),
                                 icon = "⭐",
                                 color = EmeraldGreen,
                                 modifier = Modifier.weight(1f)
