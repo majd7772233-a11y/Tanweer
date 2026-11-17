@@ -45,10 +45,11 @@ fun CommunityDecisionsScreen(
 
     var selectedFilter by remember { mutableStateOf("ALL") } // "ALL", "PENDING", "COMPLETED"
 
+    val scopedDecisions = itemsForSnapshotScope(decisions, snapshotGroupId, activeGroupId)
     val filteredList = when (selectedFilter) {
-        "PENDING" -> decisions.filter { it.status == "PENDING" }
-        "COMPLETED" -> decisions.filter { it.status != "PENDING" }
-        else -> decisions
+        "PENDING" -> scopedDecisions.filter { it.status == "PENDING" }
+        "COMPLETED" -> scopedDecisions.filter { it.status != "PENDING" }
+        else -> scopedDecisions
     }
 
     LazyColumn(

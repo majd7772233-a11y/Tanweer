@@ -623,6 +623,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         groupMembersSourceGroupId = null
         groupCorrectionsRequestGeneration++
         groupCorrectionsSourceGroupId = null
+        _groupCorrectionsSnapshotGroupId.value = null
         communityDecisionsRequestGeneration++
         communityDecisionsSourceGroupId = null
         teacherDashboardRequestGeneration++
@@ -711,6 +712,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
             if (groupCorrectionsSourceGroupId != groupId) {
                 groupCorrectionsSourceGroupId = groupId
+                _groupCorrectionsSnapshotGroupId.value = null
                 _groupCorrections.value = emptyList()
             }
             val correctionsRequestId = ++groupCorrectionsRequestGeneration
@@ -722,6 +724,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                         .onSuccess { corrections ->
                             if (correctionsRequestId == groupCorrectionsRequestGeneration && getActiveGroupId() == groupId) {
                                 _groupCorrections.value = corrections
+                                _groupCorrectionsSnapshotGroupId.value = groupId
                             }
                         }
                         .onFailure { error ->
@@ -1569,6 +1572,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     @Volatile private var groupCorrectionsSourceGroupId: String? = null
     private val _groupCorrections = MutableStateFlow<List<ContentCorrectionItem>>(emptyList())
     val groupCorrections: StateFlow<List<ContentCorrectionItem>> = _groupCorrections.asStateFlow()
+    private val _groupCorrectionsSnapshotGroupId = MutableStateFlow<String?>(null)
+    val groupCorrectionsSnapshotGroupId: StateFlow<String?> = _groupCorrectionsSnapshotGroupId.asStateFlow()
     private val _groupCorrectionsError = MutableStateFlow<String?>(null)
     val groupCorrectionsError: StateFlow<String?> = _groupCorrectionsError.asStateFlow()
     private val _isGroupCorrectionsLoading = MutableStateFlow(false)
@@ -1787,12 +1792,14 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             groupCorrectionsRequestGeneration++
             groupCorrectionsSourceGroupId = null
             _groupCorrections.value = emptyList()
+            _groupCorrectionsSnapshotGroupId.value = null
             _groupCorrectionsError.value = "لا توجد شعبة نشطة لعرض طلبات التصويب."
             _isGroupCorrectionsLoading.value = false
             return
         }
         if (groupCorrectionsSourceGroupId != groupId) {
             groupCorrectionsSourceGroupId = groupId
+            _groupCorrectionsSnapshotGroupId.value = null
             _groupCorrections.value = emptyList()
         }
         val requestId = ++groupCorrectionsRequestGeneration
@@ -1804,6 +1811,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                     .onSuccess { list ->
                         if (requestId == groupCorrectionsRequestGeneration && groupCorrectionsSourceGroupId == groupId) {
                             _groupCorrections.value = list
+                            _groupCorrectionsSnapshotGroupId.value = groupId
                         }
                     }
                     .onFailure { error ->

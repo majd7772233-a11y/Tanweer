@@ -64,3 +64,10 @@ fun hasAuthoritativeGradeSnapshot(
 ): Boolean = selectedGradeId != null &&
     selectedGradeId == syncedGradeId &&
     hasAuthoritativeSnapshot(syncState)
+
+/** Hide retained rows until the current requested group has its own confirmed snapshot. */
+fun <T> itemsForSnapshotScope(
+    items: List<T>,
+    snapshotScopeId: String?,
+    requestedScopeId: String,
+): List<T> = if (isSnapshotForScope(snapshotScopeId, requestedScopeId)) items else emptyList()

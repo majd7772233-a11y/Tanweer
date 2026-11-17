@@ -38,13 +38,22 @@ fun ModeratorDashboardScreen(
     viewModel: TanweerViewModel
 ) {
     val context = LocalContext.current
+    val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
+    val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId.orEmpty() }
     val dashboardData by viewModel.moderatorDashboard.collectAsStateWithLifecycle()
     val dashboardError by viewModel.moderatorDashboardError.collectAsStateWithLifecycle()
     val isDashboardLoading by viewModel.isModeratorDashboardLoading.collectAsStateWithLifecycle()
     val groupCorrections by viewModel.groupCorrections.collectAsStateWithLifecycle()
+    val groupCorrectionsSnapshotGroupId by viewModel.groupCorrectionsSnapshotGroupId.collectAsStateWithLifecycle()
+    val hasGroupCorrectionsSnapshot = isSnapshotForScope(groupCorrectionsSnapshotGroupId, activeGroupId)
+    val scopedGroupCorrections = itemsForSnapshotScope(groupCorrections, groupCorrectionsSnapshotGroupId, activeGroupId)
     val groupCorrectionsError by viewModel.groupCorrectionsError.collectAsStateWithLifecycle()
     val isGroupCorrectionsLoading by viewModel.isGroupCorrectionsLoading.collectAsStateWithLifecycle()
     val communityDecisions by viewModel.communityDecisions.collectAsStateWithLifecycle()
+    val communityDecisionsSnapshotGroupId by viewModel.communityDecisionsSnapshotGroupId.collectAsStateWithLifecycle()
+    val hasCommunityDecisionsSnapshot = isSnapshotForScope(communityDecisionsSnapshotGroupId, activeGroupId)
+    val scopedCommunityDecisions = itemsForSnapshotScope(communityDecisions, communityDecisionsSnapshotGroupId, activeGroupId)
     val communityDecisionsError by viewModel.communityDecisionsError.collectAsStateWithLifecycle()
     val isCommunityDecisionsLoading by viewModel.isCommunityDecisionsLoading.collectAsStateWithLifecycle()
     val groupMembers by viewModel.groupMembersState.collectAsStateWithLifecycle()
@@ -116,9 +125,9 @@ fun ModeratorDashboardScreen(
                         IconButton(
                             onClick = {
                                 viewModel.loadModeratorDashboard()
-                                viewModel.loadGroupCorrections()
-                                viewModel.loadCommunityDecisions()
-                                viewModel.loadGroupMembers()
+                                viewModel.loadGroupCorrections(activeGroupId)
+                                viewModel.loadCommunityDecisions(activeGroupId)
+                                viewModel.loadGroupMembers(activeGroupId)
                             },
                             enabled = !(isDashboardLoading || isGroupCorrectionsLoading || isCommunityDecisionsLoading || isGroupMembersLoading),
                             modifier = Modifier
@@ -140,7 +149,7 @@ fun ModeratorDashboardScreen(
                     val stats = dashboardData?.stats
                     // Schedule proposals already exist as unified community decisions.
                     // Count each record once instead of counting both backing tables.
-                    val totalDecisionsAndProposals = communityDecisions.count { it.status == "PENDING" }
+                    val totalDecisionsAndProposals = scopedCommunityDecisions.count { it.status == "PENDING" }
                     if (dashboardData != null) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -148,14 +157,14 @@ fun ModeratorDashboardScreen(
                         ) {
                             TeacherStatCard(
                                 title = "تصويبات معلقة",
-                                count = if (groupCorrectionsError.isNullOrBlank() && !isGroupCorrectionsLoading) "${stats?.pendingCorrectionsCount ?: groupCorrections.count { it.status == "PENDING" }}" else "—",
+                                count = if (hasGroupCorrectionsSnapshot && groupCorrectionsError.isNullOrBlank() && !isGroupCorrectionsLoading) "${stats?.pendingCorrectionsCount ?: scopedGroupCorrections.count { it.status == "PENDING" }}" else "—",
                                 icon = "✍️",
                                 color = WarmAmber,
                                 modifier = Modifier.weight(1f)
                             )
                             TeacherStatCard(
                                 title = "قرارات وجدول",
-                                count = if (communityDecisionsError.isNullOrBlank() && !isCommunityDecisionsLoading) "$totalDecisionsAndProposals" else "—",
+                                count = if (hasCommunityDecisionsSnapshot && communityDecisionsError.isNullOrBlank() && !isCommunityDecisionsLoading) "$totalDecisionsAndProposals" else "—",
                                 icon = "🗳️",
                                 color = EmeraldGreen,
                                 modifier = Modifier.weight(1f)
@@ -193,7 +202,7 @@ fun ModeratorDashboardScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("تعذر تحميل طلبات التصويب", color = WarmAmber, fontWeight = FontWeight.Bold)
                         Text(groupCorrectionsError ?: "", color = TextSecondary, fontSize = tanweerTextSize(11f))
-                        GlassButton(text = "إعادة محاولة التصويبات", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadGroupCorrections() })
+                        GlassButton(text = "إعادة محاولة التصويبات", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadGroupCorrections(activeGroupId) })
                     }
                 }
             }
@@ -204,7 +213,7 @@ fun ModeratorDashboardScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("تعذر تحميل القرارات الجماعية", color = WarmAmber, fontWeight = FontWeight.Bold)
                         Text(communityDecisionsError ?: "", color = TextSecondary, fontSize = tanweerTextSize(11f))
-                        GlassButton(text = "إعادة محاولة القرارات", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadCommunityDecisions() })
+                        GlassButton(text = "إعادة محاولة القرارات", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadCommunityDecisions(activeGroupId) })
                     }
                 }
             }
@@ -226,7 +235,7 @@ fun ModeratorDashboardScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("تعذر تحميل أعضاء الشعبة", color = WarmAmber, fontWeight = FontWeight.Bold)
                         Text(groupMembersError ?: "", color = TextSecondary, fontSize = tanweerTextSize(11f))
-                        GlassButton(text = "إعادة محاولة الأعضاء", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadGroupMembers() })
+                        GlassButton(text = "إعادة محاولة الأعضاء", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadGroupMembers(activeGroupId) })
                     }
                 }
             }
@@ -273,18 +282,19 @@ fun ModeratorDashboardScreen(
         when (selectedSection) {
             0 -> {
                 // Corrections Queue
-                val pending = groupCorrections.filter { it.status == "PENDING" }
-                if (isGroupCorrectionsLoading && pending.isEmpty()) {
+                val pending = scopedGroupCorrections.filter { it.status == "PENDING" }
+                if (pending.isEmpty() && !hasGroupCorrectionsSnapshot) {
                     item {
-                        GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                            Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = CyanAccent)
-                                Text("جارٍ تحميل طلبات التصويب...", color = TextSecondary)
+                        PendingSyncEmptyState(
+                            dataLabel = "طلبات تصويب الشعبة",
+                            syncState = when {
+                                isGroupCorrectionsLoading -> com.magd.tanweer.data.model.SyncState.Loading
+                                !groupCorrectionsError.isNullOrBlank() -> com.magd.tanweer.data.model.SyncState.Error(groupCorrectionsError ?: "تعذر تحميل التصويبات", false)
+                                else -> com.magd.tanweer.data.model.SyncState.Idle
                             }
-                        }
+                        )
                     }
-                }
-                if (pending.isEmpty() && !isGroupCorrectionsLoading && groupCorrectionsError.isNullOrBlank()) {
+                } else if (pending.isEmpty() && groupCorrectionsError.isNullOrBlank()) {
                     item {
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                             Column(
@@ -329,7 +339,7 @@ fun ModeratorDashboardScreen(
 
             1 -> {
                 // One authoritative list: schedule proposals are filtered from community_decisions.
-                val decisions = communityDecisions
+                val decisions = scopedCommunityDecisions
                 val scheduleDecisions = decisions.filter {
                     it.requestType == "SCHEDULE" || it.requestType == "SCHEDULE_CHANGE"
                 }
@@ -377,17 +387,18 @@ fun ModeratorDashboardScreen(
                     else -> decisions.size
                 }
 
-                if (isCommunityDecisionsLoading && visibleCount == 0) {
+                if (visibleCount == 0 && !hasCommunityDecisionsSnapshot) {
                     item {
-                        GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                            Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = CyanAccent)
-                                Text("جارٍ تحميل القرارات...", color = TextSecondary)
+                        PendingSyncEmptyState(
+                            dataLabel = "قرارات الشعبة",
+                            syncState = when {
+                                isCommunityDecisionsLoading -> com.magd.tanweer.data.model.SyncState.Loading
+                                !communityDecisionsError.isNullOrBlank() -> com.magd.tanweer.data.model.SyncState.Error(communityDecisionsError ?: "تعذر تحميل القرارات", false)
+                                else -> com.magd.tanweer.data.model.SyncState.Idle
                             }
-                        }
+                        )
                     }
-                }
-                if (visibleCount == 0 && !isCommunityDecisionsLoading && communityDecisionsError.isNullOrBlank()) {
+                } else if (visibleCount == 0 && communityDecisionsError.isNullOrBlank()) {
                     item {
                         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                             Column(

@@ -7,6 +7,7 @@ import com.magd.tanweer.ui.components.aggregateSyncStates
 import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
 import com.magd.tanweer.ui.components.syncStateForScope
 import com.magd.tanweer.ui.components.isSnapshotForScope
+import com.magd.tanweer.ui.components.itemsForSnapshotScope
 import com.magd.tanweer.ui.components.hasAuthoritativeGradeSnapshot
 import com.magd.tanweer.ui.components.shouldShowConfirmedEmptyState
 import com.magd.tanweer.ui.components.shouldShowConfirmedGradeEmptyState
@@ -156,6 +157,17 @@ class PhaseFourUiPolicyTest {
         assertFalse(hasAuthoritativeGradeSnapshot(10, 10, SyncState.OfflineCached(lastSyncedAt = 100L)))
     }
 
+
+
+    @Test
+    fun list_rows_are_visible_only_for_the_matching_group_snapshot() {
+        val rows = listOf("decision-a", "decision-b")
+
+        assertEquals(rows, itemsForSnapshotScope(rows, "group-a", "group-a"))
+        assertTrue(itemsForSnapshotScope(rows, "group-a", "group-b").isEmpty())
+        assertTrue(itemsForSnapshotScope(rows, null, "group-a").isEmpty())
+        assertTrue(itemsForSnapshotScope(rows, "group-a", "").isEmpty())
+    }
 
     @Test
     fun schedule_metadata_and_proposals_are_hidden_until_their_group_snapshot_matches() {
