@@ -723,3 +723,28 @@ describe('Owner Dashboard authoritative loading and empty states', () => {
     expect(script).not.toContain('catch (e) {}');
   });
 });
+
+
+describe('Owner Dashboard mutation acknowledgement', () => {
+  it('does not announce account or session mutation success without server acknowledgement', async () => {
+    const html = await (await renderDashboardHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    const guarded = [
+      'async function disableUser',
+      'async function enableUser',
+      'async function revokeSessions',
+      'async function revokeSingleSession',
+      'async function revokeUserAllSessionsFromModal',
+      'async function rejectRequest'
+    ];
+    for (const marker of guarded) {
+      const start = script.indexOf(marker);
+      expect(start).toBeGreaterThanOrEqual(0);
+      const tail = script.slice(start, start + 1800);
+      expect(tail).toContain('if (!res.ok || data?.success !== true)');
+    }
+    expect(script).toContain('if (res.ok && data?.success === true)');
+    expect(script).toContain("dashboardResponseMessage(data, 'تعذر تجميد الحساب')");
+    expect(script).toContain("dashboardResponseMessage(data, 'تعذر رفض طلب الترقية')");
+  });
+});

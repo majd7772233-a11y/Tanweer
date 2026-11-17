@@ -4667,6 +4667,10 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ sessionId })
         });
         const data = await res.json();
+        if (!res.ok || data?.success !== true) {
+          alert(dashboardResponseMessage(data, 'تعذر إنهاء الجلسة'));
+          return;
+        }
         showToast(data.message || 'تم إنهاء الجلسة بنجاح');
         openUserDetailModal(userId);
         loadStats();
@@ -4680,6 +4684,10 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/users/\${activeUserId}/revoke-sessions\`, { method: 'POST' });
         const data = await res.json();
+        if (!res.ok || data?.success !== true) {
+          alert(dashboardResponseMessage(data, 'تعذر إنهاء جميع جلسات المستخدم'));
+          return;
+        }
         showToast(data.message || 'تم إنهاء جميع الجلسات');
         openUserDetailModal(activeUserId);
         loadStats();
@@ -4918,13 +4926,13 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ newRole, reason })
         });
         const data = await res.json();
-        if (data.success) {
+        if (res.ok && data?.success === true) {
           closeRoleModal();
           showToast(data.message);
           loadUsers();
           loadStats();
         } else {
-          alert(data.message || 'فشلت العملية');
+          alert(dashboardResponseMessage(data, 'فشلت العملية'));
         }
       } catch (e) {
         alert('حدث خطأ');
@@ -4936,6 +4944,10 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId + '/disable', { method: 'POST' });
         const data = await res.json();
+        if (!res.ok || data?.success !== true) {
+          alert(dashboardResponseMessage(data, 'تعذر تجميد الحساب'));
+          return;
+        }
         showToast(data.message || 'تم تجميد الحساب بنجاح');
         loadUsers();
         loadStats();
@@ -4948,6 +4960,10 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId + '/enable', { method: 'POST' });
         const data = await res.json();
+        if (!res.ok || data?.success !== true) {
+          alert(dashboardResponseMessage(data, 'تعذر تنشيط الحساب'));
+          return;
+        }
         showToast(data.message || 'تم تنشيط الحساب بنجاح');
         loadUsers();
         loadStats();
@@ -4961,6 +4977,10 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId + '/revoke-sessions', { method: 'POST' });
         const data = await res.json();
+        if (!res.ok || data?.success !== true) {
+          alert(dashboardResponseMessage(data, 'تعذر إنهاء جلسات المستخدم'));
+          return;
+        }
         showToast(data.message || 'تم إنهاء الجلسات');
         loadStats();
       } catch (e) {
@@ -5025,7 +5045,7 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/role-requests/' + encodeURIComponent(id) + '/approve', { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (res.ok && data?.success === true) {
           currentGeneratedCode = data.code;
           document.getElementById('generatedCodeDisplay').textContent = data.code;
           document.getElementById('codeModalSub').textContent = \`تم اعتماد ترقية \${data.applicantName} إلى \${data.targetRole}\`;
@@ -5041,7 +5061,7 @@ export function renderDashboardHtml(): Response {
           loadRequests();
           loadStats();
         } else {
-          alert(data.message || 'فشلت العملية');
+          alert(dashboardResponseMessage(data, 'فشلت العملية'));
         }
       } catch (e) {
         alert('حدث خطأ');
@@ -5067,6 +5087,10 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ reason })
         });
         const data = await res.json();
+        if (!res.ok || data?.success !== true) {
+          alert(dashboardResponseMessage(data, 'تعذر رفض طلب الترقية'));
+          return;
+        }
         showToast(data.message || 'تم رفض الطلب');
         loadRequests();
         loadStats();
@@ -5598,13 +5622,13 @@ export function renderDashboardHtml(): Response {
           })
         });
         const data = await res.json();
-        if (data.success) {
+        if (res.ok && data?.success === true) {
           showToast(data.message || 'تم اعتماد وتثبيت الإجازة المدرسية بنجاح 🌴');
           closeHolidayModal();
           loadHolidays();
           loadStats();
         } else {
-          alert(data.message || 'فشلت عملية إنشاء الإجازة');
+          alert(dashboardResponseMessage(data, 'فشلت عملية إنشاء الإجازة'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء إنشاء الإجازة');
@@ -5616,12 +5640,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/holidays/' + encodeURIComponent(id), { method: 'DELETE' });
         const data = await res.json();
-        if (data.success) {
+        if (res.ok && data?.success === true) {
           showToast(data.message || 'تم حذف الإجازة بنجاح');
           loadHolidays();
           loadStats();
         } else {
-          alert(data.message || 'فشل حذف الإجازة');
+          alert(dashboardResponseMessage(data, 'فشل حذف الإجازة'));
         }
       } catch (e) {
         alert('حدث خطأ');

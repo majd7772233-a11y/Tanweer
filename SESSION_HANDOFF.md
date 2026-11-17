@@ -264,3 +264,10 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Owner group selectors for schedules, chat and holiday creation report group-list failures instead of swallowing them. Missing schedule-slot and decision vote counts render an unknown marker rather than invented zero.
 - Added render-level regression assertions for failed versus empty user lists, stale overview status and visible group-selector failures.
 - This patch does not change owner authentication/authorization, role visibility, schema/migrations, Worker deployment, secrets, Production data or main. Validation must run on the exact new HEAD; previous CI on e155b5c does not validate this patch.
+
+
+## 2026-11-17 — Phase 4 Owner Dashboard mutation acknowledgement
+
+- Owner account freeze/enable, single/all session revocation, role request rejection, role change/approval and holiday creation/deletion now require both HTTP success and an explicit API success flag before showing success or refreshing dependent data.
+- Failed actions surface the server error message through the dashboard error helper and stop the success path. This is a client-side confirmation safeguard; server-side authorization remains authoritative and unchanged.
+- Regression assertions verify the account/session action handlers contain the explicit acknowledgement guard. CI validation is pending on the new commit.
