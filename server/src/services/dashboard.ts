@@ -2560,7 +2560,7 @@ export function renderLoginHtml(errorMessage?: string): Response {
           body: JSON.stringify({ secret })
         });
         const data = await res.json();
-        if (data.success) {
+        if (res.ok && data?.success === true) {
           window.location.href = '/dashboard';
         } else {
           errorDiv.textContent = data.message || 'مفتاح المالك السري غير صحيح';
@@ -4337,6 +4337,15 @@ export function renderDashboardHtml(): Response {
       return (errorMessage || serverMessage || fallback || 'تعذر إكمال الطلب').trim();
     }
 
+    function dashboardMutationSucceeded(response, data) {
+      return response?.ok === true && data?.success === true;
+    }
+
+    function dashboardMutationFailureMessage(response, data, fallback) {
+      if (response?.ok !== true && data?.success === true) return 'لم يؤكد الخادم نجاح العملية عبر HTTP؛ تحقق قبل إعادة المحاولة.';
+      return dashboardResponseMessage(data, fallback);
+    }
+
     function renderDashboardTableError(tbody, colspan, data, fallback, retryAction) {
       if (!tbody) return;
       const message = escapeHtml(dashboardResponseMessage(data, fallback));
@@ -4572,8 +4581,8 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId);
         const data = await res.json();
-        if (!data.success) {
-          alert(data.message || 'فشل جلب بيانات المستخدم');
+        if (!res.ok || data?.success !== true) {
+          alert(dashboardResponseMessage(data, 'فشل جلب بيانات المستخدم'));
           closeUserDetailModal();
           return;
         }
@@ -4667,8 +4676,8 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ sessionId })
         });
         const data = await res.json();
-        if (!res.ok || data?.success !== true) {
-          alert(dashboardResponseMessage(data, 'تعذر إنهاء الجلسة'));
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر إنهاء الجلسة'));
           return;
         }
         showToast(data.message || 'تم إنهاء الجلسة بنجاح');
@@ -4684,8 +4693,8 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/users/\${activeUserId}/revoke-sessions\`, { method: 'POST' });
         const data = await res.json();
-        if (!res.ok || data?.success !== true) {
-          alert(dashboardResponseMessage(data, 'تعذر إنهاء جميع جلسات المستخدم'));
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر إنهاء جميع جلسات المستخدم'));
           return;
         }
         showToast(data.message || 'تم إنهاء جميع الجلسات');
@@ -4709,14 +4718,14 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ type: 'RECOVERY_CODE', revokeExistingSessions })
         });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           resContainer.innerHTML = '<div style="color:var(--emerald); font-weight:bold; font-size:0.85rem; margin-bottom:0.4rem;">✓ تم إنشاء رمز استرداد دائم بنجاح.</div>' +
             '<div style="color:var(--text-sec); font-size:0.78rem; line-height:1.8;">حُفظت الرسالة التي تحتوي الرمز مشفرة داخل إشعارات حساب المستخدم. لن يظهر الرمز في لوحة الإدارة أو استجابة الخادم؛ يستطيع صاحب الحساب فقط عرضه من ملفه الشخصي بعد تسجيل الدخول.</div>' +
             '<div style="color:var(--amber); font-size:0.75rem; margin-top:0.35rem;">يبقى الرمز صالحاً حتى تغييره من المستخدم أو إلغائه من الإدارة.</div>';
           showToast('تم تسليم رمز الاسترداد إلى إشعارات حساب المستخدم');
           const resRefresh = await fetch('/api/dashboard/users/' + encodeURIComponent(activeUserId));
           const dataRefresh = await resRefresh.json();
-          if (dataRefresh.success) {
+          if (resRefresh.ok && dataRefresh?.success === true && Array.isArray(dataRefresh.sessions)) {
             const sBody = document.getElementById('udSessionsTableBody');
             const sessions = dataRefresh.sessions || [];
             if (sessions.length) {
@@ -4735,7 +4744,7 @@ export function renderDashboardHtml(): Response {
             }
           }
         } else {
-          resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">' + escapeHtml(data.message || 'فشلت عملية إصدار الرمز') + '</div>';
+          resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">' + escapeHtml(dashboardMutationFailureMessage(res, data, 'فشلت عملية إصدار الرمز')) + '</div>';
         }
       } catch (e) {
         resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
@@ -4755,11 +4764,11 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({})
         });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           resContainer.innerHTML = '<div style="color:var(--amber); font-size:0.85rem; font-weight:bold;">✓ ' + escapeHtml(data.message || 'تم إلغاء رمز الاسترداد') + '</div>';
           showToast('تم إلغاء رمز الاسترداد السابق');
         } else {
-          resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">' + escapeHtml(data.message || 'فشل إلغاء رمز الاسترداد') + '</div>';
+          resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">' + escapeHtml(dashboardMutationFailureMessage(res, data, 'فشل إلغاء رمز الاسترداد')) + '</div>';
         }
       } catch (error) {
         resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
@@ -4926,13 +4935,13 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ newRole, reason })
         });
         const data = await res.json();
-        if (res.ok && data?.success === true) {
+        if (dashboardMutationSucceeded(res, data)) {
           closeRoleModal();
           showToast(data.message);
           loadUsers();
           loadStats();
         } else {
-          alert(dashboardResponseMessage(data, 'فشلت العملية'));
+          alert(dashboardMutationFailureMessage(res, data, 'فشلت العملية'));
         }
       } catch (e) {
         alert('حدث خطأ');
@@ -4944,8 +4953,8 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId + '/disable', { method: 'POST' });
         const data = await res.json();
-        if (!res.ok || data?.success !== true) {
-          alert(dashboardResponseMessage(data, 'تعذر تجميد الحساب'));
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر تجميد الحساب'));
           return;
         }
         showToast(data.message || 'تم تجميد الحساب بنجاح');
@@ -4960,8 +4969,8 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId + '/enable', { method: 'POST' });
         const data = await res.json();
-        if (!res.ok || data?.success !== true) {
-          alert(dashboardResponseMessage(data, 'تعذر تنشيط الحساب'));
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر تنشيط الحساب'));
           return;
         }
         showToast(data.message || 'تم تنشيط الحساب بنجاح');
@@ -4977,8 +4986,8 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId + '/revoke-sessions', { method: 'POST' });
         const data = await res.json();
-        if (!res.ok || data?.success !== true) {
-          alert(dashboardResponseMessage(data, 'تعذر إنهاء جلسات المستخدم'));
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر إنهاء جلسات المستخدم'));
           return;
         }
         showToast(data.message || 'تم إنهاء الجلسات');
@@ -5045,7 +5054,7 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/role-requests/' + encodeURIComponent(id) + '/approve', { method: 'POST' });
         const data = await res.json();
-        if (res.ok && data?.success === true) {
+        if (dashboardMutationSucceeded(res, data)) {
           currentGeneratedCode = data.code;
           document.getElementById('generatedCodeDisplay').textContent = data.code;
           document.getElementById('codeModalSub').textContent = \`تم اعتماد ترقية \${data.applicantName} إلى \${data.targetRole}\`;
@@ -5061,7 +5070,7 @@ export function renderDashboardHtml(): Response {
           loadRequests();
           loadStats();
         } else {
-          alert(dashboardResponseMessage(data, 'فشلت العملية'));
+          alert(dashboardMutationFailureMessage(res, data, 'فشلت العملية'));
         }
       } catch (e) {
         alert('حدث خطأ');
@@ -5087,8 +5096,8 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ reason })
         });
         const data = await res.json();
-        if (!res.ok || data?.success !== true) {
-          alert(dashboardResponseMessage(data, 'تعذر رفض طلب الترقية'));
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر رفض طلب الترقية'));
           return;
         }
         showToast(data.message || 'تم رفض الطلب');
@@ -5188,11 +5197,11 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/contents/' + encodeURIComponent(contentId) + '/pin', { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast(data.isPinned ? 'تم تثبيت الدرس بنجاح 📌' : 'تم إلغاء تثبيت الدرس بنجاح');
           loadContents(pagination.contents.offset);
         } else {
-          alert(data.message || 'فشل تحديث حالة التثبيت');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل تحديث حالة التثبيت'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -5209,8 +5218,8 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/contents/' + encodeURIComponent(contentId));
         const data = await res.json();
-        if (!data.success) {
-          alert(data.message || 'فشل جلب تفاصيل الدرس');
+        if (!res.ok || data?.success !== true) {
+          alert(dashboardResponseMessage(data, 'فشل جلب تفاصيل الدرس'));
           closeContentDetailModal();
           return;
         }
@@ -5412,13 +5421,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/homeworks/' + encodeURIComponent(hwId), { method: 'DELETE' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم حذف الواجب بنجاح');
           closeHomeworkDetailModal();
           loadHomeworks(pagination.homeworks.offset);
           loadStats();
         } else {
-          alert(data.message || 'فشل حذف الواجب');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل حذف الواجب'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -5483,12 +5492,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/exams/' + encodeURIComponent(examId), { method: 'DELETE' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم حذف الاختبار بنجاح');
           loadExams(pagination.exams.offset);
           loadStats();
         } else {
-          alert(data.message || 'فشل حذف الاختبار');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل حذف الاختبار'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -5622,13 +5631,13 @@ export function renderDashboardHtml(): Response {
           })
         });
         const data = await res.json();
-        if (res.ok && data?.success === true) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast(data.message || 'تم اعتماد وتثبيت الإجازة المدرسية بنجاح 🌴');
           closeHolidayModal();
           loadHolidays();
           loadStats();
         } else {
-          alert(dashboardResponseMessage(data, 'فشلت عملية إنشاء الإجازة'));
+          alert(dashboardMutationFailureMessage(res, data, 'فشلت عملية إنشاء الإجازة'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء إنشاء الإجازة');
@@ -5640,12 +5649,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/holidays/' + encodeURIComponent(id), { method: 'DELETE' });
         const data = await res.json();
-        if (res.ok && data?.success === true) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast(data.message || 'تم حذف الإجازة بنجاح');
           loadHolidays();
           loadStats();
         } else {
-          alert(dashboardResponseMessage(data, 'فشل حذف الإجازة'));
+          alert(dashboardMutationFailureMessage(res, data, 'فشل حذف الإجازة'));
         }
       } catch (e) {
         alert('حدث خطأ');
@@ -5761,6 +5770,23 @@ export function renderDashboardHtml(): Response {
       const container = document.getElementById('weeklyScheduleGridContainer');
       const titleElem = document.getElementById('weeklyGridGroupTitle');
       const tableBody = document.getElementById('weeklyGridTableBody');
+      const renderLoadError = message => {
+        if (!tableBody) return;
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 8;
+        cell.setAttribute('role', 'alert');
+        cell.style.cssText = 'text-align:center; color:var(--ruby); padding:1rem;';
+        cell.textContent = message;
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'action-btn';
+        retry.textContent = 'إعادة المحاولة';
+        retry.addEventListener('click', () => viewWeeklyGrid(groupId, groupName));
+        cell.append(document.createTextNode(' '), retry);
+        row.appendChild(cell);
+        tableBody.replaceChildren(row);
+      };
       if (titleElem) titleElem.textContent = 'الجدول الأسبوعي المعتمد: ' + groupName;
       if (tableBody) tableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;">جاري جلب وتوزيع حصص الأسبوع...</td></tr>';
       container.style.display = 'block';
@@ -5769,7 +5795,14 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/schedules?groupId=' + encodeURIComponent(groupId));
         const data = await res.json();
-        const slots = data.slots || [];
+        if (!res.ok || data?.success !== true || !Array.isArray(data.slots)) {
+          const message = !res.ok && data?.success === true
+            ? 'تعذر تأكيد تحميل الجدول من الخادم.'
+            : dashboardResponseMessage(data, 'تعذر تحميل الحصص الأسبوعية');
+          renderLoadError(message);
+          return;
+        }
+        const slots = data.slots;
         const days = [
           { key: 0, name: 'الأحد' },
           { key: 1, name: 'الإثنين' },
@@ -5797,7 +5830,7 @@ export function renderDashboardHtml(): Response {
 
         tableBody.innerHTML = rowsHtml;
       } catch (e) {
-        tableBody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--ruby);">فشل تحميل الحصص الأسبوعية</td></tr>';
+        renderLoadError('تعذر الاتصال بالخادم لتحميل الحصص الأسبوعية.');
       }
     }
 
@@ -5811,12 +5844,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/schedules/' + encodeURIComponent(groupId) + '/reset', { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم تصفير جدول الشعبة بنجاح ⚠️');
           closeWeeklyGrid();
           loadSchedules();
         } else {
-          alert(data.message || 'فشل تصفير الجدول');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل تصفير الجدول'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -5883,11 +5916,11 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/decisions/' + encodeURIComponent(id) + '/apply', { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم اعتماد القرار وتطبيقه بنجاح ✅');
           loadDecisions();
         } else {
-          alert(data.message || 'فشل تطبيق القرار');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل تطبيق القرار'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -5899,11 +5932,11 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/decisions/' + encodeURIComponent(id) + '/reject', { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم رفض القرار وإغلاقه');
           loadDecisions();
         } else {
-          alert(data.message || 'فشل رفض القرار');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل رفض القرار'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -6017,12 +6050,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/chat-messages/' + encodeURIComponent(msgId), { method: 'DELETE' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم حذف الرسالة بنجاح');
           loadChatMessages(pagination.chat.offset);
           loadStats();
         } else {
-          alert(data.message || 'فشل حذف الرسالة');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل حذف الرسالة'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -6209,13 +6242,13 @@ export function renderDashboardHtml(): Response {
 
         if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'التحقق والمتابعة للمعاينة 🔒'; }
 
-        if (!data.success) {
+        if (!dashboardMutationSucceeded(res, data)) {
           currentPurgeSecret = '';
           if (errBox) {
             errBox.style.display = 'block';
             errBox.textContent = data.message || 'فشل التحقق من الرمز السري أو جلب المعاينة';
           } else {
-            alert(data.message || 'فشل التحقق من الرمز السري');
+            alert(dashboardMutationFailureMessage(res, data, 'فشل التحقق من الرمز السري'));
           }
           return;
         }
@@ -6313,19 +6346,35 @@ export function renderDashboardHtml(): Response {
           })
         });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
+          if (typeof data.newGeneration !== 'string' || !data.newGeneration.trim() ||
+              !Array.isArray(data.tablesPurged) || data.tablesPurged.length === 0) {
+            currentPurgeSecret = '';
+            if (execBtn) execBtn.textContent = 'تحقق من الحالة بتحديث الصفحة';
+            alert('استجابة الخادم لا تحتوي تأكيداً كاملاً لجيل البيانات والجداول. لا تعاود العملية قبل التحقق من الحالة.');
+            return;
+          }
           currentPurgeSecret = '';
-          const purgedCount = Array.isArray(data.tablesPurged) ? data.tablesPurged.length : (data.totalTables || 31);
+          const purgedCount = data.tablesPurged.length;
           alert(\`تم تصفير البيانات بنجاح!\nالجيل الجديد: \${data.newGeneration}\nتم تفريغ \${purgedCount} جدولاً.\`);
           closePurgeModal();
           window.location.reload();
         } else {
-          alert(data.message || 'فشلت عملية التصفير');
-          if (execBtn) { execBtn.disabled = false; execBtn.textContent = 'تأكيد التصفير الشامل والنهائي للنظام ⚠️'; }
+          const confirmationUncertain = !res.ok && res.status >= 500;
+          if (confirmationUncertain) {
+            currentPurgeSecret = '';
+            if (execBtn) execBtn.textContent = 'تحقق من الحالة بتحديث الصفحة';
+            alert('لم يصل تأكيد موثوق لنتيجة العملية. قد يكون الخادم أكملها قبل تعذر إرسال الرد؛ لا تعاود التنفيذ قبل تحديث الصفحة والتحقق من الحالة.');
+            return;
+          }
+          alert(dashboardMutationFailureMessage(res, data, 'فشلت العملية'));
+          if (execBtn) { execBtn.disabled = false; execBtn.textContent = 'تأكيد العملية النهائية للنظام'; }
         }
       } catch (e) {
-        alert('حدث خطأ أثناء تنفيذ عملية التصفير');
-        if (execBtn) { execBtn.disabled = false; execBtn.textContent = 'تأكيد التصفير الشامل والنهائي للنظام ⚠️'; }
+        currentPurgeSecret = '';
+        if (execBtn) execBtn.textContent = 'تحقق من الحالة بتحديث الصفحة';
+        alert('انقطع الاتصال قبل وصول تأكيد موثوق. قد تكون العملية اكتملت؛ لا تعاود التنفيذ قبل تحديث الصفحة والتحقق من جيل البيانات.');
+        // Keep the destructive action disabled until the result is explicitly checked.
       }
     }
 

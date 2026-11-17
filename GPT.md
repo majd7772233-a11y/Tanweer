@@ -2265,3 +2265,14 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Chat history payloads are checked against the requested group before persistence, and cancellation propagates. Arabic/English resources and a regression test were added. Re-run both CI workflows on the new HEAD.
 
 - Schedule proposal dialog retains a prior successful same-group snapshot after refresh failure but now surfaces the failure/offline status and explicitly labels the count as belonging to the last confirmed snapshot.
+
+
+### 2026-11-17 — Phase 4 Owner Dashboard acknowledgement and weekly-grid follow-up
+
+- **Branch / commit:** work/release-readiness / not yet committed (base 4502fb01a120e3ab8eb45c0170891173126004bd).
+- **Inspected:** Owner Dashboard inline action handlers and endpoint contracts; purge execution and preview; user detail/session refresh; weekly schedule detail loader; SQL Studio TNR-005; SearchScreen/ArabicSearchEngine TNR-011; remaining Android empty-state/sync-state routes.
+- **Changed:** Added the shared HTTP + API success guard across privileged owner actions. Added non-retryable handling for uncertain/incomplete destructive purge outcomes. Weekly schedule detail now validates status/shape and offers a same-group retry. Owner login and detail/session read paths now reject unsuccessful HTTP responses.
+- **Tests:** Expanded server/test/dashboard-fixes.test.ts for owner mutation acknowledgements, purge uncertainty, weekly-grid retry and login acknowledgement. Tests have not yet run.
+- **CI:** Not yet run on this pending patch. Trigger and verify Android + Server CI from PR #6 against the exact pushed SHA. Previous runs 44098040628 / 44098040625 validate only the earlier source checkpoint.
+- **Risks / limitations:** Phase 4 is not closed. Browser keyboard/screen-reader acceptance and physical-device/Staging acceptance are not claimed. TNR-010 stays deferred until before first public release.
+- **Next step:** Review diff/tests and docs, commit with SESSION_HANDOFF.md and audit report, push to work/release-readiness, then verify both CI workflows and refresh this log with the committed checkpoint.

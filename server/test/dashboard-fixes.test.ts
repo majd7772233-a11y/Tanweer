@@ -14,6 +14,7 @@ import {
   handleDashboardCreateHoliday,
   handleGetDashboardUsers,
   renderDashboardHtml,
+  renderLoginHtml,
 } from '../src/services/dashboard';
 import { Env } from '../src/env';
 import { hashString } from '../src/lib/crypto';
@@ -741,10 +742,84 @@ describe('Owner Dashboard mutation acknowledgement', () => {
       const start = script.indexOf(marker);
       expect(start).toBeGreaterThanOrEqual(0);
       const tail = script.slice(start, start + 1800);
-      expect(tail).toContain('if (!res.ok || data?.success !== true)');
+      expect(tail).toContain('dashboardMutationSucceeded(res, data)');
     }
+    expect(script).toContain('function dashboardMutationSucceeded(response, data)');
+    expect(script).toContain("dashboardMutationFailureMessage(res, data, 'تعذر تجميد الحساب')");
+    expect(script).toContain("dashboardMutationFailureMessage(res, data, 'تعذر رفض طلب الترقية')");
+  });
+});
+
+describe('Owner Dashboard mutation acknowledgement coverage', () => {
+  async function dashboardScript() {
+    const html = await (await renderDashboardHtml()).text();
+    return html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+  }
+
+  it('requires HTTP success and an explicit API success flag for every owner mutation', async () => {
+    const script = await dashboardScript();
+    expect(script).toContain('return response?.ok === true && data?.success === true;');
+
+    const actions = [
+      'reissueUserCredentialsFromModal',
+      'revokeUserRecoveryCodeFromModal',
+      'submitRoleChange',
+      'approveRequest',
+      'togglePinContent',
+      'deleteHomework',
+      'deleteExam',
+      'submitCreateHoliday',
+      'deleteHoliday',
+      'resetSchedule',
+      'applyDecision',
+      'rejectDecision',
+      'deleteChatMessage',
+      'submitPurgeStage1',
+      'executePurgeFinal'
+    ];
+
+    for (const name of actions) {
+      const start = script.indexOf('async function ' + name + '(');
+      expect(start, 'missing owner action ' + name).toBeGreaterThanOrEqual(0);
+      const next = script.indexOf('\n    async function ', start + 1);
+      const action = script.slice(start, next >= 0 ? next : script.length);
+      expect(action, name + ' must validate both acknowledgement layers')
+        .toContain('dashboardMutationSucceeded(res, data)');
+    }
+  });
+
+  it('does not immediately retry a system purge when the server outcome is uncertain', async () => {
+    const script = await dashboardScript();
+    const start = script.indexOf('async function executePurgeFinal()');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const next = script.indexOf('\n    async function logout()', start + 1);
+    const action = script.slice(start, next >= 0 ? next : script.length);
+    expect(action).toContain('const confirmationUncertain = !res.ok && res.status >= 500');
+    expect(action).toContain('!Array.isArray(data.tablesPurged)');
+    expect(action).toContain('currentPurgeSecret = \'\';');
+    const catchStart = action.lastIndexOf('} catch (e) {');
+    expect(catchStart).toBeGreaterThanOrEqual(0);
+    expect(action.slice(catchStart)).not.toContain('execBtn.disabled = false');
+  });
+});
+describe('Owner Dashboard weekly schedule snapshot feedback', () => {
+  it('does not render an empty weekly grid from a failed or malformed response', async () => {
+    const html = await (await renderDashboardHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    const start = script.indexOf('async function viewWeeklyGrid(');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const next = script.indexOf('\n    function closeWeeklyGrid()', start + 1);
+    const action = script.slice(start, next >= 0 ? next : script.length);
+
+    expect(action).toContain('!res.ok || data?.success !== true || !Array.isArray(data.slots)');
+    expect(action).toContain('renderLoadError(message)');
+    expect(action).toContain("retry.addEventListener('click', () => viewWeeklyGrid(groupId, groupName))");
+    expect(action).not.toContain('const slots = data.slots || []');
+  });
+
+  it('only navigates into the owner dashboard after an HTTP-confirmed login response', async () => {
+    const html = await (await renderLoginHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
     expect(script).toContain('if (res.ok && data?.success === true)');
-    expect(script).toContain("dashboardResponseMessage(data, 'تعذر تجميد الحساب')");
-    expect(script).toContain("dashboardResponseMessage(data, 'تعذر رفض طلب الترقية')");
   });
 });

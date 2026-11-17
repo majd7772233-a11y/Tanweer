@@ -331,3 +331,18 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Owner account freeze/enable, single/all session revocation, role request rejection, role change/approval and holiday creation/deletion now require both HTTP success and an explicit API success flag before showing success or refreshing dependent data.
 - Failed actions surface the server error message through the dashboard error helper and stop the success path. This is a client-side confirmation safeguard; server-side authorization remains authoritative and unchanged.
 - Regression assertions verify the account/session action handlers contain the explicit acknowledgement guard. CI validation is pending on the new commit.
+
+
+## 2026-11-17 — Phase 4 Owner Dashboard operation and schedule-grid hardening
+
+- **Base branch / commit:** work/release-readiness / 4502fb01a120e3ab8eb45c0170891173126004bd. Changes below are prepared in the local worktree and are not committed yet.
+- **Owner mutation acknowledgement:** Added one shared client-side policy requiring response.ok === true and data.success === true. Applied it to account/session actions, credential issue/revocation, role change/approval/rejection, content pinning, homework/exam deletion, holiday create/delete, schedule reset, decision apply/reject, chat deletion, purge preview and purge execution. Error messages now prefer server details and do not reuse an HTTP-success body as proof of an HTTP-confirmed operation.
+- **Destructive purge uncertainty:** Final purge now requires a non-empty newGeneration and a non-empty tablesPurged list before displaying success. HTTP 5xx, connection loss, or an incomplete success payload clear the in-memory secret and leave the destructive action disabled with explicit guidance to refresh and inspect the generation before any retry.
+- **Owner schedule grid:** The weekly schedule detail view now validates HTTP status, API success and the slots array. Failure or malformed responses render an accessible error with a retry action scoped to the same group rather than a fabricated empty grid.
+- **Related read/login checks:** User/content detail reads now reject failed HTTP responses; session refresh after credential reissue requires a successful HTTP response and a valid sessions array; owner login navigation requires HTTP success plus API success.
+- **Regression tests:** Expanded server/test/dashboard-fixes.test.ts to cover the shared mutation guard, every remaining sensitive owner action, non-retryable ambiguous purge outcomes, weekly-grid error/retry behavior and HTTP-confirmed owner login.
+- **TNR-005 / TNR-011:** Re-read the current implementation and tests. The SQL Studio contract and committed-search history behavior remain correct; neither was reimplemented.
+- **Validation:** No local build/test was run, per the remote-CI workflow. Android and Server CI must be checked on the exact pushed SHA. The existing runs 44098040628 / 44098040625 validate the earlier e81ab42 code checkpoint only.
+- **Scope/safety:** No Android source, schema, migration, secret, Worker deployment, Staging/Production data, main, branch creation or PR merge was changed. PR #6 must remain open and Draft. TNR-010 remains deferred until before the first public release.
+- **Phase 4 status:** Still open. Do not close until the new SHA passes Android and Server CI and the remaining route/dashboard review is complete. Browser keyboard/screen-reader and real-device acceptance are not claimed.
+- **Next:** Inspect the final diff and regression test source, commit the code and this handoff update together on work/release-readiness, push, then verify both CI workflows on the resulting SHA.

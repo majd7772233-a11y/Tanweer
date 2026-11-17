@@ -903,3 +903,19 @@
 - نجاح Android/Server CI لا يعني اختباراً يدوياً على جهاز فعلي أو اختبار قبول على Staging.
 - لم يحدث دمج إلى `main` أو نشر Production أو تطبيق ترحيل Production أو تغيير أسرار في هذا checkpoint.
 - حافظ على كل تعديل كود مع تحديث `SESSION_HANDOFF.md` واختبارات الانحدار في commit نفسه.
+
+
+## 2026-11-17 — Phase 4 continuation: Owner mutation acknowledgements and operational route states
+
+- Re-established the live local/GitHub base before editing: work/release-readiness at 4502fb01a120e3ab8eb45c0170891173126004bd; main was not modified. The implementation is still uncommitted at this checkpoint.
+- Added a single Owner Dashboard acknowledgement predicate: a mutation is successful only when the HTTP response is successful and the JSON contract explicitly contains success === true.
+- Applied the predicate to the remaining privileged actions: recovery credential issue/revocation, role change and approval/rejection, content pinning, homework/exam deletion, holiday creation/deletion, schedule reset, decision apply/reject, chat-message deletion, purge preview and final purge. Existing account/session guards now use the same predicate.
+- Failure feedback reads the server error/message where available. A body claiming success === true cannot override a non-2xx HTTP status.
+- The final purge path validates the new generation and actual purged-table list before announcing success. An HTTP 5xx, lost connection or incomplete success payload is treated as an uncertain destructive outcome: the in-memory secret is cleared, the button remains disabled, and the user is told to refresh/check the generation rather than retry.
+- Found and fixed an Owner weekly-grid detail bug: a failed or malformed /api/dashboard/schedules?groupId=... response previously became a table of empty cells. The grid now validates the response and shows an accessible error plus same-group retry.
+- Owner login now navigates only after HTTP + API success. User/content detail reads and post-credential session refresh also validate the HTTP result and expected payload shape.
+- Regression coverage in server/test/dashboard-fixes.test.ts now checks the shared guard across owner actions, ambiguous purge protection, weekly-grid failure/retry and login acknowledgement. This is source/render-level regression coverage; it is not a browser keyboard or screen-reader acceptance test.
+- TNR-005 and TNR-011 were re-read on the current branch and remain implemented as documented; no reimplementation was made.
+- **Validation pending:** No local build or test was run. Android CI and Server CI must be triggered through PR #6 after pushing and verified against the exact resulting SHA. The earlier runs 44098040628 and 44098040625 validate the prior code checkpoint only.
+- **Phase 4 remains open.** This is not a closure report. Complete the final source/route review and require fresh CI before considering closure. Browser keyboard/screen-reader acceptance and physical-device/Staging tests remain unclaimed.
+- No Production/Staging Worker deployment, D1 migration/write, secret change, main update, branch creation or PR merge was performed. TNR-010 remains deferred by user decision until before first release.
