@@ -620,34 +620,77 @@ class TanweerRepository(
     }
 
     suspend fun syncProfile(): SyncResult = withContext(Dispatchers.IO) {
+        val requestedSession = db.userDao().getUserSync()
+            ?: return@withContext SyncResult.Error("لا توجد جلسة حساب نشطة للتحقق من الملف الشخصي")
+        val requestedUserId = requestedSession.id
+        val requestedToken = requestedSession.token
+        if (requestedUserId.isBlank() || requestedToken.isBlank()) {
+            return@withContext SyncResult.Error("بيانات الجلسة غير مكتملة؛ لم يتم تحديث الملف الشخصي")
+        }
+
         try {
             val res = api.getProfile()
-            if (res.isSuccessful && res.body()?.success == true && res.body()?.user != null) {
-                val user = res.body()!!.user!!
-                val currentToken = db.userDao().getUserSync()?.token ?: ""
-                db.userDao().insertUser(
-                    UserEntity(
-                        id = user.id,
-                        fullName = user.fullName,
-                        phoneNumber = user.phoneNumber,
-                        gradeId = user.gradeId,
-                        sectionId = user.sectionId,
-                        role = user.role,
-                        defaultGroupId = user.defaultGroupId,
-                        token = currentToken,
-                        lessonsCount = user.stats?.lessonsCount ?: 0,
-                        homeworksCount = user.stats?.homeworksCount ?: 0,
-                        issuesCount = user.stats?.issuesCount ?: 0,
-                        photosCount = user.stats?.photosCount ?: 0
-                    )
-                )
-                SyncResult.Success(1)
-            } else {
-                resolveHttpError(res, "أوفلاين: الملف الشخصي")
+            if (!res.isSuccessful) {
+                return@withContext resolveHttpError(res, "أوفلاين: الملف الشخصي")
             }
+
+            val body = res.body()
+            val user = body?.user
+            if (body?.success != true || user == null) {
+                return@withContext SyncResult.Error("استجابة الملف الشخصي غير مكتملة؛ احتُفظ بالبيانات المحلية")
+            }
+
+            val currentSession = db.userDao().getUserSync()
+            if (currentSession == null || !ProfileSnapshotPolicy.belongsToCurrentSession(
+                    requestedUserId = requestedUserId,
+                    requestedToken = requestedToken,
+                    responseUserId = user.id,
+                    currentUserId = currentSession.id,
+                    currentToken = currentSession.token
+                )
+            ) {
+                return@withContext SyncResult.Error("تغير الحساب أثناء جلب الملف الشخصي؛ تم تجاهل الاستجابة القديمة")
+            }
+
+            val stats = user.stats
+            if (!ProfileSnapshotPolicy.hasValidStats(stats)) {
+                return@withContext SyncResult.Error("إحصاءات الملف الشخصي غير موثوقة؛ احتُفظ بآخر لقطة محفوظة")
+            }
+
+            db.userDao().insertUser(
+                UserEntity(
+                    id = user.id,
+                    fullName = user.fullName,
+                    phoneNumber = user.phoneNumber,
+                    gradeId = user.gradeId,
+                    sectionId = user.sectionId,
+                    role = user.role,
+                    defaultGroupId = user.defaultGroupId,
+                    token = requestedToken,
+                    lessonsCount = stats!!.lessonsCount,
+                    homeworksCount = stats.homeworksCount,
+                    issuesCount = stats.issuesCount,
+                    photosCount = stats.photosCount
+                )
+            )
+            SyncResult.Success(1)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             resolveException(e, "أوفلاين: الملف الشخصي")
         }
+    }
+
+    /** Returns stored profile statistics only after syncProfile() succeeds. */
+    suspend fun getStoredProfileStats(userId: String): UserStats? = withContext(Dispatchers.IO) {
+        if (userId.isBlank()) return@withContext null
+        val session = db.userDao().getUserSync()?.takeIf { it.id == userId } ?: return@withContext null
+        UserStats(
+            lessonsCount = session.lessonsCount,
+            homeworksCount = session.homeworksCount,
+            issuesCount = session.issuesCount,
+            photosCount = session.photosCount
+        ).takeIf(ProfileSnapshotPolicy::hasValidStats)
     }
 
     suspend fun syncGroups(): SyncResult = withContext(Dispatchers.IO) {
