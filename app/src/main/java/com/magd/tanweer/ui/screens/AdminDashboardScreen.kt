@@ -94,7 +94,10 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
     val filteredStudents = remember(allStudents, searchQuery) {
         allStudents.filter { student -> student.matchesAdminSearch(searchQuery) }
     }
-    val totalStudents = dashboardData?.stats?.totalStudents ?: 0
+    val totalStudents = dashboardData?.stats?.totalStudents
+    val studentCountSummary = dashboardData?.let {
+        "${filteredStudents.size} / ${totalStudents?.toString() ?: "—"}"
+    } ?: "—"
 
     LazyColumn(
         modifier = Modifier
@@ -213,7 +216,7 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
                             fontWeight = FontWeight.Bold
                         )
                         GlassPill(
-                            text = "${filteredStudents.size} / $totalStudents",
+                            text = studentCountSummary,
                             color = CyanAccent,
                             bgColor = CyanAccent.copy(alpha = 0.12f)
                         )
@@ -294,7 +297,7 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
                     }
                 )
             }
-            if (totalStudents > allStudents.size) {
+            if (totalStudents != null && totalStudents > allStudents.size) {
                 item {
                     Text(
                         text = "يعرض الخادم أول ${allStudents.size} طالباً من أصل $totalStudents. استخدم البحث ضمن القائمة المحمّلة.",
