@@ -661,3 +661,33 @@ describe('Owner Dashboard responsive navigation and accessible controls', () => 
     expect(html).toContain('<label for="holidayReason">');
   });
 });
+
+
+describe('Owner Dashboard keyboard navigation semantics', () => {
+  it('renders every sidebar destination as a semantic, focusable button', async () => {
+    const response = renderDashboardHtml();
+    const html = await response.text();
+    const navStart = html.indexOf('<nav class="nav-links" id="dashboardNav">');
+    const navEnd = html.indexOf('</nav>', navStart);
+    const nav = html.slice(navStart, navEnd + 6);
+    const buttons = nav.match(/<button type="button" class="nav-item/g) || [];
+
+    expect(buttons).toHaveLength(17);
+    expect(nav).not.toContain('<div class="nav-item');
+    expect(nav).toContain('data-tab="overview"');
+    expect(nav).toContain('aria-controls="tab-overview"');
+    expect(nav).toContain('aria-current="page"');
+    expect(html).toContain('.nav-item:focus-visible');
+    expect(html).toContain('outline: 2px solid var(--cyan)');
+  });
+
+  it('updates the active navigation announcement when changing sections', async () => {
+    const response = renderDashboardHtml();
+    const html = await response.text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+
+    expect(script).toContain("el.removeAttribute('aria-current')");
+    expect(script).toContain("el.dataset.tab === tabId");
+    expect(script).toContain("activeNav.setAttribute('aria-current', 'page')");
+  });
+});

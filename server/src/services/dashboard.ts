@@ -2672,6 +2672,13 @@ export function renderDashboardHtml(): Response {
       overflow-y: auto;
     }
     .nav-item {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      text-align: right;
+      font-family: inherit;
       display: flex;
       align-items: center;
       gap: 0.75rem;
@@ -2682,6 +2689,12 @@ export function renderDashboardHtml(): Response {
       font-weight: 600;
       font-size: 0.85rem;
       transition: all 0.2s;
+    }
+    .nav-item:focus-visible,
+    .menu-toggle-btn:focus-visible,
+    .action-btn:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 2px;
     }
     .nav-item:hover {
       background: rgba(255, 255, 255, 0.04);
@@ -3002,58 +3015,58 @@ export function renderDashboardHtml(): Response {
     </div>
 
     <nav class="nav-links" id="dashboardNav">
-      <div class="nav-item active" onclick="switchTab('overview')">
+      <button type="button" class="nav-item active" data-tab="overview" aria-controls="tab-overview" aria-current="page" onclick="switchTab('overview')">
         <span>📊</span> <span>نظرة عامة والمنظومة</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('users')">
+      </button>
+      <button type="button" class="nav-item" data-tab="users" aria-controls="tab-users" onclick="switchTab('users')">
         <span>👥</span> <span>Users (المستخدمون)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('roles')">
+      </button>
+      <button type="button" class="nav-item" data-tab="roles" aria-controls="tab-roles" onclick="switchTab('roles')">
         <span>👑</span> <span>Roles (عرض الرتب)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('requests')">
+      </button>
+      <button type="button" class="nav-item" data-tab="requests" aria-controls="tab-requests" onclick="switchTab('requests')">
         <span>📋</span> <span>Role Requests (طلبات الترقية)</span>
         <span class="nav-badge" id="requestsBadge" style="display:none;">0</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('contents')">
+      </button>
+      <button type="button" class="nav-item" data-tab="contents" aria-controls="tab-contents" onclick="switchTab('contents')">
         <span>📚</span> <span>Lessons & Content (الدروس)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('homeworks')">
+      </button>
+      <button type="button" class="nav-item" data-tab="homeworks" aria-controls="tab-homeworks" onclick="switchTab('homeworks')">
         <span>📝</span> <span>Homework & Exams (الواجبات)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('events')">
+      </button>
+      <button type="button" class="nav-item" data-tab="events" aria-controls="tab-events" onclick="switchTab('events')">
         <span>🎪</span> <span>Events (الفعاليات المدرسية)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('holidays')">
+      </button>
+      <button type="button" class="nav-item" data-tab="holidays" aria-controls="tab-holidays" onclick="switchTab('holidays')">
         <span>🌴</span> <span>Holidays (الإجازات المعتمدة)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('issues')">
+      </button>
+      <button type="button" class="nav-item" data-tab="issues" aria-controls="tab-issues" onclick="switchTab('issues')">
         <span>❓</span> <span>Issues & Q&A (الاستفسارات)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('schedules')">
+      </button>
+      <button type="button" class="nav-item" data-tab="schedules" aria-controls="tab-schedules" onclick="switchTab('schedules')">
         <span>📅</span> <span>Schedules (جداول الحصص)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('decisions')">
+      </button>
+      <button type="button" class="nav-item" data-tab="decisions" aria-controls="tab-decisions" onclick="switchTab('decisions')">
         <span>🗳️</span> <span>Governance & Votes (القرارات)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('chat')">
+      </button>
+      <button type="button" class="nav-item" data-tab="chat" aria-controls="tab-chat" onclick="switchTab('chat')">
         <span>💬</span> <span>Live Chat (المحادثات الحية)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('corrections')">
+      </button>
+      <button type="button" class="nav-item" data-tab="corrections" aria-controls="tab-corrections" onclick="switchTab('corrections')">
         <span>✏️</span> <span>Corrections (طلبات التصحيح)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('groups')">
+      </button>
+      <button type="button" class="nav-item" data-tab="groups" aria-controls="tab-groups" onclick="switchTab('groups')">
         <span>🏫</span> <span>Groups (الشعب والنوادي)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('sql')">
+      </button>
+      <button type="button" class="nav-item" data-tab="sql" aria-controls="tab-sql" onclick="switchTab('sql')">
         <span>🛠️</span> <span>SQL Studio (استوديو البيانات)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('audit')">
+      </button>
+      <button type="button" class="nav-item" data-tab="audit" aria-controls="tab-audit" onclick="switchTab('audit')">
         <span>📜</span> <span>Audit Log (سجل العمليات)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('system')">
+      </button>
+      <button type="button" class="nav-item" data-tab="system" aria-controls="tab-system" onclick="switchTab('system')">
         <span>⚙️</span> <span>Security & System (الأمان والتصفير)</span>
-      </div>
+      </button>
     </nav>
 
     <div class="owner-info">
@@ -4240,9 +4253,15 @@ export function renderDashboardHtml(): Response {
     }
 
     function switchTab(tabId) {
-      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-      const activeNav = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes(tabId));
-      if (activeNav) activeNav.classList.add('active');
+      document.querySelectorAll('.nav-item').forEach(el => {
+        el.classList.remove('active');
+        el.removeAttribute('aria-current');
+      });
+      const activeNav = Array.from(document.querySelectorAll('.nav-item')).find(el => el.dataset.tab === tabId);
+      if (activeNav) {
+        activeNav.classList.add('active');
+        activeNav.setAttribute('aria-current', 'page');
+      }
 
       const tabs = [
         'overview', 'users', 'roles', 'teachers', 'moderators', 'admins', 'groups', 
