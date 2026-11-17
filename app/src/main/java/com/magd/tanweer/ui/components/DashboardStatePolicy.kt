@@ -122,3 +122,10 @@ fun aggregateRequiredSyncStates(states: List<SyncState>): SyncState {
         aggregate
     }
 }
+
+/** A search result set is confirmed empty only after a successful snapshot for its scope. */
+fun shouldShowConfirmedNoSearchResults(
+    query: String,
+    resultCount: Int,
+    syncState: SyncState,
+): Boolean = query.isNotBlank() && resultCount == 0 && hasAuthoritativeSnapshot(syncState)

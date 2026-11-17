@@ -2288,3 +2288,11 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Added localized Arabic/English resources for the local search result count and the latest-100 chat sync/retained-cache note.
 - Regression tests added for verified counts and Search aggregate states. git diff --check passes; Android CI is still required on the resulting SHA. No local build/test was run.
 - Phase 4 remains open pending fresh Android CI and final review. No staging/production/device acceptance is claimed. TNR-010 remains deferred until before release.
+
+### 2026-11-17 — Search no-match guard / Server security gate
+
+- SearchScreen only reports confirmed no-matches after SyncState.Success for the selected source scope. Offline, Loading/Refreshing, Idle and Error have distinct Arabic/English copy.
+- Added the shouldShowConfirmedNoSearchResults policy helper and regression tests for each state.
+- Android run 44140654341 passed on 75b3c5c1 (unit tests, Debug APK and artifact upload).
+- Server run 44140654335 stopped at npm audit due GHSA-fc5q-39xc-vjpf / CVE-2026-112366: picomatch <=4.0.7 in fdir/tinyglobby/Vite/Vitest dev tooling. npm registry currently tops out at picomatch 4.0.7; upstream PR 194 remains open/unmerged and does not resolve all repeated-extglob ReDoS cases. npm audit fix --force proposes a breaking Vitest/Vite downgrade, so no forced downgrade or audit bypass was made.
+- Phase 4 stays open until the dependency security path is properly resolved and Server CI plus a new Android CI run pass on the new SHA.

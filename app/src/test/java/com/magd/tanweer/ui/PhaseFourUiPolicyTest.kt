@@ -8,6 +8,7 @@ import com.magd.tanweer.ui.components.aggregateRequiredSyncStates
 import com.magd.tanweer.ui.components.formatVerifiedCount
 import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
 import com.magd.tanweer.ui.components.syncStateForScope
+import com.magd.tanweer.ui.components.shouldShowConfirmedNoSearchResults
 import com.magd.tanweer.ui.components.syncStateForDayScope
 import com.magd.tanweer.ui.components.shouldShowConfirmedCalendarEmpty
 import com.magd.tanweer.ui.components.hasAuthoritativeCalendarMonthSnapshot
@@ -302,5 +303,17 @@ class PhaseFourUiPolicyTest {
 
         val current = aggregateRequiredSyncStates(List(7) { success })
         assertTrue(hasAuthoritativeSnapshot(current))
+    }
+
+    @Test
+    fun search_no_results_requires_a_successful_snapshot_for_the_selected_scope() {
+        assertFalse(shouldShowConfirmedNoSearchResults("biology", 0, SyncState.Idle))
+        assertFalse(shouldShowConfirmedNoSearchResults("biology", 0, SyncState.Loading))
+        assertFalse(shouldShowConfirmedNoSearchResults("biology", 0, SyncState.Refreshing))
+        assertFalse(shouldShowConfirmedNoSearchResults("biology", 0, SyncState.OfflineCached()))
+        assertFalse(shouldShowConfirmedNoSearchResults("biology", 0, SyncState.Error("offline", true)))
+        assertFalse(shouldShowConfirmedNoSearchResults("", 0, SyncState.Success(100L)))
+        assertFalse(shouldShowConfirmedNoSearchResults("biology", 1, SyncState.Success(100L)))
+        assertTrue(shouldShowConfirmedNoSearchResults("biology", 0, SyncState.Success(100L)))
     }
 }

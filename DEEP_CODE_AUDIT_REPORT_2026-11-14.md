@@ -933,3 +933,15 @@
 - git diff --check passes. Android CI has not yet run on this follow-up. No local build/test was run. Server code is unchanged since the successful Server CI runs on c2385579.
 - Phase 4 remains open pending fresh CI on the new SHA and completion of the final review. Physical-device, screen-reader, keyboard and Staging acceptance are not claimed.
 - No schema/migration, backend, Worker, secret, Production/Staging data, main, branch or PR merge changes were made. PR #6 remains Draft/open; TNR-010 remains deferred by user decision.
+
+## 2026-11-17 — Search no-match verification and dependency security finding
+
+- On base 75b3c5c1dbf40e6692aa701e4352e90360097715, fixed one remaining SearchScreen false-empty claim: zero Room rows no longer imply that a nonblank query has no matches until the selected search source(s) have successful snapshots.
+- Loading/Refreshing, Idle and Error use separate localized messages; OfflineCached explicitly limits the statement to saved local data. Only successful scope sync can display the confirmed no-match message.
+- Added Arabic/English resources, the pure policy helper shouldShowConfirmedNoSearchResults, and regression coverage for all relevant SyncState variants.
+- Latest Android CI run 44140654341 on 75b3c5c1 passed unit tests, Debug assembly and Debug artifact upload.
+- Latest Server CI run 44140654335 failed before typecheck/tests/Wrangler at the dependency baseline step. npm audit reported GHSA-fc5q-39xc-vjpf / CVE-2026-112366 (picomatch <=4.0.7) through fdir/tinyglobby to Vite/Vitest. Current lock: picomatch 4.0.7, fdir 6.5.0, tinyglobby 0.2.17, Vite 8.3.5, Vitest 5.0.5. The npm registry currently has no picomatch version after 4.0.7; upstream PR 194 is open/unmerged and does not fix the general ReDoS, according to its own description.
+- npm's automatic --force proposal requires a major test-tool downgrade (Vitest 3.1.4 / Vite 6.2.7) and does not establish a verified full fix. No dependency downgrade, audit suppression or incomplete upstream patch was applied.
+- No Server files changed in the preceding search commit; this finding is in the transitive development toolchain, but the required CI security gate is still red.
+- **Phase 4 is not closed** until the dependency path has a complete reviewed remediation and Server CI passes on a fresh SHA. New follow-up also requires fresh Android CI on its own SHA. No real-device, screen-reader, keyboard or Staging acceptance is claimed.
+- No backend source, lockfile, schema/migration, Worker, secret, Staging/Production data, main, branch or PR merge changed in this follow-up. PR #6 remains Draft/open; TNR-010 remains deferred.

@@ -677,9 +677,26 @@ fun SearchScreen(
                 }
             }
 
-            // Empty State
+            // An empty local Room result is not a confirmed no-match until its source sync succeeds.
             if (totalResultsCount == 0) {
+                val confirmedNoResults = shouldShowConfirmedNoSearchResults(
+                    query = query,
+                    resultCount = totalResultsCount,
+                    syncState = searchSyncState
+                )
+
                 item {
+                    val emptyMessage = when {
+                        query.isBlank() -> stringResource(R.string.search_enter_query)
+                        confirmedNoResults -> stringResource(R.string.search_no_results_confirmed)
+                        searchSyncState is SyncState.OfflineCached ->
+                            stringResource(R.string.search_no_results_offline)
+                        searchSyncState is SyncState.Loading || searchSyncState is SyncState.Refreshing ->
+                            stringResource(R.string.search_results_verifying)
+                        searchSyncState is SyncState.Error ->
+                            stringResource(R.string.search_results_unverified)
+                        else -> stringResource(R.string.search_results_pending)
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -690,7 +707,7 @@ fun SearchScreen(
                             Text(text = "🔍", fontSize = tanweerTextSize(40f))
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                text = if (query.isBlank()) "اكتب كلمة للبحث في المنظومة الشاملة" else "لم يتم العثور على نتائج تطابق \"$query\"",
+                                text = emptyMessage,
                                 fontSize = tanweerTextSize(14f),
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center

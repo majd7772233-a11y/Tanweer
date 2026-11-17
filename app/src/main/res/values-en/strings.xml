@@ -12,4 +12,10 @@
     <string name="profile_stats_unverified">Profile statistics have not been verified yet.</string>
     <string name="search_local_results_count">%1$d local results</string>
     <string name="search_local_index_note">Search results come from the local index. Chat sync fetches the latest 100 server messages and retains older locally cached history.</string>
+    <string name="search_enter_query">Enter a term to browse the platform search results.</string>
+    <string name="search_no_results_confirmed">No matching results were found in the verified data.</string>
+    <string name="search_no_results_offline">No match exists in the saved local data. More results may appear when the server is reachable.</string>
+    <string name="search_results_verifying">Search sources are being checked; no-results will not be confirmed until sync finishes.</string>
+    <string name="search_results_unverified">Search sources could not be verified. Use the refresh action to try again.</string>
+    <string name="search_results_pending">Search-source sync is not complete, so the absence of results cannot be confirmed.</string>
 </resources>
