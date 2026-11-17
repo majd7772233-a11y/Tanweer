@@ -35,10 +35,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.Permission
 import com.magd.tanweer.data.model.ScheduleSlot
+import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.data.model.SubjectItem
 import com.magd.tanweer.data.model.getRoleEnum
 import com.magd.tanweer.data.model.hasPermission
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -73,11 +75,30 @@ fun ScheduleScreen(
     val allSlots by viewModel.repository.getAllScheduleSlots(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
     val scheduleSyncState by viewModel.scheduleSyncState.collectAsStateWithLifecycle()
-    val hasScheduleSnapshot = allSlots.isNotEmpty() || hasAuthoritativeSnapshot(scheduleSyncState)
+    val scopedScheduleSyncState = syncStateForScope(
+        scheduleSyncState,
+        groupSyncScopeIds[GroupSyncSource.SCHEDULE],
+        activeGroupId
+    )
+    val hasScheduleSnapshot = allSlots.isNotEmpty() || hasAuthoritativeSnapshot(scopedScheduleSyncState)
     val scheduleProposals by viewModel.scheduleProposals.collectAsStateWithLifecycle()
+    val scheduleProposalsGroupId by viewModel.scheduleProposalsGroupId.collectAsStateWithLifecycle()
+    val scheduleProposalsSnapshotGroupId by viewModel.scheduleProposalsSnapshotGroupId.collectAsStateWithLifecycle()
+    val scheduleProposalsSyncState by viewModel.scheduleProposalsSyncState.collectAsStateWithLifecycle()
+    val scopedScheduleProposalsSyncState = syncStateForScope(scheduleProposalsSyncState, scheduleProposalsGroupId, activeGroupId)
+    val hasScheduleProposalsSnapshot = isSnapshotForScope(scheduleProposalsSnapshotGroupId, activeGroupId)
+    val activeScheduleProposals = if (hasScheduleProposalsSnapshot) scheduleProposals else emptyList()
     val scheduleVersion by viewModel.scheduleVersion.collectAsStateWithLifecycle()
     val scheduleMeta by viewModel.scheduleMeta.collectAsStateWithLifecycle()
+    val scheduleMetaGroupId by viewModel.scheduleMetaGroupId.collectAsStateWithLifecycle()
+    val scheduleMetaSnapshotGroupId by viewModel.scheduleMetaSnapshotGroupId.collectAsStateWithLifecycle()
+    val scheduleMetaSyncState by viewModel.scheduleMetaSyncState.collectAsStateWithLifecycle()
+    val scopedScheduleMetaSyncState = syncStateForScope(scheduleMetaSyncState, scheduleMetaGroupId, activeGroupId)
+    val hasScheduleMetaSnapshot = isSnapshotForScope(scheduleMetaSnapshotGroupId, activeGroupId)
+    val activeScheduleMeta = if (hasScheduleMetaSnapshot && scopedScheduleMetaSyncState !is SyncState.Error) scheduleMeta else null
+    val activeScheduleVersion = if (hasScheduleMetaSnapshot) scheduleVersion else null
 
     val gradeSubjects = remember(currentUser?.gradeId) {
         viewModel.getScheduleSubjectsForCurrentGrade()
@@ -96,17 +117,17 @@ fun ScheduleScreen(
     var isProposalsReviewDialogOpen by remember { mutableStateOf(false) }
     var sourceDayToCopy by remember { mutableIntStateOf(0) }
 
-    val isStaffWithDirectEdit = remember(currentUser, scheduleMeta) {
+    val isStaffWithDirectEdit = remember(currentUser, activeScheduleMeta) {
         val role = currentUser?.getRoleEnum() ?: com.magd.tanweer.data.model.Role.STUDENT
         role == com.magd.tanweer.data.model.Role.TEACHER ||
         role == com.magd.tanweer.data.model.Role.ADMIN ||
         (currentUser?.hasPermission(Permission.MANAGE_SCHEDULE) == true) ||
-        (scheduleMeta?.canEditDirectly == true)
+        (activeScheduleMeta?.canEditDirectly == true)
     }
 
     val canFillEmptyScheduleSlots = shouldAllowEmptyScheduleSlotEditing(
         isStaffWithDirectEdit = isStaffWithDirectEdit,
-        serverConfirmsInitialSetup = scheduleMeta?.isInitialSetup == true,
+        serverConfirmsInitialSetup = activeScheduleMeta?.isInitialSetup == true,
         hasScheduleSnapshot = hasScheduleSnapshot,
     )
     val canManageSchedule = isStaffWithDirectEdit ||
@@ -114,7 +135,7 @@ fun ScheduleScreen(
 
     val filledSlotsCount = allSlots.size
     val currentGradeName = SchoolHierarchy.getGradeName(currentUser?.gradeId ?: 10)
-    val pendingProposalsCount = scheduleProposals.count { it.status == "PENDING" }
+    val pendingProposalsCount = activeScheduleProposals.count { it.status == "PENDING" }
 
     Box(
         modifier = Modifier
@@ -156,7 +177,8 @@ fun ScheduleScreen(
                         // Refresh/Sync from server
                         IconButton(
                             onClick = {
-                                viewModel.syncSchedule(isRefresh = true)
+                                viewModel.syncSchedule(activeGroupId, isRefresh = true)
+                                viewModel.loadScheduleData(activeGroupId)
                                 Toast.makeText(context, "جاري مزامنة الجدول من الخادم 🔄", Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier
@@ -201,14 +223,40 @@ fun ScheduleScreen(
             // Sync Status Indicator for Schedule (Point 15)
             item {
                 SyncStatusBar(
-                    syncState = scheduleSyncState,
-                    onRefresh = { viewModel.syncSchedule(activeGroupId, isRefresh = true) }
+                    syncState = scopedScheduleSyncState,
+                    onRefresh = {
+                        viewModel.syncSchedule(activeGroupId, isRefresh = true)
+                        viewModel.loadScheduleData(activeGroupId)
+                    }
                 )
             }
+            if (scopedScheduleMetaSyncState is SyncState.Error) {
+                item {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface, borderColor = WarmAmber.copy(alpha = 0.55f)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("تعذر التحقق من صلاحيات الجدول", color = WarmAmber, fontWeight = FontWeight.Bold)
+                            Text(scopedScheduleMetaSyncState.message, color = TextSecondary, fontSize = tanweerTextSize(11f))
+                            GlassButton(text = "إعادة التحقق", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadScheduleData(activeGroupId) })
+                        }
+                    }
+                }
+            }
+            if (scopedScheduleProposalsSyncState is SyncState.Error) {
+                item {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface, borderColor = WarmAmber.copy(alpha = 0.55f)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("تعذر تحميل مقترحات الجدول", color = WarmAmber, fontWeight = FontWeight.Bold)
+                            Text(scopedScheduleProposalsSyncState.message, color = TextSecondary, fontSize = tanweerTextSize(11f))
+                            GlassButton(text = "إعادة تحميل المقترحات", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadScheduleProposals(activeGroupId) })
+                        }
+                    }
+                }
+            }
+
 
             if (!canFillEmptyScheduleSlots) {
                 item {
-                    PendingSyncEmptyState(dataLabel = "الجدول الأسبوعي", syncState = scheduleSyncState)
+                    PendingSyncEmptyState(dataLabel = "الجدول الأسبوعي", syncState = scopedScheduleSyncState)
                 }
             }
 
@@ -268,7 +316,7 @@ fun ScheduleScreen(
             }
 
             // Proposals Banner if any pending proposals exist
-            if (pendingProposalsCount > 0 || scheduleProposals.isNotEmpty()) {
+            if (pendingProposalsCount > 0 || activeScheduleProposals.isNotEmpty()) {
                 item {
                     GlassCard(
                         modifier = Modifier
@@ -545,7 +593,7 @@ fun ScheduleScreen(
         // Proposals Review Dialog
         if (isProposalsReviewDialogOpen) {
             ScheduleProposalsReviewDialog(
-                proposals = scheduleProposals,
+                proposals = activeScheduleProposals,
                 canManageSchedule = canManageSchedule,
                 onDismiss = { isProposalsReviewDialogOpen = false },
                 onVote = { proposalId, voteType ->

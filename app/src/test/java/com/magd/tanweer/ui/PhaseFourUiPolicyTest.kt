@@ -6,6 +6,7 @@ import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.components.aggregateSyncStates
 import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
 import com.magd.tanweer.ui.components.syncStateForScope
+import com.magd.tanweer.ui.components.isSnapshotForScope
 import com.magd.tanweer.ui.components.hasAuthoritativeGradeSnapshot
 import com.magd.tanweer.ui.components.shouldShowConfirmedEmptyState
 import com.magd.tanweer.ui.components.shouldShowConfirmedGradeEmptyState
@@ -153,6 +154,15 @@ class PhaseFourUiPolicyTest {
         assertFalse(hasAuthoritativeGradeSnapshot(11, 10, success))
         assertFalse(hasAuthoritativeGradeSnapshot(null, 10, success))
         assertFalse(hasAuthoritativeGradeSnapshot(10, 10, SyncState.OfflineCached(lastSyncedAt = 100L)))
+    }
+
+
+    @Test
+    fun schedule_metadata_and_proposals_are_hidden_until_their_group_snapshot_matches() {
+        assertTrue(isSnapshotForScope("group-a", "group-a"))
+        assertFalse(isSnapshotForScope("group-a", "group-b"))
+        assertFalse(isSnapshotForScope(null, "group-a"))
+        assertFalse(isSnapshotForScope("group-a", ""))
     }
 
 }

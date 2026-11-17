@@ -237,7 +237,7 @@ fun EventsScreen(
             // Events List or Empty State
             if (filteredEvents.isEmpty()) {
                 item {
-                    if (events.isNotEmpty() || hasAuthoritativeSnapshot(eventsSyncState)) {
+                    if (hasEventsSnapshot) {
                         EmptyStateGlass(
                             title = if (events.isEmpty()) {
                                 if (activeTab == 0) "لا توجد فعاليات قادمة مجدولة" else "لا توجد فعاليات سابقة"

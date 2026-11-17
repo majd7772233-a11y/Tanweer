@@ -678,7 +678,7 @@ fun HomeScreen(
                     } else if (!hasDocumentationSnapshot) {
                         PendingSyncEmptyState(
                             dataLabel = "الحصص ومواد اليوم",
-                            syncState = aggregateSyncStates(listOf(homeSyncState, scheduleSyncState))
+                            syncState = aggregateSyncStates(listOf(scopedHomeSyncState, scopedScheduleSyncState))
                         )
                     } else if (totalSubjectsCount == 0) {
                         Text(

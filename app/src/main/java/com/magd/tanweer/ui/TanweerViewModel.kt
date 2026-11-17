@@ -606,8 +606,18 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _librarySyncState.value = SyncState.Idle
         _librarySyncGradeId.value = null
         _groupsSyncState.value = SyncState.Idle
+        scheduleMetaRequestGeneration++
+        scheduleMetaSourceGroupId = null
+        _scheduleMetaGroupId.value = null
+        _scheduleMetaSnapshotGroupId.value = null
+        _scheduleMetaSyncState.value = SyncState.Idle
         _scheduleMeta.value = null
         _scheduleVersion.value = null
+        scheduleProposalsRequestGeneration++
+        scheduleProposalsSourceGroupId = null
+        _scheduleProposalsGroupId.value = null
+        _scheduleProposalsSnapshotGroupId.value = null
+        _scheduleProposalsSyncState.value = SyncState.Idle
         _scheduleProposals.value = emptyList()
         groupMembersRequestGeneration++
         groupMembersSourceGroupId = null
@@ -1502,14 +1512,30 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    @Volatile private var scheduleMetaRequestGeneration = 0
+    @Volatile private var scheduleMetaSourceGroupId: String? = null
     private val _scheduleMeta = MutableStateFlow<com.magd.tanweer.data.model.ScheduleMeta?>(null)
     val scheduleMeta: StateFlow<com.magd.tanweer.data.model.ScheduleMeta?> = _scheduleMeta.asStateFlow()
+    private val _scheduleMetaGroupId = MutableStateFlow<String?>(null)
+    val scheduleMetaGroupId: StateFlow<String?> = _scheduleMetaGroupId.asStateFlow()
+    private val _scheduleMetaSnapshotGroupId = MutableStateFlow<String?>(null)
+    val scheduleMetaSnapshotGroupId: StateFlow<String?> = _scheduleMetaSnapshotGroupId.asStateFlow()
+    private val _scheduleMetaSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val scheduleMetaSyncState: StateFlow<SyncState> = _scheduleMetaSyncState.asStateFlow()
 
     private val _scheduleVersion = MutableStateFlow<com.magd.tanweer.data.model.ScheduleVersionItem?>(null)
     val scheduleVersion: StateFlow<com.magd.tanweer.data.model.ScheduleVersionItem?> = _scheduleVersion.asStateFlow()
 
+    @Volatile private var scheduleProposalsRequestGeneration = 0
+    @Volatile private var scheduleProposalsSourceGroupId: String? = null
     private val _scheduleProposals = MutableStateFlow<List<com.magd.tanweer.data.model.ScheduleProposalItem>>(emptyList())
     val scheduleProposals: StateFlow<List<com.magd.tanweer.data.model.ScheduleProposalItem>> = _scheduleProposals.asStateFlow()
+    private val _scheduleProposalsGroupId = MutableStateFlow<String?>(null)
+    val scheduleProposalsGroupId: StateFlow<String?> = _scheduleProposalsGroupId.asStateFlow()
+    private val _scheduleProposalsSnapshotGroupId = MutableStateFlow<String?>(null)
+    val scheduleProposalsSnapshotGroupId: StateFlow<String?> = _scheduleProposalsSnapshotGroupId.asStateFlow()
+    private val _scheduleProposalsSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val scheduleProposalsSyncState: StateFlow<SyncState> = _scheduleProposalsSyncState.asStateFlow()
 
     @Volatile private var groupMembersRequestGeneration = 0
     @Volatile private var groupMembersSourceGroupId: String? = null
@@ -1916,26 +1942,117 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun loadScheduleData() {
-        val groupId = getActiveGroupId()
-        if (groupId.isBlank()) return
-        viewModelScope.launch {
-            val res = repository.getScheduleMetaAndSlots(groupId)
-            res.onSuccess { data ->
-                _scheduleMeta.value = data.meta
-                _scheduleVersion.value = data.version
-            }
-            loadScheduleProposals()
+    fun loadScheduleData(
+        groupId: String = getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() }
+    ) {
+        if (groupId.isBlank()) {
+            scheduleMetaRequestGeneration++
+            scheduleMetaSourceGroupId = null
+            _scheduleMetaGroupId.value = null
+            _scheduleMetaSnapshotGroupId.value = null
+            _scheduleMetaSyncState.value = SyncState.Idle
+            _scheduleMeta.value = null
+            _scheduleVersion.value = null
+            loadScheduleProposals("")
+            return
         }
+
+        val requestId = ++scheduleMetaRequestGeneration
+        if (scheduleMetaSourceGroupId != groupId) {
+            scheduleMetaSourceGroupId = groupId
+            _scheduleMetaSnapshotGroupId.value = null
+            _scheduleMeta.value = null
+            _scheduleVersion.value = null
+        }
+        _scheduleMetaGroupId.value = groupId
+        _scheduleMetaSyncState.value = SyncState.Loading
+
+        viewModelScope.launch {
+            try {
+                val result = repository.getScheduleMetaAndSlots(groupId)
+                if (requestId != scheduleMetaRequestGeneration || scheduleMetaSourceGroupId != groupId) {
+                    return@launch
+                }
+                result.onSuccess { data ->
+                    if (data.success && data.meta != null) {
+                        _scheduleMeta.value = data.meta
+                        _scheduleVersion.value = data.version
+                        _scheduleMetaSnapshotGroupId.value = groupId
+                        _scheduleMetaSyncState.value = SyncState.Success()
+                    } else {
+                        _scheduleMetaSyncState.value = SyncState.Error(
+                            "رد الخادم لم يؤكد بيانات صلاحيات الجدول لهذه الشعبة",
+                            false
+                        )
+                    }
+                }.onFailure { error ->
+                    _scheduleMetaSyncState.value = SyncState.Error(
+                        error.message ?: "تعذر تحميل إعدادات الجدول",
+                        false
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (requestId == scheduleMetaRequestGeneration && scheduleMetaSourceGroupId == groupId) {
+                    _scheduleMetaSyncState.value = SyncState.Error(
+                        error.message ?: "تعذر تحميل إعدادات الجدول",
+                        false
+                    )
+                }
+            }
+        }
+
+        loadScheduleProposals(groupId)
     }
 
-    fun loadScheduleProposals() {
-        val groupId = getActiveGroupId()
-        if (groupId.isBlank()) return
+    fun loadScheduleProposals(
+        groupId: String = getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() }
+    ) {
+        if (groupId.isBlank()) {
+            scheduleProposalsRequestGeneration++
+            scheduleProposalsSourceGroupId = null
+            _scheduleProposalsGroupId.value = null
+            _scheduleProposalsSnapshotGroupId.value = null
+            _scheduleProposalsSyncState.value = SyncState.Idle
+            _scheduleProposals.value = emptyList()
+            return
+        }
+
+        val requestId = ++scheduleProposalsRequestGeneration
+        if (scheduleProposalsSourceGroupId != groupId) {
+            scheduleProposalsSourceGroupId = groupId
+            _scheduleProposalsSnapshotGroupId.value = null
+            _scheduleProposals.value = emptyList()
+        }
+        _scheduleProposalsGroupId.value = groupId
+        _scheduleProposalsSyncState.value = SyncState.Loading
+
         viewModelScope.launch {
-            val res = repository.getScheduleProposals(groupId)
-            res.onSuccess { list ->
-                _scheduleProposals.value = list
+            try {
+                val result = repository.getScheduleProposals(groupId)
+                if (requestId != scheduleProposalsRequestGeneration || scheduleProposalsSourceGroupId != groupId) {
+                    return@launch
+                }
+                result.onSuccess { list ->
+                    _scheduleProposals.value = list
+                    _scheduleProposalsSnapshotGroupId.value = groupId
+                    _scheduleProposalsSyncState.value = SyncState.Success()
+                }.onFailure { error ->
+                    _scheduleProposalsSyncState.value = SyncState.Error(
+                        error.message ?: "تعذر تحميل مقترحات الجدول",
+                        false
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (requestId == scheduleProposalsRequestGeneration && scheduleProposalsSourceGroupId == groupId) {
+                    _scheduleProposalsSyncState.value = SyncState.Error(
+                        error.message ?: "تعذر تحميل مقترحات الجدول",
+                        false
+                    )
+                }
             }
         }
     }
@@ -1944,11 +2061,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         slots: List<ScheduleSlot>,
         onResult: (Boolean, String) -> Unit = { _, _ -> }
     ) {
-        val groupId = getActiveGroupId()
+        val groupId = getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() }
         viewModelScope.launch {
             val res = repository.saveScheduleBatch(groupId, slots)
             res.onSuccess { msg ->
-                loadScheduleData()
+                if (getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() } == groupId) loadScheduleData(groupId)
                 onResult(true, msg)
             }.onFailure { err ->
                 onResult(false, err.message ?: "تعذر حفظ الجدول")
@@ -1961,11 +2078,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         voteType: String,
         onResult: (Boolean, String) -> Unit = { _, _ -> }
     ) {
+        val groupId = getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() }
         viewModelScope.launch {
             val res = repository.voteScheduleProposal(proposalId, voteType)
             res.onSuccess { msg ->
-                loadScheduleProposals()
-                loadScheduleData()
+                if (getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() } == groupId) loadScheduleData(groupId)
                 onResult(true, msg)
             }.onFailure { err ->
                 onResult(false, err.message ?: "تعذر التصويت")
@@ -1981,12 +2098,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             onResult(false, "عذراً، اعتماد مقترحات الجدول محصور بالمعلمين وإدارة المدرسة")
             return
         }
-        val groupId = getActiveGroupId()
+        val groupId = getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() }
         viewModelScope.launch {
             val res = repository.approveScheduleProposal(proposalId, groupId)
             res.onSuccess { msg ->
-                loadScheduleData()
-                loadScheduleProposals()
+                if (getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() } == groupId) loadScheduleData(groupId)
                 onResult(true, msg)
             }.onFailure { err ->
                 onResult(false, err.message ?: "تعذر اعتماد المقترح")
@@ -1998,6 +2114,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         proposalId: String,
         onResult: (Boolean, String) -> Unit = { _, _ -> }
     ) {
+        val groupId = getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() }
         if (!canManageSchedule()) {
             onResult(false, "عذراً، رفض مقترحات الجدول محصور بالمعلمين وإدارة المدرسة")
             return
@@ -2005,7 +2122,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val res = repository.rejectScheduleProposal(proposalId)
             res.onSuccess { msg ->
-                loadScheduleProposals()
+                if (getActiveGroupId().ifBlank { currentUser.value?.defaultGroupId.orEmpty() } == groupId) loadScheduleProposals(groupId)
                 onResult(true, msg)
             }.onFailure { err ->
                 onResult(false, err.message ?: "تعذر رفض المقترح")

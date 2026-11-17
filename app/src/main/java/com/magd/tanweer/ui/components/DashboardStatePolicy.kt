@@ -52,6 +52,10 @@ fun syncStateForScope(
     SyncState.Idle
 }
 
+/** A server snapshot is usable only for the group currently displayed by the screen. */
+fun isSnapshotForScope(snapshotScopeId: String?, requestedScopeId: String): Boolean =
+    requestedScopeId.isNotBlank() && snapshotScopeId == requestedScopeId
+
 /** A grade-specific empty result needs a successful snapshot for that exact grade. */
 fun hasAuthoritativeGradeSnapshot(
     selectedGradeId: Int?,
