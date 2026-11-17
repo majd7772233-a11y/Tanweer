@@ -919,3 +919,17 @@
 - **Validation pending:** No local build or test was run. Android CI and Server CI must be triggered through PR #6 after pushing and verified against the exact resulting SHA. The earlier runs 44098040628 and 44098040625 validate the prior code checkpoint only.
 - **Phase 4 remains open.** This is not a closure report. Complete the final source/route review and require fresh CI before considering closure. Browser keyboard/screen-reader acceptance and physical-device/Staging tests remain unclaimed.
 - No Production/Staging Worker deployment, D1 migration/write, secret change, main update, branch creation or PR merge was performed. TNR-010 remains deferred by user decision until before first release.
+
+## 2026-11-17 — Phase 4 continuation: Search source freshness and verified counts
+
+- Prepared on work/release-readiness at base c238557939a49cc611ecbb0a17bdb10b3bb1c99f; implemented in a combined code/test/docs commit on work/release-readiness; push and fresh CI are pending.
+- SearchScreen now derives the displayed freshness state from the matching source's sync state and scope. The search-wide state considers lessons, homework, exams, events, issues, group chat messages and books. Group results are scoped to the active group; book results are scoped to the current grade.
+- Added a strict aggregator for required search sources. An OfflineCached result for one source does not hide another source that remains Idle/unverified. Error, Loading and Refreshing outcomes remain visible.
+- Added an isolated REST chat-history refresh state and request generation in TanweerViewModel. It does not open or mutate the Groups screen's WebSocket lifecycle and resets with the user session. The repository method returns the latest 100 server messages while retaining older locally cached messages.
+- Added selected-source and all-source retry actions; group retries receive the explicit activeGroupId. Added grade-book refresh to Search entry in syncSubScreenOnEntry.
+- SubjectTimelineScreen now uses verified-count formatting across its lesson/homework/exam summary, so early Room 0 values are not represented as confirmed server counts.
+- Added Arabic and English string resources for the local result count and the explicit local-index/latest-100 chat-history disclosure.
+- Added regression assertions for all-success, incomplete, partial-offline and error aggregation plus verified timeline counts.
+- git diff --check passes. Android CI has not yet run on this follow-up. No local build/test was run. Server code is unchanged since the successful Server CI runs on c2385579.
+- Phase 4 remains open pending fresh CI on the new SHA and completion of the final review. Physical-device, screen-reader, keyboard and Staging acceptance are not claimed.
+- No schema/migration, backend, Worker, secret, Production/Staging data, main, branch or PR merge changes were made. PR #6 remains Draft/open; TNR-010 remains deferred by user decision.

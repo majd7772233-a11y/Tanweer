@@ -443,6 +443,12 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _chatHistorySyncGroupId = MutableStateFlow<String?>(null)
     val chatHistorySyncGroupId: StateFlow<String?> = _chatHistorySyncGroupId.asStateFlow()
 
+    @Volatile private var searchChatHistoryRequestGeneration = 0L
+    private val _searchChatHistorySyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val searchChatHistorySyncState: StateFlow<SyncState> = _searchChatHistorySyncState.asStateFlow()
+    private val _searchChatHistorySyncGroupId = MutableStateFlow<String?>(null)
+    val searchChatHistorySyncGroupId: StateFlow<String?> = _searchChatHistorySyncGroupId.asStateFlow()
+
     val chatConnectionStatus: StateFlow<ConnectionStatus> = repository.chatManager.status
     private val dataGenerationReady = CompletableDeferred<Unit>()
     private val dataGenerationMutex = Mutex()
@@ -630,6 +636,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         chatHistoryRequestGeneration++
         _chatHistorySyncState.value = SyncState.Idle
         _chatHistorySyncGroupId.value = null
+
+        searchChatHistoryRequestGeneration++
+        _searchChatHistorySyncState.value = SyncState.Idle
+        _searchChatHistorySyncGroupId.value = null
         scheduleMetaRequestGeneration++
         scheduleMetaSourceGroupId = null
         _scheduleMetaGroupId.value = null
@@ -944,6 +954,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 syncExams(groupId, isRefresh = true)
                 syncIssues(groupId, isRefresh = true)
                 syncEvents(groupId, isRefresh = true)
+                syncBooks(currentUser.value?.gradeId ?: 10, isRefresh = true)
                 syncGroups(isRefresh = true)
             }
 
@@ -1508,6 +1519,51 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /**
+     * Refreshes the locally indexed chat history for Search without opening a WebSocket.
+     * This state is separate from the active chat connection so a search refresh cannot
+     * invalidate or replace the connection lifecycle owned by the Groups screen.
+     */
+    fun refreshSearchChatHistory(groupId: String = getActiveGroupId()) {
+        val requestedGroupId = groupId.trim()
+        if (requestedGroupId.isBlank()) return
+
+        val requestId = ++searchChatHistoryRequestGeneration
+        val hadSnapshot = _searchChatHistorySyncGroupId.value == requestedGroupId &&
+            (_searchChatHistorySyncState.value is SyncState.Success ||
+                _searchChatHistorySyncState.value is SyncState.OfflineCached)
+        _searchChatHistorySyncGroupId.value = requestedGroupId
+        _searchChatHistorySyncState.value =
+            if (hadSnapshot) SyncState.Refreshing else SyncState.Loading
+
+        viewModelScope.launch {
+            try {
+                val result = repository.syncGroupChatHistory(requestedGroupId)
+                if (requestId != searchChatHistoryRequestGeneration ||
+                    _searchChatHistorySyncGroupId.value != requestedGroupId
+                ) return@launch
+
+                _searchChatHistorySyncState.value = when (result) {
+                    is SyncResult.Success -> SyncState.Success()
+                    is SyncResult.Offline -> SyncState.OfflineCached()
+                    is SyncResult.Error -> SyncState.Error(result.message, result.isNetworkError)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (requestId == searchChatHistoryRequestGeneration &&
+                    _searchChatHistorySyncGroupId.value == requestedGroupId
+                ) {
+                    _searchChatHistorySyncState.value = SyncState.Error(
+                        error.message ?: getApplication<Application>().getString(
+                            com.magd.tanweer.R.string.chat_history_sync_failed
+                        ),
+                        false
+                    )
+                }
+            }
+        }
+    }
     fun disconnectGroupChat() {
         chatHistoryRequestGeneration++
         _chatHistorySyncGroupId.value = null

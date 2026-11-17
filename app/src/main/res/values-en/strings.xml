@@ -10,4 +10,6 @@
     <string name="schedule_proposals_verifying">Checking schedule proposals</string>
     <string name="schedule_proposals_last_snapshot">Count in last confirmed snapshot: %1$d</string>
     <string name="profile_stats_unverified">Profile statistics have not been verified yet.</string>
+    <string name="search_local_results_count">%1$d local results</string>
+    <string name="search_local_index_note">Search results come from the local index. Chat sync fetches the latest 100 server messages and retains older locally cached history.</string>
 </resources>

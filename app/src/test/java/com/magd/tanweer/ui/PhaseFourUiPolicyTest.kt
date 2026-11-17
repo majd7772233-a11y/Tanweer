@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.components.aggregateSyncStates
+import com.magd.tanweer.ui.components.aggregateRequiredSyncStates
 import com.magd.tanweer.ui.components.formatVerifiedCount
 import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
 import com.magd.tanweer.ui.components.syncStateForScope
@@ -267,4 +268,39 @@ class PhaseFourUiPolicyTest {
         assertFalse(isSnapshotForScope("group-a", ""))
     }
 
+
+    @Test
+    fun subject_timeline_summary_hides_room_default_zeros_until_all_sources_are_verified() {
+        val initialRoomCounts = listOf(0, 0, 0)
+        assertEquals(listOf("—", "—", "—"), initialRoomCounts.map { formatVerifiedCount(it, false) })
+        assertEquals(listOf("0", "0", "0"), initialRoomCounts.map { formatVerifiedCount(it, true) })
+    }
+
+    @Test
+    fun search_freshness_requires_every_selected_domain_to_have_a_confirmed_snapshot() {
+        val success = SyncState.Success(100L)
+        val incomplete = aggregateRequiredSyncStates(
+            listOf(success, success, success, success, success, success, SyncState.Idle)
+        )
+        assertSame(SyncState.Idle, incomplete)
+
+        val offline = SyncState.OfflineCached(lastSyncedAt = 50L)
+        val cached = aggregateRequiredSyncStates(
+            listOf(success, success, success, success, success, success, offline)
+        )
+        assertSame(offline, cached)
+
+        val partiallyKnownOffline = aggregateRequiredSyncStates(
+            listOf(success, success, success, success, success, offline, SyncState.Idle)
+        )
+        assertSame(SyncState.Idle, partiallyKnownOffline)
+
+        val withError = aggregateRequiredSyncStates(
+            listOf(success, success, success, success, SyncState.Error("offline", true), SyncState.Idle, success)
+        )
+        assertTrue(withError is SyncState.Error)
+
+        val current = aggregateRequiredSyncStates(List(7) { success })
+        assertTrue(hasAuthoritativeSnapshot(current))
+    }
 }

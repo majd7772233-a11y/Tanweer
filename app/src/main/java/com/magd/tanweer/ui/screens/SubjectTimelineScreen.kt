@@ -274,7 +274,7 @@ fun SubjectTimelineScreen(
                                 color = TextPrimary
                             )
                             Text(
-                                text = "${subjectContents.size} دروس • ${homeworks.filter { it.subjectId == selectedSubject.id }.size} واجبات • ${exams.filter { it.subjectId == selectedSubject.id }.size} اختبارات",
+                                text = "${formatVerifiedCount(subjectContents.size, hasTimelineSnapshot)} دروس • ${formatVerifiedCount(homeworks.count { it.subjectId == selectedSubject.id }, hasTimelineSnapshot)} واجبات • ${formatVerifiedCount(exams.count { it.subjectId == selectedSubject.id }, hasTimelineSnapshot)} اختبارات",
                                 fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )

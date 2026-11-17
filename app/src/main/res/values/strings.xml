@@ -12,4 +12,6 @@
     <string name="schedule_proposals_verifying">جارٍ التحقق من مقترحات الجدول</string>
     <string name="schedule_proposals_last_snapshot">العدد في آخر لقطة مؤكدة: %1$d</string>
     <string name="profile_stats_unverified">لا يمكن تأكيد إحصاءات الملف الشخصي بعد.</string>
+    <string name="search_local_results_count">%1$d نتيجة محلية</string>
+    <string name="search_local_index_note">نتائج البحث مأخوذة من الفهرس المحلي. مزامنة المحادثات تجلب أحدث 100 رسالة من الخادم، مع الإبقاء على السجل الأقدم المحفوظ محلياً.</string>
 </resources>

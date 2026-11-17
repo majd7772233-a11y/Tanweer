@@ -2276,3 +2276,15 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - **CI:** Not yet run on this pending patch. Trigger and verify Android + Server CI from PR #6 against the exact pushed SHA. Previous runs 44098040628 / 44098040625 validate only the earlier source checkpoint.
 - **Risks / limitations:** Phase 4 is not closed. Browser keyboard/screen-reader acceptance and physical-device/Staging acceptance are not claimed. TNR-010 stays deferred until before first public release.
 - **Next step:** Review diff/tests and docs, commit with SESSION_HANDOFF.md and audit report, push to work/release-readiness, then verify both CI workflows and refresh this log with the committed checkpoint.
+
+### 2026-11-17 — Phase 4 Search freshness / verified-summary follow-up
+
+- **Branch/base:** work/release-readiness at c238557939a49cc611ecbb0a17bdb10b3bb1c99f; the code, tests and docs are saved in one combined local commit based on this SHA; push and fresh CI are pending.
+- SearchScreen tracks the exact group/grade freshness of seven Room-backed search domains and shows the existing SyncStatusBar with selected-source/all-source retry. Search counts are explicitly labeled local.
+- Added strict required-source aggregation so partial OfflineCached state cannot conceal another unverified source.
+- Added request-generation-guarded REST chat search refresh, isolated from the live Groups WebSocket; resets with the user session. Repository snapshot endpoint fetches latest 100 messages and retains older local cache.
+- Search entry also refreshes current grade books. Retry methods pass the screen's explicit activeGroupId.
+- Subject timeline summary counts now use formatVerifiedCount and remain — until all three snapshots are authoritative.
+- Added localized Arabic/English resources for the local search result count and the latest-100 chat sync/retained-cache note.
+- Regression tests added for verified counts and Search aggregate states. git diff --check passes; Android CI is still required on the resulting SHA. No local build/test was run.
+- Phase 4 remains open pending fresh Android CI and final review. No staging/production/device acceptance is claimed. TNR-010 remains deferred until before release.

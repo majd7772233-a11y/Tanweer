@@ -106,3 +106,19 @@ fun hasAuthoritativeCalendarMonthSnapshot(
 /** Displays zero only when a validated snapshot actually supplied that value. */
 fun formatVerifiedCount(value: Int?, hasVerifiedSnapshot: Boolean): String =
     if (hasVerifiedSnapshot && value != null && value >= 0) value.toString() else "—"
+
+/**
+ * Search spans several independent Room sources. An offline snapshot from one source
+ * must not imply that the whole search index is complete while another source is idle.
+ */
+fun aggregateRequiredSyncStates(states: List<SyncState>): SyncState {
+    val aggregate = aggregateSyncStates(states)
+    return if (
+        aggregate is SyncState.OfflineCached &&
+        states.any { it !is SyncState.Success && it !is SyncState.OfflineCached }
+    ) {
+        SyncState.Idle
+    } else {
+        aggregate
+    }
+}

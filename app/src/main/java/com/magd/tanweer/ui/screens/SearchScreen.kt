@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
@@ -32,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.*
+import com.magd.tanweer.R
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
@@ -56,6 +59,51 @@ fun SearchScreen(
 
     // Recent search history & suggestions
     var recentSearches by remember { mutableStateOf(ArabicSearchEngine.getRecentSearches(context)) }
+
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
+    val sectionContentsSyncState by viewModel.sectionContentsSyncState.collectAsStateWithLifecycle()
+    val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
+    val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
+    val eventsSyncState by viewModel.eventsSyncState.collectAsStateWithLifecycle()
+    val issuesSyncState by viewModel.issuesSyncState.collectAsStateWithLifecycle()
+    val searchChatHistorySyncState by viewModel.searchChatHistorySyncState.collectAsStateWithLifecycle()
+    val searchChatHistorySyncGroupId by viewModel.searchChatHistorySyncGroupId.collectAsStateWithLifecycle()
+    val librarySyncState by viewModel.librarySyncState.collectAsStateWithLifecycle()
+    val librarySyncGradeId by viewModel.librarySyncGradeId.collectAsStateWithLifecycle()
+    val searchGradeId = currentUser?.gradeId ?: 10
+
+    val scopedSearchContentsSync = syncStateForScope(sectionContentsSyncState, groupSyncScopeIds[GroupSyncSource.CONTENTS], activeGroupId)
+    val scopedSearchHomeworkSync = syncStateForScope(homeworkSyncState, groupSyncScopeIds[GroupSyncSource.HOMEWORKS], activeGroupId)
+    val scopedSearchExamsSync = syncStateForScope(examsSyncState, groupSyncScopeIds[GroupSyncSource.EXAMS], activeGroupId)
+    val scopedSearchEventsSync = syncStateForScope(eventsSyncState, groupSyncScopeIds[GroupSyncSource.EVENTS], activeGroupId)
+    val scopedSearchIssuesSync = syncStateForScope(issuesSyncState, groupSyncScopeIds[GroupSyncSource.ISSUES], activeGroupId)
+    val scopedSearchChatSync = syncStateForScope(searchChatHistorySyncState, searchChatHistorySyncGroupId, activeGroupId)
+    val scopedSearchBooksSync = if (librarySyncGradeId == searchGradeId) librarySyncState else SyncState.Idle
+    val allSearchSourceStates = listOf(
+        scopedSearchContentsSync,
+        scopedSearchHomeworkSync,
+        scopedSearchExamsSync,
+        scopedSearchEventsSync,
+        scopedSearchIssuesSync,
+        scopedSearchChatSync,
+        scopedSearchBooksSync
+    )
+    val searchSyncState = when (selectedFilter) {
+        "CONTENTS" -> scopedSearchContentsSync
+        "HOMEWORK" -> scopedSearchHomeworkSync
+        "EXAMS" -> scopedSearchExamsSync
+        "EVENTS" -> scopedSearchEventsSync
+        "ISSUES" -> scopedSearchIssuesSync
+        "CHAT" -> scopedSearchChatSync
+        "BOOKS" -> scopedSearchBooksSync
+        else -> aggregateRequiredSyncStates(allSearchSourceStates)
+    }
+
+    LaunchedEffect(activeGroupId) {
+        if (activeGroupId.isNotBlank()) {
+            viewModel.refreshSearchChatHistory(activeGroupId)
+        }
+    }
 
     // Live Room flows for all 7 search dimensions
     val contents by viewModel.repository.getAllContents(activeGroupId)
@@ -196,6 +244,26 @@ fun SearchScreen(
         }.sortedByDescending { it.second }
     }
 
+    val refreshSearchSource: () -> Unit = {
+        when (selectedFilter) {
+            "CONTENTS" -> viewModel.syncSectionContents(activeGroupId, isRefresh = true)
+            "HOMEWORK" -> viewModel.syncHomeworks(activeGroupId, isRefresh = true)
+            "EXAMS" -> viewModel.syncExams(activeGroupId, isRefresh = true)
+            "EVENTS" -> viewModel.syncEvents(activeGroupId, isRefresh = true)
+            "ISSUES" -> viewModel.syncIssues(activeGroupId, isRefresh = true)
+            "CHAT" -> viewModel.refreshSearchChatHistory(activeGroupId)
+            "BOOKS" -> viewModel.syncBooks(searchGradeId, isRefresh = true)
+            else -> {
+                viewModel.syncSectionContents(activeGroupId, isRefresh = true)
+                viewModel.syncHomeworks(activeGroupId, isRefresh = true)
+                viewModel.syncExams(activeGroupId, isRefresh = true)
+                viewModel.syncEvents(activeGroupId, isRefresh = true)
+                viewModel.syncIssues(activeGroupId, isRefresh = true)
+                viewModel.refreshSearchChatHistory(activeGroupId)
+                viewModel.syncBooks(searchGradeId, isRefresh = true)
+            }
+        }
+    }
     val totalResultsCount = rankedContents.size + rankedHomeworks.size + rankedExams.size +
             rankedEvents.size + rankedIssues.size + rankedChatMessages.size + rankedBooks.size
 
@@ -347,6 +415,22 @@ fun SearchScreen(
                 }
             }
 
+            // Search reads local Room data; keep source freshness visible beside the results.
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SyncStatusBar(
+                        syncState = searchSyncState,
+                        onRefresh = refreshSearchSource
+                    )
+                    Text(
+                        text = stringResource(R.string.search_local_index_note),
+                        fontSize = tanweerTextSize(10f),
+                        color = TextMuted,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
             // Results Summary
             item {
                 Row(
@@ -360,7 +444,7 @@ fun SearchScreen(
                         color = TextSecondary
                     )
                     GlassPill(
-                        text = "$totalResultsCount نتيجة",
+                        text = stringResource(R.string.search_local_results_count, totalResultsCount),
                         color = CyanAccent,
                         bgColor = CyanGlow
                     )
