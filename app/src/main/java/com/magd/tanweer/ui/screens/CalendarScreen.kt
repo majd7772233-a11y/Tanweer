@@ -48,11 +48,14 @@ fun CalendarScreen(
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
     val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
     val calendarSyncState by viewModel.calendarSyncState.collectAsStateWithLifecycle()
-    val scopedCalendarSyncState = syncStateForScope(calendarSyncState, groupSyncScopeIds[GroupSyncSource.CALENDAR], activeGroupId)
-    val hasCalendarSnapshot = hasAuthoritativeSnapshot(scopedCalendarSyncState)
+    val calendarSyncMonthScope by viewModel.calendarSyncMonthScope.collectAsStateWithLifecycle()
     var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
     var showAddActionSheet by remember { mutableStateOf(false) }
+    val monthQueryFormat = remember { SimpleDateFormat("yyyy-MM", Locale.US) }
+    val currentCalendarMonth = remember(currentCalendar.timeInMillis) { monthQueryFormat.format(currentCalendar.time) }
+    val scopedCalendarSyncState = syncStateForScope(calendarSyncState, groupSyncScopeIds[GroupSyncSource.CALENDAR], activeGroupId)
+    val hasCalendarSnapshot = hasAuthoritativeCalendarMonthSnapshot(scopedCalendarSyncState, calendarSyncMonthScope, currentCalendarMonth)
 
     val dayDetailsSyncState by viewModel.dayDetailsSyncState.collectAsStateWithLifecycle()
     val dayDetailsSyncGroupId by viewModel.dayDetailsSyncGroupId.collectAsStateWithLifecycle()
@@ -81,7 +84,6 @@ fun CalendarScreen(
 
     val monthYearFormat = remember { SimpleDateFormat("MMMM yyyy", Locale("ar")) }
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
-    val monthQueryFormat = remember { SimpleDateFormat("yyyy-MM", Locale.US) }
 
     LaunchedEffect(activeGroupId, currentCalendar.timeInMillis) {
         if (activeGroupId.isNotBlank()) {
@@ -167,6 +169,15 @@ fun CalendarScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        if (scopedDayDetailsSyncState is SyncState.Error || scopedDayDetailsSyncState is SyncState.OfflineCached) {
+            item {
+                SyncStatusBar(
+                    syncState = scopedDayDetailsSyncState,
+                    onRefresh = { viewModel.syncDayDetails(activeGroupId, selectedDateStr) }
+                )
+            }
+        }
+
         // Month Navigation Bar
         item {
             GlassCard(

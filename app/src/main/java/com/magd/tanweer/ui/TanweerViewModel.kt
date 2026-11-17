@@ -407,6 +407,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _calendarSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val calendarSyncState: StateFlow<SyncState> = _calendarSyncState.asStateFlow()
+    private val _calendarSyncMonthScope = MutableStateFlow<String?>(null)
+    val calendarSyncMonthScope: StateFlow<String?> = _calendarSyncMonthScope.asStateFlow()
 
     @Volatile private var dayDetailsSyncRequestGeneration = 0
     private val _dayDetailsSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
@@ -608,6 +610,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _homeworkSyncState.value = SyncState.Idle
         _examsSyncState.value = SyncState.Idle
         _calendarSyncState.value = SyncState.Idle
+        _calendarSyncMonthScope.value = null
         dayDetailsSyncRequestGeneration++
         _dayDetailsSyncState.value = SyncState.Idle
         _dayDetailsSyncGroupId.value = null
@@ -1306,13 +1309,19 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncCalendarMonth(groupId: String = getActiveGroupId(), month: String, isRefresh: Boolean = false) {
+        val requestedMonth = month.trim()
+        if (_calendarSyncMonthScope.value != requestedMonth) {
+            _calendarSyncMonthScope.value = requestedMonth.takeIf { it.isNotBlank() }
+            // A success for another month cannot confirm this month's contents.
+            _calendarSyncState.value = SyncState.Idle
+        }
         launchGroupScopedSync(
             source = GroupSyncSource.CALENDAR,
             groupId = groupId,
             state = _calendarSyncState,
             isRefresh = isRefresh,
             dataLabel = "التقويم"
-        ) { repository.syncCalendarMonth(groupId, month) }
+        ) { repository.syncCalendarMonth(groupId, requestedMonth) }
     }
 
     fun syncDayDetails(groupId: String = getActiveGroupId(), date: String) {

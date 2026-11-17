@@ -8,6 +8,7 @@ import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
 import com.magd.tanweer.ui.components.syncStateForScope
 import com.magd.tanweer.ui.components.syncStateForDayScope
 import com.magd.tanweer.ui.components.shouldShowConfirmedCalendarEmpty
+import com.magd.tanweer.ui.components.hasAuthoritativeCalendarMonthSnapshot
 import com.magd.tanweer.ui.components.isSnapshotForScope
 import com.magd.tanweer.ui.components.itemsForSnapshotScope
 import com.magd.tanweer.ui.components.hasAuthoritativeGradeSnapshot
@@ -161,6 +162,17 @@ class PhaseFourUiPolicyTest {
 
 
 
+
+
+    @Test
+    fun calendar_month_snapshot_is_authoritative_only_for_the_requested_month() {
+        val success = SyncState.Success(100L)
+        assertTrue(hasAuthoritativeCalendarMonthSnapshot(success, "2026-11", "2026-11"))
+        assertFalse(hasAuthoritativeCalendarMonthSnapshot(success, "2026-10", "2026-11"))
+        assertFalse(hasAuthoritativeCalendarMonthSnapshot(SyncState.Idle, "2026-11", "2026-11"))
+        assertFalse(hasAuthoritativeCalendarMonthSnapshot(SyncState.OfflineCached(), "2026-11", "2026-11"))
+        assertFalse(hasAuthoritativeCalendarMonthSnapshot(success, "2026-11", ""))
+    }
 
     @Test
     fun day_detail_snapshot_requires_the_exact_group_and_date() {

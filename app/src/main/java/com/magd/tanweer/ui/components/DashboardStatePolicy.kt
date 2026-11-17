@@ -92,3 +92,13 @@ fun shouldShowConfirmedCalendarEmpty(
     hasMonthlySnapshot: Boolean,
     hasDayDetailsSnapshot: Boolean,
 ): Boolean = hasMonthlySnapshot && hasDayDetailsSnapshot
+
+
+/** A successful calendar response is authoritative only for the displayed month. */
+fun hasAuthoritativeCalendarMonthSnapshot(
+    syncState: SyncState,
+    syncedMonth: String?,
+    requestedMonth: String,
+): Boolean = requestedMonth.isNotBlank() &&
+    syncedMonth == requestedMonth &&
+    hasAuthoritativeSnapshot(syncState)
