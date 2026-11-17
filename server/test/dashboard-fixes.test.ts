@@ -691,3 +691,35 @@ describe('Owner Dashboard keyboard navigation semantics', () => {
     expect(script).toContain("activeNav.setAttribute('aria-current', 'page')");
   });
 });
+
+
+describe('Owner Dashboard authoritative loading and empty states', () => {
+  it('separates failed user-list requests from a confirmed empty search', async () => {
+    const html = await (await renderDashboardHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    expect(script).toContain('function renderDashboardTableError');
+    expect(script).toContain('function renderDashboardTableEmpty');
+    expect(script).toContain("renderDashboardTableError(tbody, 7, data, 'تعذر تحميل حسابات المستخدمين', 'loadUsers')");
+    expect(script).toContain('if (data.users.length === 0)');
+    expect(script).toContain('لا توجد حسابات مطابقة لعبارة البحث.');
+    expect(script).not.toContain('if (!data.success || !data.users.length)');
+  });
+
+  it('marks old overview numbers as last-confirmed when statistics refresh fails', async () => {
+    const html = await (await renderDashboardHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    expect(html).toContain('id="overviewLoadNotice"');
+    expect(script).toContain('showOverviewLoadNotice');
+    expect(script).toContain('الأرقام الظاهرة — إن وُجدت — هي آخر لقطة مؤكدة');
+    expect(script).not.toContain('if (!data.success) return;');
+  });
+
+  it('shows group-filter failures rather than silently hiding them', async () => {
+    const html = await (await renderDashboardHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    expect(script).toContain('function setDashboardSelectError');
+    expect(script).toContain('setDashboardSelectError(groupFilter');
+    expect(script).toContain('setDashboardSelectError(sel');
+    expect(script).not.toContain('catch (e) {}');
+  });
+});

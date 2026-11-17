@@ -3091,6 +3091,8 @@ export function renderDashboardHtml(): Response {
       <!-- Overview Tab: All 18 System Sections -->
       <section id="tab-overview">
         <h3 style="font-size:1rem; font-weight:800; color:var(--cyan); margin-bottom:1rem;">✨ TANWEER CONTROL CENTER — إحصائيات المنظومة الحية</h3>
+        <div id="overviewLoadNotice" role="status" aria-live="polite" hidden style="margin:0 0 0.85rem; padding:0.65rem 0.8rem; border:1px solid var(--border); border-radius:10px; font-size:0.82rem;"></div>
+        <div id="overviewLoadNotice" role="status" aria-live="polite" hidden style="margin:0 0 0.85rem; padding:0.65rem 0.8rem; border:1px solid var(--border); border-radius:10px; font-size:0.82rem;"></div>
         <div class="stats-grid">
           <div class="stat-card" onclick="switchTab('users')" style="cursor:pointer;">
             <div class="stat-num" id="statUsers" style="color:var(--cyan);">-</div>
@@ -4328,40 +4330,114 @@ export function renderDashboardHtml(): Response {
       if (tabId === 'audit') loadAudit(0);
     }
 
+    function dashboardResponseMessage(data, fallback) {
+      const rawError = data?.error;
+      const errorMessage = typeof rawError === 'string' ? rawError : (typeof rawError?.message === 'string' ? rawError.message : '');
+      const serverMessage = typeof data?.message === 'string' ? data.message : '';
+      return (errorMessage || serverMessage || fallback || 'تعذر إكمال الطلب').trim();
+    }
+
+    function renderDashboardTableError(tbody, colspan, data, fallback, retryAction) {
+      if (!tbody) return;
+      const message = escapeHtml(dashboardResponseMessage(data, fallback));
+      const retry = typeof retryAction === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(retryAction)
+        ? '<button type="button" class="action-btn" style="margin-inline-start:0.5rem;" onclick="' + retryAction + '()">إعادة المحاولة</button>'
+        : '';
+      tbody.innerHTML = '<tr><td colspan="' + String(colspan) + '" role="alert" style="text-align:center; color:var(--ruby); padding:1rem;">' + message + retry + '</td></tr>';
+    }
+
+    function renderDashboardTableEmpty(tbody, colspan, message) {
+      if (!tbody) return;
+      tbody.innerHTML = '<tr><td colspan="' + String(colspan) + '" role="status" style="text-align:center; color:var(--text-sec); padding:1rem;">' + escapeHtml(message) + '</td></tr>';
+    }
+
+    function renderDashboardPanelError(container, data, fallback, retryAction) {
+      if (!container) return;
+      const message = escapeHtml(dashboardResponseMessage(data, fallback));
+      const retry = typeof retryAction === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(retryAction)
+        ? '<button type="button" class="action-btn" style="margin-inline-start:0.5rem;" onclick="' + retryAction + '()">إعادة المحاولة</button>'
+        : '';
+      container.innerHTML = '<div role="alert" style="text-align:center; color:var(--ruby); grid-column:1/-1; padding:1rem;">' + message + retry + '</div>';
+    }
+
+    function renderDashboardPanelEmpty(container, message) {
+      if (!container) return;
+      container.innerHTML = '<div role="status" style="text-align:center; color:var(--text-sec); grid-column:1/-1; padding:1rem;">' + escapeHtml(message) + '</div>';
+    }
+
+    function setDashboardSelectError(select, message) {
+      if (!select) return;
+      select.innerHTML = '<option value="">' + escapeHtml(message) + '</option>';
+      select.setAttribute('aria-invalid', 'true');
+      select.title = message;
+    }
+
+    function clearDashboardSelectError(select) {
+      if (!select) return;
+      select.removeAttribute('aria-invalid');
+      select.removeAttribute('title');
+    }
+
+    function showOverviewLoadNotice(message, isError = false) {
+      const notice = document.getElementById('overviewLoadNotice');
+      if (!notice) return;
+      notice.textContent = message || '';
+      notice.hidden = !message;
+      notice.style.color = isError ? 'var(--ruby)' : 'var(--text-sec)';
+      notice.setAttribute('role', isError ? 'alert' : 'status');
+    }
+
+    function dashboardCountText(value) {
+      if (value === null || value === undefined || value === '') return '—';
+      const number = Number(value);
+      return Number.isFinite(number) && number >= 0 ? String(value) : '—';
+    }
+
     async function loadStats() {
+      showOverviewLoadNotice('جارٍ التحقق من إحصاءات المنظومة...');
       try {
         const res = await fetch('/api/dashboard/stats');
         const data = await res.json();
-        if (!data.success) return;
-        const s = data.stats;
-        document.getElementById('statUsers').textContent = s.users.total;
-        document.getElementById('statTeachers').textContent = s.teachers;
-        document.getElementById('statModerators').textContent = s.moderators;
-        document.getElementById('statAdmins').textContent = s.administrators;
-        document.getElementById('statGroups').textContent = s.groups;
-        document.getElementById('statPendingRequests').textContent = s.roleRequests.pending;
-
-        document.getElementById('statContents').textContent = s.content;
-        document.getElementById('statHomeworks').textContent = s.homework;
-        document.getElementById('statExams').textContent = s.exams;
-        document.getElementById('statEvents').textContent = s.events;
-        document.getElementById('statSchedules').textContent = s.schedules.slots;
-        document.getElementById('statIssues').textContent = s.issues;
-        document.getElementById('statChat').textContent = s.chat;
-        document.getElementById('statMedia').textContent = s.media;
-        document.getElementById('statVotes').textContent = s.votes;
-        document.getElementById('statSecurity').textContent = s.security.activeSessions;
-        document.getElementById('statAudit').textContent = s.auditLog;
-
-        document.getElementById('sysEnv').textContent = s.system.environment;
-
-        if (s.roleRequests.pending > 0) {
-          const b = document.getElementById('requestsBadge');
-          b.textContent = s.roleRequests.pending;
-          b.style.display = 'inline-block';
+        const s = data?.stats;
+        const counts = [
+          s?.users?.total, s?.teachers, s?.moderators, s?.administrators, s?.groups,
+          s?.roleRequests?.pending, s?.content, s?.homework, s?.exams, s?.events,
+          s?.schedules?.slots, s?.issues, s?.chat, s?.media, s?.votes,
+          s?.security?.activeSessions, s?.auditLog
+        ];
+        const validCounts = counts.every(value => value !== null && value !== undefined && value !== '' &&
+          Number.isFinite(Number(value)) && Number(value) >= 0);
+        if (!res.ok || data?.success !== true || !s?.system?.environment || !validCounts) {
+          showOverviewLoadNotice(dashboardResponseMessage(data, 'تعذر تحديث الإحصاءات؛ الأرقام الظاهرة — إن وُجدت — هي آخر لقطة مؤكدة.'), true);
+          return;
         }
+        document.getElementById('statUsers').textContent = dashboardCountText(s.users.total);
+        document.getElementById('statTeachers').textContent = dashboardCountText(s.teachers);
+        document.getElementById('statModerators').textContent = dashboardCountText(s.moderators);
+        document.getElementById('statAdmins').textContent = dashboardCountText(s.administrators);
+        document.getElementById('statGroups').textContent = dashboardCountText(s.groups);
+        document.getElementById('statPendingRequests').textContent = dashboardCountText(s.roleRequests.pending);
+        document.getElementById('statContents').textContent = dashboardCountText(s.content);
+        document.getElementById('statHomeworks').textContent = dashboardCountText(s.homework);
+        document.getElementById('statExams').textContent = dashboardCountText(s.exams);
+        document.getElementById('statEvents').textContent = dashboardCountText(s.events);
+        document.getElementById('statSchedules').textContent = dashboardCountText(s.schedules.slots);
+        document.getElementById('statIssues').textContent = dashboardCountText(s.issues);
+        document.getElementById('statChat').textContent = dashboardCountText(s.chat);
+        document.getElementById('statMedia').textContent = dashboardCountText(s.media);
+        document.getElementById('statVotes').textContent = dashboardCountText(s.votes);
+        document.getElementById('statSecurity').textContent = dashboardCountText(s.security.activeSessions);
+        document.getElementById('statAudit').textContent = dashboardCountText(s.auditLog);
+        document.getElementById('sysEnv').textContent = s.system.environment;
+        const badge = document.getElementById('requestsBadge');
+        if (badge) {
+          badge.textContent = dashboardCountText(s.roleRequests.pending);
+          badge.style.display = Number(s.roleRequests.pending) > 0 ? 'inline-block' : 'none';
+        }
+        showOverviewLoadNotice('');
       } catch (e) {
-        console.error(e);
+        showOverviewLoadNotice('تعذر الاتصال بالخادم لتحديث الإحصاءات؛ الأرقام الظاهرة — إن وُجدت — هي آخر لقطة مؤكدة.', true);
+        console.error('Owner Dashboard statistics refresh failed', e);
       }
     }
 
@@ -4420,9 +4496,13 @@ export function renderDashboardHtml(): Response {
         const url = \`/api/dashboard/users?q=\${encodeURIComponent(q)}&role=\${encodeURIComponent(role)}&status=\${encodeURIComponent(status)}&offset=\${offset}&limit=\${pagination.users.limit}\`;
         const res = await fetch(url);
         const data = await res.json();
-        if (!data.success || !data.users.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد حسابات مطابقة</td></tr>';
-          renderPaginationControls('usersPagination', 0, pagination.users.limit, 0, 0, 'loadUsers');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.users)) {
+          renderDashboardTableError(tbody, 7, data, 'تعذر تحميل حسابات المستخدمين', 'loadUsers');
+          return;
+        }
+        if (data.users.length === 0) {
+          renderDashboardTableEmpty(tbody, 7, 'لا توجد حسابات مطابقة لعبارة البحث.');
+          renderPaginationControls('usersPagination', data.offset ?? offset, data.limit ?? pagination.users.limit, data.count ?? 0, data.totalCount ?? 0, 'loadUsers');
           return;
         }
 
@@ -4683,8 +4763,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/roles');
         const data = await res.json();
-        if (!data.success || !data.roles.length) {
-          container.innerHTML = '<div style="text-align:center; color:var(--ruby); grid-column:1/-1;">فشل تحميل الرتب</div>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.roles)) {
+          renderDashboardPanelError(container, data, 'تعذر تحميل تعريفات الرتب', 'loadRoles');
+          return;
+        }
+        if (data.roles.length === 0) {
+          renderDashboardPanelEmpty(container, 'لم يُرجع الخادم تعريفات للرتب.');
           return;
         }
         container.innerHTML = data.roles.map(r => \`
@@ -4722,8 +4806,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users?role=TEACHER');
         const data = await res.json();
-        if (!data.success || !data.users.length) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا يوجد أساتذة مسجلين بعد</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.users)) {
+          renderDashboardTableError(tbody, 5, data, 'تعذر تحميل قائمة TEACHER', 'loadTeachers');
+          return;
+        }
+        if (data.users.length === 0) {
+          renderDashboardTableEmpty(tbody, 5, 'لا يوجد أساتذة مسجلون حالياً.');
           return;
         }
         tbody.innerHTML = data.users.map(u => {
@@ -4750,8 +4838,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users?role=MODERATOR');
         const data = await res.json();
-        if (!data.success || !data.users.length) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا يوجد مشرفون مسجلون</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.users)) {
+          renderDashboardTableError(tbody, 5, data, 'تعذر تحميل قائمة MODERATOR', 'loadModerators');
+          return;
+        }
+        if (data.users.length === 0) {
+          renderDashboardTableEmpty(tbody, 5, 'لا يوجد مشرفون مسجلون حالياً.');
           return;
         }
         tbody.innerHTML = data.users.map(u => {
@@ -4778,8 +4870,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users?role=ADMIN');
         const data = await res.json();
-        if (!data.success || !data.users.length) {
-          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-sec);">لا يوجد مدراء إضافيون</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.users)) {
+          renderDashboardTableError(tbody, 4, data, 'تعذر تحميل قائمة ADMIN', 'loadAdmins');
+          return;
+        }
+        if (data.users.length === 0) {
+          renderDashboardTableEmpty(tbody, 4, 'لا يوجد مديرون إضافيون مسجلون حالياً.');
           return;
         }
         tbody.innerHTML = data.users.map(u => {
@@ -4880,8 +4976,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/role-requests?status=' + status);
         const data = await res.json();
-        if (!data.success || !data.requests.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد طلبات في هذه الحالة</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.requests)) {
+          renderDashboardTableError(tbody, 7, data, 'تعذر تحميل طلبات الترقية', 'loadRequests');
+          return;
+        }
+        if (data.requests.length === 0) {
+          renderDashboardTableEmpty(tbody, 7, 'لا توجد طلبات في الحالة المحددة.');
           return;
         }
 
@@ -4977,18 +5077,27 @@ export function renderDashboardHtml(): Response {
 
     async function loadGroups() {
       const tbody = document.getElementById('groupsTableBody');
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">جاري تحميل المجموعات...</td></tr>';
       try {
         const res = await fetch('/api/dashboard/groups');
         const data = await res.json();
+        if (!res.ok || data?.success !== true || !Array.isArray(data.groups)) {
+          renderDashboardTableError(tbody, 5, data, 'تعذر تحميل المجموعات', 'loadGroups');
+          return;
+        }
+        if (data.groups.length === 0) {
+          renderDashboardTableEmpty(tbody, 5, 'لا توجد مجموعات مسجلة في البيانات المعادة من الخادم.');
+          return;
+        }
         tbody.innerHTML = data.groups.map(g => \`<tr>
           <td><code>\${escapeHtml(g.id)}</code></td>
           <td><strong>\${escapeHtml(g.name)}</strong></td>
           <td><span class="badge admin">\${escapeHtml(g.type)}</span></td>
-          <td>\${escapeHtml(g.member_count)} عضو</td>
+          <td>\${dashboardCountText(g.member_count)} عضو</td>
           <td>\${escapeHtml(g.academic_year_id)}</td>
         </tr>\`).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--ruby);">فشل تحميل المجموعات</td></tr>';
+        renderDashboardTableError(tbody, 5, null, 'تعذر الاتصال بالخادم لتحميل المجموعات.', 'loadGroups');
       }
     }
 
@@ -5002,9 +5111,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/contents?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.contents.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.contents.length) {
-          tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--text-sec);">لا توجد دروس مطابقة</td></tr>';
-          renderPaginationControls('contentsPagination', 0, pagination.contents.limit, 0, 0, 'loadContents');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.contents)) {
+          renderDashboardTableError(tbody, 8, data, 'تعذر تحميل الدروس', 'loadContents');
+          return;
+        }
+        if (data.contents.length === 0) {
+          renderDashboardTableEmpty(tbody, 8, 'لا توجد دروس مطابقة.');
+          renderPaginationControls('contentsPagination', data.offset ?? offset, data.limit ?? pagination.contents.limit, data.count ?? 0, data.totalCount ?? 0, 'loadContents');
           return;
         }
 
@@ -5141,9 +5254,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/homeworks?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.homeworks.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.homeworks.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد واجبات مطابقة</td></tr>';
-          renderPaginationControls('homeworksPagination', 0, pagination.homeworks.limit, 0, 0, 'loadHomeworks');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.homeworks)) {
+          renderDashboardTableError(tbody, 6, data, 'تعذر تحميل الواجبات', 'loadHomeworks');
+          return;
+        }
+        if (data.homeworks.length === 0) {
+          renderDashboardTableEmpty(tbody, 6, 'لا توجد واجبات مطابقة.');
+          renderPaginationControls('homeworksPagination', data.offset ?? offset, data.limit ?? pagination.homeworks.limit, data.count ?? 0, data.totalCount ?? 0, 'loadHomeworks');
           return;
         }
 
@@ -5294,9 +5411,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/exams?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.exams.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.exams.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد اختبارات مسجلة</td></tr>';
-          renderPaginationControls('examsPagination', 0, pagination.exams.limit, 0, 0, 'loadExams');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.exams)) {
+          renderDashboardTableError(tbody, 7, data, 'تعذر تحميل الاختبارات', 'loadExams');
+          return;
+        }
+        if (data.exams.length === 0) {
+          renderDashboardTableEmpty(tbody, 7, 'لا توجد اختبارات مسجلة.');
+          renderPaginationControls('examsPagination', data.offset ?? offset, data.limit ?? pagination.exams.limit, data.count ?? 0, data.totalCount ?? 0, 'loadExams');
           return;
         }
 
@@ -5360,9 +5481,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/events?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.events.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.events.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد أحداث مسجلة</td></tr>';
-          renderPaginationControls('eventsPagination', 0, pagination.events.limit, 0, 0, 'loadEvents');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.events)) {
+          renderDashboardTableError(tbody, 6, data, 'تعذر تحميل الفعاليات', 'loadEvents');
+          return;
+        }
+        if (data.events.length === 0) {
+          renderDashboardTableEmpty(tbody, 6, 'لا توجد فعاليات مسجلة.');
+          renderPaginationControls('eventsPagination', data.offset ?? offset, data.limit ?? pagination.events.limit, data.count ?? 0, data.totalCount ?? 0, 'loadEvents');
           return;
         }
 
@@ -5391,8 +5516,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/holidays');
         const data = await res.json();
-        if (!data.success || !data.holidays.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد إجازات مدرسية مسجلة حالياً</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.holidays)) {
+          renderDashboardTableError(tbody, 6, data, 'تعذر تحميل الإجازات المدرسية', 'loadHolidays');
+          return;
+        }
+        if (data.holidays.length === 0) {
+          renderDashboardTableEmpty(tbody, 6, 'لا توجد إجازات مدرسية مسجلة حالياً.');
           return;
         }
 
@@ -5418,17 +5547,24 @@ export function renderDashboardHtml(): Response {
       document.getElementById('holidayDate').value = new Date().toISOString().split('T')[0];
       document.getElementById('holidayReason').value = '';
       
+      const sel = document.getElementById('holidayGroupId');
+      sel.innerHTML = '<option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>';
       try {
         const res = await fetch('/api/dashboard/groups');
         const data = await res.json();
-        const sel = document.getElementById('holidayGroupId');
-        sel.innerHTML = '<option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>';
-        if (data.groups) {
-          data.groups.forEach(g => {
-            sel.innerHTML += \`<option value="\${escapeHtml(g.id)}">شعبة: \${escapeHtml(g.name)}</option>\`;
-          });
+        if (!res.ok || data?.success !== true || !Array.isArray(data.groups)) {
+          setDashboardSelectError(sel, dashboardResponseMessage(data, 'تعذر تحميل الشعب؛ يمكنك اختيار كامل المدرسة أو إعادة المحاولة لاحقاً.'));
+          sel.insertAdjacentHTML('afterbegin', '<option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>');
+          return;
         }
-      } catch (e) {}
+        clearDashboardSelectError(sel);
+        data.groups.forEach(g => {
+          sel.innerHTML += \`<option value="\${escapeHtml(g.id)}">شعبة: \${escapeHtml(g.name)}</option>\`;
+        });
+      } catch (e) {
+        setDashboardSelectError(sel, 'تعذر الاتصال بالخادم؛ يمكنك اختيار كامل المدرسة أو إعادة المحاولة لاحقاً.');
+        sel.insertAdjacentHTML('afterbegin', '<option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>');
+      }
 
       document.getElementById('holidayModal').style.display = 'flex';
     }
@@ -5502,9 +5638,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/issues?status=\${status}&offset=\${offset}&limit=\${pagination.issues.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.issues.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد بلاغات مسجلة</td></tr>';
-          renderPaginationControls('issuesPagination', 0, pagination.issues.limit, 0, 0, 'loadIssues');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.issues)) {
+          renderDashboardTableError(tbody, 7, data, 'تعذر تحميل البلاغات', 'loadIssues');
+          return;
+        }
+        if (data.issues.length === 0) {
+          renderDashboardTableEmpty(tbody, 7, 'لا توجد بلاغات مسجلة ضمن هذا المرشح.');
+          renderPaginationControls('issuesPagination', data.offset ?? offset, data.limit ?? pagination.issues.limit, data.count ?? 0, data.totalCount ?? 0, 'loadIssues');
           return;
         }
 
@@ -5538,32 +5678,44 @@ export function renderDashboardHtml(): Response {
         try {
           const gRes = await fetch('/api/dashboard/groups');
           const gData = await gRes.json();
-          if (gData.groups) {
+          if (!gRes.ok || gData?.success !== true || !Array.isArray(gData.groups)) {
+            setDashboardSelectError(groupFilter, dashboardResponseMessage(gData, 'تعذر تحميل قائمة الشعب'));
+          } else if (gData.groups.length === 0) {
+            groupFilter.innerHTML = '<option value="">لا توجد مجموعات مسجلة</option>';
+            clearDashboardSelectError(groupFilter);
+          } else {
+            clearDashboardSelectError(groupFilter);
             groupFilter.innerHTML = '<option value="">-- جميع الشعب الدراسية --</option>';
             gData.groups.forEach(g => {
               groupFilter.innerHTML += \`<option value="\${escapeHtml(g.id)}">\${escapeHtml(g.name)} (\${escapeHtml(g.grade || '')})</option>\`;
             });
           }
-        } catch (e) {}
+        } catch (e) {
+          setDashboardSelectError(groupFilter, 'تعذر الاتصال بالخادم لتحميل الشعب');
+        }
       }
 
       const selectedGroupId = groupFilter?.value || '';
       try {
         const res = await fetch('/api/dashboard/schedules' + (selectedGroupId ? '?groupId=' + encodeURIComponent(selectedGroupId) : ''));
         const data = await res.json();
-        if (!data.success || !data.groups || !data.groups.length) {
-          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-sec);">لا توجد جداول مسجلة للشعب المحددة</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.groups)) {
+          renderDashboardTableError(tbody, 4, data, 'تعذر تحميل الجداول الدراسية', 'loadSchedules');
+          return;
+        }
+        if (data.groups.length === 0) {
+          renderDashboardTableEmpty(tbody, 4, 'لا توجد جداول مسجلة للمجموعات المحددة.');
           return;
         }
 
         tbody.innerHTML = data.groups.map(g => {
           const safeId = escapeHtml(g.id);
           const safeName = escapeHtml(g.name);
-          const totalSlots = g.totalSlots || (g.slots ? g.slots.length : 0);
+          const totalSlots = g.totalSlots ?? (Array.isArray(g.slots) ? g.slots.length : null);
 
           return \`<tr>
             <td><strong>\${safeName}</strong> <span style="font-size:0.75rem; color:var(--text-sec);">(\${escapeHtml(g.grade || '')})</span></td>
-            <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${totalSlots} حصة مسجلة</span></td>
+            <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${dashboardCountText(totalSlots)} حصة مسجلة</span></td>
             <td><code>الأحد - الخميس (7 حصص يومياً)</code></td>
             <td>
               <button class="action-btn" onclick="viewWeeklyGrid('\${safeId}', '\${safeName}')">عرض الجدول الأسبوعي 📅</button>
@@ -5654,8 +5806,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/decisions');
         const data = await res.json();
-        if (!data.success || !data.decisions || !data.decisions.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد قرارات أو تصويتات مسجلة</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.decisions)) {
+          renderDashboardTableError(tbody, 7, data, 'تعذر تحميل القرارات والتصويتات', 'loadDecisions');
+          return;
+        }
+        if (data.decisions.length === 0) {
+          renderDashboardTableEmpty(tbody, 7, 'لا توجد قرارات أو تصويتات مسجلة.');
           return;
         }
 
@@ -5664,8 +5820,8 @@ export function renderDashboardHtml(): Response {
           const reqType = escapeHtml(d.request_type || d.type || 'قرار');
           const reason = escapeHtml(d.reason || d.description || '-');
           const group = escapeHtml(d.group_name || d.group_id || 'عام');
-          const yesVotes = d.votes_for ?? d.yes_votes ?? 0;
-          const noVotes = d.votes_against ?? d.no_votes ?? 0;
+          const yesVotes = dashboardCountText(d.votes_for ?? d.yes_votes);
+          const noVotes = dashboardCountText(d.votes_against ?? d.no_votes);
           const status = (d.status || 'PENDING').toUpperCase();
           const creator = escapeHtml(d.creator_name || d.created_by || '-');
 
@@ -5737,8 +5893,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/corrections');
         const data = await res.json();
-        if (!data.success || !data.corrections || !data.corrections.length) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا توجد مقترحات تصحيح مسجلة</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.corrections)) {
+          renderDashboardTableError(tbody, 5, data, 'تعذر تحميل مقترحات التصحيح', 'loadCorrections');
+          return;
+        }
+        if (data.corrections.length === 0) {
+          renderDashboardTableEmpty(tbody, 5, 'لا توجد مقترحات تصحيح مسجلة.');
           return;
         }
 
@@ -5761,13 +5921,22 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/groups');
         const data = await res.json();
-        if (data.groups) {
-          sel.innerHTML = '<option value="">-- جميع الشعب --</option>';
-          data.groups.forEach(g => {
-            sel.innerHTML += \`<option value="\${escapeHtml(g.id)}">\${escapeHtml(g.name)}</option>\`;
-          });
+        if (!res.ok || data?.success !== true || !Array.isArray(data.groups)) {
+          setDashboardSelectError(sel, dashboardResponseMessage(data, 'تعذر تحميل قائمة الشعب'));
+          return;
         }
-      } catch (e) {}
+        clearDashboardSelectError(sel);
+        sel.innerHTML = '<option value="">-- جميع الشعب --</option>';
+        if (data.groups.length === 0) {
+          sel.innerHTML = '<option value="">لا توجد مجموعات مسجلة</option>';
+          return;
+        }
+        data.groups.forEach(g => {
+          sel.innerHTML += \`<option value="\${escapeHtml(g.id)}">\${escapeHtml(g.name)}</option>\`;
+        });
+      } catch (e) {
+        setDashboardSelectError(sel, 'تعذر الاتصال بالخادم لتحميل قائمة الشعب');
+      }
     }
 
     async function loadChatMessages(offset = 0) {
@@ -5782,9 +5951,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/chat-messages?q=\${encodeURIComponent(q)}&groupId=\${encodeURIComponent(groupId)}&order=\${encodeURIComponent(order)}&offset=\${offset}&limit=\${pagination.chat.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.messages.length) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا توجد رسائل مطابقة</td></tr>';
-          renderPaginationControls('chatPagination', 0, pagination.chat.limit, 0, 0, 'loadChatMessages');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.messages)) {
+          renderDashboardTableError(tbody, 5, data, 'تعذر تحميل رسائل المحادثة', 'loadChatMessages');
+          return;
+        }
+        if (data.messages.length === 0) {
+          renderDashboardTableEmpty(tbody, 5, 'لا توجد رسائل مطابقة للبحث أو المجموعة المحددة.');
+          renderPaginationControls('chatPagination', data.offset ?? offset, data.limit ?? pagination.chat.limit, data.count ?? 0, data.totalCount ?? 0, 'loadChatMessages');
           return;
         }
 
@@ -5925,9 +6098,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/audit-logs?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.audit.limit}\`);
         const data = await res.json();
-        if (!data.logs || !data.logs.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">لا توجد سجلات بعد</td></tr>';
-          renderPaginationControls('auditPagination', 0, pagination.audit.limit, 0, 0, 'loadAudit');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.logs)) {
+          renderDashboardTableError(tbody, 6, data, 'تعذر تحميل سجل الرقابة', 'loadAudit');
+          return;
+        }
+        if (data.logs.length === 0) {
+          renderDashboardTableEmpty(tbody, 6, 'لا توجد سجلات ضمن البحث الحالي.');
+          renderPaginationControls('auditPagination', data.offset ?? offset, data.limit ?? pagination.audit.limit, data.count ?? 0, data.totalCount ?? 0, 'loadAudit');
           return;
         }
 

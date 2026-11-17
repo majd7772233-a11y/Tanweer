@@ -254,3 +254,13 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 
 
 - Schedule proposal dialog follow-up: when a refresh fails after a previous successful snapshot, the dialog keeps the last confirmed proposals visible but now displays the sync error/offline status and labels the count as belonging to the last confirmed snapshot. A first-load empty result still cannot claim there are no proposals.
+
+
+## 2026-11-17 — Phase 4 Owner Dashboard data-state follow-up
+
+- Based on the verified source HEAD e155b5c04d141a5db429ddf550246ea2f516dd26, hardened System Owner overview statistics and list loaders.
+- Overview statistics now validate HTTP success, API success, required nested fields and non-negative counts before replacing displayed values. Failed refreshes preserve the last confirmed values and announce that they are stale.
+- User directories, role requests, groups, lessons, homework, exams, events, holidays, issues, schedules, decisions, corrections, chat and audit lists distinguish failed/malformed responses from successful empty arrays. Failed table states expose an explicit retry action.
+- Owner group selectors for schedules, chat and holiday creation report group-list failures instead of swallowing them. Missing schedule-slot and decision vote counts render an unknown marker rather than invented zero.
+- Added render-level regression assertions for failed versus empty user lists, stale overview status and visible group-selector failures.
+- This patch does not change owner authentication/authorization, role visibility, schema/migrations, Worker deployment, secrets, Production data or main. Validation must run on the exact new HEAD; previous CI on e155b5c does not validate this patch.
