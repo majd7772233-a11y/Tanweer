@@ -3,13 +3,7 @@ import { createRequire } from 'node:module';
 import process from 'node:process';
 import { describe, expect, it } from 'vitest';
 
-type PicomatchApi = {
-  makeRe: (pattern: string, options?: { capture?: boolean }) => RegExp;
-  isMatch: (input: string, pattern: string) => boolean;
-};
-
-const require = createRequire(import.meta.url);
-const picomatch = require('picomatch') as PicomatchApi;
+const picomatch = createRequire(import.meta.url)('picomatch');
 
 describe('picomatch ReDoS security backport', () => {
   it('removes nested unbounded repetition from affected single-branch extglobs', () => {
