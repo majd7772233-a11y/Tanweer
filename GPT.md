@@ -2296,3 +2296,19 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Android run 44140654341 passed on 75b3c5c1 (unit tests, Debug APK and artifact upload).
 - Server run 44140654335 stopped at npm audit due GHSA-fc5q-39xc-vjpf / CVE-2026-112366: picomatch <=4.0.7 in fdir/tinyglobby/Vite/Vitest dev tooling. npm registry currently tops out at picomatch 4.0.7; upstream PR 194 remains open/unmerged and does not resolve all repeated-extglob ReDoS cases. npm audit fix --force proposes a breaking Vitest/Vite downgrade, so no forced downgrade or audit bypass was made.
 - Phase 4 stays open until the dependency security path is properly resolved and Server CI plus a new Android CI run pass on the new SHA.
+
+### 2026-11-17 — picomatch ReDoS remediation
+
+- Resolved the current Server npm-audit blocker GHSA-fc5q-39xc-vjpf / CVE-2026-112366 by vendoring a reviewed backport of upstream picomatch PR #237 (source commit 1bf0d04563cb9ce568cf36efc5f6b7187d9911d5).
+- The local package is explicitly versioned 4.0.8+tanweer.1; this is a downstream build, not an official npm release. Server package.json pins picomatch as a local development tarball dependency and sets overrides.picomatch to $picomatch; the lockfile records its local archive integrity. No Vite/Vitest downgrade, advisory suppression, audit-level change, or external runtime dependency was introduced.
+- The backport collapses the redundant outer repetition for eligible single-branch extglobs containing ordinary star wildcards. It excludes globstars, path separators and complex syntax. In capture mode it uses the conservative literal fallback to preserve capture behavior.
+- Added server/test/picomatch-security.test.ts for regex-shape regression, expected matching behavior, capture fallback, and a child-process timeout probe against crafted non-matching strings. Source and attribution are documented in server/vendor/picomatch/UPSTREAM_SECURITY_PATCH.md.
+- The npm local-file override and clean-install behavior were verified in an isolated npm fixture. A project lockfile regeneration, project npm audit, full Server CI, and fresh Android CI remain to be completed/verified before this checkpoint can be called green. Do not close Phase 4 yet.
+- Keep the existing boundaries: branch work/release-readiness only; main untouched; PR #6 open and Draft; no merge, Worker deployment, D1 migration, secrets, or Production/Staging writes. TNR-010 remains deferred until before first release.
+
+### 2026-11-17 - post-backport verification
+
+- The checked-in Server package manifest and package-lock.json now use the local picomatch 4.0.8+tanweer.1 archive via a direct devDependency plus the $picomatch npm override. Lockfile integrity pins the archive; Vite/Vitest remain at their existing major versions.
+- The exact Server CI audit command, npm audit --audit-level=moderate, now passes on the updated project lock with zero reported vulnerabilities at every severity. The previous five high records were five affected packages reporting the same underlying advisory.
+- A clean copy of the entire Server package (excluding existing node_modules) completed lock generation and npm ci --ignore-scripts; npm ls confirmed Vite, Vitest, tinyglobby and fdir all resolve to the same local patched version. npm audit then returned zero vulnerabilities. The local clean-install probe used Node 26/npm 12 and disabled lifecycle scripts; the repository CI on Node 24 remains the authoritative install/typecheck/test/bundle validation.
+- No local TypeScript, Vitest, Android build, or Wrangler bundle command was run. Fresh Server and Android GitHub Actions runs on the committed SHA are required. Phase 4 remains open until those checks and the already documented manual acceptance work are complete.
