@@ -71,3 +71,24 @@ fun <T> itemsForSnapshotScope(
     snapshotScopeId: String?,
     requestedScopeId: String,
 ): List<T> = if (isSnapshotForScope(snapshotScopeId, requestedScopeId)) items else emptyList()
+
+
+/** A selected-day snapshot is valid only for the exact group and date being displayed. */
+fun syncStateForDayScope(
+    syncState: SyncState,
+    snapshotGroupId: String?,
+    snapshotDate: String?,
+    requestedGroupId: String,
+    requestedDate: String,
+): SyncState = if (
+    requestedGroupId.isNotBlank() &&
+    requestedDate.isNotBlank() &&
+    snapshotGroupId == requestedGroupId &&
+    snapshotDate == requestedDate
+) syncState else SyncState.Idle
+
+/** An empty calendar day needs both a validated month and a validated day-detail snapshot. */
+fun shouldShowConfirmedCalendarEmpty(
+    hasMonthlySnapshot: Boolean,
+    hasDayDetailsSnapshot: Boolean,
+): Boolean = hasMonthlySnapshot && hasDayDetailsSnapshot

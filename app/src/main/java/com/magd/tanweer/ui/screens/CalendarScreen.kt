@@ -50,6 +50,18 @@ fun CalendarScreen(
     val calendarSyncState by viewModel.calendarSyncState.collectAsStateWithLifecycle()
     val scopedCalendarSyncState = syncStateForScope(calendarSyncState, groupSyncScopeIds[GroupSyncSource.CALENDAR], activeGroupId)
     val hasCalendarSnapshot = hasAuthoritativeSnapshot(scopedCalendarSyncState)
+    val dayDetailsSyncState by viewModel.dayDetailsSyncState.collectAsStateWithLifecycle()
+    val dayDetailsSyncGroupId by viewModel.dayDetailsSyncGroupId.collectAsStateWithLifecycle()
+    val dayDetailsSyncDate by viewModel.dayDetailsSyncDate.collectAsStateWithLifecycle()
+    val scopedDayDetailsSyncState = syncStateForDayScope(
+        dayDetailsSyncState,
+        dayDetailsSyncGroupId,
+        dayDetailsSyncDate,
+        activeGroupId,
+        selectedDateStr,
+    )
+    val hasDayDetailsSnapshot = hasAuthoritativeSnapshot(scopedDayDetailsSyncState)
+    val hasConfirmedEmptyDay = shouldShowConfirmedCalendarEmpty(hasCalendarSnapshot, hasDayDetailsSnapshot)
 
     var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
@@ -704,7 +716,7 @@ fun CalendarScreen(
             }
         } else if (dayExams.isEmpty() && dayHomeworks.isEmpty() && dayEvents.isEmpty()) {
             item {
-                if (hasCalendarSnapshot) {
+                if (hasConfirmedEmptyDay) {
                     GlassCard(
                         modifier = Modifier.fillMaxWidth(),
                         backgroundColor = GlassSurface.copy(alpha = 0.4f)
@@ -720,7 +732,20 @@ fun CalendarScreen(
                         )
                     }
                 } else {
-                    PendingSyncEmptyState(dataLabel = "تقويم هذا الشهر", syncState = scopedCalendarSyncState)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PendingSyncEmptyState(
+                            dataLabel = "تفاصيل يوم $selectedDateStr",
+                            syncState = aggregateSyncStates(listOf(scopedCalendarSyncState, scopedDayDetailsSyncState))
+                        )
+                        TextButton(
+                            onClick = {
+                                viewModel.syncCalendarMonth(activeGroupId, monthQueryFormat.format(currentCalendar.time), isRefresh = true)
+                                viewModel.syncDayDetails(activeGroupId, selectedDateStr)
+                            }
+                        ) {
+                            Text("إعادة التحقق من اليوم", color = CyanAccent)
+                        }
+                    }
                 }
             }
         }

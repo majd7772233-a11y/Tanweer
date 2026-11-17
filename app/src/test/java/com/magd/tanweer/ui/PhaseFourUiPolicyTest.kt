@@ -6,6 +6,8 @@ import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.components.aggregateSyncStates
 import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
 import com.magd.tanweer.ui.components.syncStateForScope
+import com.magd.tanweer.ui.components.syncStateForDayScope
+import com.magd.tanweer.ui.components.shouldShowConfirmedCalendarEmpty
 import com.magd.tanweer.ui.components.isSnapshotForScope
 import com.magd.tanweer.ui.components.itemsForSnapshotScope
 import com.magd.tanweer.ui.components.hasAuthoritativeGradeSnapshot
@@ -158,6 +160,36 @@ class PhaseFourUiPolicyTest {
     }
 
 
+
+
+    @Test
+    fun day_detail_snapshot_requires_the_exact_group_and_date() {
+        val success = SyncState.Success(100L)
+        assertEquals(
+            success,
+            syncStateForDayScope(success, "group-a", "2026-11-17", "group-a", "2026-11-17")
+        )
+        assertEquals(
+            SyncState.Idle,
+            syncStateForDayScope(success, "group-a", "2026-11-16", "group-a", "2026-11-17")
+        )
+        assertEquals(
+            SyncState.Idle,
+            syncStateForDayScope(success, "group-a", "2026-11-17", "group-b", "2026-11-17")
+        )
+        assertEquals(
+            SyncState.Idle,
+            syncStateForDayScope(success, null, "2026-11-17", "group-a", "2026-11-17")
+        )
+    }
+
+    @Test
+    fun calendar_empty_claim_requires_month_and_day_detail_snapshots() {
+        assertTrue(shouldShowConfirmedCalendarEmpty(true, true))
+        assertFalse(shouldShowConfirmedCalendarEmpty(true, false))
+        assertFalse(shouldShowConfirmedCalendarEmpty(false, true))
+        assertFalse(shouldShowConfirmedCalendarEmpty(false, false))
+    }
 
     @Test
     fun list_rows_are_visible_only_for_the_matching_group_snapshot() {

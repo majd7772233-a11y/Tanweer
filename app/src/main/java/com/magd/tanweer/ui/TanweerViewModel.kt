@@ -408,6 +408,14 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _calendarSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val calendarSyncState: StateFlow<SyncState> = _calendarSyncState.asStateFlow()
 
+    @Volatile private var dayDetailsSyncRequestGeneration = 0
+    private val _dayDetailsSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val dayDetailsSyncState: StateFlow<SyncState> = _dayDetailsSyncState.asStateFlow()
+    private val _dayDetailsSyncGroupId = MutableStateFlow<String?>(null)
+    val dayDetailsSyncGroupId: StateFlow<String?> = _dayDetailsSyncGroupId.asStateFlow()
+    private val _dayDetailsSyncDate = MutableStateFlow<String?>(null)
+    val dayDetailsSyncDate: StateFlow<String?> = _dayDetailsSyncDate.asStateFlow()
+
     private val _issuesSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val issuesSyncState: StateFlow<SyncState> = _issuesSyncState.asStateFlow()
 
@@ -600,6 +608,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _homeworkSyncState.value = SyncState.Idle
         _examsSyncState.value = SyncState.Idle
         _calendarSyncState.value = SyncState.Idle
+        dayDetailsSyncRequestGeneration++
+        _dayDetailsSyncState.value = SyncState.Idle
+        _dayDetailsSyncGroupId.value = null
+        _dayDetailsSyncDate.value = null
         _issuesSyncState.value = SyncState.Idle
         _eventsSyncState.value = SyncState.Idle
         librarySyncRequestGeneration++
@@ -1304,9 +1316,45 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncDayDetails(groupId: String = getActiveGroupId(), date: String) {
-        if (groupId.isBlank() || date.isBlank()) return
+        if (groupId.isBlank() || date.isBlank()) {
+            dayDetailsSyncRequestGeneration++
+            _dayDetailsSyncGroupId.value = null
+            _dayDetailsSyncDate.value = null
+            _dayDetailsSyncState.value = SyncState.Idle
+            return
+        }
+
+        val requestId = ++dayDetailsSyncRequestGeneration
+        _dayDetailsSyncGroupId.value = groupId
+        _dayDetailsSyncDate.value = date
+        _dayDetailsSyncState.value = SyncState.Loading
+
         viewModelScope.launch {
-            repository.syncDay(groupId, date)
+            try {
+                when (val result = repository.syncDay(groupId, date)) {
+                    is SyncResult.Success -> {
+                        if (requestId == dayDetailsSyncRequestGeneration) {
+                            _dayDetailsSyncState.value = SyncState.Success()
+                        }
+                    }
+                    is SyncResult.Offline -> {
+                        if (requestId == dayDetailsSyncRequestGeneration) {
+                            _dayDetailsSyncState.value = SyncState.OfflineCached()
+                        }
+                    }
+                    is SyncResult.Error -> {
+                        if (requestId == dayDetailsSyncRequestGeneration) {
+                            _dayDetailsSyncState.value = SyncState.Error(result.message, result.isNetworkError)
+                        }
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (requestId == dayDetailsSyncRequestGeneration) {
+                    _dayDetailsSyncState.value = SyncState.Error(error.message ?: "تعذر مزامنة تفاصيل اليوم", false)
+                }
+            }
         }
     }
 
