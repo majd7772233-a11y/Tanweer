@@ -2263,3 +2263,5 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Group chat no longer treats an initially empty Room Flow as proof that a group has no messages. The chat history REST snapshot result is surfaced as a group-scoped, request-generation-guarded SyncState while the WebSocket opens immediately.
 - Only a successful snapshot for the exact active group can authorize the empty chat state. Errors/offline/initial states show the sync status and retry action; cached local messages remain visible with the sync status.
 - Chat history payloads are checked against the requested group before persistence, and cancellation propagates. Arabic/English resources and a regression test were added. Re-run both CI workflows on the new HEAD.
+
+- Schedule proposal dialog retains a prior successful same-group snapshot after refresh failure but now surfaces the failure/offline status and explicitly labels the count as belonging to the last confirmed snapshot.

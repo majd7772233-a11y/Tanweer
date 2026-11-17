@@ -8,4 +8,5 @@
     <string name="chat_empty_subtitle">There are no messages in this group history yet. You can start the discussion.</string>
     <string name="schedule_proposals_label">Schedule change proposals</string>
     <string name="schedule_proposals_verifying">Checking schedule proposals</string>
+    <string name="schedule_proposals_last_snapshot">Count in last confirmed snapshot: %1$d</string>
 </resources>

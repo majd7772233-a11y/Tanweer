@@ -10,4 +10,5 @@
     <string name="chat_empty_subtitle">لا توجد رسائل في سجل هذه المجموعة حتى الآن. يمكنك بدء النقاش.</string>
     <string name="schedule_proposals_label">مقترحات تعديل الجدول</string>
     <string name="schedule_proposals_verifying">جارٍ التحقق من مقترحات الجدول</string>
+    <string name="schedule_proposals_last_snapshot">العدد في آخر لقطة مؤكدة: %1$d</string>
 </resources>

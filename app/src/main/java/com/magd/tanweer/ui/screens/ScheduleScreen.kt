@@ -1362,7 +1362,7 @@ fun ScheduleProposalsReviewDialog(
                         fontSize = tanweerTextSize(17f)
                     )
                     Text(
-                        text = if (hasSnapshot) "${proposals.size} مقترح متاح للمراجعة والتصويت" else stringResource(com.magd.tanweer.R.string.schedule_proposals_verifying),
+                        text = when { !hasSnapshot -> stringResource(com.magd.tanweer.R.string.schedule_proposals_verifying); syncState is SyncState.Success -> "${proposals.size} مقترح متاح للمراجعة والتصويت"; else -> stringResource(com.magd.tanweer.R.string.schedule_proposals_last_snapshot, proposals.size) },
                         color = TextSecondary,
                         fontSize = tanweerTextSize(11f)
                     )
@@ -1370,6 +1370,9 @@ fun ScheduleProposalsReviewDialog(
             }
         },
         text = {
+            if (hasSnapshot && syncState !is SyncState.Success) {
+                SyncStatusBar(syncState = syncState, onRefresh = onRefresh)
+            }
             if (!hasSnapshot) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),

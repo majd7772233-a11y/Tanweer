@@ -250,3 +250,7 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Continued the route-state audit and found that the schedule proposal review dialog received a group-scoped proposal list but showed “no pending proposals” when the current group had not yet produced a successful proposal snapshot.
 - The dialog now receives the scoped proposal sync state and snapshot validity. It displays a pending/error/offline state with a refresh action until the exact active group has a successful snapshot; only then can an empty list be described as having no pending proposals.
 - Added a policy regression to ensure an unverified group scope cannot authorize the empty state. Requires a new Android CI run after the current chat-history patch.
+
+
+
+- Schedule proposal dialog follow-up: when a refresh fails after a previous successful snapshot, the dialog keeps the last confirmed proposals visible but now displays the sync error/offline status and labels the count as belonging to the last confirmed snapshot. A first-load empty result still cannot claim there are no proposals.
