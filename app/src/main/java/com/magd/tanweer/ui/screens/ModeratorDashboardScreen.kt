@@ -57,6 +57,8 @@ fun ModeratorDashboardScreen(
     val communityDecisionsError by viewModel.communityDecisionsError.collectAsStateWithLifecycle()
     val isCommunityDecisionsLoading by viewModel.isCommunityDecisionsLoading.collectAsStateWithLifecycle()
     val groupMembers by viewModel.groupMembersState.collectAsStateWithLifecycle()
+    val groupMembersSnapshotGroupId by viewModel.groupMembersSnapshotGroupId.collectAsStateWithLifecycle()
+    val hasGroupMembersSnapshot = isSnapshotForScope(groupMembersSnapshotGroupId, activeGroupId)
     val groupMembersError by viewModel.groupMembersError.collectAsStateWithLifecycle()
     val isGroupMembersLoading by viewModel.isGroupMembersLoading.collectAsStateWithLifecycle()
 
@@ -147,6 +149,18 @@ fun ModeratorDashboardScreen(
 
                     // Summary Stats Row
                     val stats = dashboardData?.stats
+                    val isDashboardSnapshotForActiveGroup = isSnapshotForScope(dashboardData?.groupId, activeGroupId)
+                    // Corrections are counted from the validated list snapshot for the group currently displayed.
+                    val pendingCorrectionsCount = if (hasGroupCorrectionsSnapshot && groupCorrectionsError.isNullOrBlank() && !isGroupCorrectionsLoading) {
+                        scopedGroupCorrections.count { it.status == "PENDING" }
+                    } else null
+                    // Default-group dashboard statistics must not be reused for another selected group.
+                    val activeGroupMembersCount = when {
+                        isDashboardSnapshotForActiveGroup && stats != null -> stats.totalMembers
+                        hasGroupMembersSnapshot && groupMembers?.success == true ->
+                            groupMembers.members.count { it.status.equals("ACTIVE", ignoreCase = true) }
+                        else -> null
+                    }
                     // Schedule proposals already exist as unified community decisions.
                     // Count each record once instead of counting both backing tables.
                     val totalDecisionsAndProposals = scopedCommunityDecisions.count { it.status == "PENDING" }
@@ -157,7 +171,7 @@ fun ModeratorDashboardScreen(
                         ) {
                             TeacherStatCard(
                                 title = "تصويبات معلقة",
-                                count = if (hasGroupCorrectionsSnapshot && groupCorrectionsError.isNullOrBlank() && !isGroupCorrectionsLoading) "${stats?.pendingCorrectionsCount ?: scopedGroupCorrections.count { it.status == "PENDING" }}" else "—",
+                                count = formatVerifiedCount(pendingCorrectionsCount, pendingCorrectionsCount != null),
                                 icon = "✍️",
                                 color = WarmAmber,
                                 modifier = Modifier.weight(1f)
@@ -171,7 +185,7 @@ fun ModeratorDashboardScreen(
                             )
                             TeacherStatCard(
                                 title = "أعضاء الشعبة",
-                                count = if (groupMembersError.isNullOrBlank() && !isGroupMembersLoading) "${stats?.totalMembers ?: (groupMembers?.members?.size ?: 0)}" else "—",
+                                count = formatVerifiedCount(activeGroupMembersCount, activeGroupMembersCount != null && groupMembersError.isNullOrBlank() && !isGroupMembersLoading),
                                 icon = "👥",
                                 color = TextPrimary,
                                 modifier = Modifier.weight(1f)

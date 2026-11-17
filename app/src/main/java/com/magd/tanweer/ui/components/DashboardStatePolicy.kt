@@ -102,3 +102,7 @@ fun hasAuthoritativeCalendarMonthSnapshot(
 ): Boolean = requestedMonth.isNotBlank() &&
     syncedMonth == requestedMonth &&
     hasAuthoritativeSnapshot(syncState)
+
+/** Displays zero only when a validated snapshot actually supplied that value. */
+fun formatVerifiedCount(value: Int?, hasVerifiedSnapshot: Boolean): String =
+    if (hasVerifiedSnapshot && value != null && value >= 0) value.toString() else "—"

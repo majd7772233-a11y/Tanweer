@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.components.aggregateSyncStates
+import com.magd.tanweer.ui.components.formatVerifiedCount
 import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
 import com.magd.tanweer.ui.components.syncStateForScope
 import com.magd.tanweer.ui.components.syncStateForDayScope
@@ -248,4 +249,22 @@ class PhaseFourUiPolicyTest {
         assertFalse(hasAuthoritativeSnapshot(syncStateForScope(SyncState.Error("network", true), "group-a", "group-a")))
         assertFalse(hasAuthoritativeSnapshot(syncStateForScope(SyncState.Idle, null, "group-a")))
     }
+
+    @Test
+    fun verified_counts_show_zero_only_after_a_confirmed_snapshot() {
+        assertEquals("0", formatVerifiedCount(0, true))
+        assertEquals("12", formatVerifiedCount(12, true))
+        assertEquals("—", formatVerifiedCount(null, true))
+        assertEquals("—", formatVerifiedCount(0, false))
+        assertEquals("—", formatVerifiedCount(-1, true))
+    }
+
+    @Test
+    fun moderator_group_counts_must_use_the_exact_active_group_snapshot() {
+        assertTrue(isSnapshotForScope("group-a", "group-a"))
+        assertFalse(isSnapshotForScope("group-a", "group-b"))
+        assertFalse(isSnapshotForScope(null, "group-a"))
+        assertFalse(isSnapshotForScope("group-a", ""))
+    }
+
 }

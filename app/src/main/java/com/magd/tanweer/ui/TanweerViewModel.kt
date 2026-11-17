@@ -645,6 +645,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _scheduleProposals.value = emptyList()
         groupMembersRequestGeneration++
         groupMembersSourceGroupId = null
+        _groupMembersSnapshotGroupId.value = null
         groupCorrectionsRequestGeneration++
         groupCorrectionsSourceGroupId = null
         _groupCorrectionsSnapshotGroupId.value = null
@@ -697,6 +698,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             if (groupMembersSourceGroupId != groupId) {
                 groupMembersSourceGroupId = groupId
                 _groupMembersState.value = null
+                _groupMembersSnapshotGroupId.value = null
             }
             val membersRequestId = ++groupMembersRequestGeneration
             _groupMembersError.value = null
@@ -706,8 +708,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                     repository.getGroupMembers(groupId)
                         .onSuccess { data ->
                             if (membersRequestId == groupMembersRequestGeneration && getActiveGroupId() == groupId) {
-                                if (data.success) _groupMembersState.value = data
-                                else _groupMembersError.value = "تعذر تحميل قائمة أعضاء المجموعة من الخادم."
+                                if (data.success) {
+                                    _groupMembersState.value = data
+                                    _groupMembersSnapshotGroupId.value = groupId
+                                } else _groupMembersError.value = "تعذر تحميل قائمة أعضاء المجموعة من الخادم."
                             }
                         }
                         .onFailure { error ->
@@ -1633,6 +1637,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     @Volatile private var groupMembersSourceGroupId: String? = null
     private val _groupMembersState = MutableStateFlow<com.magd.tanweer.data.model.GroupMembersResponse?>(null)
     val groupMembersState: StateFlow<com.magd.tanweer.data.model.GroupMembersResponse?> = _groupMembersState.asStateFlow()
+    private val _groupMembersSnapshotGroupId = MutableStateFlow<String?>(null)
+    val groupMembersSnapshotGroupId: StateFlow<String?> = _groupMembersSnapshotGroupId.asStateFlow()
     private val _isGroupMembersLoading = MutableStateFlow(false)
     val isGroupMembersLoading: StateFlow<Boolean> = _isGroupMembersLoading.asStateFlow()
     private val _groupMembersError = MutableStateFlow<String?>(null)
@@ -2232,6 +2238,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             groupMembersRequestGeneration++
             groupMembersSourceGroupId = null
             _groupMembersState.value = null
+            _groupMembersSnapshotGroupId.value = null
             _groupMembersError.value = "لا توجد شعبة نشطة لعرض الأعضاء."
             _isGroupMembersLoading.value = false
             return
@@ -2239,6 +2246,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         if (groupMembersSourceGroupId != groupId) {
             groupMembersSourceGroupId = groupId
             _groupMembersState.value = null
+            _groupMembersSnapshotGroupId.value = null
         }
         val requestId = ++groupMembersRequestGeneration
         viewModelScope.launch {
@@ -2248,8 +2256,10 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 repository.getGroupMembers(groupId)
                     .onSuccess { data ->
                         if (requestId == groupMembersRequestGeneration && groupMembersSourceGroupId == groupId) {
-                            if (data.success) _groupMembersState.value = data
-                            else _groupMembersError.value = "تعذر تحميل قائمة أعضاء المجموعة من الخادم."
+                            if (data.success) {
+                                _groupMembersState.value = data
+                                _groupMembersSnapshotGroupId.value = groupId
+                            } else _groupMembersError.value = "تعذر تحميل قائمة أعضاء المجموعة من الخادم."
                         }
                     }
                     .onFailure { error ->
