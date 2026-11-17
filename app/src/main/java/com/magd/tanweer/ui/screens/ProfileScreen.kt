@@ -30,11 +30,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.content.Intent
 import android.net.Uri
 import com.magd.tanweer.data.model.Role
+import com.magd.tanweer.data.model.SyncState
+import com.magd.tanweer.data.model.UserStats
 import com.magd.tanweer.data.model.SubmitRoleUpgradeResponse
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.data.model.getRoleEnum
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
+import com.magd.tanweer.data.repository.SyncResult
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.ArabicNameValidator
@@ -69,8 +72,12 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val currentUserId = currentUser?.id.orEmpty()
     var isDataSaverEnabled by remember { mutableStateOf(true) }
     var isEditProfileDialogOpen by remember { mutableStateOf(false) }
+    var verifiedProfileStats by remember(currentUserId) { mutableStateOf<UserStats?>(null) }
+    var profileStatsSyncState by remember(currentUserId) { mutableStateOf<SyncState>(SyncState.Idle) }
+    var profileStatsRetryCount by remember(currentUserId) { mutableIntStateOf(0) }
 
     val gradeName = currentUser?.gradeId?.let { SchoolHierarchy.getGradeName(it) } ?: "المرحلة الدراسية"
     val sectionAr = currentUser?.sectionId?.let { SchoolHierarchy.getSectionArabicName(it) } ?: ""
@@ -93,9 +100,31 @@ fun ProfileScreen(
     var selectedBadgeInfo by remember { mutableStateOf<BadgeDetailInfo?>(null) }
 
     LaunchedEffect(Unit) {
-        viewModel.repository.syncProfile()
         viewModel.loadMyRoleRequests()
         viewModel.loadMyNotifications()
+    }
+
+    LaunchedEffect(currentUserId, profileStatsRetryCount) {
+        if (currentUserId.isBlank()) {
+            verifiedProfileStats = null
+            profileStatsSyncState = SyncState.Idle
+            return@LaunchedEffect
+        }
+
+        profileStatsSyncState = if (verifiedProfileStats != null) SyncState.Refreshing else SyncState.Loading
+        when (val result = viewModel.repository.syncProfile()) {
+            is SyncResult.Success -> {
+                val confirmedStats = viewModel.repository.getStoredProfileStats(currentUserId)
+                if (confirmedStats != null) {
+                    verifiedProfileStats = confirmedStats
+                    profileStatsSyncState = SyncState.Success()
+                } else {
+                    profileStatsSyncState = SyncState.Error("تعذر قراءة إحصاءات الحساب المؤكدة بعد المزامنة")
+                }
+            }
+            is SyncResult.Offline -> profileStatsSyncState = SyncState.OfflineCached()
+            is SyncResult.Error -> profileStatsSyncState = SyncState.Error(result.message, result.isNetworkError)
+        }
     }
 
     LaunchedEffect(currentUser) {
@@ -118,7 +147,6 @@ fun ProfileScreen(
         if (editFullName.isEmpty()) null else ArabicNameValidator.validate(editFullName)
     }
 
-    val currentUserId = currentUser?.id ?: ""
     val verifiedBestAnswersCount by viewModel.repository.getBestAnswersCountForUser(currentUserId)
         .collectAsStateWithLifecycle(initialValue = 0)
     val userCommentsCount by viewModel.repository.getCommentsCountForUser(currentUserId)
@@ -486,20 +514,25 @@ fun ProfileScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    val stats = currentUser?.stats
+                    val hasProfileStatsSnapshot = currentUser?.id == currentUserId && verifiedProfileStats != null
+                    val stats = verifiedProfileStats.takeIf { hasProfileStatsSnapshot }
                     val lessonsCount = stats?.lessonsCount ?: 0
                     val photosCount = stats?.photosCount ?: 0
                     val homeworksCount = stats?.homeworksCount ?: 0
                     val issuesCount = stats?.issuesCount ?: 0
 
+                    SyncStatusBar(
+                        syncState = profileStatsSyncState,
+                        onRefresh = { profileStatsRetryCount++ }
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceAround
                     ) {
-                        StatItem(label = "دروس موثقة", count = "$lessonsCount", icon = "📚")
-                        StatItem(label = "صور سبورة", count = "$photosCount", icon = "📷")
-                        StatItem(label = "واجبات مسجلة", count = "$homeworksCount", icon = "📝")
-                        StatItem(label = "استفسارات", count = "$issuesCount", icon = "❓")
+                        StatItem(label = "دروس موثقة", count = formatVerifiedCount(stats?.lessonsCount, hasProfileStatsSnapshot), icon = "📚")
+                        StatItem(label = "صور سبورة", count = formatVerifiedCount(stats?.photosCount, hasProfileStatsSnapshot), icon = "📷")
+                        StatItem(label = "واجبات مسجلة", count = formatVerifiedCount(stats?.homeworksCount, hasProfileStatsSnapshot), icon = "📝")
+                        StatItem(label = "استفسارات", count = formatVerifiedCount(stats?.issuesCount, hasProfileStatsSnapshot), icon = "❓")
                     }
                 }
             }
@@ -507,16 +540,17 @@ fun ProfileScreen(
 
         // Badges Section (Dynamically computed from actual student activity)
         item {
-            val stats = currentUser?.stats
+            val hasProfileStatsSnapshot = currentUser?.id == currentUserId && verifiedProfileStats != null
+            val stats = verifiedProfileStats.takeIf { hasProfileStatsSnapshot }
             val lessonsCount = stats?.lessonsCount ?: 0
             val photosCount = stats?.photosCount ?: 0
             val homeworksCount = stats?.homeworksCount ?: 0
             val issuesCount = stats?.issuesCount ?: 0
 
-            val isLessonDoc = lessonsCount >= 1 || photosCount >= 3
-            val isHelper = (userCommentsCount >= 2) || (userCommentsCount >= 1 && homeworksCount >= 2) || (verifiedBestAnswersCount >= 1)
-            val isBestAnswerOwner = verifiedBestAnswersCount >= 1
-            val isMonthContributor = monthLessonsCount >= 3
+            val isLessonDoc = hasProfileStatsSnapshot && (lessonsCount >= 1 || photosCount >= 3)
+            val isHelper = hasProfileStatsSnapshot && ((userCommentsCount >= 2) || (userCommentsCount >= 1 && homeworksCount >= 2) || (verifiedBestAnswersCount >= 1))
+            val isBestAnswerOwner = hasProfileStatsSnapshot && verifiedBestAnswersCount >= 1
+            val isMonthContributor = hasProfileStatsSnapshot && monthLessonsCount >= 3
 
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -548,14 +582,14 @@ fun ProfileScreen(
                         BadgeItem(
                             name = "موثق الدروس",
                             icon = "📚",
-                            active = isLessonDoc,
+                            active = hasProfileStatsSnapshot && isLessonDoc,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 selectedBadgeInfo = BadgeDetailInfo(
                                     name = "موثق الدروس",
                                     icon = "📚",
                                     criteria = "توثيق درس دراسي واحد على الأقل أو رفع 3 صور للسبورة",
-                                    progressText = "إنجازك: $lessonsCount دروس و$photosCount صور سبورة",
+                                    progressText = if (hasProfileStatsSnapshot) "إنجازك: $lessonsCount دروس و$photosCount صور سبورة" else context.getString(com.magd.tanweer.R.string.profile_stats_unverified),
                                     isAchieved = isLessonDoc
                                 )
                             }
@@ -563,14 +597,14 @@ fun ProfileScreen(
                         BadgeItem(
                             name = "مساعد الشعبة",
                             icon = "🛡️",
-                            active = isHelper,
+                            active = hasProfileStatsSnapshot && isHelper,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 selectedBadgeInfo = BadgeDetailInfo(
                                     name = "مساعد الشعبة",
                                     icon = "🛡️",
                                     criteria = "مساعدة الزملاء بتقديم إجابتين على الأقل في استفسارات الشعبة أو توثيق واجبات دراسية للمجموعة",
-                                    progressText = "إنجازك: $userCommentsCount إجابات ومشاركات مفيدة و$homeworksCount واجبات موثقة",
+                                    progressText = if (hasProfileStatsSnapshot) "إنجازك: $userCommentsCount إجابات ومشاركات مفيدة و$homeworksCount واجبات موثقة" else context.getString(com.magd.tanweer.R.string.profile_stats_unverified),
                                     isAchieved = isHelper
                                 )
                             }
@@ -578,14 +612,14 @@ fun ProfileScreen(
                         BadgeItem(
                             name = "صاحب أفضل إجابة",
                             icon = "⭐",
-                            active = isBestAnswerOwner,
+                            active = hasProfileStatsSnapshot && isBestAnswerOwner,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 selectedBadgeInfo = BadgeDetailInfo(
                                     name = "صاحب أفضل إجابة",
                                     icon = "⭐",
                                     criteria = "اعتماد إجابتك كأفضل إجابة معتمدة على استفسارات الشعبة",
-                                    progressText = "إنجازك: $verifiedBestAnswersCount إجابات معتمدة كأفضل إجابة",
+                                    progressText = if (hasProfileStatsSnapshot) "إنجازك: $verifiedBestAnswersCount إجابات معتمدة كأفضل إجابة" else context.getString(com.magd.tanweer.R.string.profile_stats_unverified),
                                     isAchieved = isBestAnswerOwner
                                 )
                             }
@@ -593,14 +627,14 @@ fun ProfileScreen(
                         BadgeItem(
                             name = "موثق دروس الشهر",
                             icon = "🌟",
-                            active = isMonthContributor,
+                            active = hasProfileStatsSnapshot && isMonthContributor,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 selectedBadgeInfo = BadgeDetailInfo(
                                     name = "موثق دروس الشهر",
                                     icon = "🌟",
                                     criteria = "توثيق 3 دروس دراسية أو أكثر باسمك خلال الشهر الجاري",
-                                    progressText = "إنجازك: $monthLessonsCount من 3 دروس مسجلة هذا الشهر",
+                                    progressText = if (hasProfileStatsSnapshot) "إنجازك: $monthLessonsCount من 3 دروس مسجلة هذا الشهر" else context.getString(com.magd.tanweer.R.string.profile_stats_unverified),
                                     isAchieved = isMonthContributor
                                 )
                             }

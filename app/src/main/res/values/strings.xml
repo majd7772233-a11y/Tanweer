@@ -11,4 +11,5 @@
     <string name="schedule_proposals_label">مقترحات تعديل الجدول</string>
     <string name="schedule_proposals_verifying">جارٍ التحقق من مقترحات الجدول</string>
     <string name="schedule_proposals_last_snapshot">العدد في آخر لقطة مؤكدة: %1$d</string>
+    <string name="profile_stats_unverified">لا يمكن تأكيد إحصاءات الملف الشخصي بعد.</string>
 </resources>

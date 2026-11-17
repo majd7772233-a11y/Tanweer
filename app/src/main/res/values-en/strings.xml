@@ -9,4 +9,5 @@
     <string name="schedule_proposals_label">Schedule change proposals</string>
     <string name="schedule_proposals_verifying">Checking schedule proposals</string>
     <string name="schedule_proposals_last_snapshot">Count in last confirmed snapshot: %1$d</string>
+    <string name="profile_stats_unverified">Profile statistics have not been verified yet.</string>
 </resources>
