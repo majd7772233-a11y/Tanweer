@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -595,6 +596,9 @@ fun ScheduleScreen(
             ScheduleProposalsReviewDialog(
                 proposals = activeScheduleProposals,
                 canManageSchedule = canManageSchedule,
+                hasSnapshot = hasScheduleProposalsSnapshot,
+                syncState = scopedScheduleProposalsSyncState,
+                onRefresh = { viewModel.loadScheduleProposals(activeGroupId) },
                 onDismiss = { isProposalsReviewDialogOpen = false },
                 onVote = { proposalId, voteType ->
                     viewModel.voteScheduleProposal(proposalId, voteType) { success, msg ->
@@ -1339,6 +1343,9 @@ fun CopyScheduleDayDialog(
 fun ScheduleProposalsReviewDialog(
     proposals: List<com.magd.tanweer.data.model.ScheduleProposalItem>,
     canManageSchedule: Boolean,
+    hasSnapshot: Boolean,
+    syncState: SyncState,
+    onRefresh: () -> Unit,
     onDismiss: () -> Unit,
     onVote: (proposalId: String, voteType: String) -> Unit
 ) {
@@ -1355,7 +1362,7 @@ fun ScheduleProposalsReviewDialog(
                         fontSize = tanweerTextSize(17f)
                     )
                     Text(
-                        text = "${proposals.size} مقترح متاح للمراجعة والتصويت",
+                        text = if (hasSnapshot) "${proposals.size} مقترح متاح للمراجعة والتصويت" else stringResource(com.magd.tanweer.R.string.schedule_proposals_verifying),
                         color = TextSecondary,
                         fontSize = tanweerTextSize(11f)
                     )
@@ -1363,7 +1370,18 @@ fun ScheduleProposalsReviewDialog(
             }
         },
         text = {
-            if (proposals.isEmpty()) {
+            if (!hasSnapshot) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PendingSyncEmptyState(
+                        dataLabel = stringResource(com.magd.tanweer.R.string.schedule_proposals_label),
+                        syncState = syncState
+                    )
+                    SyncStatusBar(syncState = syncState, onRefresh = onRefresh)
+                }
+            } else if (proposals.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()

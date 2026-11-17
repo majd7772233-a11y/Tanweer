@@ -242,3 +242,11 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - The chat UI shows a pending/error/offline sync state and a retry action until a successful snapshot for the exact group is received. Only a successful empty server snapshot can show the genuine no-messages state. Existing local messages remain visible while sync status is surfaced.
 - Added Arabic and English strings and a pure regression test for exact-group success gating. This patch requires fresh Android and Server CI; the prior successful runs do not validate it.
 - No staging/production deployment, D1 migration, secret change, merge, or physical-device acceptance was performed.
+
+
+
+## 2026-11-17 — Phase 4 follow-up: schedule proposal empty-state gate
+
+- Continued the route-state audit and found that the schedule proposal review dialog received a group-scoped proposal list but showed “no pending proposals” when the current group had not yet produced a successful proposal snapshot.
+- The dialog now receives the scoped proposal sync state and snapshot validity. It displays a pending/error/offline state with a refresh action until the exact active group has a successful snapshot; only then can an empty list be described as having no pending proposals.
+- Added a policy regression to ensure an unverified group scope cannot authorize the empty state. Requires a new Android CI run after the current chat-history patch.

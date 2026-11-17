@@ -229,6 +229,11 @@ class PhaseFourUiPolicyTest {
         assertFalse(isSnapshotForScope("group-a", "group-b"))
         assertFalse(isSnapshotForScope(null, "group-a"))
         assertFalse(isSnapshotForScope("group-a", ""))
+
+        val unverified = syncStateForScope(SyncState.Idle, null, "group-a")
+        val verified = syncStateForScope(SyncState.Success(100L), "group-a", "group-a")
+        assertFalse(hasAuthoritativeSnapshot(unverified))
+        assertTrue(hasAuthoritativeSnapshot(verified))
     }
 
 
