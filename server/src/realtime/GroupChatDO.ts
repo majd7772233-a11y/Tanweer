@@ -1,5 +1,6 @@
 import { Env } from '../env';
 import { generateId } from '../lib/ids';
+import { consumeChatRateLimit, getGroupChatSendPermission, isSamePersistedChatMessage, MAX_CHAT_FRAME_BYTES, PersistedChatMessageIdentity, getChatFrameByteLength, validateChatMessageText } from '../services/chat';
 
 interface ClientSession {
   ws: WebSocket;
@@ -8,12 +9,14 @@ interface ClientSession {
   gradeSection: string;
   role: string;
   groupId: string;
+  canSend: boolean;
 }
 
 export class GroupChatDO {
   state: DurableObjectState;
   env: Env;
   sessions: Map<WebSocket, ClientSession>;
+  private rateLimitQueue: Promise<void> = Promise.resolve();
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -21,24 +24,35 @@ export class GroupChatDO {
     this.sessions = new Map();
   }
 
+  private async consumeMessageRateLimit(userId: string): Promise<boolean> {
+    const previous = this.rateLimitQueue;
+    let release!: () => void;
+    this.rateLimitQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await consumeChatRateLimit(this.state.storage, userId); } finally { release(); }
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    // 1. Broadcast endpoint from internal REST postGroupMessage
-    if (request.method === 'POST') {
+    if (request.method === 'POST' && url.pathname === '/rate-limit') {
+      let data: { userId?: unknown };
+      try { data = await request.json() as { userId?: unknown }; } catch { return new Response(JSON.stringify({ success: false }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
+      if (typeof data.userId !== 'string' || !data.userId.trim()) return new Response(JSON.stringify({ success: false }), { status: 400, headers: { 'Content-Type': 'application/json' } });
       try {
-        const data = await request.text();
-        this.broadcast(data);
-        return new Response(JSON.stringify({ success: true }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      } catch {
-        return new Response('Error', { status: 500 });
-      }
+        const allowed = await this.consumeMessageRateLimit(data.userId);
+        return new Response(JSON.stringify({ success: true, allowed }), { status: allowed ? 200 : 429, headers: { 'Content-Type': 'application/json' } });
+      } catch { return new Response(JSON.stringify({ success: false, code: 'CHAT_RATE_LIMIT_UNAVAILABLE' }), { status: 503, headers: { 'Content-Type': 'application/json' } }); }
     }
 
-    // 2. WebSocket Upgrade
+    if (request.method === 'POST' && url.pathname === '/broadcast') {
+      try {
+        const data = await request.text(); this.broadcast(data);
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } catch { return new Response('Error', { status: 500 }); }
+    }
+
+    // WebSocket Upgrade
     if (request.headers.get('Upgrade') === 'websocket') {
       const userId = request.headers.get('X-User-Id');
       const rawName = request.headers.get('X-User-Name');
@@ -65,19 +79,65 @@ export class GroupChatDO {
         gradeSection,
         role: verifiedRole,
         groupId,
+        canSend: request.headers.get('X-Can-Send') === '1',
       };
 
       this.sessions.set(server, session);
 
       server.addEventListener('message', async (event) => {
         try {
+          const frameBytes = getChatFrameByteLength(event.data);
+          if (frameBytes > MAX_CHAT_FRAME_BYTES) {
+            try { server.send(JSON.stringify({ type: 'message_error', code: 'MESSAGE_BODY_TOO_LARGE', error: 'حجم الرسالة أكبر من الحد المسموح.' })); } catch {}
+            server.close(1009, 'Message frame too large'); return;
+          }
           const raw = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
-          const data = JSON.parse(raw);
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+          const data = parsed as Record<string, any>;
+          const isDeleteMessage = data.type === 'delete_message' || data.action === 'delete_message';
+          const hasMessageText = Object.prototype.hasOwnProperty.call(data, 'text');
+          if (!isDeleteMessage && !hasMessageText) return;
+
+          // Every supported chat action consumes the persistent per-user/per-group quota.
+          // Check before D1 authorization reads so delete operations cannot bypass the guard.
+          let rateAllowed = false;
+          try { rateAllowed = await this.consumeMessageRateLimit(session.userId); } catch {
+            try { server.send(JSON.stringify({ type: 'message_error', code: 'CHAT_RATE_LIMIT_UNAVAILABLE', error: 'تعذر التحقق من حد إرسال الرسائل. حاول مجدداً.' })); } catch {}
+            return;
+          }
+          if (!rateAllowed) {
+            try { server.send(JSON.stringify({ type: 'message_error', code: 'RATE_LIMIT_EXCEEDED', error: 'أرسلت رسائل كثيرة خلال وقت قصير. انتظر قليلاً ثم حاول مجدداً.' })); } catch {}
+            return;
+          }
+
+          // Re-check membership and group policy for every supported chat action.
+          // This invalidates already-open sockets immediately after demotion/removal.
+          const livePermission = await getGroupChatSendPermission(
+            session.groupId,
+            session.userId,
+            session.role,
+            this.env
+          );
+          if (!livePermission.allowed) {
+            try {
+              server.send(JSON.stringify({
+                type: 'error',
+                code: 'READ_ONLY_GROUP',
+                message: 'لم تعد تملك صلاحية الإرسال في هذه المجموعة. يمكنك متابعة القراءة فقط.',
+              }));
+            } catch {}
+            return;
+          }
 
           // Handle message deletion action by sender or moderator/teacher/admin
-          if (data.type === 'delete_message' || data.action === 'delete_message') {
-            const messageId = data.messageId || data.id;
-            if (!messageId) return;
+          if (isDeleteMessage) {
+            const candidateId = data.messageId ?? data.id;
+            if (typeof candidateId !== 'string' || !candidateId.trim() || candidateId.length > 128) {
+              try { server.send(JSON.stringify({ type: 'message_error', code: 'INVALID_MESSAGE_ID', error: 'معرّف الرسالة المطلوب حذفه غير صالح.' })); } catch {}
+              return;
+            }
+            const messageId = candidateId;
 
             const existing = await this.env.DB.prepare(
               `SELECT sender_id FROM chat_messages WHERE id = ? AND group_id = ?`
@@ -100,12 +160,13 @@ export class GroupChatDO {
             return;
           }
 
-          const text = (data.text || '').trim();
-          if (!text) return; // ignore empty messages
-
-          const messageId = (data.id && typeof data.id === 'string' && data.id.length > 3)
-            ? data.id
-            : generateId('msg');
+          const validation = validateChatMessageText(data.text);
+          if (!validation.valid) {
+            try { server.send(JSON.stringify({ type: 'message_error', id: typeof data.id === 'string' ? data.id : '', code: validation.code, error: validation.message })); } catch {}
+            return;
+          }
+          const text = validation.text;
+          const messageId = (data.id && typeof data.id === 'string' && data.id.length > 3) ? data.id : generateId('msg');
           const now = Date.now();
 
           // Server-authoritative sender identity from verified session
@@ -122,9 +183,9 @@ export class GroupChatDO {
             status: 'SENT',
           };
 
-          // Save message to D1 (idempotent insert)
+          // Persist once, and ACK only a new row or an exact retry of that row.
           try {
-            await this.env.DB.prepare(
+            const insertResult = await this.env.DB.prepare(
               `INSERT OR IGNORE INTO chat_messages (id, group_id, sender_id, sender_name, sender_grade_section, text, timestamp)
                VALUES (?, ?, ?, ?, ?, ?, ?)`
             ).bind(
@@ -137,10 +198,32 @@ export class GroupChatDO {
               now
             ).run();
 
-            // Broadcast verified message to all connected clients only after successful persistence
-            this.broadcast(JSON.stringify(messagePayload));
+            const wasInserted = insertResult.meta?.changes === 1;
+            if (!wasInserted) {
+              const existing = await this.env.DB.prepare(
+                `SELECT group_id, sender_id, text, timestamp
+                 FROM chat_messages WHERE id = ?`
+              ).bind(messageId).first<PersistedChatMessageIdentity>();
 
-            // Send explicit ACK back to the sender
+              if (!isSamePersistedChatMessage(existing, {
+                groupId: session.groupId,
+                senderId: session.userId,
+                text,
+              })) {
+                server.send(JSON.stringify({
+                  type: 'message_error',
+                  id: messageId,
+                  error: 'معرّف الرسالة مستخدم مسبقاً لرسالة أخرى. لم يتم تأكيد الإرسال.',
+                }));
+                return;
+              }
+              messagePayload.timestamp = existing.timestamp;
+            } else {
+              // Broadcast only after D1 confirms a new persisted row.
+              this.broadcast(JSON.stringify(messagePayload));
+            }
+
+            // An exact persisted retry is safe to ACK, but is not rebroadcast.
             try {
               server.send(JSON.stringify({ type: 'ack', id: messageId, status: 'SENT' }));
             } catch {}

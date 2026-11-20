@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.CommunityDecisionItem
+import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -33,18 +34,22 @@ fun CommunityDecisionsScreen(
     viewModel: TanweerViewModel
 ) {
     val context = LocalContext.current
+    val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
+    val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId.orEmpty() }
     val decisions by viewModel.communityDecisions.collectAsStateWithLifecycle()
-
-    LaunchedEffect(Unit) {
-        viewModel.loadCommunityDecisions()
-    }
+    val isLoading by viewModel.isCommunityDecisionsLoading.collectAsStateWithLifecycle()
+    val loadError by viewModel.communityDecisionsError.collectAsStateWithLifecycle()
+    val snapshotGroupId by viewModel.communityDecisionsSnapshotGroupId.collectAsStateWithLifecycle()
+    val hasDecisionSnapshot = activeGroupId.isNotBlank() && snapshotGroupId == activeGroupId
 
     var selectedFilter by remember { mutableStateOf("ALL") } // "ALL", "PENDING", "COMPLETED"
 
+    val scopedDecisions = itemsForSnapshotScope(decisions, snapshotGroupId, activeGroupId)
     val filteredList = when (selectedFilter) {
-        "PENDING" -> decisions.filter { it.status == "PENDING" }
-        "COMPLETED" -> decisions.filter { it.status != "PENDING" }
-        else -> decisions
+        "PENDING" -> scopedDecisions.filter { it.status == "PENDING" }
+        "COMPLETED" -> scopedDecisions.filter { it.status != "PENDING" }
+        else -> scopedDecisions
     }
 
     LazyColumn(
@@ -78,34 +83,33 @@ fun CommunityDecisionsScreen(
                                     .background(CyanGlow),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("🗳️", fontSize = 26.sp)
+                                Text("🗳️", fontSize = tanweerTextSize(26f))
                             }
                             Column {
                                 Text(
                                     text = "القرارات والتصويتات الجماعية",
-                                    fontSize = 17.sp,
+                                    fontSize = tanweerTextSize(17f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                                 Text(
                                     text = "حوكمة تشاركية للدروس، الجداول، وطلبات الحذف",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary
                                 )
                             }
                         }
 
                         IconButton(
-                            onClick = {
-                                viewModel.loadCommunityDecisions()
-                                Toast.makeText(context, "تم تحديث القرارات والتصويتات 🔄", Toast.LENGTH_SHORT).show()
-                            },
+                            onClick = { viewModel.loadCommunityDecisions(activeGroupId) },
+                            enabled = !isLoading,
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
                                 .background(GlassSurface)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "تحديث", tint = CyanAccent, modifier = Modifier.size(20.dp))
+                            if (isLoading) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = CyanAccent)
+                            else Icon(Icons.Default.Refresh, contentDescription = "تحديث القرارات", tint = CyanAccent, modifier = Modifier.size(20.dp))
                         }
                     }
 
@@ -119,9 +123,9 @@ fun CommunityDecisionsScreen(
                     ) {
                         Text(
                             text = "⚖️ نظام القرارات الجماعية: عند اكتمال النصاب القانوني المطلوب من أصوات الشعبة، يتم تنفيذ القرار فورياً وتلقائياً عبر الخادم (مثل حذف منشور مكرر أو اعتماد تعديل).",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextMuted,
-                            lineHeight = 15.sp
+                            lineHeight = tanweerLineHeight(15f)
                         )
                     }
                 }
@@ -145,7 +149,7 @@ fun CommunityDecisionsScreen(
                     ) {
                         Text(
                             text = label,
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) TextOnAccent else TextSecondary
                         )
@@ -155,21 +159,54 @@ fun CommunityDecisionsScreen(
         }
 
         // Decisions List
+        if (loadError != null) {
+            item {
+                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface, borderColor = RubyRed.copy(alpha = 0.5f)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("تعذر تحميل القرارات والتصويتات", color = RubyRed, fontWeight = FontWeight.Bold)
+                        Text(loadError ?: "", color = TextSecondary, fontSize = tanweerTextSize(11f))
+                        TextButton(onClick = { viewModel.loadCommunityDecisions(activeGroupId) }) {
+                            Text("إعادة المحاولة", color = CyanAccent)
+                        }
+                    }
+                }
+            }
+        }
+
         if (filteredList.isEmpty()) {
             item {
-                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("✨", fontSize = 32.sp)
-                        Text(
-                            text = "لا توجد قرارات مطابقة للفلتر المحدد",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                if (!hasDecisionSnapshot) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PendingSyncEmptyState(
+                            dataLabel = "القرارات والتصويتات الجماعية",
+                            syncState = when {
+                                isLoading -> SyncState.Loading
+                                loadError != null -> SyncState.Error(loadError ?: "تعذر تحميل القرارات", false)
+                                else -> SyncState.Idle
+                            }
                         )
+                        TextButton(
+                            onClick = { viewModel.loadCommunityDecisions(activeGroupId) },
+                            enabled = !isLoading
+                        ) {
+                            Text("التحقق من القرارات", color = CyanAccent)
+                        }
+                    }
+                } else {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("✨", fontSize = tanweerTextSize(32f))
+                            Text(
+                                text = "لا توجد قرارات مطابقة للفلتر المحدد",
+                                fontSize = tanweerTextSize(14f),
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        }
                     }
                 }
             }

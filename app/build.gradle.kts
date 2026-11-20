@@ -18,6 +18,22 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  flavorDimensions += "environment"
+
+  productFlavors {
+    create("production") {
+      dimension = "environment"
+      buildConfigField("String", "API_BASE_URL", "\"https://tanweer.magd.workers.dev/\"")
+    }
+
+    create("staging") {
+      dimension = "environment"
+      applicationIdSuffix = ".staging"
+      versionNameSuffix = "-staging"
+      buildConfigField("String", "API_BASE_URL", "\"https://tanweer-staging.magd.workers.dev/\"")
+    }
+  }
+
   signingConfigs {
     create("release") {
         val keystorePath = System.getenv("KEYSTORE_PATH")
@@ -33,12 +49,6 @@ android {
         keyPassword = System.getenv("KEY_PASSWORD")
     }
 
-    create("debugConfig") {
-        storeFile = file("${rootDir}/debug.keystore")
-        storePassword = "android"
-        keyAlias = "androiddebugkey"
-        keyPassword = "android"
-    }
   }
 
   buildTypes {
@@ -48,7 +58,9 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    // Use the Android Gradle Plugin's generated default debug keystore.
+    // Do not depend on a private/untracked keystore file in the repository.
+    debug {}
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -58,7 +70,17 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        // Robolectric downloads android-all directly via HttpURLConnection,
+        // so point it at Maven Central's canonical endpoint instead of repo1.
+        it.systemProperty("robolectric.dependency.repo.id", "mavenCentral")
+        it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

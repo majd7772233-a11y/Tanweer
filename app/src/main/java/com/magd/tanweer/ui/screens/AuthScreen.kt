@@ -123,7 +123,7 @@ fun AuthScreen(
             // App Brand Header with Canvas Glow
             Text(
                 text = "✨ تـنـويـر",
-                fontSize = 36.sp,
+                fontSize = tanweerTextSize(36f),
                 fontWeight = FontWeight.Black,
                 color = CyanAccent,
                 textAlign = TextAlign.Center
@@ -131,14 +131,14 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "النظام الدراسي الجماعي لطلاب المدرسة",
-                fontSize = 14.sp,
+                fontSize = tanweerTextSize(14f),
                 color = TextSecondary,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center
             )
             Text(
                 text = "«كل يوم له محتواه، وكل مادة لها مكان، ولا يضيع درس»",
-                fontSize = 12.sp,
+                fontSize = tanweerTextSize(12f),
                 color = WarmAmber,
                 fontWeight = FontWeight.Normal,
                 textAlign = TextAlign.Center,
@@ -172,7 +172,7 @@ fun AuthScreen(
                 ) {
                     Text(
                         text = "طالب جديد 👤",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = if (authMode == AuthMode.REGISTER) TextOnAccent else TextSecondary
                     )
@@ -193,7 +193,7 @@ fun AuthScreen(
                 ) {
                     Text(
                         text = "تسجيل دخول 🔐",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = if (authMode == AuthMode.LOGIN_PHONE_PASS) TextOnAccent else TextSecondary
                     )
@@ -214,7 +214,7 @@ fun AuthScreen(
                 ) {
                     Text(
                         text = "بالرمز السري 🔑",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = if (authMode == AuthMode.LOGIN_RECOVERY_CODE) TextOnAccent else TextSecondary
                     )
@@ -241,12 +241,12 @@ fun AuthScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(12.dp)
                         ) {
-                            Text(text = "⚠️", fontSize = 16.sp)
+                            Text(text = "⚠️", fontSize = tanweerTextSize(16f))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = errorMessage!!,
                                 color = Color.White,
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -271,7 +271,7 @@ fun AuthScreen(
                             Column {
                                 Text(
                                     text = "الاسم الثلاثي للطالب:",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     color = TextSecondary,
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier.padding(bottom = 6.dp)
@@ -295,7 +295,7 @@ fun AuthScreen(
                                         Text(
                                             text = "الاسم صالح ومطابق للشروط (${if (nameValidation.detectedLanguage == "AR") "لغة عربية 🇾🇪" else "لغة إنجليزية 🇬🇧"})",
                                             color = EmeraldGreen,
-                                            fontSize = 12.sp,
+                                            fontSize = tanweerTextSize(12f),
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -324,7 +324,7 @@ fun AuthScreen(
                             Column {
                                 Text(
                                     text = "الصف الدراسي والشعبة:",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     color = TextSecondary,
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier.padding(bottom = 6.dp)
@@ -356,7 +356,7 @@ fun AuthScreen(
                                         ) {
                                             Text(
                                                 text = gLabel,
-                                                fontSize = 11.sp,
+                                                fontSize = tanweerTextSize(11f),
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                                 color = if (isSelected) CyanAccent else TextPrimary
                                             )
@@ -374,7 +374,7 @@ fun AuthScreen(
                                 ) {
                                     Text(
                                         text = "الشعبة:",
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         color = TextMuted
                                     )
                                     currentGrade.allowedSections.forEach { secCode ->
@@ -391,7 +391,7 @@ fun AuthScreen(
                                         ) {
                                             Text(
                                                 text = secName,
-                                                fontSize = 13.sp,
+                                                fontSize = tanweerTextSize(13f),
                                                 fontWeight = FontWeight.Bold,
                                                 color = if (isSelected) TextOnAccent else TextPrimary
                                             )
@@ -488,7 +488,7 @@ fun AuthScreen(
                             Column {
                                 Text(
                                     text = "الرمز السري للاسترداد (Recovery Code):",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     color = TextSecondary,
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier.padding(bottom = 6.dp)
@@ -502,7 +502,7 @@ fun AuthScreen(
                                 )
                                 Text(
                                     text = "الرمز السري الذي حصلت عليه عند إنشاء حسابك أول مرة يمكنك من استعادة حسابك مباشرة دون كلمة مرور.",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextMuted,
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
@@ -560,7 +560,7 @@ fun YemenPhoneInputField(
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
             text = "رقم الهاتف:",
-            fontSize = 13.sp,
+            fontSize = tanweerTextSize(13f),
             color = TextSecondary,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(bottom = 6.dp)
@@ -596,11 +596,11 @@ fun YemenPhoneInputField(
                         .border(1.dp, CyanAccent.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
                         .padding(horizontal = 8.dp, vertical = 5.dp)
                 ) {
-                    Text(text = "🇾🇪", fontSize = 15.sp)
+                    Text(text = "🇾🇪", fontSize = tanweerTextSize(15f))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "+967",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent
                     )
@@ -623,7 +623,7 @@ fun YemenPhoneInputField(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     textStyle = TextStyle(
                         color = TextPrimary,
-                        fontSize = 16.sp,
+                        fontSize = tanweerTextSize(16f),
                         fontWeight = FontWeight.SemiBold,
                         letterSpacing = 1.sp
                     ),
@@ -637,7 +637,7 @@ fun YemenPhoneInputField(
                             Text(
                                 text = "7XX XXX XXX",
                                 color = TextMuted,
-                                fontSize = 14.sp
+                                fontSize = tanweerTextSize(14f)
                             )
                         }
                         innerTextField()
@@ -668,14 +668,14 @@ fun YemenPhoneInputField(
             Text(
                 text = phoneValidation.errorMessage,
                 color = RubyRed,
-                fontSize = 12.sp,
+                fontSize = tanweerTextSize(12f),
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp)
             )
         } else if (isValid) {
             Text(
                 text = "الرقم مكتمل وصالح: ${phoneValidation.formattedDisplay} ✅",
                 color = EmeraldGreen,
-                fontSize = 12.sp,
+                fontSize = tanweerTextSize(12f),
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp)
             )
@@ -737,7 +737,7 @@ fun CanvasPasswordInputField(
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
             text = label,
-            fontSize = 13.sp,
+            fontSize = tanweerTextSize(13f),
             color = TextSecondary,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(bottom = 6.dp)
@@ -776,7 +776,7 @@ fun CanvasPasswordInputField(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     textStyle = TextStyle(
                         color = TextPrimary,
-                        fontSize = 15.sp,
+                        fontSize = tanweerTextSize(15f),
                         fontWeight = FontWeight.Medium
                     ),
                     cursorBrush = SolidColor(CyanAccent),
@@ -789,7 +789,7 @@ fun CanvasPasswordInputField(
                             Text(
                                 text = placeholder,
                                 color = TextMuted,
-                                fontSize = 13.sp
+                                fontSize = tanweerTextSize(13f)
                             )
                         }
                         innerTextField()
@@ -927,13 +927,13 @@ fun CanvasPasswordStrengthMeter(
         ) {
             Text(
                 text = "قوة كلمة المرور: ${analysis.level.label}",
-                fontSize = 12.sp,
+                fontSize = tanweerTextSize(12f),
                 fontWeight = FontWeight.Bold,
                 color = meterColor
             )
             Text(
                 text = "${(animatedScore * 100).toInt()}%",
-                fontSize = 12.sp,
+                fontSize = tanweerTextSize(12f),
                 fontWeight = FontWeight.Black,
                 color = meterColor
             )
@@ -996,7 +996,7 @@ fun CanvasPasswordStrengthMeter(
 
         Text(
             text = analysis.feedbackMessage,
-            fontSize = 11.sp,
+            fontSize = tanweerTextSize(11f),
             color = if (analysis.isAcceptable) EmeraldGreen else TextSecondary,
             modifier = Modifier.padding(start = 2.dp)
         )
@@ -1023,7 +1023,7 @@ private fun StrengthPill(
     ) {
         Text(
             text = if (isPassed) "✓ $text" else "• $text",
-            fontSize = 10.sp,
+            fontSize = tanweerTextSize(10f),
             fontWeight = if (isPassed) FontWeight.Bold else FontWeight.Normal,
             color = if (isPassed) EmeraldGreen else TextMuted,
             textAlign = TextAlign.Center

@@ -248,7 +248,7 @@ fun Canvas3DBookCard(
                 ) {
                     Text(
                         text = book.subjectIcon.ifEmpty { "📕" },
-                        fontSize = 22.sp
+                        fontSize = tanweerTextSize(22f)
                     )
                 }
             }
@@ -281,7 +281,7 @@ fun Canvas3DBookCard(
                     } else {
                         Text(
                             text = "${book.fileSizeMb} MB",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             fontWeight = FontWeight.Bold,
                             color = TextSecondary
                         )
@@ -292,7 +292,7 @@ fun Canvas3DBookCard(
 
                 Text(
                     text = book.title,
-                    fontSize = 15.sp,
+                    fontSize = tanweerTextSize(15f),
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
                     maxLines = 2,
@@ -301,7 +301,7 @@ fun Canvas3DBookCard(
 
                 Text(
                     text = book.edition ?: "إصدار رسمي - تنوير",
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     color = TextMuted,
                     modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
                 )
@@ -412,24 +412,24 @@ fun CanvasBookshelfSpine(
             ) {
                 Text(
                     text = book.subjectIcon.ifEmpty { "📕" },
-                    fontSize = 16.sp
+                    fontSize = tanweerTextSize(16f)
                 )
 
                 Text(
                     text = book.subjectName,
                     color = Color.White,
-                    fontSize = 11.sp,
+                    fontSize = tanweerTextSize(11f),
                     fontWeight = FontWeight.Bold,
                     maxLines = 4,
                     textAlign = TextAlign.Center,
-                    lineHeight = 12.sp,
+                    lineHeight = tanweerLineHeight(12f),
                     overflow = TextOverflow.Ellipsis
                 )
 
                 Text(
                     text = if (book.title.contains("2") || book.title.contains("ثاني")) "جـ2" else if (book.title.contains("1") || book.title.contains("أول")) "جـ1" else "كتاب",
                     color = accentGold,
-                    fontSize = 10.sp,
+                    fontSize = tanweerTextSize(10f),
                     fontWeight = FontWeight.Bold
                 )
             }

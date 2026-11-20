@@ -515,7 +515,7 @@ fun UploadLessonDialog(
                         } else {
                             Text(
                                 text = "💡 يمكنك تصوير السبورة مباشرة أو إرفاق صور متعددة وسيتم تحسين الإضاءة وتوضيح الخطوط آلياً.",
-                                style = AppTypography.Hint.copy(color = TextMuted, lineHeight = 16.sp)
+                                style = AppTypography.Hint.copy(color = TextMuted, lineHeight = tanweerLineHeight(16f))
                             )
                         }
 

@@ -4,6 +4,15 @@ import { mapIssue, mapIssueComment } from '../lib/mappers';
 import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
+import { Role, normalizeRole } from '../lib/roles';
+
+async function isApprovedTeacherForGroup(user: UserContext, groupId: string, env: Env): Promise<boolean> {
+  if (normalizeRole(user.role) === Role.TEACHER) return true;
+  const membership = await env.DB.prepare(
+    `SELECT role FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'ACTIVE'`
+  ).bind(groupId, user.userId).first<{ role: string }>();
+  return !!membership && normalizeRole(membership.role) === Role.TEACHER;
+}
 
 export async function handleGetIssues(groupId: string, user: UserContext, env: Env): Promise<Response> {
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
@@ -19,9 +28,13 @@ export async function handleGetIssues(groupId: string, user: UserContext, env: E
      WHERE i.group_id = ?
      ORDER BY i.created_at DESC`
   ).bind(groupId).all();
+  const totalCount = await env.DB.prepare(
+    `SELECT COUNT(*) AS total_count FROM issues WHERE group_id = ?`
+  ).bind(groupId).first<{ total_count: number }>();
 
   return jsonResponse({
     success: true,
+    totalCount: Number(totalCount?.total_count ?? -1),
     issues: (issues.results || []).map(mapIssue),
   });
 }
@@ -77,12 +90,41 @@ export async function handleCreateIssue(user: UserContext, request: Request, env
     description?: string;
   };
 
-  if (!body.groupId || !body.title) {
+  if (!body.groupId || typeof body.title !== 'string' || !body.title.trim()) {
     return errorResponse('INVALID_INPUT', 'يرجى كتابة عنوان الاستفسار');
   }
 
   const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
   if (memberCheck) return memberCheck;
+
+  // Linked academic records must belong to the same group as the issue.
+  // Issues has no foreign keys for these optional references, so enforce scope here.
+  if (body.subjectId) {
+    const subject = await env.DB.prepare(
+      `SELECT id FROM subjects WHERE id = ?`
+    ).bind(body.subjectId).first<{ id: string }>();
+    if (!subject) {
+      return errorResponse('SUBJECT_NOT_FOUND', 'المادة المحددة غير موجودة', 404);
+    }
+  }
+
+  if (body.homeworkId) {
+    const homework = await env.DB.prepare(
+      `SELECT id FROM homeworks WHERE id = ? AND group_id = ?`
+    ).bind(body.homeworkId, body.groupId).first<{ id: string }>();
+    if (!homework) {
+      return errorResponse('LINKED_HOMEWORK_NOT_FOUND', 'الواجب المرتبط غير موجود في هذه المجموعة', 404);
+    }
+  }
+
+  if (body.examId) {
+    const exam = await env.DB.prepare(
+      `SELECT id FROM exams WHERE id = ? AND group_id = ?`
+    ).bind(body.examId, body.groupId).first<{ id: string }>();
+    if (!exam) {
+      return errorResponse('LINKED_EXAM_NOT_FOUND', 'الاختبار المرتبط غير موجود في هذه المجموعة', 404);
+    }
+  }
 
   const issueId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
@@ -144,10 +186,8 @@ export async function handleAddIssueComment(issueId: string, user: UserContext, 
     return errorResponse('INVALID_INPUT', 'يرجى كتابة نص الإجابة أو التعليق');
   }
 
-  const isTeacher = user.role === 'TEACHER' || user.role === 'ADMIN' || await hasPermission(user, Permission.ANSWER_AS_TEACHER, {
-    db: env.DB,
-    groupId: issue.group_id,
-  });
+  // The teacher marker is reserved for a globally or group-approved TEACHER.
+  const isTeacher = await isApprovedTeacherForGroup(user, issue.group_id, env);
 
   const commentId = (body.id && typeof body.id === 'string' && body.id.trim())
     ? body.id.trim()
@@ -273,13 +313,12 @@ export async function handleMarkBestAnswer(issueId: string, commentId: string, u
   const memberCheck = await requireGroupMember(user, issue.group_id, env.DB);
   if (memberCheck) return memberCheck;
 
-  const canVerify = await hasPermission(user, Permission.VERIFY_BEST_ANSWER, {
-    db: env.DB,
-    groupId: issue.group_id,
-    resourceOwnerId: issue.created_by,
-  });
-  if (!canVerify) {
-    return errorResponse('FORBIDDEN', 'صاحب الاستفسار أو الأستاذ أو المشرف فقط يستطيع تحديد واعتماد أفضل إجابة', 403);
+  const actorRole = normalizeRole(user.role);
+  const isIssueAuthor = issue.created_by === user.userId;
+  const isSchoolAdmin = actorRole === Role.ADMIN || actorRole === Role.SYSTEM_OWNER;
+  const isApprovedTeacher = isSchoolAdmin ? false : await isApprovedTeacherForGroup(user, issue.group_id, env);
+  if (!isIssueAuthor && !isSchoolAdmin && !isApprovedTeacher) {
+    return errorResponse('FORBIDDEN', 'اعتماد الحل متاح لصاحب الاستفسار أو الأستاذ المعتمد أو المدير فقط', 403);
   }
 
   // Verify that the comment belongs to this issue
@@ -288,7 +327,7 @@ export async function handleMarkBestAnswer(issueId: string, commentId: string, u
   ).bind(commentId, issueId).first();
 
   if (!comment) {
-    return errorResponse('COMMENT_NOT_FOUND', 'التعليق غير موجود أو لا ينتمي لهذا الاستفسار');
+    return errorResponse('COMMENT_NOT_FOUND', 'التعليق غير موجود أو لا ينتمي لهذا الاستفسار', 404);
   }
 
   await env.DB.prepare(`UPDATE issue_comments SET is_best_answer = 0 WHERE issue_id = ?`).bind(issueId).run();

@@ -230,7 +230,7 @@ fun GlassTextField(
         if (label.isNotBlank()) {
             Text(
                 text = label,
-                fontSize = 13.sp,
+                fontSize = tanweerTextSize(13f),
                 color = TextSecondary,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(bottom = 6.dp)
@@ -239,7 +239,7 @@ fun GlassTextField(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            placeholder = { Text(placeholder, color = TextMuted, fontSize = 14.sp) },
+            placeholder = { Text(placeholder, color = TextMuted, fontSize = tanweerTextSize(14f)) },
             leadingIcon = if (leadingIcon != null) {
                 { Icon(leadingIcon, contentDescription = null, tint = CyanAccent) }
             } else null,
@@ -266,7 +266,7 @@ fun GlassTextField(
             Text(
                 text = errorMessage,
                 color = RubyRed,
-                fontSize = 12.sp,
+                fontSize = tanweerTextSize(12f),
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp)
             )
         }
@@ -292,7 +292,7 @@ fun GlassPill(
         Text(
             text = text,
             color = color,
-            fontSize = 12.sp,
+            fontSize = tanweerTextSize(12f),
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             softWrap = false
@@ -359,13 +359,13 @@ fun EmptyStateGlass(
         ) {
             Text(
                 text = icon,
-                fontSize = 40.sp,
+                fontSize = tanweerTextSize(40f),
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = title,
-                fontSize = 17.sp,
+                fontSize = tanweerTextSize(17f),
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary,
                 textAlign = TextAlign.Center
@@ -373,7 +373,7 @@ fun EmptyStateGlass(
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = subtitle,
-                fontSize = 13.sp,
+                fontSize = tanweerTextSize(13f),
                 color = TextSecondary,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 24.dp)

@@ -1,4 +1,23 @@
 <resources>
     <string name="app_name">تنوير</string>
     <string name="app_tagline">كل يوم له محتواه، وكل مادة لها مكان، ولا يضيع درس</string>
+    <string name="calendar_day_details_label">تفاصيل يوم %1$s</string>
+    <string name="calendar_retry_day_sync">إعادة التحقق من اليوم</string>
+    <string name="calendar_day_sync_failed">تعذر مزامنة تفاصيل اليوم</string>
+    <string name="chat_history_label">سجل محادثة المجموعة</string>
+    <string name="chat_history_sync_failed">تعذر تحديث سجل المحادثة</string>
+    <string name="chat_empty_title">بدء النقاش المباشر في الشعبة</string>
+    <string name="chat_empty_subtitle">لا توجد رسائل في سجل هذه المجموعة حتى الآن. يمكنك بدء النقاش.</string>
+    <string name="schedule_proposals_label">مقترحات تعديل الجدول</string>
+    <string name="schedule_proposals_verifying">جارٍ التحقق من مقترحات الجدول</string>
+    <string name="schedule_proposals_last_snapshot">العدد في آخر لقطة مؤكدة: %1$d</string>
+    <string name="profile_stats_unverified">لا يمكن تأكيد إحصاءات الملف الشخصي بعد.</string>
+    <string name="search_local_results_count">%1$d نتيجة محلية</string>
+    <string name="search_local_index_note">نتائج البحث مأخوذة من الفهرس المحلي. مزامنة المحادثات تجلب أحدث 100 رسالة من الخادم، مع الإبقاء على السجل الأقدم المحفوظ محلياً.</string>
+    <string name="search_enter_query">اكتب كلمة لاستعراض نتائج البحث في المنظومة.</string>
+    <string name="search_no_results_confirmed">لم تظهر نتائج مطابقة في البيانات التي تم التحقق منها.</string>
+    <string name="search_no_results_offline">لا توجد مطابقة في البيانات المحلية المحفوظة. قد تظهر نتائج إضافية عند الاتصال بالخادم.</string>
+    <string name="search_results_verifying">جارٍ التحقق من مصادر البحث؛ لن نؤكد عدم وجود نتائج قبل اكتمال المزامنة.</string>
+    <string name="search_results_unverified">تعذر التحقق من مصادر البحث. استخدم زر التحديث للمحاولة مجدداً.</string>
+    <string name="search_results_pending">لم تكتمل مزامنة مصادر البحث بعد؛ لذلك لا يمكن تأكيد عدم وجود نتائج.</string>
 </resources>

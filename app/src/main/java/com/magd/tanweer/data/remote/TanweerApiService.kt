@@ -24,7 +24,9 @@ data class RegisterRequest(
     val gradeId: Int,
     val sectionId: String,
     val email: String? = null,
-    val deviceId: String? = null
+    val deviceId: String? = null,
+    val platform: String = "Android",
+    val appVersion: String = BuildConfig.VERSION_NAME
 )
 
 @JsonClass(generateAdapter = true)
@@ -32,13 +34,16 @@ data class LoginRequest(
     val phoneNumber: String,
     val password: String,
     val deviceId: String? = null,
-    val appVersion: String? = "1.0"
+    val platform: String = "Android",
+    val appVersion: String = BuildConfig.VERSION_NAME
 )
 
 @JsonClass(generateAdapter = true)
 data class RecoveryLoginRequest(
     val recoveryCode: String,
-    val deviceId: String? = null
+    val deviceId: String? = null,
+    val platform: String = "Android",
+    val appVersion: String = BuildConfig.VERSION_NAME
 )
 
 @JsonClass(generateAdapter = true)
@@ -137,7 +142,8 @@ data class CreateHomeworkRequest(
     val pageNumbers: String? = null,
     val questionNumbers: String? = null,
     val taskType: String = "HOMEWORK",
-    val mediaUrls: List<String> = emptyList()
+    val mediaUrls: List<String> = emptyList(),
+    val isOfficial: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
@@ -149,7 +155,8 @@ data class CreateExamRequest(
     val title: String,
     val requiredChapters: String? = null,
     val notes: String? = null,
-    val examType: String = "MONTHLY"
+    val examType: String = "MONTHLY",
+    val isOfficial: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
@@ -172,27 +179,69 @@ data class CreateEventRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class UpdateContentRequest(
+    val title: String? = null,
+    val description: String? = null,
+    val type: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateHomeworkRequest(
+    val dueDate: String? = null,
+    val title: String? = null,
+    val details: String? = null,
+    val pageNumbers: String? = null,
+    val questionNumbers: String? = null,
+    val isOfficial: Boolean? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateExamRequest(
+    val examDate: String? = null,
+    val title: String? = null,
+    val requiredChapters: String? = null,
+    val notes: String? = null,
+    val isOfficial: Boolean? = null,
+    val examType: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateEventRequest(
+    val eventDate: String? = null,
+    val timeStr: String? = null,
+    val title: String? = null,
+    val description: String? = null,
+    val category: String? = null,
+    val location: String? = null,
+    val isOfficial: Boolean? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class HomeworksResponse(
     val success: Boolean,
-    val homeworks: List<HomeworkItem> = emptyList()
+    val homeworks: List<HomeworkItem> = emptyList(),
+    val totalCount: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class ExamsResponse(
     val success: Boolean,
-    val exams: List<ExamItem> = emptyList()
+    val exams: List<ExamItem> = emptyList(),
+    val totalCount: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class EventsResponse(
     val success: Boolean,
-    val events: List<SchoolEventItem> = emptyList()
+    val events: List<SchoolEventItem> = emptyList(),
+    val totalCount: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class IssuesResponse(
     val success: Boolean,
-    val issues: List<IssueItem> = emptyList()
+    val issues: List<IssueItem> = emptyList(),
+    val totalCount: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -304,6 +353,26 @@ data class ProfileResponse(
     val user: User? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class RegisteredDevice(
+    val deviceId: String,
+    val platform: String = "Android",
+    val appVersion: String = "",
+    val lastSeen: Long = 0L,
+    val connectedAt: Long = 0L,
+    val isCurrent: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class RegisteredDevicesResponse(
+    val success: Boolean,
+    val maxActiveDevices: Int = 3,
+    val activeDevicesCount: Int = 0,
+    val devices: List<RegisteredDevice> = emptyList(),
+    val message: String? = null,
+    val error: ApiError? = null
+)
+
 interface TanweerApiService {
 
     @POST("api/v1/auth/register")
@@ -315,11 +384,26 @@ interface TanweerApiService {
     @POST("api/v1/auth/recovery-login")
     suspend fun loginWithRecoveryCode(@Body req: RecoveryLoginRequest): Response<AuthResponse>
 
+    @GET("api/v1/auth/devices")
+    suspend fun getRegisteredDevices(): Response<RegisteredDevicesResponse>
+
+    @DELETE("api/v1/auth/devices/{deviceId}")
+    suspend fun revokeRegisteredDevice(@Path("deviceId") deviceId: String): Response<GenericResponse>
+
+    @POST("api/v1/auth/logout")
+    suspend fun logoutCurrentDevice(): Response<GenericResponse>
+
     @GET("api/v1/me")
     suspend fun getProfile(): Response<ProfileResponse>
 
     @POST("api/v1/profile")
     suspend fun updateProfile(@Body req: UpdateProfileRequest): Response<ProfileResponse>
+
+    @POST("api/v1/me/recovery-code")
+    suspend fun generateMyRecoveryCode(): Response<RecoveryCodeResponse>
+
+    @GET("api/v1/notifications")
+    suspend fun getMyNotifications(): Response<NotificationsResponse>
 
     @GET("api/v1/groups")
     suspend fun getGroups(): Response<GroupsResponse>
@@ -329,6 +413,9 @@ interface TanweerApiService {
         @Path("id") groupId: String,
         @Body req: com.magd.tanweer.data.model.JoinGroupBody = com.magd.tanweer.data.model.JoinGroupBody()
     ): Response<GenericResponse>
+
+    @POST("api/v1/groups/{id}/leave")
+    suspend fun leaveGroup(@Path("id") groupId: String): Response<GenericResponse>
 
     @POST("api/v1/groups")
     suspend fun createPublicGroup(
@@ -459,6 +546,15 @@ interface TanweerApiService {
     @POST("api/v1/content")
     suspend fun createContent(@Body req: CreateContentRequest): Response<GenericResponse>
 
+    @PATCH("api/v1/content/{id}")
+    suspend fun updateContent(
+        @Path("id") contentId: String,
+        @Body req: UpdateContentRequest
+    ): Response<GenericResponse>
+
+    @DELETE("api/v1/content/{id}")
+    suspend fun deleteContent(@Path("id") contentId: String): Response<GenericResponse>
+
     @POST("api/v1/content/{id}/useful")
     suspend fun voteUseful(@Path("id") contentId: String): Response<GenericResponse>
 
@@ -503,11 +599,29 @@ interface TanweerApiService {
     @GET("api/v1/dashboards/admin")
     suspend fun getAdminDashboard(): Response<com.magd.tanweer.data.model.AdminDashboardResponse>
 
+    @PATCH("api/v1/admin/users/{userId}/status")
+    suspend fun updateSchoolStudentStatus(
+        @Path("userId") userId: String,
+        @Body req: com.magd.tanweer.data.model.UpdateStudentStatusRequest
+    ): Response<GenericResponse>
+
+    @DELETE("api/v1/admin/students/{userId}/class-membership")
+    suspend fun removeSchoolStudentFromClass(@Path("userId") userId: String): Response<GenericResponse>
+
     @GET("api/v1/homeworks")
     suspend fun getHomeworks(@Query("groupId") groupId: String): Response<HomeworksResponse>
 
     @POST("api/v1/homeworks")
     suspend fun createHomework(@Body req: CreateHomeworkRequest): Response<GenericResponse>
+
+    @PATCH("api/v1/homeworks/{id}")
+    suspend fun updateHomework(
+        @Path("id") homeworkId: String,
+        @Body req: UpdateHomeworkRequest
+    ): Response<GenericResponse>
+
+    @DELETE("api/v1/homeworks/{id}")
+    suspend fun deleteHomework(@Path("id") homeworkId: String): Response<GenericResponse>
 
     @POST("api/v1/homeworks/{id}/toggle")
     suspend fun toggleHomework(
@@ -524,6 +638,12 @@ interface TanweerApiService {
     @POST("api/v1/exams")
     suspend fun createExam(@Body req: CreateExamRequest): Response<GenericResponse>
 
+    @PATCH("api/v1/exams/{id}")
+    suspend fun updateExam(
+        @Path("id") examId: String,
+        @Body req: UpdateExamRequest
+    ): Response<GenericResponse>
+
     @DELETE("api/v1/exams/{id}")
     suspend fun deleteExam(@Path("id") id: String): Response<GenericResponse>
 
@@ -536,8 +656,20 @@ interface TanweerApiService {
     @GET("api/v1/events")
     suspend fun getEvents(@Query("groupId") groupId: String): Response<EventsResponse>
 
+    @POST("api/v1/events/{eventId}/dismiss")
+    suspend fun dismissSchoolAnnouncement(@Path("eventId") eventId: String): Response<GenericResponse>
+
     @POST("api/v1/events")
     suspend fun createEvent(@Body req: CreateEventRequest): Response<GenericResponse>
+
+    @PATCH("api/v1/events/{id}")
+    suspend fun updateEvent(
+        @Path("id") eventId: String,
+        @Body req: UpdateEventRequest
+    ): Response<GenericResponse>
+
+    @DELETE("api/v1/events/{id}")
+    suspend fun deleteEvent(@Path("id") eventId: String): Response<GenericResponse>
 
     @GET("api/v1/issues")
     suspend fun getIssues(@Query("groupId") groupId: String): Response<IssuesResponse>
@@ -582,12 +714,59 @@ interface GitHubApiService {
 }
 
 object NetworkModule {
-    private const val BASE_URL = "https://tanweer.magd.workers.dev/"
+    private val BASE_URL = BuildConfig.API_BASE_URL
     private const val GITHUB_BASE_URL = "https://api.github.com/"
-    private var authToken: String? = null
+    @Volatile private var authToken: String? = null
+    @Volatile private var installationDeviceId: String? = null
+
+    val deviceId: String
+        get() = installationDeviceId.orEmpty()
+
+    fun setDeviceId(deviceId: String?) {
+        installationDeviceId = deviceId?.trim()?.takeIf { it.length in 8..128 }
+    }
 
     fun setAuthToken(token: String?) {
-        authToken = token
+        authToken = token?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Returns the active session token used by the API auth interceptor.
+     * Media downloads outside Retrofit must use this same source of truth.
+     */
+    fun currentAuthToken(): String? = authToken
+
+    val apiBaseUrl: String
+        get() = BASE_URL
+
+    /**
+     * Resolves a server-returned relative URL against the selected build flavor.
+     * Absolute HTTP(S) URLs (for example, external media hosts) remain untouched.
+     */
+    fun resolveApiUrl(url: String): String {
+        val trimmed = url.trim()
+        if (trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true)
+        ) {
+            return trimmed
+        }
+
+        return "${BASE_URL.trimEnd('/')}/${trimmed.trimStart('/')}"
+    }
+
+    /**
+     * Builds a WebSocket URL from the same API origin used by Retrofit.
+     */
+    fun resolveWebSocketUrl(path: String): String {
+        val websocketBaseUrl = when {
+            BASE_URL.startsWith("https://", ignoreCase = true) ->
+                "wss://${BASE_URL.substringAfter("://")}"
+            BASE_URL.startsWith("http://", ignoreCase = true) ->
+                "ws://${BASE_URL.substringAfter("://")}"
+            else -> throw IllegalStateException("Unsupported API base URL scheme")
+        }
+
+        return "${websocketBaseUrl.trimEnd('/')}/${path.trimStart('/')}"
     }
 
     private val moshi = Moshi.Builder()
@@ -602,7 +781,10 @@ object NetworkModule {
         authToken?.let {
             builder.addHeader("Authorization", "Bearer $it")
         }
-        builder.addHeader("X-App-Version", BuildConfig.VERSION_NAME)
+        installationDeviceId?.let {
+            builder.header("X-Device-Id", it)
+        }
+        builder.header("X-App-Version", BuildConfig.VERSION_NAME)
         builder.addHeader("X-App-Version-Code", BuildConfig.VERSION_CODE.toString())
         val response = chain.proceed(builder.build())
         if (response.code == 401 && !original.url.encodedPath.contains("/auth/")) {

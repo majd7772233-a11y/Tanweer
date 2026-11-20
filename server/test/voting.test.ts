@@ -13,7 +13,14 @@ class VotingMockDb {
     content_media: [],
     community_decisions: [],
     community_votes: [],
+    schedule_proposals: [],
   };
+
+  async batch(statements: any[]): Promise<unknown[]> {
+    const results: unknown[] = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
+  }
 
   prepare(sql: string) {
     const db = this;
@@ -30,9 +37,9 @@ class VotingMockDb {
       async all<T = any>(): Promise<{ results: T[] }> {
         return { results: db.execute(sql, boundParams) as T[] };
       },
-      async run(): Promise<{ success: boolean }> {
-        db.execute(sql, boundParams);
-        return { success: true };
+      async run(): Promise<{ success: boolean; meta: { changes: number } }> {
+        const changes = db.execute(sql, boundParams);
+        return { success: true, meta: { changes: changes.length } };
       },
     };
   }
@@ -54,13 +61,44 @@ class VotingMockDb {
       const match = trimmed.match(/DELETE FROM (\w+)/i);
       if (match) {
         const table = match[1];
+        const rows = this.tables[table] || [];
         if (trimmed.includes('content_id = ?')) {
-          this.tables[table] = (this.tables[table] || []).filter((r) => r.content_id !== params[0]);
-        } else if (trimmed.includes('WHERE id = ?')) {
-          this.tables[table] = (this.tables[table] || []).filter((r) => r.id !== params[0]);
+          const before = rows.length;
+          this.tables[table] = rows.filter((r) => r.content_id !== params[0]);
+          return Array.from({ length: before - this.tables[table].length }, () => ({}));
+        }
+        if (trimmed.includes('WHERE id = ? AND group_id = ?')) {
+          const before = rows.length;
+          this.tables[table] = rows.filter((r) => !(r.id === params[0] && r.group_id === params[1]));
+          return Array.from({ length: before - this.tables[table].length }, () => ({}));
+        }
+        if (trimmed.includes('WHERE id = ?')) {
+          const before = rows.length;
+          this.tables[table] = rows.filter((r) => r.id !== params[0]);
+          return Array.from({ length: before - this.tables[table].length }, () => ({}));
         }
         return [];
       }
+    }
+
+    if (/^UPDATE community_decisions SET status = 'EXPIRED'/i.test(trimmed)) {
+      const [decisionId, groupId] = params;
+      const dec = this.tables.community_decisions.find(
+        (d) => d.id === decisionId && d.group_id === groupId && d.status === 'PENDING'
+      );
+      if (!dec) return [];
+      dec.status = 'EXPIRED';
+      return [dec];
+    }
+
+    if (/^UPDATE schedule_proposals SET status = 'EXPIRED'/i.test(trimmed)) {
+      const [proposalId, groupId] = params;
+      const proposal = this.tables.schedule_proposals.find(
+        (p) => p.id === proposalId && p.group_id === groupId && p.status === 'PENDING'
+      );
+      if (!proposal) return [];
+      proposal.status = 'EXPIRED';
+      return [proposal];
     }
 
     if (/^UPDATE community_decisions/i.test(trimmed)) {
@@ -91,6 +129,10 @@ class VotingMockDb {
         const vFor = this.tables.community_votes.filter((v) => v.decision_id === decisionId && v.vote_choice === 1).length;
         const vAgainst = this.tables.community_votes.filter((v) => v.decision_id === decisionId && v.vote_choice === 0).length;
         return [{ v_for: vFor, v_against: vAgainst }];
+      }
+
+      if (trimmed.includes('WHERE id = ? AND group_id = ?')) {
+        return rows.filter((row) => row.id === params[0] && row.group_id === params[1]);
       }
 
       if (table === 'community_decisions' && trimmed.includes('WHERE id = ?')) {
@@ -214,6 +256,93 @@ describe('Unified Governance & Community Decisions Voting Engine', () => {
 
     // Automatic Execution: The spam lesson is wiped out from contents table!
     expect(mockDb.tables.contents).toHaveLength(0);
+  });
+
+  it('expires a linked schedule proposal together with its community decision', async () => {
+    const expiredAt = Date.now() - 1000;
+    mockDb.tables.schedule_proposals.push({
+      id: 'prop_expired_1',
+      group_id: 'class_10_A',
+      status: 'PENDING',
+    });
+    mockDb.tables.community_decisions.push({
+      id: 'dec_schedule_expired_1',
+      group_id: 'class_10_A',
+      request_type: 'SCHEDULE',
+      target_id: 'prop_expired_1',
+      title: 'اقتراح تعديل الجدول',
+      description: JSON.stringify({ voters: [studentA.userId, studentB.userId] }),
+      requested_by: studentA.userId,
+      total_eligible_voters: 2,
+      threshold_percent: 60,
+      votes_for: 1,
+      votes_against: 0,
+      status: 'PENDING',
+      expires_at: expiredAt,
+      created_at: expiredAt - 1000,
+    });
+
+    const response = await handleVoteCommunityDecision(
+      'dec_schedule_expired_1',
+      studentB,
+      new Request('http://localhost/api/v1/decisions/dec_schedule_expired_1/vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voteChoice: 1 }),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(410);
+    expect((mockDb.tables.community_decisions.find(d => d.id === 'dec_schedule_expired_1'))?.status).toBe('EXPIRED');
+    expect((mockDb.tables.schedule_proposals.find(p => p.id === 'prop_expired_1'))?.status).toBe('EXPIRED');
+  });
+
+  it('does not let a non-member expire another group\'s community decision', async () => {
+    mockDb.tables.schedule_proposals.push({
+      id: 'prop_private_1',
+      group_id: 'class_10_A',
+      status: 'PENDING',
+    });
+    mockDb.tables.community_decisions.push({
+      id: 'dec_private_expired_1',
+      group_id: 'class_10_A',
+      request_type: 'SCHEDULE',
+      target_id: 'prop_private_1',
+      title: 'اقتراح خاص',
+      description: JSON.stringify({ voters: [studentA.userId, studentB.userId] }),
+      requested_by: studentA.userId,
+      total_eligible_voters: 2,
+      threshold_percent: 60,
+      votes_for: 1,
+      votes_against: 0,
+      status: 'PENDING',
+      expires_at: Date.now() - 1000,
+      created_at: Date.now() - 2000,
+    });
+    const outsider: UserContext = {
+      userId: 'outsider',
+      phoneNumber: '777000099',
+      fullName: 'خارج المجموعة',
+      gradeId: 10,
+      sectionId: 'B',
+      role: Role.STUDENT,
+    };
+
+    const response = await handleVoteCommunityDecision(
+      'dec_private_expired_1',
+      outsider,
+      new Request('http://localhost/api/v1/decisions/dec_private_expired_1/vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voteChoice: 1 }),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockDb.tables.community_decisions.find(d => d.id === 'dec_private_expired_1')?.status).toBe('PENDING');
+    expect(mockDb.tables.schedule_proposals.find(p => p.id === 'prop_private_1')?.status).toBe('PENDING');
   });
 
   it('SECURITY: Rejects votes on decisions that are already closed or applied', async () => {

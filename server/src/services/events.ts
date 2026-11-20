@@ -11,14 +11,40 @@ export async function handleGetEvents(groupId: string, user: UserContext, env: E
   if (memberCheck) return memberCheck;
 
   const events = await env.DB.prepare(
-    `SELECT id, group_id, event_date, time_str, title, description, category, location, is_official, created_by, created_at
-     FROM events
-     WHERE group_id = ? OR group_id = 'all'
-     ORDER BY is_official DESC, event_date ASC`
-  ).bind(groupId).all();
+    `SELECT e.id, e.group_id, e.event_date, e.time_str, e.title, e.description,
+            e.category, e.location, e.is_official, e.created_by, e.created_at,
+            u.full_name AS source_name
+     FROM events e
+     LEFT JOIN users u ON u.id = e.created_by
+     WHERE (e.group_id = ? OR e.group_id = 'all')
+       AND NOT (
+         e.group_id = 'all'
+         AND UPPER(e.category) = 'ANNOUNCEMENT'
+         AND EXISTS (
+           SELECT 1 FROM user_dismissed_announcements d
+           WHERE d.user_id = ? AND d.event_id = e.id
+         )
+       )
+     ORDER BY CASE WHEN e.group_id = 'all' AND e.category = 'ANNOUNCEMENT' THEN 0 ELSE 1 END,
+              e.is_official DESC, e.event_date ASC`
+  ).bind(groupId, user.userId).all();
+  const totalCount = await env.DB.prepare(
+    `SELECT COUNT(*) AS total_count
+     FROM events e
+     WHERE (e.group_id = ? OR e.group_id = 'all')
+       AND NOT (
+         e.group_id = 'all'
+         AND UPPER(e.category) = 'ANNOUNCEMENT'
+         AND EXISTS (
+           SELECT 1 FROM user_dismissed_announcements d
+           WHERE d.user_id = ? AND d.event_id = e.id
+         )
+       )`
+  ).bind(groupId, user.userId).first<{ total_count: number }>();
 
   return jsonResponse({
     success: true,
+    totalCount: Number(totalCount?.total_count ?? -1),
     events: (events.results || []).map(mapSchoolEvent),
   });
 }
@@ -57,8 +83,13 @@ export async function handleCreateEvent(user: UserContext, request: Request, env
   const isPrivilegedRole = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER' || user.role === 'TEACHER' || user.role === 'VERIFIED_TEACHER';
 
   if (isSchoolWide) {
+    const isAnnouncement = body.category?.toUpperCase() === 'ANNOUNCEMENT';
+    const isSchoolAdmin = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER';
+    if (isAnnouncement && !isSchoolAdmin) {
+      return errorResponse('FORBIDDEN', 'نشر التعاميم المدرسية الرسمية محصور بمدير المدرسة', 403);
+    }
     if (!isPrivilegedRole) {
-      return errorResponse('FORBIDDEN', 'صلاحية الإجازات أو الفعاليات العامة على مستوى المدرسة محصورة بالمعلمين وإدارة المدرسة', 403);
+      return errorResponse('FORBIDDEN', 'صلاحية الفعاليات العامة على مستوى المدرسة محصورة بالمعلمين وإدارة المدرسة', 403);
     }
     // Ensure school-wide group 'all' exists in groups table for foreign key constraint
     await env.DB.prepare(
@@ -149,6 +180,9 @@ export async function handleUpdateEvent(
     id: string;
     group_id: string;
     created_by: string;
+    category: string;
+    description: string | null;
+    is_official: number;
   }>();
 
   if (!event) {
@@ -197,8 +231,30 @@ export async function handleUpdateEvent(
         groupId: event.group_id,
       });
 
+  // A holiday is an official school decision, not an ordinary user-created event.
+  // Enforce the same publication policy here as in handleCreateEvent so an owner
+  // cannot bypass it by changing an existing event's category.
+  const requestedCategory = typeof body.category === 'string' ? body.category.trim() : '';
+  const resultingCategory = (requestedCategory || event.category || '').trim().toUpperCase();
+  const isSchoolAdmin = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER';
+  if (isSchoolWide && (event.category === 'ANNOUNCEMENT' || resultingCategory === 'ANNOUNCEMENT') && !isSchoolAdmin) {
+    return errorResponse('FORBIDDEN', 'تعديل التعاميم المدرسية الرسمية محصور بمدير المدرسة', 403);
+  }
+  const resultingDescription = body.description !== undefined ? body.description : event.description;
+  if (resultingCategory === 'HOLIDAY') {
+    if (typeof resultingDescription !== 'string' || !resultingDescription.trim()) {
+      return errorResponse('INVALID_INPUT', 'يرجى توضيح سبب الإجازة المدرسية في حقل الوصف');
+    }
+    if (!canPublishOfficial && !isPrivilegedRole) {
+      return errorResponse('FORBIDDEN', 'لا تملك صلاحية تحديد إجازة مدرسية معتمدة', 403);
+    }
+  }
+
   let officialVal: number | null = null;
-  if (body.isOfficial !== undefined && canPublishOfficial) {
+  if (resultingCategory === 'HOLIDAY') {
+    // Holidays are always official, even when an update body omits isOfficial.
+    officialVal = 1;
+  } else if (body.isOfficial !== undefined && canPublishOfficial) {
     officialVal = body.isOfficial ? 1 : 0;
   }
 
@@ -217,7 +273,7 @@ export async function handleUpdateEvent(
     body.timeStr || null,
     body.title?.trim() || null,
     body.description?.trim() || null,
-    body.category || null,
+    body.category?.trim().toUpperCase() || null,
     body.location?.trim() || null,
     officialVal,
     eventId
@@ -238,6 +294,7 @@ export async function handleDeleteEvent(
     id: string;
     group_id: string;
     created_by: string;
+    category: string;
   }>();
 
   if (!event) {
@@ -245,6 +302,9 @@ export async function handleDeleteEvent(
   }
 
   const isSchoolWide = event.group_id === 'all';
+  if (isSchoolWide && event.category === 'ANNOUNCEMENT' && user.role !== 'ADMIN' && user.role !== 'SYSTEM_OWNER') {
+    return errorResponse('FORBIDDEN', 'حذف التعاميم المدرسية الرسمية محصور بمدير المدرسة', 403);
+  }
   const isPrivilegedRole = user.role === 'ADMIN' || user.role === 'SYSTEM_OWNER' || user.role === 'TEACHER' || user.role === 'VERIFIED_TEACHER';
 
   if (!isSchoolWide) {
@@ -270,5 +330,32 @@ export async function handleDeleteEvent(
   return jsonResponse({
     success: true,
     message: 'تم حذف الفعالية بنجاح',
+  });
+}
+
+/**
+ * Dismiss one official school announcement for the authenticated account only.
+ * This never edits or deletes the shared event row, so other students keep seeing it.
+ */
+export async function handleDismissSchoolAnnouncement(
+  eventId: string,
+  user: UserContext,
+  env: Env
+): Promise<Response> {
+  const event = await env.DB.prepare(
+    "SELECT id FROM events WHERE id = ? AND group_id = 'all' AND UPPER(category) = 'ANNOUNCEMENT'"
+  ).bind(eventId).first<{ id: string }>();
+
+  if (!event) {
+    return errorResponse('ANNOUNCEMENT_NOT_FOUND', 'التعميم المدرسي غير موجود أو لم يعد متاحاً', 404);
+  }
+
+  await env.DB.prepare(
+    'INSERT OR IGNORE INTO user_dismissed_announcements (user_id, event_id, dismissed_at) VALUES (?, ?, ?)'
+  ).bind(user.userId, eventId, Date.now()).run();
+
+  return jsonResponse({
+    success: true,
+    message: 'تم إخفاء التعميم من حسابك فقط',
   });
 }

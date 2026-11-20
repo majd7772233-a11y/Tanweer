@@ -4,7 +4,7 @@ import { requireGroupMember } from '../middleware/permissions';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
 import { mapContent } from '../lib/mappers';
-import { cleanupOrphanMedia } from './media';
+import { cleanupOrphanMedia, validateMediaAttachmentAccess } from './media';
 
 interface MediaPayloadItem {
   url: string;
@@ -42,14 +42,60 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   const memberCheck = await requireGroupMember(user, body.groupId, env.DB);
   if (memberCheck) return memberCheck;
 
+  if (!Array.isArray(mediaList)) {
+    return errorResponse('INVALID_MEDIA', 'قائمة المرفقات غير صالحة');
+  }
+
+  const mediaReferences: string[] = [];
+  for (const item of mediaList) {
+    if (!item || typeof item.url !== 'string') {
+      return errorResponse('INVALID_MEDIA', 'يوجد مرفق لا يحتوي على رابط صالح');
+    }
+    mediaReferences.push(item.url);
+
+    if (item.objectKey !== undefined && item.objectKey !== null && String(item.objectKey).trim()) {
+      const objectKey = String(item.objectKey).trim();
+      if (!/^[A-Za-z0-9_-]+$/.test(objectKey)) {
+        return errorResponse('INVALID_MEDIA_OBJECT_KEY', 'مفتاح ملف الوسائط غير صالح');
+      }
+      // The media download route also authorizes content_media.object_key matches.
+      // Validate that reference through the exact same ownership path as a media URL.
+      mediaReferences.push(`/api/v1/media/${objectKey}`);
+    }
+  }
+
+  const mediaValidation = await validateMediaAttachmentAccess(user, mediaReferences, env.DB);
+  if (mediaValidation) return mediaValidation;
+
+  const normalizedMediaList = mediaList.map((item, index) => ({
+    pageOrder: item.pageOrder ?? item.page_order ?? index + 1,
+    objectKey: item.objectKey?.trim() || '',
+    url: item.url,
+    mimeType: item.mimeType || item.mime_type || 'image/jpeg',
+    fileSize: item.fileSize ?? item.file_size ?? 0,
+    checksum: item.checksum || null,
+  }));
+  const requestedPageOrders = normalizedMediaList.map(item => item.pageOrder);
+  if (
+    requestedPageOrders.some(order => !Number.isInteger(order) || order < 1) ||
+    new Set(requestedPageOrders).size !== requestedPageOrders.length
+  ) {
+    return errorResponse('INVALID_MEDIA_ORDER', 'ترتيب صفحات المرفقات غير صالح أو مكرر');
+  }
+
+  const contentId = (body.id && typeof body.id === 'string' && body.id.trim())
+    ? body.id.trim()
+    : generateId('cnt');
+
   // Check duplicate checksum if media provided
   if (mediaList && mediaList.length > 0 && mediaList[0].checksum) {
     const duplicate = await env.DB.prepare(
       `SELECT cm.content_id, c.title, c.study_date
        FROM content_media cm
        JOIN contents c ON cm.content_id = c.id
-       WHERE cm.checksum = ? AND c.group_id = ? AND c.study_date = ? AND c.subject_id = ?`
-    ).bind(mediaList[0].checksum, body.groupId, studyDate, body.subjectId).first<{
+       WHERE cm.checksum = ? AND c.group_id = ? AND c.study_date = ? AND c.subject_id = ?
+         AND cm.content_id != ?`
+    ).bind(mediaList[0].checksum, body.groupId, studyDate, body.subjectId, contentId).first<{
       content_id: string;
       title: string;
     }>();
@@ -65,9 +111,25 @@ export async function handleCreateContent(user: UserContext, request: Request, e
     }
   }
 
-  const contentId = (body.id && typeof body.id === 'string' && body.id.trim())
-    ? body.id.trim()
-    : generateId('cnt');
+  const createMediaInsertStatement = (
+    item: typeof normalizedMediaList[number],
+    isPrimary: boolean,
+    createdAt: number
+  ) => env.DB.prepare(
+    `INSERT INTO content_media (id, content_id, page_order, object_key, url, mime_type, file_size, checksum, is_primary, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    generateId('med'),
+    contentId,
+    item.pageOrder,
+    item.objectKey,
+    item.url,
+    item.mimeType,
+    item.fileSize,
+    item.checksum,
+    isPrimary ? 1 : 0,
+    createdAt
+  );
 
   // Idempotency check with ownership & scope validation
   const existing = await env.DB.prepare(`SELECT id, group_id, created_by FROM contents WHERE id = ?`).bind(contentId).first<{
@@ -79,10 +141,80 @@ export async function handleCreateContent(user: UserContext, request: Request, e
     if (existing.group_id !== body.groupId || existing.created_by !== user.userId) {
       return errorResponse('CONFLICT', 'المعرّف مستخدم مسبقاً في نطاق آخر أو بواسطة مستخدم آخر', 409);
     }
+
+    if (normalizedMediaList.length > 0) {
+      const storedResponse = await env.DB.prepare(
+        `SELECT page_order, object_key, url, mime_type, file_size, checksum
+         FROM content_media
+         WHERE content_id = ?
+         ORDER BY page_order ASC`
+      ).bind(existing.id).all<{
+        page_order: number;
+        object_key: string | null;
+        url: string;
+        mime_type: string;
+        file_size: number;
+        checksum: string | null;
+      }>();
+
+      const storedRows = storedResponse.results || [];
+      const storedByPage = new Map<number, typeof storedRows[number]>();
+      for (const stored of storedRows) {
+        if (storedByPage.has(stored.page_order)) {
+          return errorResponse(
+            'CONTENT_MEDIA_CONFLICT',
+            'توجد مرفقات مكررة في الدرس المحفوظ. لم يتم إعلان اكتمال النشر.',
+            409
+          );
+        }
+        storedByPage.set(stored.page_order, stored);
+      }
+
+      for (const stored of storedRows) {
+        const requested = normalizedMediaList.find(item => item.pageOrder === stored.page_order);
+        if (!requested ||
+            requested.url !== stored.url ||
+            requested.objectKey !== (stored.object_key || '') ||
+            requested.mimeType !== stored.mime_type ||
+            requested.fileSize !== Number(stored.file_size || 0) ||
+            requested.checksum !== (stored.checksum || null)
+        ) {
+          return errorResponse(
+            'CONTENT_MEDIA_CONFLICT',
+            'بيانات المرفقات لا تطابق النسخة المحفوظة لهذا المعرّف. لم يتم استبدال أي مرفق.',
+            409
+          );
+        }
+      }
+
+      const missingMedia = normalizedMediaList.filter(item => !storedByPage.has(item.pageOrder));
+      if (missingMedia.length > 0) {
+        const createdAt = Date.now();
+        const firstPageOrder = normalizedMediaList[0].pageOrder;
+        const repairStatements = missingMedia.map(item =>
+          createMediaInsertStatement(item, item.pageOrder === firstPageOrder, createdAt)
+        );
+        try {
+          const repairResults = await env.DB.batch(repairStatements);
+          if (repairResults.length !== repairStatements.length ||
+              repairResults.some(result => !result.success || result.meta?.changes !== 1)) {
+            throw new Error('D1 did not confirm every missing lesson media row');
+          }
+        } catch (error) {
+          console.error('Could not repair incomplete lesson media:', error);
+          return errorResponse(
+            'CONTENT_MEDIA_REPAIR_FAILED',
+            'تم العثور على درس محفوظ بمرفقات ناقصة، لكن تعذر استكمال حفظها. أعد المحاولة.',
+            500
+          );
+        }
+      }
+    }
+
     return jsonResponse({
       success: true,
       contentId: existing.id,
-      message: 'تم توثيق الدرس بنجاح',
+      message: 'تم التحقق من الدرس ومرفقاته المحفوظة بنجاح',
     });
   }
 
@@ -92,47 +224,46 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   };
   const authorGradeSection = `${gradeNameMap[user.gradeId] || user.gradeId} — ${user.sectionId}`;
 
-  await env.DB.prepare(
-    `INSERT INTO contents (id, group_id, study_date, subject_id, type, title, description, created_by, author_name, author_grade_section, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    contentId,
-    body.groupId,
-    studyDate,
-    body.subjectId,
-    body.type || 'LESSON',
-    body.title.trim(),
-    body.description?.trim() || null,
-    user.userId,
-    user.fullName,
-    authorGradeSection,
-    'PUBLISHED',
-    now,
-    now
-  ).run();
+  // Treat the lesson row and all of its media rows as one publication.
+  // D1 batch is transactional: a failed media insert must not leave a published
+  // lesson that a retry would mistake for a complete successful upload.
+  const publicationStatements = [
+    env.DB.prepare(
+      `INSERT INTO contents (id, group_id, study_date, subject_id, type, title, description, created_by, author_name, author_grade_section, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      contentId,
+      body.groupId,
+      studyDate,
+      body.subjectId,
+      body.type || 'LESSON',
+      body.title.trim(),
+      body.description?.trim() || null,
+      user.userId,
+      user.fullName,
+      authorGradeSection,
+      'PUBLISHED',
+      now,
+      now
+    ),
+    ...normalizedMediaList.map((item, index) =>
+      createMediaInsertStatement(item, index === 0, now)
+    ),
+  ];
 
-  if (mediaList && mediaList.length > 0) {
-    let order = 1;
-    for (const m of mediaList) {
-      const mediaId = generateId('med');
-      const pageOrder = m.pageOrder || m.page_order || order;
-      await env.DB.prepare(
-        `INSERT INTO content_media (id, content_id, page_order, object_key, url, mime_type, file_size, checksum, is_primary, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        mediaId,
-        contentId,
-        pageOrder,
-        m.objectKey || '',
-        m.url,
-        m.mimeType || m.mime_type || 'image/jpeg',
-        m.fileSize || m.file_size || 0,
-        m.checksum || null,
-        order === 1 ? 1 : 0,
-        now
-      ).run();
-      order++;
+  try {
+    const results = await env.DB.batch(publicationStatements);
+    if (results.length !== publicationStatements.length ||
+        results.some(result => !result.success || result.meta?.changes !== 1)) {
+      throw new Error('D1 did not confirm every lesson publication statement');
     }
+  } catch (error) {
+    console.error('Atomic lesson publication failed:', error);
+    return errorResponse(
+      'CONTENT_CREATE_FAILED',
+      'تعذر حفظ الدرس ومرفقاته بصورة مكتملة. لم يتم نشر سجل جزئي؛ أعد المحاولة.',
+      500
+    );
   }
 
   return jsonResponse({
@@ -319,7 +450,7 @@ export async function handleGetContents(
 
   const contents = await env.DB.prepare(
     `SELECT c.id, c.group_id, c.study_date, c.subject_id, c.type, c.title, c.description,
-            c.author_name, c.author_grade_section, c.views_count, c.useful_count, c.created_at,
+            c.created_by, c.author_name, c.author_grade_section, c.views_count, c.useful_count, c.created_at,
             s.name_ar as subject_name, s.icon as subject_icon, s.color_hex
      FROM contents c
      LEFT JOIN subjects s ON c.subject_id = s.id
@@ -330,7 +461,7 @@ export async function handleGetContents(
   const contentList = [];
   for (const c of (contents.results as any[])) {
     const media = await env.DB.prepare(
-      `SELECT id, page_order, url, mime_type, file_size FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
+      `SELECT id, page_order, url, mime_type, file_size, checksum FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
     ).bind(c.id).all();
     contentList.push(mapContent(c, media.results || []));
   }
@@ -353,7 +484,7 @@ export async function handleGetAcademicArchive(
 ): Promise<Response> {
   const contents = await env.DB.prepare(
     `SELECT c.id, c.group_id, c.study_date, c.subject_id, c.type, c.title, c.description,
-            c.author_name, c.author_grade_section, c.views_count, c.useful_count, c.created_at,
+            c.created_by, c.author_name, c.author_grade_section, c.views_count, c.useful_count, c.created_at,
             s.name_ar as subject_name, s.icon as subject_icon, s.color_hex,
             g.name as group_name
      FROM contents c
@@ -362,7 +493,7 @@ export async function handleGetAcademicArchive(
      WHERE c.status = 'PUBLISHED'
        AND (
          c.created_by = ?
-         OR c.group_id IN (SELECT group_id FROM group_members WHERE user_id = ?)
+         OR c.group_id IN (SELECT group_id FROM group_members WHERE user_id = ? AND status = 'ACTIVE')
        )
      ORDER BY c.study_date DESC, c.created_at DESC`
   ).bind(user.userId, user.userId).all();
@@ -370,7 +501,7 @@ export async function handleGetAcademicArchive(
   const contentList = [];
   for (const c of (contents.results as any[])) {
     const media = await env.DB.prepare(
-      `SELECT id, page_order, url, mime_type, file_size FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
+      `SELECT id, page_order, url, mime_type, file_size, checksum FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
     ).bind(c.id).all();
     contentList.push(mapContent(c, media.results || []));
   }

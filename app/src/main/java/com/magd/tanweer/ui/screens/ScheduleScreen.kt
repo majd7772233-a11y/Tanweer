@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -35,10 +36,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.Permission
 import com.magd.tanweer.data.model.ScheduleSlot
+import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.data.model.SubjectItem
 import com.magd.tanweer.data.model.getRoleEnum
 import com.magd.tanweer.data.model.hasPermission
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -73,10 +76,30 @@ fun ScheduleScreen(
     val allSlots by viewModel.repository.getAllScheduleSlots(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
     val scheduleSyncState by viewModel.scheduleSyncState.collectAsStateWithLifecycle()
+    val scopedScheduleSyncState = syncStateForScope(
+        scheduleSyncState,
+        groupSyncScopeIds[GroupSyncSource.SCHEDULE],
+        activeGroupId
+    )
+    val hasScheduleSnapshot = allSlots.isNotEmpty() || hasAuthoritativeSnapshot(scopedScheduleSyncState)
     val scheduleProposals by viewModel.scheduleProposals.collectAsStateWithLifecycle()
+    val scheduleProposalsGroupId by viewModel.scheduleProposalsGroupId.collectAsStateWithLifecycle()
+    val scheduleProposalsSnapshotGroupId by viewModel.scheduleProposalsSnapshotGroupId.collectAsStateWithLifecycle()
+    val scheduleProposalsSyncState by viewModel.scheduleProposalsSyncState.collectAsStateWithLifecycle()
+    val scopedScheduleProposalsSyncState = syncStateForScope(scheduleProposalsSyncState, scheduleProposalsGroupId, activeGroupId)
+    val hasScheduleProposalsSnapshot = isSnapshotForScope(scheduleProposalsSnapshotGroupId, activeGroupId)
+    val activeScheduleProposals = if (hasScheduleProposalsSnapshot) scheduleProposals else emptyList()
     val scheduleVersion by viewModel.scheduleVersion.collectAsStateWithLifecycle()
     val scheduleMeta by viewModel.scheduleMeta.collectAsStateWithLifecycle()
+    val scheduleMetaGroupId by viewModel.scheduleMetaGroupId.collectAsStateWithLifecycle()
+    val scheduleMetaSnapshotGroupId by viewModel.scheduleMetaSnapshotGroupId.collectAsStateWithLifecycle()
+    val scheduleMetaSyncState by viewModel.scheduleMetaSyncState.collectAsStateWithLifecycle()
+    val scopedScheduleMetaSyncState = syncStateForScope(scheduleMetaSyncState, scheduleMetaGroupId, activeGroupId)
+    val hasScheduleMetaSnapshot = isSnapshotForScope(scheduleMetaSnapshotGroupId, activeGroupId)
+    val activeScheduleMeta = if (hasScheduleMetaSnapshot && scopedScheduleMetaSyncState !is SyncState.Error) scheduleMeta else null
+    val activeScheduleVersion = if (hasScheduleMetaSnapshot) scheduleVersion else null
 
     val gradeSubjects = remember(currentUser?.gradeId) {
         viewModel.getScheduleSubjectsForCurrentGrade()
@@ -95,29 +118,25 @@ fun ScheduleScreen(
     var isProposalsReviewDialogOpen by remember { mutableStateOf(false) }
     var sourceDayToCopy by remember { mutableIntStateOf(0) }
 
-    val isStaffWithDirectEdit = remember(currentUser, scheduleMeta) {
+    val isStaffWithDirectEdit = remember(currentUser, activeScheduleMeta) {
         val role = currentUser?.getRoleEnum() ?: com.magd.tanweer.data.model.Role.STUDENT
         role == com.magd.tanweer.data.model.Role.TEACHER ||
         role == com.magd.tanweer.data.model.Role.ADMIN ||
         (currentUser?.hasPermission(Permission.MANAGE_SCHEDULE) == true) ||
-        (scheduleMeta?.canEditDirectly == true)
+        (activeScheduleMeta?.canEditDirectly == true)
     }
 
-    val canManageSchedule = remember(currentUser, allSlots.size, scheduleMeta, isStaffWithDirectEdit) {
-        isStaffWithDirectEdit || (scheduleMeta?.isInitialSetup == true) || allSlots.isEmpty()
-    }
-    var isDirectEditMode by remember { mutableStateOf(false) }
+    val canFillEmptyScheduleSlots = shouldAllowEmptyScheduleSlotEditing(
+        isStaffWithDirectEdit = isStaffWithDirectEdit,
+        serverConfirmsInitialSetup = activeScheduleMeta?.isInitialSetup == true,
+        hasScheduleSnapshot = hasScheduleSnapshot,
+    )
+    val canManageSchedule = isStaffWithDirectEdit ||
+        (allSlots.isEmpty() && canFillEmptyScheduleSlots)
 
     val filledSlotsCount = allSlots.size
     val currentGradeName = SchoolHierarchy.getGradeName(currentUser?.gradeId ?: 10)
-    val pendingProposalsCount = scheduleProposals.count { it.status == "PENDING" }
-
-    LaunchedEffect(activeGroupId) {
-        if (activeGroupId.isNotBlank()) {
-            viewModel.syncSchedule(activeGroupId, isRefresh = false)
-            viewModel.loadScheduleData()
-        }
-    }
+    val pendingProposalsCount = activeScheduleProposals.count { it.status == "PENDING" }
 
     Box(
         modifier = Modifier
@@ -141,13 +160,13 @@ fun ScheduleScreen(
                     Column {
                         Text(
                             text = "📅 جدول الحصص الأسبوعي",
-                            fontSize = 20.sp,
+                            fontSize = tanweerTextSize(20f),
                             fontWeight = FontWeight.Black,
                             color = CyanAccent
                         )
                         Text(
                             text = "$currentGradeName • $filledSlotsCount من 30 حصة",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             color = TextSecondary
                         )
                     }
@@ -159,7 +178,8 @@ fun ScheduleScreen(
                         // Refresh/Sync from server
                         IconButton(
                             onClick = {
-                                viewModel.syncSchedule(isRefresh = true)
+                                viewModel.syncSchedule(activeGroupId, isRefresh = true)
+                                viewModel.loadScheduleData(activeGroupId)
                                 Toast.makeText(context, "جاري مزامنة الجدول من الخادم 🔄", Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier
@@ -183,7 +203,7 @@ fun ScheduleScreen(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = if (isFullWeekView) "عرض الجدول" else "عرض القائمة",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = CyanAccent,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
@@ -204,9 +224,41 @@ fun ScheduleScreen(
             // Sync Status Indicator for Schedule (Point 15)
             item {
                 SyncStatusBar(
-                    syncState = scheduleSyncState,
-                    onRefresh = { viewModel.syncSchedule(activeGroupId, isRefresh = true) }
+                    syncState = scopedScheduleSyncState,
+                    onRefresh = {
+                        viewModel.syncSchedule(activeGroupId, isRefresh = true)
+                        viewModel.loadScheduleData(activeGroupId)
+                    }
                 )
+            }
+            if (scopedScheduleMetaSyncState is SyncState.Error) {
+                item {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface, borderColor = WarmAmber.copy(alpha = 0.55f)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("تعذر التحقق من صلاحيات الجدول", color = WarmAmber, fontWeight = FontWeight.Bold)
+                            Text(scopedScheduleMetaSyncState.message, color = TextSecondary, fontSize = tanweerTextSize(11f))
+                            GlassButton(text = "إعادة التحقق", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadScheduleData(activeGroupId) })
+                        }
+                    }
+                }
+            }
+            if (scopedScheduleProposalsSyncState is SyncState.Error) {
+                item {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface, borderColor = WarmAmber.copy(alpha = 0.55f)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("تعذر تحميل مقترحات الجدول", color = WarmAmber, fontWeight = FontWeight.Bold)
+                            Text(scopedScheduleProposalsSyncState.message, color = TextSecondary, fontSize = tanweerTextSize(11f))
+                            GlassButton(text = "إعادة تحميل المقترحات", color = CyanAccent, textColor = TextOnAccent, onClick = { viewModel.loadScheduleProposals(activeGroupId) })
+                        }
+                    }
+                }
+            }
+
+
+            if (!canFillEmptyScheduleSlots) {
+                item {
+                    PendingSyncEmptyState(dataLabel = "الجدول الأسبوعي", syncState = scopedScheduleSyncState)
+                }
             }
 
             // Permission & Mode Status Banner (Points 13 & 14 Policy)
@@ -215,7 +267,7 @@ fun ScheduleScreen(
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = MidnightSurface,
-                    borderColor = if (isStaffWithDirectEdit && isDirectEditMode) CyanAccent else GlassBorderSubtle
+                    borderColor = if (isStaffWithDirectEdit) CyanAccent else GlassBorderSubtle
                 ) {
                     Row(
                         modifier = Modifier
@@ -227,13 +279,13 @@ fun ScheduleScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    text = if (allSlots.isEmpty()) "🌟 المساهمة في بناء الجدول"
-                                           else if (isStaffWithDirectEdit && isDirectEditMode) "🛠️ تحرير مباشر (معلم / إدارة)"
-                                           else if (isStaffWithDirectEdit) "👁️ وضع العرض (مصرّح بالإدارة)"
+                                    text = if (allSlots.isEmpty() && !canFillEmptyScheduleSlots) "🔄 التحقق من الجدول"
+                                           else if (allSlots.isEmpty()) "🌟 المساهمة في بناء الجدول"
+                                           else if (isStaffWithDirectEdit) "🛠️ تحرير مباشر (معلم / إدارة)"
                                            else "👁️ جدول الشعبة التشاركي",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isStaffWithDirectEdit && isDirectEditMode) CyanAccent else TextPrimary
+                                    color = if (isStaffWithDirectEdit) CyanAccent else TextPrimary
                                 )
                                 GlassPill(
                                     text = "${userRole.badgeIcon} ${userRole.displayNameAr}",
@@ -242,40 +294,30 @@ fun ScheduleScreen(
                                 )
                             }
                             Text(
-                                text = if (allSlots.isEmpty()) "الجدول غير معبأ بعد: يمكن لجميع الطلاب والمعلمين إدخال الحصص الأولى مباشرة!"
-                                       else if (isStaffWithDirectEdit && isDirectEditMode) "وضع التحرير المباشر مفعل: تعديلاتك على أي حصة تُحفظ مباشرة في الخادم دون تصويت."
-                                       else if (isStaffWithDirectEdit) "بصفتك أستاذاً أو مديراً: يمكنك الضغط على زر التحرير لتعديل الحصص مباشرة دون تصويت."
+                                text = if (allSlots.isEmpty() && !canFillEmptyScheduleSlots) "لا يمكن تفعيل إضافة الحصص قبل تأكيد حالة الجدول من الخادم."
+                                       else if (allSlots.isEmpty()) "الجدول غير معبأ بعد: يمكن لجميع الطلاب والمعلمين إدخال الحصص الأولى مباشرة!"
+                                       else if (isStaffWithDirectEdit) "بصفتك معلماً أو مديراً، يمكنك الضغط على أي حصة لتعديلها مباشرة؛ ويُحدّث الجدول من الخادم بعد الحفظ."
                                        else "قاعدة الجدول: الخانة الفارغة تُملأ مباشرة؛ والخانة المشغولة ينقلك الضغط عليها لتقديم مقترح تعديل مع سبب للتصويت 🗳️.",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary,
-                                lineHeight = 15.sp
+                                lineHeight = tanweerLineHeight(15f)
                             )
                         }
 
                         if (isStaffWithDirectEdit && allSlots.isNotEmpty()) {
                             Spacer(modifier = Modifier.width(8.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isDirectEditMode) CyanAccent else GlassSurface)
-                                    .border(1.dp, if (isDirectEditMode) CyanAccent else GlassBorderSubtle, RoundedCornerShape(10.dp))
-                                    .clickable { isDirectEditMode = !isDirectEditMode }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = if (isDirectEditMode) "إنهاء التحرير ✓" else "تفعيل التحرير ✏️",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isDirectEditMode) TextOnAccent else CyanAccent
-                                )
-                            }
+                            GlassPill(
+                                text = "تحرير مباشر مفعل",
+                                color = CyanAccent,
+                                bgColor = CyanGlow
+                            )
                         }
                     }
                 }
             }
 
             // Proposals Banner if any pending proposals exist
-            if (pendingProposalsCount > 0 || scheduleProposals.isNotEmpty()) {
+            if (pendingProposalsCount > 0 || activeScheduleProposals.isNotEmpty()) {
                 item {
                     GlassCard(
                         modifier = Modifier
@@ -292,17 +334,17 @@ fun ScheduleScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🗳️", fontSize = 18.sp)
+                                Text("🗳️", fontSize = tanweerTextSize(18f))
                                 Column {
                                     Text(
                                         text = "مقترحات تعديل الجدول المطروحة للزملاء",
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
                                     Text(
                                         text = "يوجد $pendingProposalsCount مقترح قيد التصويت والمراجعة",
-                                        fontSize = 10.sp,
+                                        fontSize = tanweerTextSize(10f),
                                         color = WarmAmber
                                     )
                                 }
@@ -318,11 +360,11 @@ fun ScheduleScreen(
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = if (isStaffWithDirectEdit && isDirectEditMode)
-                                "وضع التحرير المباشر مفعل: اضغط على أي خانة لتعديل المادة مباشرة وحفظها دون تصويت:"
+                            text = if (isStaffWithDirectEdit)
+                                "اضغط على أي خانة لتعديل الحصة مباشرة وحفظها ومزامنتها دون تصويت:"
                             else
                                 "قاعدة الحصص: الخانات الفارغة تُملأ مباشرة ＋، والحصص القائمة يُطرح عليها مقترح تصويت 💡:",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             color = TextMuted,
                             modifier = Modifier.padding(bottom = 6.dp)
                         )
@@ -332,18 +374,11 @@ fun ScheduleScreen(
                             allSlots = allSlots,
                             onCellClick = { dayIndex, slotOrder ->
                                 val slot = allSlots.find { it.dayOfWeek == dayIndex && it.slotOrder == slotOrder }
-                                val isStaffDirect = (isStaffWithDirectEdit && isDirectEditMode) || allSlots.isEmpty()
-                                if (isStaffDirect) {
-                                    activeEditingCell = Pair(dayIndex, slotOrder)
-                                } else {
-                                    // Points 13 & 14 Policy:
-                                    // Empty slot -> directly filled!
-                                    // Occupied slot -> propose change with reason and voting!
-                                    if (slot == null) {
-                                        activeEditingCell = Pair(dayIndex, slotOrder)
-                                    } else {
-                                        activeProposalCell = Pair(dayIndex, slotOrder)
-                                    }
+                                when {
+                                    isStaffWithDirectEdit -> activeEditingCell = Pair(dayIndex, slotOrder)
+                                    slot == null && canFillEmptyScheduleSlots -> activeEditingCell = Pair(dayIndex, slotOrder)
+                                    slot != null -> activeProposalCell = Pair(dayIndex, slotOrder)
+                                    // Unknown first-snapshot state exposes no edit action.
                                 }
                             }
                         )
@@ -376,7 +411,7 @@ fun ScheduleScreen(
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
                                         text = dayName,
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                         color = if (isSelected) TextOnAccent else TextSecondary,
                                         maxLines = 1,
@@ -384,7 +419,7 @@ fun ScheduleScreen(
                                     )
                                     Text(
                                         text = "$daySlotsCount/6",
-                                        fontSize = 9.sp,
+                                        fontSize = tanweerTextSize(9f),
                                         color = if (isSelected) TextOnAccent.copy(alpha = 0.8f) else TextMuted
                                     )
                                 }
@@ -403,7 +438,7 @@ fun ScheduleScreen(
                     ) {
                         Text(
                             text = "حصص يوم $dayName:",
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             fontWeight = FontWeight.Bold,
                             color = CyanAccent
                         )
@@ -417,7 +452,7 @@ fun ScheduleScreen(
                             ) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = null, tint = WarmAmber, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("نسخ اليوم", fontSize = 11.sp, color = WarmAmber)
+                                Text("نسخ اليوم", fontSize = tanweerTextSize(11f), color = WarmAmber)
                             }
                         }
                     }
@@ -427,26 +462,19 @@ fun ScheduleScreen(
                 items((1..6).toList()) { periodOrder ->
                     val slot = allSlots.find { it.dayOfWeek == selectedDayForList && it.slotOrder == periodOrder }
                     val defaultTime = com.magd.tanweer.util.AcademicTimeEngine.getDefaultPeriodTime(periodOrder)
-                    val isStaffDirect = (isStaffWithDirectEdit && isDirectEditMode) || allSlots.isEmpty()
+                    val isStaffDirect = isStaffWithDirectEdit
 
                     SinglePeriodSlotCard(
                         dayOfWeek = selectedDayForList,
                         periodOrder = periodOrder,
                         slot = slot,
                         defaultTime = defaultTime,
-                        canDirectEdit = isStaffDirect || slot == null,
+                        canDirectEdit = isStaffDirect || (slot == null && canFillEmptyScheduleSlots),
                         onClick = {
-                            if (isStaffDirect) {
-                                activeEditingCell = Pair(selectedDayForList, periodOrder)
-                            } else {
-                                // Points 13 & 14 Policy:
-                                // Empty slot -> directly filled!
-                                // Occupied slot -> propose change with reason and voting!
-                                if (slot == null) {
-                                    activeEditingCell = Pair(selectedDayForList, periodOrder)
-                                } else {
-                                    activeProposalCell = Pair(selectedDayForList, periodOrder)
-                                }
+                            when {
+                                isStaffDirect -> activeEditingCell = Pair(selectedDayForList, periodOrder)
+                                slot == null && canFillEmptyScheduleSlots -> activeEditingCell = Pair(selectedDayForList, periodOrder)
+                                slot != null -> activeProposalCell = Pair(selectedDayForList, periodOrder)
                             }
                         }
                     )
@@ -527,9 +555,10 @@ fun ScheduleScreen(
                         newSubjectId = newSubjectId,
                         reason = reason
                     ) { success, msg ->
-                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                         if (success) {
                             activeProposalCell = null
+                        } else {
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -565,21 +594,14 @@ fun ScheduleScreen(
         // Proposals Review Dialog
         if (isProposalsReviewDialogOpen) {
             ScheduleProposalsReviewDialog(
-                proposals = scheduleProposals,
+                proposals = activeScheduleProposals,
                 canManageSchedule = canManageSchedule,
+                hasSnapshot = hasScheduleProposalsSnapshot,
+                syncState = scopedScheduleProposalsSyncState,
+                onRefresh = { viewModel.loadScheduleProposals(activeGroupId) },
                 onDismiss = { isProposalsReviewDialogOpen = false },
                 onVote = { proposalId, voteType ->
                     viewModel.voteScheduleProposal(proposalId, voteType) { success, msg ->
-                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onApprove = { proposalId ->
-                    viewModel.approveScheduleProposal(proposalId) { success, msg ->
-                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                    }
-                },
-                onReject = { proposalId ->
-                    viewModel.rejectScheduleProposal(proposalId) { success, msg ->
                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -623,7 +645,7 @@ fun CanvasSchoolTimetableBoard(
                         .background(Color(0x2200E5FF)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "اليوم", fontSize = 12.sp, fontWeight = FontWeight.Black, color = CyanAccent)
+                    Text(text = "اليوم", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Black, color = CyanAccent)
                 }
 
                 Spacer(modifier = Modifier.width(6.dp))
@@ -650,8 +672,8 @@ fun CanvasSchoolTimetableBoard(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(text = periodTitle, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text(text = timeHint, fontSize = 9.sp, color = TextMuted)
+                            Text(text = periodTitle, fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(text = timeHint, fontSize = tanweerTextSize(9f), color = TextMuted)
                         }
                     }
 
@@ -663,7 +685,7 @@ fun CanvasSchoolTimetableBoard(
                                 .height(36.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(text = "🥪", fontSize = 9.sp)
+                            Text(text = "🥪", fontSize = tanweerTextSize(9f))
                         }
                     } else if (p < 6) {
                         Spacer(modifier = Modifier.width(6.dp))
@@ -692,9 +714,9 @@ fun CanvasSchoolTimetableBoard(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(text = dayName, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(text = dayName, fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
                             val dayCount = allSlots.count { it.dayOfWeek == dayIndex }
-                            Text(text = "$dayCount/6", fontSize = 9.sp, color = if (dayCount == 6) EmeraldGreen else TextSecondary)
+                            Text(text = "$dayCount/6", fontSize = tanweerTextSize(9f), color = if (dayCount == 6) EmeraldGreen else TextSecondary)
                         }
                     }
 
@@ -803,7 +825,7 @@ fun CanvasTimetableCell(
                 if (slot?.syncStatus == "PENDING" || slot?.syncStatus == "FAILED") {
                     Text(
                         text = if (slot?.syncStatus == "PENDING") "⏳" else "⚠️",
-                        fontSize = 9.sp,
+                        fontSize = tanweerTextSize(9f),
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(2.dp)
@@ -816,10 +838,10 @@ fun CanvasTimetableCell(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text(text = slot!!.subjectIcon, fontSize = 16.sp)
+                    Text(text = slot!!.subjectIcon, fontSize = tanweerTextSize(16f))
                     Text(
                         text = slot.subjectName,
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
                         maxLines = 1,
@@ -828,7 +850,7 @@ fun CanvasTimetableCell(
                     )
                     Text(
                         text = "${slot.startTime ?: ""} - ${slot.endTime ?: ""}",
-                        fontSize = 8.sp,
+                        fontSize = tanweerTextSize(8f),
                         color = TextSecondary,
                         maxLines = 1
                     )
@@ -839,8 +861,8 @@ fun CanvasTimetableCell(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(text = "＋", fontSize = 15.sp, color = CyanAccent.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
-                Text(text = "فارغة", fontSize = 9.sp, color = TextMuted)
+                Text(text = "＋", fontSize = tanweerTextSize(15f), color = CyanAccent.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
+                Text(text = "فارغة", fontSize = tanweerTextSize(9f), color = TextMuted)
             }
         }
     }
@@ -896,7 +918,7 @@ fun SinglePeriodSlotCard(
                         .border(1.dp, if (isOccupied) cellColor else GlassBorderSubtle, RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = slot?.subjectIcon ?: "＋", fontSize = 18.sp)
+                    Text(text = slot?.subjectIcon ?: "＋", fontSize = tanweerTextSize(18f))
                 }
 
                 Spacer(modifier = Modifier.width(10.dp))
@@ -905,19 +927,19 @@ fun SinglePeriodSlotCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = periodTitle,
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextMuted
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "${slot?.startTime ?: defaultTime.first} - ${slot?.endTime ?: defaultTime.second}",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = CyanAccent
                         )
                     }
                     Text(
                         text = slot?.subjectName ?: if (canDirectEdit) "خانة فارغة (اضغط لإضافة مادة)" else "خانة غير مسجلة (اضغط لاقتراح مادة)",
-                        fontSize = 14.sp,
+                        fontSize = tanweerTextSize(14f),
                         fontWeight = if (isOccupied) FontWeight.Bold else FontWeight.Normal,
                         color = if (isOccupied) TextPrimary else TextMuted
                     )
@@ -1005,13 +1027,13 @@ fun SubjectPickerSheet(
                 Column {
                     Text(
                         text = "اختيار مادة 📚",
-                        fontSize = 18.sp,
+                        fontSize = tanweerTextSize(18f),
                         fontWeight = FontWeight.Black,
                         color = CyanAccent
                     )
                     Text(
                         text = "$dayName • $periodTitle ($startTime - $endTime)",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         color = TextSecondary
                     )
                 }
@@ -1046,10 +1068,10 @@ fun SubjectPickerSheet(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(text = subj.icon, fontSize = 18.sp)
+                            Text(text = subj.icon, fontSize = tanweerTextSize(18f))
                             Text(
                                 text = subj.name,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isSelected) color else TextPrimary,
                                 maxLines = 1,
@@ -1135,18 +1157,18 @@ fun ScheduleProposalDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("💡", fontSize = 20.sp)
+                Text("💡", fontSize = tanweerTextSize(20f))
                 Column {
                     Text(
                         text = if (existingSlot == null) "اقتراح ملء خانة فارغة في الجدول" else "اقتراح تعديل حصة",
                         color = CyanAccent,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp
+                        fontSize = tanweerTextSize(17f)
                     )
                     Text(
                         text = "$dayName — الحصة $slotOrder",
                         color = TextSecondary,
-                        fontSize = 12.sp
+                        fontSize = tanweerTextSize(12f)
                     )
                 }
             }
@@ -1163,10 +1185,10 @@ fun ScheduleProposalDialog(
                         .padding(10.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("الحصة الحالية:", fontSize = 11.sp, color = TextMuted)
+                        Text("الحصة الحالية:", fontSize = tanweerTextSize(11f), color = TextMuted)
                         Text(
                             text = existingSlot?.let { "${it.subjectIcon} ${it.subjectName}" } ?: "فارغة (غير محددة)",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
@@ -1174,7 +1196,7 @@ fun ScheduleProposalDialog(
                 }
 
                 // New Subject selection
-                Text("المادة المقترحة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                Text("المادة المقترحة:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     modifier = Modifier
@@ -1195,10 +1217,10 @@ fun ScheduleProposalDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(subj.icon, fontSize = 16.sp)
+                                Text(subj.icon, fontSize = tanweerTextSize(16f))
                                 Text(
                                     subj.name,
-                                    fontSize = 10.sp,
+                                    fontSize = tanweerTextSize(10f),
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) CyanAccent else TextPrimary,
                                     maxLines = 1,
@@ -1210,11 +1232,11 @@ fun ScheduleProposalDialog(
                 }
 
                 // Reason input: لماذا؟
-                Text("لماذا؟ (سبب الاقتراح):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                Text("لماذا؟ (سبب الاقتراح):", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
                 OutlinedTextField(
                     value = reason,
                     onValueChange = { reason = it },
-                    placeholder = { Text(if (existingSlot == null) "مثلاً: إضافة حصة الرياضيات في هذه الخانة..." else "مثلاً: تغيير المدرس أو تبديل الحصة...", fontSize = 11.sp, color = TextMuted) },
+                    placeholder = { Text(if (existingSlot == null) "مثلاً: إضافة حصة الرياضيات في هذه الخانة..." else "مثلاً: تغيير المدرس أو تبديل الحصة...", fontSize = tanweerTextSize(11f), color = TextMuted) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -1228,7 +1250,7 @@ fun ScheduleProposalDialog(
 
                 Text(
                     text = "ℹ️ سيُطرح الاقتراح لتصويت الشعبة ويُعتمد رسمياً بعد الموافقة.",
-                    fontSize = 10.sp,
+                    fontSize = tanweerTextSize(10f),
                     color = TextSecondary
                 )
             }
@@ -1272,14 +1294,14 @@ fun CopyScheduleDayDialog(
                 text = "نسخ حصص $sourceDayName 📋",
                 color = CyanAccent,
                 fontWeight = FontWeight.Bold,
-                fontSize = 17.sp
+                fontSize = tanweerTextSize(17f)
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = "اختر اليوم الهدف لنسخ الحصص إليه:",
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     color = TextSecondary
                 )
                 SCHEDULE_DAYS.filter { it.first != sourceDay }.forEach { (dIdx, dName) ->
@@ -1295,7 +1317,7 @@ fun CopyScheduleDayDialog(
                     ) {
                         Text(
                             text = "نسخ إلى يوم $dName",
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) CyanAccent else TextPrimary
                         )
@@ -1321,33 +1343,48 @@ fun CopyScheduleDayDialog(
 fun ScheduleProposalsReviewDialog(
     proposals: List<com.magd.tanweer.data.model.ScheduleProposalItem>,
     canManageSchedule: Boolean,
+    hasSnapshot: Boolean,
+    syncState: SyncState,
+    onRefresh: () -> Unit,
     onDismiss: () -> Unit,
-    onVote: (proposalId: String, voteType: String) -> Unit,
-    onApprove: (proposalId: String) -> Unit,
-    onReject: (proposalId: String) -> Unit
+    onVote: (proposalId: String, voteType: String) -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("🗳️", fontSize = 22.sp)
+                Text("🗳️", fontSize = tanweerTextSize(22f))
                 Column {
                     Text(
                         text = "مقترحات تعديل جدول الشعبة",
                         color = CyanAccent,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp
+                        fontSize = tanweerTextSize(17f)
                     )
                     Text(
-                        text = "${proposals.size} مقترح متاح للمراجعة والتصويت",
+                        text = when { !hasSnapshot -> stringResource(com.magd.tanweer.R.string.schedule_proposals_verifying); syncState is SyncState.Success -> "${proposals.size} مقترح متاح للمراجعة والتصويت"; else -> stringResource(com.magd.tanweer.R.string.schedule_proposals_last_snapshot, proposals.size) },
                         color = TextSecondary,
-                        fontSize = 11.sp
+                        fontSize = tanweerTextSize(11f)
                     )
                 }
             }
         },
         text = {
-            if (proposals.isEmpty()) {
+            if (hasSnapshot && syncState !is SyncState.Success) {
+                SyncStatusBar(syncState = syncState, onRefresh = onRefresh)
+            }
+            if (!hasSnapshot) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PendingSyncEmptyState(
+                        dataLabel = stringResource(com.magd.tanweer.R.string.schedule_proposals_label),
+                        syncState = syncState
+                    )
+                    SyncStatusBar(syncState = syncState, onRefresh = onRefresh)
+                }
+            } else if (proposals.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1355,17 +1392,17 @@ fun ScheduleProposalsReviewDialog(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("✨", fontSize = 28.sp)
+                        Text("✨", fontSize = tanweerTextSize(28f))
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "لا توجد مقترحات معلقة حالياً",
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
                         Text(
                             text = "الجدول مستقر ومتفق عليه بين جميع أعضاء الشعبة.",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary,
                             textAlign = TextAlign.Center
                         )
@@ -1398,28 +1435,32 @@ fun ScheduleProposalsReviewDialog(
                                 ) {
                                     Text(
                                         text = "$dayName — الحصة ${prop.slotOrder}",
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         fontWeight = FontWeight.Bold,
                                         color = CyanAccent
                                     )
                                     val statusColor = when (prop.status) {
-                                        "ACCEPTED" -> EmeraldGreen
+                                        "ACCEPTED", "APPLIED" -> EmeraldGreen
                                         "REJECTED" -> RubyRed
+                                        "EXPIRED" -> TextMuted
+                                        "CONFLICTED" -> WarmAmber
                                         else -> WarmAmber
                                     }
                                     val statusText = when (prop.status) {
-                                        "ACCEPTED" -> "معتمد ومطبق ✅"
+                                        "ACCEPTED", "APPLIED" -> "مقبول ومطبق ✅"
                                         "REJECTED" -> "مرفوض ❌"
+                                        "EXPIRED" -> "انتهت مهلة التصويت ⌛"
+                                        "CONFLICTED" -> "تعارض مع نسخة الجدول ⚠️"
                                         else -> "قيد التصويت ⏳"
                                     }
                                     GlassPill(text = statusText, color = statusColor, bgColor = statusColor.copy(alpha = 0.15f))
                                 }
 
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("التعديل المقترح:", fontSize = 11.sp, color = TextMuted)
+                                    Text("التعديل المقترح:", fontSize = tanweerTextSize(11f), color = TextMuted)
                                     Text(
                                         text = "${prop.oldSubjectName ?: "فارغة"} ➔ ${prop.newSubjectIcon} ${prop.newSubjectName ?: prop.newSubjectId}",
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
@@ -1427,7 +1468,7 @@ fun ScheduleProposalsReviewDialog(
 
                                 Text(
                                     text = "السبب: ${prop.reason}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextSecondary
                                 )
 
@@ -1438,12 +1479,12 @@ fun ScheduleProposalsReviewDialog(
                                 ) {
                                     Text(
                                         text = "المقترح من: ${prop.proposerName}",
-                                        fontSize = 10.sp,
+                                        fontSize = tanweerTextSize(10f),
                                         color = TextMuted
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text("👍 ${prop.votesFor}", fontSize = 11.sp, color = EmeraldGreen, fontWeight = FontWeight.Bold)
-                                        Text("👎 ${prop.votesAgainst}", fontSize = 11.sp, color = RubyRed, fontWeight = FontWeight.Bold)
+                                        Text("👍 ${prop.votesFor}", fontSize = tanweerTextSize(11f), color = EmeraldGreen, fontWeight = FontWeight.Bold)
+                                        Text("👎 ${prop.votesAgainst}", fontSize = tanweerTextSize(11f), color = RubyRed, fontWeight = FontWeight.Bold)
                                     }
                                 }
 
@@ -1463,7 +1504,7 @@ fun ScheduleProposalsReviewDialog(
                                         ) {
                                             Text(
                                                 text = if (prop.myVote == "FOR") "موافق ✓" else "أوافق 👍",
-                                                fontSize = 10.sp,
+                                                fontSize = tanweerTextSize(10f),
                                                 color = if (prop.myVote == "FOR") EmeraldGreen else TextSecondary
                                             )
                                         }
@@ -1477,32 +1518,19 @@ fun ScheduleProposalsReviewDialog(
                                         ) {
                                             Text(
                                                 text = if (prop.myVote == "AGAINST") "معارض ✕" else "أعارض 👎",
-                                                fontSize = 10.sp,
+                                                fontSize = tanweerTextSize(10f),
                                                 color = if (prop.myVote == "AGAINST") RubyRed else TextSecondary
                                             )
                                         }
 
-                                        // Manager Decision buttons
-                                        if (canManageSchedule) {
-                                            Button(
-                                                onClick = { onApprove(prop.id) },
-                                                modifier = Modifier.weight(1.2f).height(32.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                shape = RoundedCornerShape(8.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
-                                            ) {
-                                                Text("اعتماد ✅", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                                            }
-                                            Button(
-                                                onClick = { onReject(prop.id) },
-                                                modifier = Modifier.weight(0.9f).height(32.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                shape = RoundedCornerShape(8.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = RubyRed)
-                                            ) {
-                                                Text("رفض ❌", fontSize = 10.sp, color = Color.White)
-                                            }
-                                        }
+                                    }
+                                    if (canManageSchedule) {
+                                        Text(
+                                            text = "الحسم يتم عبر التصويت الجماعي الموحد؛ لا يوجد اعتماد إداري منفصل عن أصوات المجموعة.",
+                                            fontSize = tanweerTextSize(9f),
+                                            color = TextMuted,
+                                            lineHeight = tanweerLineHeight(13f)
+                                        )
                                     }
                                 }
                             }

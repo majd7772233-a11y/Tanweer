@@ -56,6 +56,185 @@ function detectImageMimeType(buffer: ArrayBuffer): string | null {
   return null;
 }
 
+/**
+ * Extracts the identifier from this server's private media endpoint.
+ * External HTTP(S) image URLs are not subject to local blob ownership checks.
+ */
+function extractInternalMediaId(value: string): string | null {
+  try {
+    const parsed = new URL(value, 'https://tanweer.invalid');
+    const match = parsed.pathname.match(/^\/api\/v1\/media\/([A-Za-z0-9_-]+)(?:\.[A-Za-z0-9]+)?\/?$/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves source groups using exact media identifiers. SQL LIKE is used only
+ * to shortlist candidate rows; it is never treated as proof of linkage because
+ * an ID may be a substring of another blob's ID or URL.
+ */
+async function getMediaLinkedGroupIds(mediaId: string, db: D1Database): Promise<Set<string>> {
+  const [contentLinks, homeworkLinks, legacyHomeworkLinks] = await Promise.all([
+    db.prepare(
+      `SELECT c.group_id, cm.id, cm.url, cm.object_key
+       FROM content_media cm
+       JOIN contents c ON cm.content_id = c.id
+       WHERE cm.url LIKE ? OR cm.id = ? OR cm.object_key = ?`
+    ).bind('%' + mediaId + '%', mediaId, mediaId).all<{
+      group_id: string;
+      id: string;
+      url: string | null;
+      object_key: string | null;
+    }>(),
+    db.prepare(
+      `SELECT h.group_id, hm.media_id, hm.url
+       FROM homework_media hm
+       JOIN homeworks h ON hm.homework_id = h.id
+       WHERE hm.media_id = ? OR hm.url LIKE ?`
+    ).bind(mediaId, '%' + mediaId + '%').all<{
+      group_id: string;
+      media_id: string;
+      url: string | null;
+    }>(),
+    db.prepare(
+      `SELECT group_id, media_urls
+       FROM homeworks
+       WHERE media_urls LIKE ?`
+    ).bind('%' + mediaId + '%').all<{
+      group_id: string;
+      media_urls: string | null;
+    }>(),
+  ]);
+
+  const linkedGroupIds = new Set<string>();
+
+  for (const row of contentLinks.results || []) {
+    const exactMatch =
+      row.id === mediaId ||
+      row.object_key === mediaId ||
+      (!!row.url && extractInternalMediaId(row.url) === mediaId);
+    if (exactMatch && row.group_id) linkedGroupIds.add(row.group_id);
+  }
+
+  for (const row of homeworkLinks.results || []) {
+    const exactMatch =
+      row.media_id === mediaId ||
+      (!!row.url && extractInternalMediaId(row.url) === mediaId);
+    if (exactMatch && row.group_id) linkedGroupIds.add(row.group_id);
+  }
+
+  for (const row of legacyHomeworkLinks.results || []) {
+    if (!row.group_id || !row.media_urls) continue;
+    let references: unknown;
+    try {
+      references = JSON.parse(row.media_urls);
+    } catch {
+      references = [row.media_urls];
+    }
+
+    const values = Array.isArray(references) ? references : [references];
+    const exactMatch = values.some(value =>
+      typeof value === 'string' && extractInternalMediaId(value) === mediaId
+    );
+    if (exactMatch) linkedGroupIds.add(row.group_id);
+  }
+
+  return linkedGroupIds;
+}
+
+/**
+ * Prevents a user from linking another group's private media blob into a group
+ * they can access. The uploader may reuse their own upload; other users must
+ * already have active access to at least one group where the blob is linked.
+ */
+export async function validateMediaAttachmentAccess(
+  user: UserContext,
+  urls: string[],
+  db: D1Database
+): Promise<Response | null> {
+  const uniqueUrls = Array.from(new Set(urls));
+  for (const value of uniqueUrls) {
+    if (typeof value !== 'string' || !value.trim()) {
+      return errorResponse('INVALID_MEDIA_URL', 'يوجد رابط صورة فارغ أو غير صالح');
+    }
+
+    const mediaId = extractInternalMediaId(value);
+    if (!mediaId) {
+      if (value.includes('/api/v1/media/')) {
+        return errorResponse('INVALID_MEDIA_URL', 'رابط صورة تنوير الداخلي غير صالح');
+      }
+
+      try {
+        const external = new URL(value);
+        if (external.protocol !== 'https:' && external.protocol !== 'http:') {
+          return errorResponse('INVALID_MEDIA_URL', 'يجب أن يكون رابط الصورة من نوع HTTP أو HTTPS');
+        }
+      } catch {
+        return errorResponse('INVALID_MEDIA_URL', 'رابط الصورة غير صالح');
+      }
+      continue;
+    }
+
+    let blob: { id: string; uploaded_by: string | null } | null;
+    try {
+      blob = await db.prepare(
+        `SELECT id, uploaded_by FROM media_blobs WHERE id = ? LIMIT 1`
+      ).bind(mediaId).first<{ id: string; uploaded_by: string | null }>();
+    } catch (error) {
+      console.error('Failed to validate media blob ownership:', error);
+      return errorResponse('MEDIA_VALIDATION_UNAVAILABLE', 'تعذر التحقق من صلاحية الصورة حالياً. حاول مجدداً.', 503);
+    }
+
+    if (!blob) {
+      return errorResponse('MEDIA_NOT_FOUND', 'الصورة المرتبطة غير موجودة على الخادم', 404);
+    }
+
+    if (blob.uploaded_by === user.userId) {
+      continue;
+    }
+
+    try {
+      const linkedGroupIds = await getMediaLinkedGroupIds(mediaId, db);
+
+      if (linkedGroupIds.size === 0) {
+        return errorResponse(
+          'FORBIDDEN_UNLINKED_MEDIA',
+          'لا يمكنك إعادة ربط صورة لا تملكها ولم تُنشر في مجموعة تملك عضوية فعالة فيها',
+          403
+        );
+      }
+
+      let sourceAccess = false;
+      for (const groupId of linkedGroupIds) {
+        const membership = await db.prepare(
+          `SELECT 1 FROM group_members
+           WHERE group_id = ? AND user_id = ? AND status = 'ACTIVE'
+           LIMIT 1`
+        ).bind(groupId, user.userId).first();
+        if (membership) {
+          sourceAccess = true;
+          break;
+        }
+      }
+
+      if (!sourceAccess) {
+        return errorResponse(
+          'FORBIDDEN_MEDIA_SOURCE',
+          'لا يمكنك إعادة استخدام صورة من مجموعة لا تملك عضوية فعالة فيها',
+          403
+        );
+      }
+    } catch (error) {
+      console.error('Failed to validate media source-group access:', error);
+      return errorResponse('MEDIA_VALIDATION_UNAVAILABLE', 'تعذر التحقق من صلاحية الصورة حالياً. حاول مجدداً.', 503);
+    }
+  }
+
+  return null;
+}
+
 export async function handleUploadMedia(user: UserContext, request: Request, env: Env): Promise<Response> {
   const contentType = request.headers.get('content-type') || '';
   let mediaBuffer: ArrayBuffer | null = null;
@@ -113,22 +292,40 @@ export async function handleUploadMedia(user: UserContext, request: Request, env
   const checksum = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
   // Check if identical media already exists to deduplicate
-  const existing = await env.DB.prepare(
-    `SELECT id, mime_type, file_size FROM media_blobs WHERE checksum = ? LIMIT 1`
-  ).bind(checksum).first<{ id: string; mime_type: string; file_size: number }>();
+  let existing = await env.DB.prepare(
+    `SELECT id, mime_type, file_size, uploaded_by
+     FROM media_blobs
+     WHERE checksum = ? AND (uploaded_by = ? OR uploaded_by IS NULL)
+     LIMIT 1`
+  ).bind(checksum, user.userId).first<{
+    id: string;
+    mime_type: string;
+    file_size: number;
+    uploaded_by: string | null;
+  }>();
+
+  // Claim an unowned legacy blob only when this upload proves the caller has
+  // the actual image bytes. If another uploader wins the race, store a private copy.
+  if (existing && !existing.uploaded_by) {
+    const claim = await env.DB.prepare(
+      `UPDATE media_blobs SET uploaded_by = ? WHERE id = ? AND uploaded_by IS NULL`
+    ).bind(user.userId, existing.id).run();
+    if (claim.meta?.changes !== 1) existing = null;
+  }
 
   const targetId = existing ? existing.id : mediaId;
 
   if (!existing) {
     await env.DB.prepare(
-      `INSERT INTO media_blobs (id, mime_type, data, file_size, checksum, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO media_blobs (id, mime_type, data, file_size, checksum, uploaded_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       mediaId,
       mimeType,
       mediaBuffer,
       fileSize,
       checksum,
+      user.userId,
       now
     ).run();
   }
@@ -184,41 +381,16 @@ export async function handleGetMedia(mediaId: string, request: Request, env: Env
   const isPrivileged = userRole === Role.ADMIN || userRole === Role.SYSTEM_OWNER;
 
   if (!isPrivileged) {
-    // Check if this media is linked to a lesson/content in content_media
-    const contentRows = await env.DB.prepare(
-      `SELECT c.group_id
-       FROM content_media cm
-       JOIN contents c ON cm.content_id = c.id
-       WHERE cm.url LIKE ? OR cm.id = ? OR cm.object_key = ?`
-    ).bind(`%${cleanId}%`, cleanId, cleanId).all<{ group_id: string }>();
-
-    // Check if this media is linked to homework in homework_media or homeworks
-    let hwMediaRows: any[] = [];
+    let linkedGroupIds: Set<string>;
     try {
-      const res = await env.DB.prepare(
-        `SELECT h.group_id
-         FROM homework_media hm
-         JOIN homeworks h ON hm.homework_id = h.id
-         WHERE hm.media_id = ? OR hm.url LIKE ?`
-      ).bind(cleanId, `%${cleanId}%`).all<{ group_id: string }>();
-      hwMediaRows = res.results || [];
-    } catch {}
-
-    const homeworkRows = await env.DB.prepare(
-      `SELECT group_id
-       FROM homeworks
-       WHERE media_urls LIKE ?`
-    ).bind(`%${cleanId}%`).all<{ group_id: string }>();
-
-    const linkedGroupIds = new Set<string>();
-    for (const r of contentRows.results || []) {
-      if (r.group_id) linkedGroupIds.add(r.group_id);
-    }
-    for (const r of hwMediaRows) {
-      if (r.group_id) linkedGroupIds.add(r.group_id);
-    }
-    for (const r of homeworkRows.results || []) {
-      if (r.group_id) linkedGroupIds.add(r.group_id);
+      linkedGroupIds = await getMediaLinkedGroupIds(cleanId, env.DB);
+    } catch (error) {
+      console.error('Failed to verify exact media linkage:', error);
+      return errorResponse(
+        'MEDIA_ACCESS_CHECK_UNAVAILABLE',
+        'تعذر التحقق من صلاحية الوصول إلى الصورة حالياً. حاول مجدداً.',
+        503
+      );
     }
 
     // Reject unlinked media: media must be connected to an authenticated classroom context
@@ -257,7 +429,8 @@ export async function handleGetMedia(mediaId: string, request: Request, env: Env
     status: 200,
     headers: {
       'Content-Type': row.mime_type || 'image/jpeg',
-      'Cache-Control': 'private, max-age=86400',
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
       'Access-Control-Allow-Origin': '*',
     },
   });

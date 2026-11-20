@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,6 +59,7 @@ import com.magd.tanweer.data.pdf.PdfDownloadState
 import com.magd.tanweer.data.repository.TanweerRepository
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.FocusNoisePlayer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -104,12 +106,19 @@ fun PdfReaderScreen(
     val pdfManager = remember { PdfBookManager(context) }
     val db = remember { TanweerDatabase.getInstance(context) }
     val repository = remember { TanweerRepository(db) }
+    val focusNoisePlayer = remember { FocusNoisePlayer() }
+
+    DisposableEffect(focusNoisePlayer) {
+        onDispose { focusNoisePlayer.stop() }
+    }
 
     // Real Audio Reader State (TTS Assistant)
     var isAudioPlaying by remember { mutableStateOf(false) }
     var audioSpeed by remember { mutableFloatStateOf(1.0f) }
     var audioReadMode by remember { mutableStateOf(AudioReadMode.BOOK_TEXT) }
     var isExtractingAudioText by remember { mutableStateOf(false) }
+    var activeSpeechRequestId by remember { mutableStateOf<String?>(null) }
+    var activeSpeechFinalUtteranceId by remember { mutableStateOf<String?>(null) }
 
     // Study Stopwatch & Real Reading Time (Point 47.5)
     var sessionReadingSeconds by remember { mutableLongStateOf(0L) }
@@ -121,20 +130,21 @@ fun PdfReaderScreen(
     var pomodoroSecondsLeft by remember { mutableIntStateOf(25 * 60) }
     var isPomodoroBreak by remember { mutableStateOf(false) }
 
-    // Fullscreen Immersive Sticky Mode (Point 47.7: Hide system navigation bars)
+    // Keep system bars visible and reserve their insets for reader content.
     val activity = context as? Activity
-    DisposableEffect(Unit) {
+    DisposableEffect(activity) {
         val window = activity?.window
         if (window != null) {
             val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
-            insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+            insetsController.systemBarsBehavior =
+                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+            insetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
         }
         onDispose {
-            val win = activity?.window
-            if (win != null) {
-                val insetsController = androidx.core.view.WindowCompat.getInsetsController(win, win.decorView)
-                insetsController.show(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+            val window = activity?.window
+            if (window != null) {
+                androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+                    .show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             }
         }
     }
@@ -148,22 +158,65 @@ fun PdfReaderScreen(
         try {
             tts = TextToSpeech(context) { status ->
                 if (status == TextToSpeech.SUCCESS) {
-                    val result = tts?.setLanguage(Locale("ar"))
-                    if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        tts?.setLanguage(Locale.getDefault())
+                    val arabicResult = tts?.setLanguage(Locale("ar"))
+                        ?: TextToSpeech.LANG_NOT_SUPPORTED
+                    val languageReady = if (
+                        arabicResult == TextToSpeech.LANG_MISSING_DATA ||
+                        arabicResult == TextToSpeech.LANG_NOT_SUPPORTED
+                    ) {
+                        val fallbackResult = tts?.setLanguage(Locale.getDefault())
+                            ?: TextToSpeech.LANG_NOT_SUPPORTED
+                        fallbackResult >= TextToSpeech.LANG_AVAILABLE
+                    } else {
+                        arabicResult >= TextToSpeech.LANG_AVAILABLE
                     }
                     tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                         override fun onStart(utteranceId: String?) {
-                            coroutineScope.launch { isAudioPlaying = true }
+                            coroutineScope.launch {
+                                val requestId = activeSpeechRequestId
+                                if (requestId != null && (utteranceId == requestId || utteranceId?.startsWith("${requestId}:") == true)) {
+                                    isAudioPlaying = true
+                                }
+                            }
                         }
+
                         override fun onDone(utteranceId: String?) {
-                            coroutineScope.launch { isAudioPlaying = false }
+                            coroutineScope.launch {
+                                if (utteranceId != null && utteranceId == activeSpeechFinalUtteranceId) {
+                                    isAudioPlaying = false
+                                    activeSpeechRequestId = null
+                                    activeSpeechFinalUtteranceId = null
+                                }
+                            }
                         }
+
                         override fun onError(utteranceId: String?) {
-                            coroutineScope.launch { isAudioPlaying = false }
+                            coroutineScope.launch {
+                                val requestId = activeSpeechRequestId
+                                if (requestId != null && (utteranceId == requestId || utteranceId?.startsWith("${requestId}:") == true)) {
+                                    tts?.stop()
+                                    isAudioPlaying = false
+                                    activeSpeechRequestId = null
+                                    activeSpeechFinalUtteranceId = null
+                                }
+                            }
+                        }
+
+                        override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                            coroutineScope.launch {
+                                val requestId = activeSpeechRequestId
+                                if (requestId != null && (utteranceId == requestId || utteranceId?.startsWith("${requestId}:") == true)) {
+                                    isAudioPlaying = false
+                                    activeSpeechRequestId = null
+                                    activeSpeechFinalUtteranceId = null
+                                }
+                            }
                         }
                     })
-                    isTtsReady = true
+                    isTtsReady = languageReady
+                    if (!languageReady) {
+                        Toast.makeText(context, "لا تتوفر لغة قراءة مدعومة في محرك تحويل النص إلى كلام على هذا الجهاز.", Toast.LENGTH_LONG).show()
+                    }
                 }
             }
             ttsEngine = tts
@@ -318,52 +371,128 @@ fun PdfReaderScreen(
         }
     }
 
+    fun stopAudioPlayback() {
+        activeSpeechRequestId = null
+        activeSpeechFinalUtteranceId = null
+        isExtractingAudioText = false
+        try {
+            ttsEngine?.stop()
+        } catch (_: Exception) {}
+        isAudioPlaying = false
+    }
+
+    // Queue one utterance and track the full request rather than each individual chunk.
+    fun enqueueSpeech(
+        text: String,
+        queueMode: Int,
+        utteranceId: String,
+        requestId: String = utteranceId,
+        isFinalUtterance: Boolean = true
+    ): Boolean {
+        val engine = ttsEngine
+        if (engine == null || text.isBlank()) return false
+
+        if (queueMode == TextToSpeech.QUEUE_FLUSH) {
+            activeSpeechRequestId = requestId
+            activeSpeechFinalUtteranceId = null
+        }
+        if (isFinalUtterance) {
+            activeSpeechFinalUtteranceId = utteranceId
+        }
+
+        val result = try {
+            engine.setSpeechRate(audioSpeed)
+            engine.speak(text, queueMode, null, utteranceId)
+        } catch (error: Exception) {
+            android.util.Log.e("PdfReaderScreen", "TTS request failed", error)
+            TextToSpeech.ERROR
+        }
+
+        if (result != TextToSpeech.SUCCESS) {
+            if (activeSpeechRequestId == requestId) {
+                activeSpeechRequestId = null
+                activeSpeechFinalUtteranceId = null
+            }
+            isAudioPlaying = false
+            Toast.makeText(context, "تعذر على محرك الصوت بدء القراءة. تحقق من تثبيت الصوت العربي في إعدادات تحويل النص إلى كلام.", Toast.LENGTH_LONG).show()
+            return false
+        }
+
+        isAudioPlaying = true
+        return true
+    }
+
     // TTS Control Functions (المساعد الصوتي لنص الكتاب الفعلي وملاحظات ومصطلحات الصفحة)
     fun speakCurrentPage(customText: String? = null) {
         if (!isTtsReady || ttsEngine == null) {
-            Toast.makeText(context, "جاري تهيئة المساعد الصوتي...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                if (ttsEngine == null) "محرك القراءة الصوتية ما زال قيد التهيئة." else "لا توجد لغة صوتية مدعومة على هذا الجهاز.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
         }
         if (customText != null) {
-            ttsEngine?.setSpeechRate(audioSpeed)
-            ttsEngine?.speak(customText, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
-            isAudioPlaying = true
+            val requestId = "reader-${java.util.UUID.randomUUID()}"
+            if (!enqueueSpeech(customText, TextToSpeech.QUEUE_FLUSH, "$requestId:0", requestId)) return
             com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
             return
         }
 
         if (audioReadMode == AudioReadMode.BOOK_TEXT) {
+            // Stop the previous page immediately; extraction for this page may take time.
+            stopAudioPlayback()
+            val requestedPageIndex = currentPageIndex
             coroutineScope.launch {
                 isExtractingAudioText = true
                 val bookFile = pdfManager.getCachedFile(book.id)
-                val pageText = repository.getOrExtractPageText(book.id, currentPageIndex, bookFile)
-                isExtractingAudioText = false
+                val pageText = try {
+                    repository.getOrExtractPageText(context.applicationContext, book.id, requestedPageIndex, bookFile)
+                } finally {
+                    isExtractingAudioText = false
+                }
+
+                // A slow PDF extraction must never start reading a page the user has left.
+                if (requestedPageIndex != currentPageIndex) return@launch
+                val requestId = "reader-${java.util.UUID.randomUUID()}"
 
                 if (pageText.isBlank()) {
-                    Toast.makeText(context, "هذه الصفحة لا تحتوي على نص رقمي قابل للاستخراج. يجري قراءة ملخص وملاحظات الصفحة.", Toast.LENGTH_SHORT).show()
-                    val pageNotes = notesList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { it.noteText }
-                    val pageVocab = vocabList.filter { it.pageIndex == currentPageIndex }.joinToString(". ") { "${it.word}: ${it.meaning}" }
-                    val intro = "كتاب ${book.title}، الصفحة ${currentPageIndex + 1}. هذه الصفحة مصورة أو لا تحتوي على طبقة نصية رقمية. "
-                    val notesRead = if (pageNotes.isNotBlank() || pageVocab.isNotBlank()) {
-                        intro + listOf(pageNotes, pageVocab).filter { it.isNotBlank() }.joinToString(". ")
-                    } else {
-                        intro + "لم تقم بتسجيل ملاحظات دراسية على هذه الصفحة."
+                    val pageNotes = notesList.filter { it.pageIndex == requestedPageIndex }.joinToString(". ") { it.noteText }
+                    val pageVocab = vocabList.filter { it.pageIndex == requestedPageIndex }.joinToString(". ") { "${it.word}: ${it.meaning}" }
+                    if (pageNotes.isBlank() && pageVocab.isBlank()) {
+                        Toast.makeText(
+                            context,
+                            "لم يعثر القارئ على طبقة نصية في هذه الصفحة. قد تكون الصفحة صورة ممسوحة ضوئياً؛ لا يتوفر OCR في القارئ حالياً.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@launch
                     }
-                    ttsEngine?.setSpeechRate(audioSpeed)
-                    ttsEngine?.speak(notesRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
-                    isAudioPlaying = true
+                    Toast.makeText(context, "لا يوجد نص رقمي قابل للاستخراج؛ ستتم قراءة ملاحظاتك ومفرداتك فقط.", Toast.LENGTH_LONG).show()
+                    val notesRead = listOf(pageNotes, pageVocab)
+                        .filter { it.isNotBlank() }
+                        .joinToString(". ")
+                    enqueueSpeech(notesRead, TextToSpeech.QUEUE_FLUSH, "$requestId:0", requestId)
                 } else {
-                    ttsEngine?.setSpeechRate(audioSpeed)
-                    val maxLen = 3000
-                    if (pageText.length <= maxLen) {
-                        ttsEngine?.speak(pageText, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
-                    } else {
-                        val chunks = pageText.chunked(maxLen)
-                        chunks.forEachIndexed { idx, chunk ->
-                            val queueMode = if (idx == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                            ttsEngine?.speak(chunk, queueMode, null, "page_${currentPageIndex}_$idx")
+                    val chunks = pageText.chunked(3000)
+                    var acceptedAllChunks = true
+                    for ((idx, chunk) in chunks.withIndex()) {
+                        val queueMode = if (idx == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                        val utteranceId = "$requestId:$idx"
+                        if (!enqueueSpeech(
+                                text = chunk,
+                                queueMode = queueMode,
+                                utteranceId = utteranceId,
+                                requestId = requestId,
+                                isFinalUtterance = idx == chunks.lastIndex
+                            )
+                        ) {
+                            acceptedAllChunks = false
+                            break
                         }
                     }
-                    isAudioPlaying = true
+                    if (!acceptedAllChunks) {
+                        stopAudioPlayback()
+                    }
                     com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
                 }
             }
@@ -383,18 +512,10 @@ fun PdfReaderScreen(
                 parts.add("لم تقم بإضافة ملاحظات أو مصطلحات لهذه الصفحة بعد.")
             }
             val textToRead = parts.joinToString(". ")
-            ttsEngine?.setSpeechRate(audioSpeed)
-            ttsEngine?.speak(textToRead, TextToSpeech.QUEUE_FLUSH, null, "page_${currentPageIndex}")
-            isAudioPlaying = true
+            val requestId = "reader-${java.util.UUID.randomUUID()}"
+            enqueueSpeech(textToRead, TextToSpeech.QUEUE_FLUSH, "$requestId:0", requestId)
             com.magd.tanweer.util.TanweerHapticManager.performHaptic(context, type = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         }
-    }
-
-    fun stopAudioPlayback() {
-        try {
-            ttsEngine?.stop()
-        } catch (_: Exception) {}
-        isAudioPlaying = false
     }
 
     // Save Reading State on exit or state changes
@@ -665,6 +786,7 @@ fun PdfReaderScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(readingTheme.backgroundColor)
+            .systemBarsPadding()
     ) {
         val isTablet = maxWidth > 600.dp
 
@@ -709,7 +831,7 @@ fun PdfReaderScreen(
 
                         Text(
                             text = "جاري تحميل وتجهيز الكتاب للمطالعة بدون إنترنت...",
-                            fontSize = 15.sp,
+                            fontSize = tanweerTextSize(15f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
                             textAlign = TextAlign.Center
@@ -717,7 +839,7 @@ fun PdfReaderScreen(
 
                         Text(
                             text = "$downloadedMb MB من أصل $totalMb MB (${(progress * 100).toInt()}%)",
-                            fontSize = 13.sp,
+                            fontSize = tanweerTextSize(13f),
                             color = CyanAccent,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(top = 6.dp)
@@ -752,17 +874,17 @@ fun PdfReaderScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.padding(16.dp)
                         ) {
-                            Text(text = "⚠️", fontSize = 42.sp)
+                            Text(text = "⚠️", fontSize = tanweerTextSize(42f))
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = "تعذر فتح ملف الكتاب",
-                                fontSize = 18.sp,
+                                fontSize = tanweerTextSize(18f),
                                 fontWeight = FontWeight.Bold,
                                 color = RubyRed
                             )
                             Text(
                                 text = state.message,
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.padding(vertical = 8.dp)
@@ -805,11 +927,14 @@ fun PdfReaderScreen(
                     currentPenColor = currentPenColor,
                     currentPenWidth = currentPenWidth,
                     isHighlighter = isHighlighter,
-                    focusRulerY = if (isFocusRulerActive) focusRulerY ?: 400f else null,
+                    focusRulerY = if (isFocusRulerActive) focusRulerY ?: -1f else null,
                     isWatermarkEnabled = isWatermarkEnabled,
                     onZoomChange = { scale, pan ->
                         zoomScale = scale
                         panOffset = pan
+                    },
+                    onFocusRulerYChange = { rulerY ->
+                        focusRulerY = rulerY
                     },
                     onNextPage = {
                         if (currentPageIndex < totalPages - 1) {
@@ -834,6 +959,43 @@ fun PdfReaderScreen(
                         }
                     }
                 )
+
+                if (isFocusRulerActive) {
+                    val density = LocalDensity.current
+                    val rulerCenterPx = focusRulerY ?: with(density) { maxHeight.toPx() / 2f }
+                    val rulerTop = with(density) { (rulerCenterPx - 32f).coerceAtLeast(0f).toDp() }
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(y = rulerTop)
+                            .padding(end = 12.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xE6121D2D))
+                            .border(1.dp, WarmAmber.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
+                            .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "اسحب الشريط لتحريك المسطرة",
+                            fontSize = tanweerTextSize(10f),
+                            color = TextPrimary
+                        )
+                        IconButton(
+                            onClick = {
+                                isFocusRulerActive = false
+                                focusRulerY = null
+                            },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "إخفاء مسطرة التركيز",
+                                tint = WarmAmber,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
 
                 // Blue Light Filter Overlay (Warmth Tint)
                 if (blueLightFilterWarmth > 0f) {
@@ -913,7 +1075,7 @@ fun PdfReaderScreen(
                             Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
                             Text(
                                 text = if (isExtractingAudioText) "جاري استخراج النص..." else if (audioReadMode == AudioReadMode.BOOK_TEXT) "📖 نص الكتاب (${currentPageIndex + 1})" else "📝 ملاحظاتي (${currentPageIndex + 1})",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold
                             )
@@ -932,7 +1094,7 @@ fun PdfReaderScreen(
                             ) {
                                 Text(
                                     text = if (audioReadMode == AudioReadMode.BOOK_TEXT) "نص الكتاب" else "ملاحظاتي",
-                                    fontSize = 10.sp,
+                                    fontSize = tanweerTextSize(10f),
                                     fontWeight = FontWeight.Bold,
                                     color = if (audioReadMode == AudioReadMode.BOOK_TEXT) CyanAccent else WarmAmber
                                 )
@@ -951,7 +1113,7 @@ fun PdfReaderScreen(
                                 },
                                 modifier = Modifier.size(28.dp)
                             ) {
-                                Text(text = "${audioSpeed}x", fontSize = 11.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                                Text(text = "${audioSpeed}x", fontSize = tanweerTextSize(11f), color = WarmAmber, fontWeight = FontWeight.Bold)
                             }
                             IconButton(
                                 onClick = { stopAudioPlayback() },
@@ -983,8 +1145,8 @@ fun PdfReaderScreen(
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(text = if (isPomodoroBreak) "☕ استراحة" else "🍅 تركيز", fontSize = 11.sp, color = TextOnAccent, fontWeight = FontWeight.Bold)
-                            Text(text = timeStr, fontSize = 11.sp, color = TextOnAccent, fontWeight = FontWeight.Black)
+                            Text(text = if (isPomodoroBreak) "☕ استراحة" else "🍅 تركيز", fontSize = tanweerTextSize(11f), color = TextOnAccent, fontWeight = FontWeight.Bold)
+                            Text(text = timeStr, fontSize = tanweerTextSize(11f), color = TextOnAccent, fontWeight = FontWeight.Black)
                         }
                     }
                 }
@@ -1213,12 +1375,19 @@ fun PdfReaderScreen(
                                 isAutoScrollActive = !isAutoScrollActive
                             },
                             onToggleWhiteNoise = {
-                                isWhiteNoiseActive = !isWhiteNoiseActive
-                                Toast.makeText(
-                                    context,
-                                    if (isWhiteNoiseActive) "🎧 تم تفعيل بيئة التركيز الهادئة (صوت أمواج ومطر)" else "🔇 تم إيقاف أصوات التركيز",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                if (isWhiteNoiseActive) {
+                                    focusNoisePlayer.stop()
+                                    isWhiteNoiseActive = false
+                                    Toast.makeText(context, "تم إيقاف صوت التركيز.", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val started = focusNoisePlayer.start()
+                                    if (started) {
+                                        isWhiteNoiseActive = true
+                                        Toast.makeText(context, "تم تشغيل صوت التركيز الهادئ. استخدم زر الإيقاف عند الانتهاء.", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "تعذر تشغيل الصوت على هذا الجهاز.", Toast.LENGTH_LONG).show()
+                                    }
+                                }
                             },
                             onToggleEyeBreak = {
                                 isEyeBreakActive = !isEyeBreakActive
@@ -1416,7 +1585,7 @@ fun TopReaderBar(
                 ) {
                     Text(
                         text = book.title,
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
                         maxLines = 1,
@@ -1428,14 +1597,14 @@ fun TopReaderBar(
                     ) {
                         Text(
                             text = "صفحة $currentPage من $totalPages",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = CyanAccent,
                             fontWeight = FontWeight.Medium
                         )
-                        Text(text = "•", fontSize = 11.sp, color = TextMuted)
+                        Text(text = "•", fontSize = tanweerTextSize(11f), color = TextMuted)
                         Text(
                             text = "⏱️ $timeFormatted",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = WarmAmber
                         )
                     }
@@ -1457,7 +1626,7 @@ fun TopReaderBar(
                         .clip(CircleShape)
                         .background(WarmAmber.copy(alpha = 0.15f))
                 ) {
-                    Text(text = "⚡", fontSize = 15.sp)
+                    Text(text = "⚡", fontSize = tanweerTextSize(15f))
                 }
 
                 // Drawing Pen Toggle
@@ -1620,7 +1789,7 @@ fun BottomReaderBar(
                 ) {
                     Text(
                         text = "📖 $currentPage / $totalPages",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent
                     )
@@ -1638,7 +1807,7 @@ fun BottomReaderBar(
                                 .clickable { onResetZoom() }
                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                         ) {
-                            Text(text = "🔍 ${(zoomScale * 100).toInt()}% (إعادة)", fontSize = 11.sp, color = CyanAccent, fontWeight = FontWeight.Bold)
+                            Text(text = "🔍 ${(zoomScale * 100).toInt()}% (إعادة)", fontSize = tanweerTextSize(11f), color = CyanAccent, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -1729,32 +1898,31 @@ fun StudyToolsHubSheet(
 ) {
     val scrollState = rememberScrollState()
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 680.dp)
-            .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Sheet Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = minOf(maxHeight * 0.88f, 720.dp))
+                .verticalScroll(scrollState)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "⚡ مركز أدوات المذاكرة الاحترافية", fontSize = 17.sp, fontWeight = FontWeight.Black, color = CyanAccent)
-                Spacer(modifier = Modifier.width(8.dp))
-                GlassPill(text = "20 أداة متصلة", color = WarmAmber, bgColor = AmberGlow)
+            // Compact header that remains readable on narrow phones.
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = "أدوات المذاكرة",
+                    fontSize = tanweerTextSize(14f),
+                    fontWeight = FontWeight.Bold,
+                    color = CyanAccent
+                )
+                Text(
+                    text = "الصفحة ${currentPageIndex + 1} من $totalPages • اختر ما تحتاجه الآن",
+                    fontSize = tanweerTextSize(11f),
+                    color = TextSecondary,
+                    fontWeight = FontWeight.Medium
+                )
             }
-            Text(
-                text = "صفحة ${currentPageIndex + 1} من $totalPages",
-                fontSize = 11.sp,
-                color = TextSecondary,
-                fontWeight = FontWeight.Medium
-            )
-        }
 
         // TOOL 1 & 2: Daily Reading Goal & Live Velocity Calculator
         GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = MidnightSurface) {
@@ -1765,12 +1933,12 @@ fun StudyToolsHubSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(text = "🎯 هدف القراءة اليومي وسرعة التحصيل", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text(text = "أنجزت $pagesRead من أصل $targetGoal صفحة اليوم", fontSize = 11.sp, color = TextSecondary)
+                        Text(text = "🎯 هدف القراءة اليومي وسرعة التحصيل", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(text = "أنجزت $pagesRead من أصل $targetGoal صفحة اليوم", fontSize = tanweerTextSize(11f), color = TextSecondary)
                     }
                     Text(
                         text = "${((pagesRead.toFloat() / targetGoal.coerceAtLeast(1)) * 100).toInt()}%",
-                        fontSize = 18.sp,
+                        fontSize = tanweerTextSize(18f),
                         fontWeight = FontWeight.Black,
                         color = EmeraldGreen
                     )
@@ -1788,13 +1956,13 @@ fun StudyToolsHubSheet(
                 ) {
                     Text(
                         text = "⚡ سرعة القراءة: $velocityPerHour ص/ساعة",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         color = CyanAccent,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
                         text = "⏱️ جلسة اليوم: ${sessionSeconds / 60} دقيقة (إجمالي: ${totalStudySeconds / 3600}س)",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         color = WarmAmber,
                         fontWeight = FontWeight.Medium
                     )
@@ -1803,7 +1971,7 @@ fun StudyToolsHubSheet(
         }
 
         // SECTION 1: Focus & Flow (Tools 3, 4, 5, 6)
-        Text(text = "⏳ التركيز والانسيابية الذهنية", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+        Text(text = "⏳ التركيز والانسيابية الذهنية", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = WarmAmber)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             // TOOL 3: Pomodoro Timer
             GlassCard(
@@ -1817,11 +1985,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "🍅", fontSize = 22.sp)
+                    Text(text = "🍅", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isPomodoroActive) "بومودورو: ${String.format(Locale.US, "%02d:%02d", pomodoroSecondsLeft / 60, pomodoroSecondsLeft % 60)}" else "مؤقت بومودورو (25د)",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Bold,
                         color = if (isPomodoroActive) RubyRed else TextPrimary,
                         textAlign = TextAlign.Center
@@ -1841,11 +2009,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "🎙️", fontSize = 22.sp)
+                    Text(text = "🎙️", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isAudioPlaying) "إيقاف القارئ الصوتي ⏹️" else "قارئ نص الكتاب والملاحظات 🎙️",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Bold,
                         color = if (isAudioPlaying) CyanAccent else TextPrimary,
                         textAlign = TextAlign.Center
@@ -1867,11 +2035,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "📏", fontSize = 22.sp)
+                    Text(text = "📏", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isFocusRulerActive) "إخفاء مسطرة السطور" else "مسطرة التركيز القرائي",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Bold,
                         color = if (isFocusRulerActive) EmeraldGreen else TextPrimary,
                         textAlign = TextAlign.Center
@@ -1891,11 +2059,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "⏱️", fontSize = 22.sp)
+                    Text(text = "⏱️", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isAutoScrollActive) "إيقاف التمرير التلقائي" else "التقليب التلقائي الذاتي",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Bold,
                         color = if (isAutoScrollActive) WarmAmber else TextPrimary,
                         textAlign = TextAlign.Center
@@ -1905,7 +2073,7 @@ fun StudyToolsHubSheet(
         }
 
         // SECTION 2: Memory & Knowledge Mastery (Tools 7, 8, 9, 10)
-        Text(text = "🧠 استذكار وتثبيت المعلومات", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+        Text(text = "🧠 استذكار وتثبيت المعلومات", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = CyanAccent)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             // TOOL 7: Vocabulary & Lexicon
             GlassCard(
@@ -1918,9 +2086,9 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "📖", fontSize = 22.sp)
+                    Text(text = "📖", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = "معجم المفردات والمصطلحات", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                    Text(text = "معجم المفردات والمصطلحات", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
                 }
             }
 
@@ -1935,9 +2103,9 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "📝", fontSize = 22.sp)
+                    Text(text = "📝", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = "مسودة القوانين والملاحظات", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                    Text(text = "مسودة القوانين والملاحظات", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
                 }
             }
         }
@@ -1954,9 +2122,9 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "🔖", fontSize = 22.sp)
+                    Text(text = "🔖", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = "فهرس الفواصل المرجعية", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                    Text(text = "فهرس الفواصل المرجعية", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
                 }
             }
 
@@ -1971,16 +2139,16 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "✏️", fontSize = 22.sp)
+                    Text(text = "✏️", fontSize = tanweerTextSize(22f))
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = "أقلام التظليل والتدوين الحر", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
+                    Text(text = "أقلام التظليل والتدوين الحر", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary, textAlign = TextAlign.Center)
                 }
             }
         }
 
         // TOOL 11: Quick Exam & Ministerial Question Tagger
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(text = "🏷️ وسم الصفحة السريع للامتحانات:", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
+            Text(text = "🏷️ وسم الصفحة السريع للامتحانات:", fontSize = tanweerTextSize(12f), color = TextSecondary, fontWeight = FontWeight.Medium)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(
                     "مهم للاختبار 📌" to RubyRed,
@@ -2000,11 +2168,11 @@ fun StudyToolsHubSheet(
                     ) {
                         Text(
                             text = tag,
-                            fontSize = 9.sp,
+                            fontSize = tanweerTextSize(9f),
                             fontWeight = FontWeight.Bold,
                             color = tagColor,
                             textAlign = TextAlign.Center,
-                            maxLines = 1
+                            maxLines = 2
                         )
                     }
                 }
@@ -2012,7 +2180,7 @@ fun StudyToolsHubSheet(
         }
 
         // SECTION 3: Export & Sharing (Tools 12, 13, 14, 15)
-        Text(text = "📤 التصدير والمشاركة السريعة", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+        Text(text = "📤 التصدير والمشاركة السريعة", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = EmeraldGreen)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             // TOOL 12: Snapshot Share
             GlassCard(
@@ -2026,9 +2194,9 @@ fun StudyToolsHubSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(text = "📸", fontSize = 18.sp)
+                    Text(text = "📸", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "مشاركة لقطة الصفحة", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "مشاركة لقطة الصفحة", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
 
@@ -2044,15 +2212,15 @@ fun StudyToolsHubSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(text = "📋", fontSize = 18.sp)
+                    Text(text = "📋", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "تصدير الملاحظات Markdown", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "تصدير الملاحظات Markdown", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
         }
 
         // SECTION 4: Reading Themes & Eye Health (Tools 14, 15, 16, 17, 18)
-        Text(text = "🌙 أنماط القراءة وصحة العين والبيئة", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFB74D))
+        Text(text = "🌙 أنماط القراءة وصحة العين والبيئة", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = Color(0xFFFFB74D))
 
         // TOOL 14: Six Reading Paper Themes
         Row(
@@ -2073,7 +2241,7 @@ fun StudyToolsHubSheet(
                 ) {
                     Text(
                         text = theme.title.substringBefore(" "),
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         color = theme.textColor
                     )
@@ -2102,11 +2270,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "👁️", fontSize = 18.sp)
+                    Text(text = "👁️", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (isEyeBreakActive) "تنبيه العين (مفعّل)" else "قاعدة 20-20-20 لراحة العين",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         fontWeight = FontWeight.Bold,
                         color = if (isEyeBreakActive) EmeraldGreen else TextPrimary
                     )
@@ -2125,11 +2293,11 @@ fun StudyToolsHubSheet(
                     modifier = Modifier.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "🎧", fontSize = 18.sp)
+                    Text(text = "🎧", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (isWhiteNoiseActive) "أصوات التركيز (شغالة)" else "أصوات خلفية وبيئة هادئة",
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         fontWeight = FontWeight.Bold,
                         color = if (isWhiteNoiseActive) CyanAccent else TextPrimary
                     )
@@ -2151,9 +2319,9 @@ fun StudyToolsHubSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(text = "🚀", fontSize = 18.sp)
+                    Text(text = "🚀", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "انتقال مباشر لرقم الصفحة", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "انتقال مباشر لرقم الصفحة", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
 
@@ -2169,11 +2337,12 @@ fun StudyToolsHubSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(text = "ℹ️", fontSize = 18.sp)
+                    Text(text = "ℹ️", fontSize = tanweerTextSize(18f))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "تفاصيل ومعلومات الكتاب", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "تفاصيل ومعلومات الكتاب", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
+        }
         }
     }
 }
@@ -2316,7 +2485,7 @@ fun ThumbnailsGridSheet(
         ) {
             Text(
                 text = "📑 معاينة وفهرس الصفحات المصغرة",
-                fontSize = 16.sp,
+                fontSize = tanweerTextSize(16f),
                 fontWeight = FontWeight.Bold,
                 color = CyanAccent
             )
@@ -2381,7 +2550,7 @@ fun ThumbnailsGridSheet(
 
                     Text(
                         text = "صفحة ${pageIdx + 1}",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
                         color = if (isCurrent) CyanAccent else TextPrimary
                     )
@@ -2420,7 +2589,7 @@ fun ReaderSettingsSheet(
         item {
             Text(
                 text = "🎨 ثيمات وإعدادات القراءة والمطالعة",
-                fontSize = 17.sp,
+                fontSize = tanweerTextSize(17f),
                 fontWeight = FontWeight.Bold,
                 color = CyanAccent
             )
@@ -2428,7 +2597,7 @@ fun ReaderSettingsSheet(
 
         // Themes
         item {
-            Text(text = "وضع القراءة واللون المريح للعين:", fontSize = 13.sp, color = TextSecondary)
+            Text(text = "وضع القراءة واللون المريح للعين:", fontSize = tanweerTextSize(13f), color = TextSecondary)
             Spacer(modifier = Modifier.height(8.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(ReadingTheme.values()) { theme ->
@@ -2443,7 +2612,7 @@ fun ReaderSettingsSheet(
                     ) {
                         Text(
                             text = theme.title,
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             color = if (isSelected) CyanAccent else TextPrimary
                         )
@@ -2454,7 +2623,7 @@ fun ReaderSettingsSheet(
 
         // Page Turn Transition Mode
         item {
-            Text(text = "نمط تقليب الصفحات والانتقال:", fontSize = 13.sp, color = TextSecondary)
+            Text(text = "نمط تقليب الصفحات والانتقال:", fontSize = tanweerTextSize(13f), color = TextSecondary)
             Spacer(modifier = Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(
@@ -2467,7 +2636,7 @@ fun ReaderSettingsSheet(
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "✨ 3D تقليب واقعي", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "✨ 3D تقليب واقعي", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
                 Box(
                     modifier = Modifier
@@ -2479,7 +2648,7 @@ fun ReaderSettingsSheet(
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "↔️ تمرير أفقي", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "↔️ تمرير أفقي", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
         }
@@ -2488,8 +2657,8 @@ fun ReaderSettingsSheet(
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(text = "🛡️ فلتر الضوء الأزرق (حماية العين):", fontSize = 13.sp, color = TextSecondary)
-                    Text(text = "${(blueLightFilter * 200).toInt()}%", fontSize = 13.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Text(text = "🛡️ فلتر الضوء الأزرق (حماية العين):", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                    Text(text = "${(blueLightFilter * 200).toInt()}%", fontSize = tanweerTextSize(13f), color = WarmAmber, fontWeight = FontWeight.Bold)
                 }
                 Slider(
                     value = blueLightFilter,
@@ -2504,8 +2673,8 @@ fun ReaderSettingsSheet(
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(text = "💡 التحكم بالسطوع الداخلي:", fontSize = 13.sp, color = TextSecondary)
-                    Text(text = "${(brightnessOverlay * 100).toInt()}%", fontSize = 13.sp, color = CyanAccent, fontWeight = FontWeight.Bold)
+                    Text(text = "💡 التحكم بالسطوع الداخلي:", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                    Text(text = "${(brightnessOverlay * 100).toInt()}%", fontSize = tanweerTextSize(13f), color = CyanAccent, fontWeight = FontWeight.Bold)
                 }
                 Slider(
                     value = brightnessOverlay,
@@ -2519,7 +2688,7 @@ fun ReaderSettingsSheet(
         // Keep Screen Awake & Watermark Toggles
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "📱 تثبيت تشغيل الشاشة (منع القفل):", fontSize = 13.sp, color = TextPrimary)
+                Text(text = "📱 تثبيت تشغيل الشاشة (منع القفل):", fontSize = tanweerTextSize(13f), color = TextPrimary)
                 Switch(
                     checked = isKeepScreenAwake,
                     onCheckedChange = onKeepScreenAwakeChange,
@@ -2530,7 +2699,7 @@ fun ReaderSettingsSheet(
 
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "🔖 إظهار الختم والعلامة المائية:", fontSize = 13.sp, color = TextPrimary)
+                Text(text = "🔖 إظهار الختم والعلامة المائية:", fontSize = tanweerTextSize(13f), color = TextPrimary)
                 Switch(
                     checked = isWatermarkEnabled,
                     onCheckedChange = onWatermarkChange,
@@ -2560,7 +2729,7 @@ fun BookmarksSheet(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = "🔖 الإشارات المرجعية المحفوظة", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+            Text(text = "🔖 الإشارات المرجعية المحفوظة", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold, color = WarmAmber)
             GlassPill(text = "${bookmarks.size} إشارة", color = WarmAmber, bgColor = AmberGlow)
         }
 
@@ -2589,11 +2758,11 @@ fun BookmarksSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = "🔖", fontSize = 18.sp)
+                                Text(text = "🔖", fontSize = tanweerTextSize(18f))
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
-                                    Text(text = bm.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                    Text(text = "الانتقال المباشر لصفحة ${bm.pageIndex + 1}", fontSize = 11.sp, color = CyanAccent)
+                                    Text(text = bm.title, fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                                    Text(text = "الانتقال المباشر لصفحة ${bm.pageIndex + 1}", fontSize = tanweerTextSize(11f), color = CyanAccent)
                                 }
                             }
                             IconButton(onClick = { onDeleteBookmark(bm.id) }) {
@@ -2631,7 +2800,7 @@ fun StudyNotesSheet(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = "📝 ملاحظات صفحة ${currentPage + 1}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+            Text(text = "📝 ملاحظات صفحة ${currentPage + 1}", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold, color = CyanAccent)
             GlassPill(text = "${currentPageNotes.size} ملاحظات", color = CyanAccent, bgColor = CyanGlow)
         }
 
@@ -2673,7 +2842,7 @@ fun StudyNotesSheet(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Top
                         ) {
-                            Text(text = note.noteText, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.weight(1f))
+                            Text(text = note.noteText, fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.weight(1f))
                             IconButton(onClick = { onDeleteNote(note.id) }, modifier = Modifier.size(28.dp)) {
                                 Icon(Icons.Default.DeleteOutline, contentDescription = "حذف", tint = RubyRed, modifier = Modifier.size(16.dp))
                             }
@@ -2705,7 +2874,7 @@ fun VocabularySheet(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(text = "📖 معجم المفردات والمصطلحات", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+            Text(text = "📖 معجم المفردات والمصطلحات", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold, color = CyanAccent)
             GlassPill(text = "${vocabList.size} كلمة", color = WarmAmber, bgColor = AmberGlow)
         }
 
@@ -2735,8 +2904,8 @@ fun VocabularySheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(text = item.word, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-                            Text(text = item.meaning, fontSize = 12.sp, color = TextPrimary)
+                            Text(text = item.word, fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = CyanAccent)
+                            Text(text = item.meaning, fontSize = tanweerTextSize(12f), color = TextPrimary)
                         }
                         IconButton(onClick = { onDeleteVocab(item.id) }) {
                             Icon(Icons.Default.DeleteOutline, contentDescription = "حذف", tint = RubyRed)
@@ -2763,11 +2932,11 @@ fun JumpToPageDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "🚀 الانتقال السريع إلى صفحة", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+            Text(text = "🚀 الانتقال السريع إلى صفحة", fontSize = tanweerTextSize(17f), fontWeight = FontWeight.Bold, color = CyanAccent)
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(text = "أدخل رقم الصفحة من 1 إلى $totalPages:", fontSize = 13.sp, color = TextSecondary)
+                Text(text = "أدخل رقم الصفحة من 1 إلى $totalPages:", fontSize = tanweerTextSize(13f), color = TextSecondary)
                 GlassTextField(
                     value = targetPageText,
                     onValueChange = { targetPageText = it.filter { char -> char.isDigit() } },
@@ -2809,17 +2978,17 @@ fun BookInfoDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "ℹ️ تفاصيل الكتاب وبيانات المنهج", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+            Text(text = "ℹ️ تفاصيل الكتاب وبيانات المنهج", fontSize = tanweerTextSize(17f), fontWeight = FontWeight.Bold, color = CyanAccent)
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(text = "العنوان: ${book.title}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Text(text = "المادة: ${book.subjectName}", fontSize = 13.sp, color = CyanAccent)
-                Text(text = "الصف الدراسي: ${SchoolHierarchy.getGradeName(book.gradeId)}", fontSize = 13.sp, color = TextSecondary)
-                Text(text = "الإصدار: ${book.edition ?: "إصدار رسمي معتمد"}", fontSize = 13.sp, color = TextSecondary)
-                Text(text = "عدد الصفحات الكلي: $totalPages صفحة", fontSize = 13.sp, color = TextSecondary)
-                Text(text = "حجم الملف: ${book.fileSizeMb} MB", fontSize = 13.sp, color = TextSecondary)
-                Text(text = "الوقت المستغرق في المذاكرة: $timeFormatted", fontSize = 13.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                Text(text = "العنوان: ${book.title}", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                Text(text = "المادة: ${book.subjectName}", fontSize = tanweerTextSize(13f), color = CyanAccent)
+                Text(text = "الصف الدراسي: ${SchoolHierarchy.getGradeName(book.gradeId)}", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                Text(text = "الإصدار: ${book.edition ?: "إصدار رسمي معتمد"}", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                Text(text = "عدد الصفحات الكلي: $totalPages صفحة", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                Text(text = "حجم الملف: ${book.fileSizeMb} MB", fontSize = tanweerTextSize(13f), color = TextSecondary)
+                Text(text = "الوقت المستغرق في المذاكرة: $timeFormatted", fontSize = tanweerTextSize(13f), color = WarmAmber, fontWeight = FontWeight.Bold)
             }
         },
         confirmButton = {

@@ -27,18 +27,36 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.magd.tanweer.data.model.Role
 import android.content.Intent
 import android.net.Uri
+import com.magd.tanweer.data.model.Role
+import com.magd.tanweer.data.model.SyncState
+import com.magd.tanweer.data.model.UserStats
 import com.magd.tanweer.data.model.SubmitRoleUpgradeResponse
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.data.model.getRoleEnum
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
+import com.magd.tanweer.data.repository.SyncResult
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.ArabicNameValidator
 import com.magd.tanweer.util.TanweerHapticManager
+
+private fun formatYemeniPhoneForDisplay(rawPhone: String): String {
+    val digits = rawPhone.filter { it.isDigit() }
+    val local = when {
+        digits.startsWith("00967") && digits.length == 14 -> digits.drop(5)
+        digits.startsWith("967") && digits.length == 12 -> digits.drop(3)
+        digits.startsWith("0") && digits.length == 10 -> digits.drop(1)
+        else -> digits
+    }
+    return if (local.length == 9 && local.startsWith("7")) {
+        "${local.substring(0, 3)} ${local.substring(3, 6)} ${local.substring(6, 9)}"
+    } else {
+        rawPhone
+    }
+}
 
 data class BadgeDetailInfo(
     val name: String,
@@ -54,8 +72,12 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val currentUserId = currentUser?.id.orEmpty()
     var isDataSaverEnabled by remember { mutableStateOf(true) }
     var isEditProfileDialogOpen by remember { mutableStateOf(false) }
+    var verifiedProfileStats by remember(currentUserId) { mutableStateOf<UserStats?>(null) }
+    var profileStatsSyncState by remember(currentUserId) { mutableStateOf<SyncState>(SyncState.Idle) }
+    var profileStatsRetryCount by remember(currentUserId) { mutableIntStateOf(0) }
 
     val gradeName = currentUser?.gradeId?.let { SchoolHierarchy.getGradeName(it) } ?: "المرحلة الدراسية"
     val sectionAr = currentUser?.sectionId?.let { SchoolHierarchy.getSectionArabicName(it) } ?: ""
@@ -68,14 +90,41 @@ fun ProfileScreen(
     var isSavingProfile by remember { mutableStateOf(false) }
 
     val myRoleRequests by viewModel.myRoleRequests.collectAsStateWithLifecycle()
+    val myNotifications by viewModel.myNotifications.collectAsStateWithLifecycle()
+    var isRecoveryCodeVisible by remember { mutableStateOf(false) }
+    var isGeneratingRecoveryCode by remember { mutableStateOf(false) }
+    var generatedRecoveryCode by remember { mutableStateOf<String?>(null) }
     var isRoleUpgradeDialogOpen by remember { mutableStateOf(false) }
     var isRedeemCodeDialogOpen by remember { mutableStateOf(false) }
     var requestSuccessInfo by remember { mutableStateOf<SubmitRoleUpgradeResponse?>(null) }
     var selectedBadgeInfo by remember { mutableStateOf<BadgeDetailInfo?>(null) }
 
     LaunchedEffect(Unit) {
-        viewModel.repository.syncProfile()
         viewModel.loadMyRoleRequests()
+        viewModel.loadMyNotifications()
+    }
+
+    LaunchedEffect(currentUserId, profileStatsRetryCount) {
+        if (currentUserId.isBlank()) {
+            verifiedProfileStats = null
+            profileStatsSyncState = SyncState.Idle
+            return@LaunchedEffect
+        }
+
+        profileStatsSyncState = if (verifiedProfileStats != null) SyncState.Refreshing else SyncState.Loading
+        when (val result = viewModel.repository.syncProfile()) {
+            is SyncResult.Success -> {
+                val confirmedStats = viewModel.repository.getStoredProfileStats(currentUserId)
+                if (confirmedStats != null) {
+                    verifiedProfileStats = confirmedStats
+                    profileStatsSyncState = SyncState.Success()
+                } else {
+                    profileStatsSyncState = SyncState.Error("تعذر قراءة إحصاءات الحساب المؤكدة بعد المزامنة")
+                }
+            }
+            is SyncResult.Offline -> profileStatsSyncState = SyncState.OfflineCached()
+            is SyncResult.Error -> profileStatsSyncState = SyncState.Error(result.message, result.isNetworkError)
+        }
     }
 
     LaunchedEffect(currentUser) {
@@ -98,7 +147,6 @@ fun ProfileScreen(
         if (editFullName.isEmpty()) null else ArabicNameValidator.validate(editFullName)
     }
 
-    val currentUserId = currentUser?.id ?: ""
     val verifiedBestAnswersCount by viewModel.repository.getBestAnswersCountForUser(currentUserId)
         .collectAsStateWithLifecycle(initialValue = 0)
     val userCommentsCount by viewModel.repository.getCommentsCountForUser(currentUserId)
@@ -155,14 +203,14 @@ fun ProfileScreen(
                                     .border(1.5.dp, CyanAccent, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(text = roleEnum.badgeIcon, fontSize = 28.sp)
+                                Text(text = roleEnum.badgeIcon, fontSize = tanweerTextSize(28f))
                             }
                             Spacer(modifier = Modifier.width(14.dp))
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(
                                         text = currentUser?.fullName ?: "طالب تنوير",
-                                        fontSize = 17.sp,
+                                        fontSize = tanweerTextSize(17f),
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
@@ -180,13 +228,13 @@ fun ProfileScreen(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = if (roleEnum == Role.ADMIN) "الإدارة المدرسية العامة 🏫" else "$gradeName — شعبة $sectionAr",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     color = if (roleEnum == Role.ADMIN) WarmAmber else CyanAccent,
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    text = "📱 رقم الهاتف: ${currentUser?.phoneNumber ?: ""}",
-                                    fontSize = 11.sp,
+                                    text = "📱 رقم الهاتف: ${currentUser?.phoneNumber?.let(::formatYemeniPhoneForDisplay) ?: ""}",
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextMuted
                                 )
                             }
@@ -223,17 +271,17 @@ fun ProfileScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(userRole.badgeIcon, fontSize = 22.sp)
+                            Text(userRole.badgeIcon, fontSize = tanweerTextSize(22f))
                             Column {
                                 Text(
                                     text = "الرتبة في المنظومة: ${userRole.displayNameAr}",
-                                    fontSize = 15.sp,
+                                    fontSize = tanweerTextSize(15f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                                 Text(
                                     text = "المستوى ${userRole.level} من 4 في الهيكل المدرسي",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = CyanAccent
                                 )
                             }
@@ -258,9 +306,9 @@ fun ProfileScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = userRole.descriptionAr,
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         color = TextSecondary,
-                        lineHeight = 16.sp
+                        lineHeight = tanweerLineHeight(16f)
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -274,16 +322,16 @@ fun ProfileScreen(
                     ) {
                         Text(
                             text = "💡 فلسفة تنوير: المساهمة في إضافة الدروس والصور والواجبات مفتوحة للجميع بالتساوي، بينما تمنح الرتبة سلطات الاعتماد والمراجعة والإشراف.",
-                            fontSize = 10.sp,
+                            fontSize = tanweerTextSize(10f),
                             color = TextMuted,
-                            lineHeight = 14.sp
+                            lineHeight = tanweerLineHeight(14f)
                         )
                     }
 
                     // Display pending/recent role request status if any
                     if (myRoleRequests.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(10.dp))
-                        Text("حالة طلبات الترقية السابقة:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("حالة طلبات الترقية السابقة:", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = TextPrimary)
                         Spacer(modifier = Modifier.height(4.dp))
                         myRoleRequests.take(2).forEach { req ->
                             val statusLabel = when (req.status) {
@@ -305,7 +353,7 @@ fun ProfileScreen(
                             ) {
                                 Text(
                                     text = "طلب رتبة: ${Role.fromString(req.requestedRole).displayNameAr}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextSecondary
                                 )
                                 GlassPill(text = statusLabel, color = statusColor, bgColor = statusColor.copy(alpha = 0.15f))
@@ -340,6 +388,117 @@ fun ProfileScreen(
             }
         }
 
+        // Permanent recovery credential and the encrypted private delivery notification.
+        item {
+            val recoveryNotification = myNotifications.firstOrNull { it.type == "RECOVERY_CODE_RESET" }
+            // The latest server notification wins over any code cached in this screen.
+            // This keeps the UI in sync when an administrator rotates the code while the profile is open.
+            val activeRecoveryCode = recoveryNotification?.recoveryCode ?: generatedRecoveryCode
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = MidnightSurface,
+                borderColor = CyanAccent.copy(alpha = 0.35f)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("🔐 رمز استرداد الحساب", fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = CyanAccent)
+                            Text(
+                                "رمز دائم لا تنتهي صلاحيته إلا عند تغييره أو إلغائه من الإدارة",
+                                fontSize = tanweerTextSize(11f),
+                                color = TextSecondary
+                            )
+                        }
+                        IconButton(
+                            onClick = { viewModel.loadMyNotifications() },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "تحديث رسالة رمز الاسترداد",
+                                tint = CyanAccent,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        GlassPill(text = "دائم", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.14f))
+                    }
+
+                    if (recoveryNotification != null) {
+                        Text(recoveryNotification.title, fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(recoveryNotification.body, fontSize = tanweerTextSize(11f), color = TextSecondary, lineHeight = tanweerLineHeight(16f))
+                    } else {
+                        Text(
+                            "لا توجد رسالة رمز استرداد محفوظة لهذا الحساب بعد. أنشئ رمزاً جديداً ليُحفظ مشفراً ويمكنك استعادته من ملفك الشخصي.",
+                            fontSize = tanweerTextSize(11f),
+                            color = TextSecondary,
+                            lineHeight = tanweerLineHeight(16f)
+                        )
+                    }
+
+                    if (!activeRecoveryCode.isNullOrBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MidnightBackground.copy(alpha = 0.7f))
+                                .border(1.dp, GlassBorderSubtle, RoundedCornerShape(10.dp))
+                                .padding(12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                if (isRecoveryCodeVisible) activeRecoveryCode else "••••-••••-••••-••••",
+                                fontSize = tanweerTextSize(18f),
+                                fontWeight = FontWeight.Black,
+                                color = EmeraldGreen
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GlassOutlinedButton(
+                            text = if (isRecoveryCodeVisible) "إخفاء الرمز" else "عرض الرمز",
+                            onClick = {
+                                isRecoveryCodeVisible = !isRecoveryCodeVisible
+                                if (myNotifications.isEmpty()) viewModel.loadMyNotifications()
+                            },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            enabled = !activeRecoveryCode.isNullOrBlank()
+                        )
+                        GlassButton(
+                            text = if (isGeneratingRecoveryCode) "جارٍ التغيير..." else "تغيير الرمز",
+                            onClick = {
+                                if (!isGeneratingRecoveryCode) {
+                                    isGeneratingRecoveryCode = true
+                                    viewModel.generateMyRecoveryCode { success, value ->
+                                        isGeneratingRecoveryCode = false
+                                        if (success) {
+                                            generatedRecoveryCode = value
+                                            isRecoveryCodeVisible = true
+                                            Toast.makeText(context, "تم تغيير رمز الاسترداد وحفظ نسخة آمنة في إشعارات الحساب", Toast.LENGTH_LONG).show()
+                                        } else {
+                                            Toast.makeText(context, value, Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            enabled = !isGeneratingRecoveryCode
+                        )
+                    }
+                }
+            }
+        }
+
         // Contributions Stats
         item {
             GlassCard(
@@ -349,26 +508,31 @@ fun ProfileScreen(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "📚 سجل مساهماتي الدراسية في الشعبة",
-                        fontSize = 16.sp,
+                        fontSize = tanweerTextSize(16f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    val stats = currentUser?.stats
+                    val hasProfileStatsSnapshot = currentUser?.id == currentUserId && verifiedProfileStats != null
+                    val stats = verifiedProfileStats.takeIf { hasProfileStatsSnapshot }
                     val lessonsCount = stats?.lessonsCount ?: 0
                     val photosCount = stats?.photosCount ?: 0
                     val homeworksCount = stats?.homeworksCount ?: 0
                     val issuesCount = stats?.issuesCount ?: 0
 
+                    SyncStatusBar(
+                        syncState = profileStatsSyncState,
+                        onRefresh = { profileStatsRetryCount++ }
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceAround
                     ) {
-                        StatItem(label = "دروس موثقة", count = "$lessonsCount", icon = "📚")
-                        StatItem(label = "صور سبورة", count = "$photosCount", icon = "📷")
-                        StatItem(label = "واجبات مسجلة", count = "$homeworksCount", icon = "📝")
-                        StatItem(label = "استفسارات", count = "$issuesCount", icon = "❓")
+                        StatItem(label = "دروس موثقة", count = formatVerifiedCount(stats?.lessonsCount, hasProfileStatsSnapshot), icon = "📚")
+                        StatItem(label = "صور سبورة", count = formatVerifiedCount(stats?.photosCount, hasProfileStatsSnapshot), icon = "📷")
+                        StatItem(label = "واجبات مسجلة", count = formatVerifiedCount(stats?.homeworksCount, hasProfileStatsSnapshot), icon = "📝")
+                        StatItem(label = "استفسارات", count = formatVerifiedCount(stats?.issuesCount, hasProfileStatsSnapshot), icon = "❓")
                     }
                 }
             }
@@ -376,16 +540,17 @@ fun ProfileScreen(
 
         // Badges Section (Dynamically computed from actual student activity)
         item {
-            val stats = currentUser?.stats
+            val hasProfileStatsSnapshot = currentUser?.id == currentUserId && verifiedProfileStats != null
+            val stats = verifiedProfileStats.takeIf { hasProfileStatsSnapshot }
             val lessonsCount = stats?.lessonsCount ?: 0
             val photosCount = stats?.photosCount ?: 0
             val homeworksCount = stats?.homeworksCount ?: 0
             val issuesCount = stats?.issuesCount ?: 0
 
-            val isLessonDoc = lessonsCount >= 1 || photosCount >= 3
-            val isHelper = (userCommentsCount >= 2) || (userCommentsCount >= 1 && homeworksCount >= 2) || (verifiedBestAnswersCount >= 1)
-            val isBestAnswerOwner = verifiedBestAnswersCount >= 1
-            val isMonthContributor = monthLessonsCount >= 3
+            val isLessonDoc = hasProfileStatsSnapshot && (lessonsCount >= 1 || photosCount >= 3)
+            val isHelper = hasProfileStatsSnapshot && ((userCommentsCount >= 2) || (userCommentsCount >= 1 && homeworksCount >= 2) || (verifiedBestAnswersCount >= 1))
+            val isBestAnswerOwner = hasProfileStatsSnapshot && verifiedBestAnswersCount >= 1
+            val isMonthContributor = hasProfileStatsSnapshot && monthLessonsCount >= 3
 
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -399,13 +564,13 @@ fun ProfileScreen(
                     ) {
                         Text(
                             text = "🎖️ شارات الإنجاز والنشاط الموثقة",
-                            fontSize = 15.sp,
+                            fontSize = tanweerTextSize(15f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
                         Text(
                             text = "تُحسب تلقائياً من مساهماتك",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary
                         )
                     }
@@ -417,14 +582,14 @@ fun ProfileScreen(
                         BadgeItem(
                             name = "موثق الدروس",
                             icon = "📚",
-                            active = isLessonDoc,
+                            active = hasProfileStatsSnapshot && isLessonDoc,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 selectedBadgeInfo = BadgeDetailInfo(
                                     name = "موثق الدروس",
                                     icon = "📚",
                                     criteria = "توثيق درس دراسي واحد على الأقل أو رفع 3 صور للسبورة",
-                                    progressText = "إنجازك: $lessonsCount دروس و$photosCount صور سبورة",
+                                    progressText = if (hasProfileStatsSnapshot) "إنجازك: $lessonsCount دروس و$photosCount صور سبورة" else context.getString(com.magd.tanweer.R.string.profile_stats_unverified),
                                     isAchieved = isLessonDoc
                                 )
                             }
@@ -432,14 +597,14 @@ fun ProfileScreen(
                         BadgeItem(
                             name = "مساعد الشعبة",
                             icon = "🛡️",
-                            active = isHelper,
+                            active = hasProfileStatsSnapshot && isHelper,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 selectedBadgeInfo = BadgeDetailInfo(
                                     name = "مساعد الشعبة",
                                     icon = "🛡️",
                                     criteria = "مساعدة الزملاء بتقديم إجابتين على الأقل في استفسارات الشعبة أو توثيق واجبات دراسية للمجموعة",
-                                    progressText = "إنجازك: $userCommentsCount إجابات ومشاركات مفيدة و$homeworksCount واجبات موثقة",
+                                    progressText = if (hasProfileStatsSnapshot) "إنجازك: $userCommentsCount إجابات ومشاركات مفيدة و$homeworksCount واجبات موثقة" else context.getString(com.magd.tanweer.R.string.profile_stats_unverified),
                                     isAchieved = isHelper
                                 )
                             }
@@ -447,14 +612,14 @@ fun ProfileScreen(
                         BadgeItem(
                             name = "صاحب أفضل إجابة",
                             icon = "⭐",
-                            active = isBestAnswerOwner,
+                            active = hasProfileStatsSnapshot && isBestAnswerOwner,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 selectedBadgeInfo = BadgeDetailInfo(
                                     name = "صاحب أفضل إجابة",
                                     icon = "⭐",
                                     criteria = "اعتماد إجابتك كأفضل إجابة معتمدة على استفسارات الشعبة",
-                                    progressText = "إنجازك: $verifiedBestAnswersCount إجابات معتمدة كأفضل إجابة",
+                                    progressText = if (hasProfileStatsSnapshot) "إنجازك: $verifiedBestAnswersCount إجابات معتمدة كأفضل إجابة" else context.getString(com.magd.tanweer.R.string.profile_stats_unverified),
                                     isAchieved = isBestAnswerOwner
                                 )
                             }
@@ -462,14 +627,14 @@ fun ProfileScreen(
                         BadgeItem(
                             name = "موثق دروس الشهر",
                             icon = "🌟",
-                            active = isMonthContributor,
+                            active = hasProfileStatsSnapshot && isMonthContributor,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 selectedBadgeInfo = BadgeDetailInfo(
                                     name = "موثق دروس الشهر",
                                     icon = "🌟",
                                     criteria = "توثيق 3 دروس دراسية أو أكثر باسمك خلال الشهر الجاري",
-                                    progressText = "إنجازك: $monthLessonsCount من 3 دروس مسجلة هذا الشهر",
+                                    progressText = if (hasProfileStatsSnapshot) "إنجازك: $monthLessonsCount من 3 دروس مسجلة هذا الشهر" else context.getString(com.magd.tanweer.R.string.profile_stats_unverified),
                                     isAchieved = isMonthContributor
                                 )
                             }
@@ -493,11 +658,11 @@ fun ProfileScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🏛️", fontSize = 20.sp)
+                            Text("🏛️", fontSize = tanweerTextSize(20f))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("الأرشيف الأكاديمي الشخصي", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                Text("تصفح سجلاتك ودروسك للأعوام الدراسية السابقة", fontSize = 11.sp, color = TextSecondary)
+                                Text("الأرشيف الأكاديمي الشخصي", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                                Text("تصفح سجلاتك ودروسك للأعوام الدراسية السابقة", fontSize = tanweerTextSize(11f), color = TextSecondary)
                             }
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = CyanAccent)
@@ -515,11 +680,11 @@ fun ProfileScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("📚", fontSize = 20.sp)
+                            Text("📚", fontSize = tanweerTextSize(20f))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("بنك معرفة المادة ومستودع الدروس 📚", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                Text("دروس، واجبات، اختبارات، وأسئلة كل مادة في مكان واحد", fontSize = 11.sp, color = TextSecondary)
+                                Text("بنك معرفة المادة ومستودع الدروس 📚", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                                Text("دروس، واجبات، اختبارات، وأسئلة كل مادة في مكان واحد", fontSize = tanweerTextSize(11f), color = TextSecondary)
                             }
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = CyanAccent)
@@ -541,11 +706,11 @@ fun ProfileScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🚀", fontSize = 20.sp)
+                        Text("🚀", fontSize = tanweerTextSize(20f))
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text("فحص التحديثات والإصدار (${com.magd.tanweer.BuildConfig.VERSION_NAME})", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("التحقق من حالة النسخة، سجل الميزات وما الجديد", fontSize = 11.sp, color = TextSecondary)
+                            Text("فحص التحديثات والإصدار (${com.magd.tanweer.BuildConfig.VERSION_NAME})", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("التحقق من حالة النسخة، سجل الميزات وما الجديد", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                     }
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = EmeraldGreen)
@@ -577,8 +742,8 @@ fun ProfileScreen(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text(text = "إعدادات التطبيق وتخصيص الخط", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text(text = "الخط (12sp)، السمة، المزامنة والكاش", fontSize = 11.sp, color = TextSecondary)
+                            Text(text = "إعدادات التطبيق وتخصيص الخط", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(text = "الخط (12sp)، السمة، المزامنة والكاش", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                     }
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = TextSecondary)
@@ -606,21 +771,21 @@ fun ProfileScreen(
             onDismissRequest = { selectedBadgeInfo = null },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(text = badge.icon, fontSize = 24.sp)
-                    Text(text = badge.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = badge.icon, fontSize = tanweerTextSize(24f))
+                    Text(text = badge.name, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(text = "📋 شرط الحصول على الوسام:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-                    Text(text = badge.criteria, fontSize = 12.sp, color = TextPrimary)
+                    Text(text = "📋 شرط الحصول على الوسام:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
+                    Text(text = badge.criteria, fontSize = tanweerTextSize(12f), color = TextPrimary)
                     HorizontalDivider(color = GlassBorderSubtle)
-                    Text(text = "📊 إنجازك الحالي الموثق:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
-                    Text(text = badge.progressText, fontSize = 12.sp, color = TextSecondary)
+                    Text(text = "📊 إنجازك الحالي الموثق:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = WarmAmber)
+                    Text(text = badge.progressText, fontSize = tanweerTextSize(12f), color = TextSecondary)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = if (badge.isAchieved) "الحالة: حصلت على هذا الوسام بنجاح ✅" else "الحالة: قيد الإنجاز ⏳",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         fontWeight = FontWeight.Bold,
                         color = if (badge.isAchieved) EmeraldGreen else WarmAmber
                     )
@@ -641,7 +806,7 @@ fun ProfileScreen(
             title = {
                 Text(
                     text = "✏️ تعديل البيانات الشخصية",
-                    fontSize = 18.sp,
+                    fontSize = tanweerTextSize(18f),
                     fontWeight = FontWeight.Bold,
                     color = CyanAccent
                 )
@@ -673,7 +838,7 @@ fun ProfileScreen(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = if (editNameValidation.isValid) "الاسم الثلاثي صالح ومعتمد ✅ (${if (editNameValidation.detectedLanguage == "AR") "عربي" else "إنجليزي"})" else (editNameValidation.errorMessage ?: ""),
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = if (editNameValidation.isValid) EmeraldGreen else RubyRed
                             )
                         }
@@ -700,7 +865,7 @@ fun ProfileScreen(
                                 )
                                 Text(
                                     text = "الانتماء الأكاديمي المعتمد",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     fontWeight = FontWeight.Bold,
                                     color = WarmAmber
                                 )
@@ -708,28 +873,28 @@ fun ProfileScreen(
                             if (currentUser?.getRoleEnum() == Role.ADMIN) {
                                 Text(
                                     text = "الإدارة المدرسية العامة 🏫",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     fontWeight = FontWeight.SemiBold,
                                     color = WarmAmber
                                 )
                                 Text(
                                     text = "حساب إدارة المدرسة يملك صلاحيات شاملة على مستوى المدرسة دون الارتباط بصف أو شعبة محددة.",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextMuted,
-                                    lineHeight = 16.sp
+                                    lineHeight = tanweerLineHeight(16f)
                                 )
                             } else {
                                 Text(
                                     text = "$gradeName — شعبة ($sectionAr)",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     fontWeight = FontWeight.SemiBold,
                                     color = TextPrimary
                                 )
                                 Text(
                                     text = "الانتقال إلى صف أو شعبة أخرى يتطلب مراجعة إدارة المدرسة أو المشرف المخول لضمان سلامة العزل الدراسي وسجلات الطلاب.",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextMuted,
-                                    lineHeight = 16.sp
+                                    lineHeight = tanweerLineHeight(16f)
                                 )
                             }
                         }
@@ -739,7 +904,7 @@ fun ProfileScreen(
                         Text(
                             text = editErrorMessage ?: "",
                             color = RubyRed,
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = FontWeight.Medium
                         )
                     }
@@ -848,10 +1013,10 @@ fun RoleRequestSuccessDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("📋", fontSize = 22.sp)
+                Text("📋", fontSize = tanweerTextSize(22f))
                 Column {
-                    Text("تم إرسال الطلب بنجاح", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("الرتبة المطلوبة: ${info.targetRoleNameAr ?: "أستاذ / مسؤول"}", color = TextSecondary, fontSize = 11.sp)
+                    Text("تم إرسال الطلب بنجاح", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = tanweerTextSize(16f))
+                    Text("الرتبة المطلوبة: ${info.targetRoleNameAr ?: "أستاذ / مسؤول"}", color = TextSecondary, fontSize = tanweerTextSize(11f))
                 }
             }
         },
@@ -867,11 +1032,11 @@ fun RoleRequestSuccessDialog(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("رقم الطلب الخاص بك", fontSize = 11.sp, color = TextMuted)
+                        Text("رقم الطلب الخاص بك", fontSize = tanweerTextSize(11f), color = TextMuted)
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = info.requestId ?: "TNV-8F294",
-                            fontSize = 20.sp,
+                            fontSize = tanweerTextSize(20f),
                             fontWeight = FontWeight.Black,
                             color = CyanAccent
                         )
@@ -882,9 +1047,9 @@ fun RoleRequestSuccessDialog(
 
                 Text(
                     text = "يرجى التواصل مع إدارة المنظومة عبر WhatsApp لتأكيد هويتك واعتماد الرتبة واستلام رمز التفعيل السري.",
-                    fontSize = 11.sp,
+                    fontSize = tanweerTextSize(11f),
                     color = TextSecondary,
-                    lineHeight = 16.sp
+                    lineHeight = tanweerLineHeight(16f)
                 )
 
                 Button(
@@ -894,8 +1059,8 @@ fun RoleRequestSuccessDialog(
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("💬", fontSize = 16.sp)
-                        Text("التواصل على WhatsApp (+967 735465673)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MidnightBackground)
+                        Text("💬", fontSize = tanweerTextSize(16f))
+                        Text("التواصل على WhatsApp (+967 735465673)", fontWeight = FontWeight.Bold, fontSize = tanweerTextSize(12f), color = MidnightBackground)
                     }
                 }
 
@@ -926,23 +1091,23 @@ fun RedeemRoleCodeDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("🔑", fontSize = 22.sp)
+                Text("🔑", fontSize = tanweerTextSize(22f))
                 Column {
-                    Text("تفعيل الرتبة بالرمز السري", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("رمز معتمد من إدارة المنظومة (صالح 24 ساعة)", color = TextSecondary, fontSize = 11.sp)
+                    Text("تفعيل الرتبة بالرمز السري", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = tanweerTextSize(16f))
+                    Text("رمز معتمد من إدارة المنظومة (صالح 24 ساعة)", color = TextSecondary, fontSize = tanweerTextSize(11f))
                 }
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("أدخل رمز التفعيل المكون من 8 أرقام:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                Text("أدخل رمز التفعيل المكون من 8 أرقام:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
 
                 OutlinedTextField(
                     value = code,
                     onValueChange = { 
                         if (it.length <= 10) code = it 
                     },
-                    placeholder = { Text("مثال: 7391-8426", fontSize = 14.sp, color = TextMuted) },
+                    placeholder = { Text("مثال: 7391-8426", fontSize = tanweerTextSize(14f), color = TextMuted) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     singleLine = true,
@@ -956,9 +1121,9 @@ fun RedeemRoleCodeDialog(
 
                 Text(
                     text = "🔒 الرمز صالح للاستخدام لمرة واحدة فقط ومقيد بحسابك ومحمي بحد أقصى 5 محاولات.",
-                    fontSize = 10.sp,
+                    fontSize = tanweerTextSize(10f),
                     color = TextMuted,
-                    lineHeight = 14.sp
+                    lineHeight = tanweerLineHeight(14f)
                 )
             }
         },
@@ -993,16 +1158,16 @@ fun RoleUpgradeRequestDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("🎓", fontSize = 22.sp)
+                Text("🎓", fontSize = tanweerTextSize(22f))
                 Column {
-                    Text("طلب ترقية رتبة", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                    Text("إدارة الشعبة والمحتوى الدراسي", color = TextSecondary, fontSize = 11.sp)
+                    Text("طلب ترقية رتبة", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = tanweerTextSize(17f))
+                    Text("إدارة الشعبة والمحتوى الدراسي", color = TextSecondary, fontSize = tanweerTextSize(11f))
                 }
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("اختر الرتبة المطلوبة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                Text("اختر الرتبة المطلوبة:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val isMod = targetRole == Role.MODERATOR
@@ -1017,9 +1182,9 @@ fun RoleUpgradeRequestDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("🛡️", fontSize = 20.sp)
-                            Text("مسؤول شعبة", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isMod) CyanAccent else TextPrimary)
-                            Text("مراجعة وإشراف", fontSize = 9.sp, color = TextSecondary)
+                            Text("🛡️", fontSize = tanweerTextSize(20f))
+                            Text("مسؤول شعبة", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = if (isMod) CyanAccent else TextPrimary)
+                            Text("مراجعة وإشراف", fontSize = tanweerTextSize(9f), color = TextSecondary)
                         }
                     }
 
@@ -1035,18 +1200,18 @@ fun RoleUpgradeRequestDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("🎓", fontSize = 20.sp)
-                            Text("أستاذ معتمد", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isTeacher) CyanAccent else TextPrimary)
-                            Text("اعتماد وتثبيت", fontSize = 9.sp, color = TextSecondary)
+                            Text("🎓", fontSize = tanweerTextSize(20f))
+                            Text("أستاذ معتمد", fontSize = tanweerTextSize(11f), fontWeight = FontWeight.Bold, color = if (isTeacher) CyanAccent else TextPrimary)
+                            Text("اعتماد وتثبيت", fontSize = tanweerTextSize(9f), color = TextSecondary)
                         }
                     }
                 }
 
-                Text("سبب التقديم ومسؤولياتك:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                Text("سبب التقديم ومسؤولياتك:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 OutlinedTextField(
                     value = reason,
                     onValueChange = { reason = it },
-                    placeholder = { Text("وضح سبب طلب الترقية (مثلاً: رائد الفصل، ممثل الشعبة، أو معلم المادة)...", fontSize = 11.sp, color = TextMuted) },
+                    placeholder = { Text("وضح سبب طلب الترقية (مثلاً: رائد الفصل، ممثل الشعبة، أو معلم المادة)...", fontSize = tanweerTextSize(11f), color = TextMuted) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -1060,9 +1225,9 @@ fun RoleUpgradeRequestDialog(
 
                 Text(
                     text = "ℹ️ في تنوير، المساهمة مفتوحة لجميع الطلاب بالتساوي. الترقية تضيف صلاحيات المراجعة والاعتماد والإشراف.",
-                    fontSize = 10.sp,
+                    fontSize = tanweerTextSize(10f),
                     color = TextSecondary,
-                    lineHeight = 14.sp
+                    lineHeight = tanweerLineHeight(14f)
                 )
             }
         },
@@ -1084,9 +1249,9 @@ fun RoleUpgradeRequestDialog(
 @Composable
 fun StatItem(label: String, count: String, icon: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = icon, fontSize = 20.sp)
-        Text(text = count, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-        Text(text = label, fontSize = 11.sp, color = TextSecondary)
+        Text(text = icon, fontSize = tanweerTextSize(20f))
+        Text(text = count, fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold, color = CyanAccent)
+        Text(text = label, fontSize = tanweerTextSize(11f), color = TextSecondary)
     }
 }
 
@@ -1108,11 +1273,11 @@ fun BadgeItem(
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text = icon, fontSize = 22.sp)
+            Text(text = icon, fontSize = tanweerTextSize(22f))
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = name,
-                fontSize = 11.sp,
+                fontSize = tanweerTextSize(11f),
                 fontWeight = FontWeight.Bold,
                 color = if (active) TextPrimary else TextMuted
             )

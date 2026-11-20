@@ -21,7 +21,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -29,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.*
+import com.magd.tanweer.R
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
@@ -53,6 +59,51 @@ fun SearchScreen(
 
     // Recent search history & suggestions
     var recentSearches by remember { mutableStateOf(ArabicSearchEngine.getRecentSearches(context)) }
+
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
+    val sectionContentsSyncState by viewModel.sectionContentsSyncState.collectAsStateWithLifecycle()
+    val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
+    val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
+    val eventsSyncState by viewModel.eventsSyncState.collectAsStateWithLifecycle()
+    val issuesSyncState by viewModel.issuesSyncState.collectAsStateWithLifecycle()
+    val searchChatHistorySyncState by viewModel.searchChatHistorySyncState.collectAsStateWithLifecycle()
+    val searchChatHistorySyncGroupId by viewModel.searchChatHistorySyncGroupId.collectAsStateWithLifecycle()
+    val librarySyncState by viewModel.librarySyncState.collectAsStateWithLifecycle()
+    val librarySyncGradeId by viewModel.librarySyncGradeId.collectAsStateWithLifecycle()
+    val searchGradeId = currentUser?.gradeId ?: 10
+
+    val scopedSearchContentsSync = syncStateForScope(sectionContentsSyncState, groupSyncScopeIds[GroupSyncSource.CONTENTS], activeGroupId)
+    val scopedSearchHomeworkSync = syncStateForScope(homeworkSyncState, groupSyncScopeIds[GroupSyncSource.HOMEWORKS], activeGroupId)
+    val scopedSearchExamsSync = syncStateForScope(examsSyncState, groupSyncScopeIds[GroupSyncSource.EXAMS], activeGroupId)
+    val scopedSearchEventsSync = syncStateForScope(eventsSyncState, groupSyncScopeIds[GroupSyncSource.EVENTS], activeGroupId)
+    val scopedSearchIssuesSync = syncStateForScope(issuesSyncState, groupSyncScopeIds[GroupSyncSource.ISSUES], activeGroupId)
+    val scopedSearchChatSync = syncStateForScope(searchChatHistorySyncState, searchChatHistorySyncGroupId, activeGroupId)
+    val scopedSearchBooksSync = if (librarySyncGradeId == searchGradeId) librarySyncState else SyncState.Idle
+    val allSearchSourceStates = listOf(
+        scopedSearchContentsSync,
+        scopedSearchHomeworkSync,
+        scopedSearchExamsSync,
+        scopedSearchEventsSync,
+        scopedSearchIssuesSync,
+        scopedSearchChatSync,
+        scopedSearchBooksSync
+    )
+    val searchSyncState = when (selectedFilter) {
+        "CONTENTS" -> scopedSearchContentsSync
+        "HOMEWORK" -> scopedSearchHomeworkSync
+        "EXAMS" -> scopedSearchExamsSync
+        "EVENTS" -> scopedSearchEventsSync
+        "ISSUES" -> scopedSearchIssuesSync
+        "CHAT" -> scopedSearchChatSync
+        "BOOKS" -> scopedSearchBooksSync
+        else -> aggregateRequiredSyncStates(allSearchSourceStates)
+    }
+
+    LaunchedEffect(activeGroupId) {
+        if (activeGroupId.isNotBlank()) {
+            viewModel.refreshSearchChatHistory(activeGroupId)
+        }
+    }
 
     // Live Room flows for all 7 search dimensions
     val contents by viewModel.repository.getAllContents(activeGroupId)
@@ -193,13 +244,34 @@ fun SearchScreen(
         }.sortedByDescending { it.second }
     }
 
+    val refreshSearchSource: () -> Unit = {
+        when (selectedFilter) {
+            "CONTENTS" -> viewModel.syncSectionContents(activeGroupId, isRefresh = true)
+            "HOMEWORK" -> viewModel.syncHomeworks(activeGroupId, isRefresh = true)
+            "EXAMS" -> viewModel.syncExams(activeGroupId, isRefresh = true)
+            "EVENTS" -> viewModel.syncEvents(activeGroupId, isRefresh = true)
+            "ISSUES" -> viewModel.syncIssues(activeGroupId, isRefresh = true)
+            "CHAT" -> viewModel.refreshSearchChatHistory(activeGroupId)
+            "BOOKS" -> viewModel.syncBooks(searchGradeId, isRefresh = true)
+            else -> {
+                viewModel.syncSectionContents(activeGroupId, isRefresh = true)
+                viewModel.syncHomeworks(activeGroupId, isRefresh = true)
+                viewModel.syncExams(activeGroupId, isRefresh = true)
+                viewModel.syncEvents(activeGroupId, isRefresh = true)
+                viewModel.syncIssues(activeGroupId, isRefresh = true)
+                viewModel.refreshSearchChatHistory(activeGroupId)
+                viewModel.syncBooks(searchGradeId, isRefresh = true)
+            }
+        }
+    }
     val totalResultsCount = rankedContents.size + rankedHomeworks.size + rankedExams.size +
             rankedEvents.size + rankedIssues.size + rankedChatMessages.size + rankedBooks.size
 
     fun triggerSearch(term: String) {
-        searchQuery = term
-        if (term.isNotBlank()) {
-            ArabicSearchEngine.saveRecentSearch(context, term)
+        val committedQuery = term.trim()
+        searchQuery = committedQuery
+        if (committedQuery.isNotBlank()) {
+            ArabicSearchEngine.saveRecentSearch(context, committedQuery)
             recentSearches = ArabicSearchEngine.getRecentSearches(context)
         }
     }
@@ -229,17 +301,15 @@ fun SearchScreen(
                 ) {
                     GlassTextField(
                         value = searchQuery,
-                        onValueChange = {
-                            searchQuery = it
-                            if (it.length >= 2) {
-                                ArabicSearchEngine.saveRecentSearch(context, it)
-                                recentSearches = ArabicSearchEngine.getRecentSearches(context)
-                            }
-                        },
+                        onValueChange = { searchQuery = it },
                         label = "محرك البحث الشامل الذكي",
                         placeholder = "ابحث عن درس، واجب، اختبار، فعالية، استفسار...",
                         modifier = Modifier.weight(1f),
-                        leadingIcon = Icons.Default.Search
+                        leadingIcon = Icons.Default.Search,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = { triggerSearch(searchQuery) }
+                        )
                     )
                     if (searchQuery.isNotEmpty()) {
                         IconButton(
@@ -262,10 +332,10 @@ fun SearchScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("🕒 عمليات البحث الأخيرة:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                                Text("🕒 عمليات البحث الأخيرة:", fontSize = tanweerTextSize(11f), color = TextMuted, fontWeight = FontWeight.Bold)
                                 Text(
                                     text = "مسح السجل",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = RubyRed,
                                     modifier = Modifier.clickable {
                                         ArabicSearchEngine.clearRecentSearches(context)
@@ -283,14 +353,14 @@ fun SearchScreen(
                                             .clickable { triggerSearch(term) }
                                             .padding(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
-                                        Text(text = term, fontSize = 11.sp, color = TextSecondary)
+                                        Text(text = term, fontSize = tanweerTextSize(11f), color = TextSecondary)
                                     }
                                 }
                             }
                         }
 
                         // Keyword Suggestions
-                        Text("💡 مقترحات بحث سريعة:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                        Text("💡 مقترحات بحث سريعة:", fontSize = tanweerTextSize(11f), color = TextMuted, fontWeight = FontWeight.Bold)
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             items(ArabicSearchEngine.suggestedKeywords) { keyword ->
                                 Box(
@@ -301,7 +371,7 @@ fun SearchScreen(
                                         .clickable { triggerSearch(keyword) }
                                         .padding(horizontal = 10.dp, vertical = 4.dp)
                                 ) {
-                                    Text(text = keyword, fontSize = 11.sp, color = CyanAccent, fontWeight = FontWeight.Medium)
+                                    Text(text = keyword, fontSize = tanweerTextSize(11f), color = CyanAccent, fontWeight = FontWeight.Medium)
                                 }
                             }
                         }
@@ -336,12 +406,28 @@ fun SearchScreen(
                         ) {
                             Text(
                                 text = label,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isSelected) TextOnAccent else TextSecondary
                             )
                         }
                     }
+                }
+            }
+
+            // Search reads local Room data; keep source freshness visible beside the results.
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SyncStatusBar(
+                        syncState = searchSyncState,
+                        onRefresh = refreshSearchSource
+                    )
+                    Text(
+                        text = stringResource(R.string.search_local_index_note),
+                        fontSize = tanweerTextSize(10f),
+                        color = TextMuted,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
 
@@ -354,11 +440,11 @@ fun SearchScreen(
                 ) {
                     Text(
                         text = if (query.isBlank()) "استعراض أحدث محتويات المنظومة" else "نتائج البحث عن \"$query\"",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         color = TextSecondary
                     )
                     GlassPill(
-                        text = "$totalResultsCount نتيجة",
+                        text = stringResource(R.string.search_local_results_count, totalResultsCount),
                         color = CyanAccent,
                         bgColor = CyanGlow
                     )
@@ -368,7 +454,7 @@ fun SearchScreen(
             // 1. Lessons Results (Exact Click -> Lesson Details)
             if (rankedContents.isNotEmpty()) {
                 item {
-                    Text(text = "📚 الدروس وتوثيق السبورة (${rankedContents.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
+                    Text(text = "📚 الدروس وتوثيق السبورة (${rankedContents.size})", fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = CyanAccent)
                 }
                 items(rankedContents) { (content, _) ->
                     GlassCard(
@@ -383,16 +469,16 @@ fun SearchScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 GlassPill(text = content.subjectName, color = CyanAccent, bgColor = CyanGlow)
-                                Text(text = "التاريخ: ${content.studyDate}", fontSize = 11.sp, color = TextMuted)
+                                Text(text = "التاريخ: ${content.studyDate}", fontSize = tanweerTextSize(11f), color = TextMuted)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = content.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(text = content.title, fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = TextPrimary)
                             if (!content.description.isNullOrBlank()) {
-                                Text(text = content.description, fontSize = 12.sp, color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(text = content.description, fontSize = tanweerTextSize(12f), color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                             if (content.media.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Text(text = "📷 يحتوي ${content.media.size} صور سبورة موثقة", fontSize = 11.sp, color = EmeraldGreen)
+                                Text(text = "📷 يحتوي ${content.media.size} صور سبورة موثقة", fontSize = tanweerTextSize(11f), color = EmeraldGreen)
                             }
                         }
                     }
@@ -402,7 +488,7 @@ fun SearchScreen(
             // 2. Homework Results (Exact Click -> Homework Details & Checkbox)
             if (rankedHomeworks.isNotEmpty()) {
                 item {
-                    Text(text = "📋 الواجبات والمهام (${rankedHomeworks.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = WarmAmber)
+                    Text(text = "📋 الواجبات والمهام (${rankedHomeworks.size})", fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = WarmAmber)
                 }
                 items(rankedHomeworks) { (hw, _) ->
                     GlassCard(
@@ -425,11 +511,11 @@ fun SearchScreen(
                                 )
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = hw.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(text = hw.title, fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = TextPrimary)
                             if (!hw.details.isNullOrBlank()) {
-                                Text(text = hw.details, fontSize = 12.sp, color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(text = hw.details, fontSize = tanweerTextSize(12f), color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
-                            Text(text = "تاريخ الاستحقاق: ${hw.dueDate}", fontSize = 11.sp, color = TextMuted)
+                            Text(text = "تاريخ الاستحقاق: ${hw.dueDate}", fontSize = tanweerTextSize(11f), color = TextMuted)
                         }
                     }
                 }
@@ -438,7 +524,7 @@ fun SearchScreen(
             // 3. Exam Results (Exact Click -> Exam Details & Checklist)
             if (rankedExams.isNotEmpty()) {
                 item {
-                    Text(text = "🎯 جدول الاختبارات (${rankedExams.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = RubyRed)
+                    Text(text = "🎯 جدول الاختبارات (${rankedExams.size})", fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = RubyRed)
                 }
                 items(rankedExams) { (exam, _) ->
                     GlassCard(
@@ -454,12 +540,12 @@ fun SearchScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 GlassPill(text = exam.subjectName, color = RubyRed, bgColor = RubyRed.copy(alpha = 0.15f))
-                                Text(text = "موعد: ${exam.examDate}", fontSize = 11.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                                Text(text = "موعد: ${exam.examDate}", fontSize = tanweerTextSize(11f), color = WarmAmber, fontWeight = FontWeight.Bold)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = exam.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(text = exam.title, fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = TextPrimary)
                             if (!exam.requiredChapters.isNullOrBlank()) {
-                                Text(text = "المقرر: ${exam.requiredChapters}", fontSize = 12.sp, color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(text = "المقرر: ${exam.requiredChapters}", fontSize = tanweerTextSize(12f), color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -469,7 +555,7 @@ fun SearchScreen(
             // 4. Events Results (Exact Click -> Event Details)
             if (rankedEvents.isNotEmpty()) {
                 item {
-                    Text(text = "🎪 الفعاليات والأنشطة (${rankedEvents.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+                    Text(text = "🎪 الفعاليات والأنشطة (${rankedEvents.size})", fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = EmeraldGreen)
                 }
                 items(rankedEvents) { (event, _) ->
                     GlassCard(
@@ -485,15 +571,15 @@ fun SearchScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 GlassPill(text = event.category, color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
-                                Text(text = event.eventDate, fontSize = 11.sp, color = TextMuted)
+                                Text(text = event.eventDate, fontSize = tanweerTextSize(11f), color = TextMuted)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = event.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(text = event.title, fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = TextPrimary)
                             if (!event.location.isNullOrBlank()) {
-                                Text(text = "📍 المكان: ${event.location}", fontSize = 12.sp, color = CyanAccent)
+                                Text(text = "📍 المكان: ${event.location}", fontSize = tanweerTextSize(12f), color = CyanAccent)
                             }
                             if (!event.description.isNullOrBlank()) {
-                                Text(text = event.description, fontSize = 12.sp, color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(text = event.description, fontSize = tanweerTextSize(12f), color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -503,7 +589,7 @@ fun SearchScreen(
             // 5. Inquiries / Issues Results (Exact Click -> Full Issue Thread)
             if (rankedIssues.isNotEmpty()) {
                 item {
-                    Text(text = "❓ الاستفسارات والنقاشات الدراسية (${rankedIssues.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = PurpleAccent)
+                    Text(text = "❓ الاستفسارات والنقاشات الدراسية (${rankedIssues.size})", fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = PurpleAccent)
                 }
                 items(rankedIssues) { (issue, _) ->
                     GlassCard(
@@ -523,12 +609,12 @@ fun SearchScreen(
                                     color = if (issue.status == "SOLVED") EmeraldGreen else PurpleAccent,
                                     bgColor = if (issue.status == "SOLVED") EmeraldGreen.copy(alpha = 0.15f) else PurpleAccent.copy(alpha = 0.15f)
                                 )
-                                Text(text = "${issue.commentsCount} ردود", fontSize = 11.sp, color = TextMuted)
+                                Text(text = "${issue.commentsCount} ردود", fontSize = tanweerTextSize(11f), color = TextMuted)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = issue.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text(text = issue.title, fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = TextPrimary)
                             if (!issue.description.isNullOrBlank()) {
-                                Text(text = issue.description, fontSize = 12.sp, color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(text = issue.description, fontSize = tanweerTextSize(12f), color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -538,7 +624,7 @@ fun SearchScreen(
             // 6. Chat Messages Results (Exact Click -> View Message & Open Chat)
             if (rankedChatMessages.isNotEmpty()) {
                 item {
-                    Text(text = "💬 رسائل ونقاشات المجموعة (${rankedChatMessages.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = ElectricBlue)
+                    Text(text = "💬 رسائل ونقاشات المجموعة (${rankedChatMessages.size})", fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = ElectricBlue)
                 }
                 items(rankedChatMessages) { (msg, _) ->
                     GlassCard(
@@ -553,11 +639,11 @@ fun SearchScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(text = "👤 ${msg.senderName}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ElectricBlue)
-                                Text(text = SimpleDateFormat("HH:mm • yyyy-MM-dd", Locale.US).format(Date(msg.timestamp)), fontSize = 10.sp, color = TextMuted)
+                                Text(text = "👤 ${msg.senderName}", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = ElectricBlue)
+                                Text(text = SimpleDateFormat("HH:mm • yyyy-MM-dd", Locale.US).format(Date(msg.timestamp)), fontSize = tanweerTextSize(10f), color = TextMuted)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = msg.text, fontSize = 13.sp, color = TextPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            Text(text = msg.text, fontSize = tanweerTextSize(13f), color = TextPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -566,7 +652,7 @@ fun SearchScreen(
             // 7. Books Results (Exact Click -> Instant Reader)
             if (rankedBooks.isNotEmpty()) {
                 item {
-                    Text(text = "📕 الكتب والمناهج الدراسية (${rankedBooks.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = "📕 الكتب والمناهج الدراسية (${rankedBooks.size})", fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
                 items(rankedBooks) { (book, _) ->
                     GlassCard(
@@ -579,8 +665,8 @@ fun SearchScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(text = book.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                Text(text = "${book.subjectName} • ${book.edition}", fontSize = 12.sp, color = TextSecondary)
+                                Text(text = book.title, fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                                Text(text = "${book.subjectName} • ${book.edition}", fontSize = tanweerTextSize(12f), color = TextSecondary)
                             }
                             GlassOutlinedButton(
                                 text = "مطالعة 📖",
@@ -591,9 +677,26 @@ fun SearchScreen(
                 }
             }
 
-            // Empty State
+            // An empty local Room result is not a confirmed no-match until its source sync succeeds.
             if (totalResultsCount == 0) {
+                val confirmedNoResults = shouldShowConfirmedNoSearchResults(
+                    query = query,
+                    resultCount = totalResultsCount,
+                    syncState = searchSyncState
+                )
+
                 item {
+                    val emptyMessage = when {
+                        query.isBlank() -> stringResource(R.string.search_enter_query)
+                        confirmedNoResults -> stringResource(R.string.search_no_results_confirmed)
+                        searchSyncState is SyncState.OfflineCached ->
+                            stringResource(R.string.search_no_results_offline)
+                        searchSyncState is SyncState.Loading || searchSyncState is SyncState.Refreshing ->
+                            stringResource(R.string.search_results_verifying)
+                        searchSyncState is SyncState.Error ->
+                            stringResource(R.string.search_results_unverified)
+                        else -> stringResource(R.string.search_results_pending)
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -601,11 +704,11 @@ fun SearchScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(text = "🔍", fontSize = 40.sp)
+                            Text(text = "🔍", fontSize = tanweerTextSize(40f))
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                text = if (query.isBlank()) "اكتب كلمة للبحث في المنظومة الشاملة" else "لم يتم العثور على نتائج تطابق \"$query\"",
-                                fontSize = 14.sp,
+                                text = emptyMessage,
+                                fontSize = tanweerTextSize(14f),
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center
                             )
@@ -644,16 +747,16 @@ fun SearchScreen(
                             }
                         }
 
-                        Text(text = content.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                        Text(text = "📅 تاريخ الدرس: ${content.studyDate} • الكاتب: ${content.authorName}", fontSize = 11.sp, color = TextSecondary)
+                        Text(text = content.title, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Black, color = TextPrimary)
+                        Text(text = "📅 تاريخ الدرس: ${content.studyDate} • الكاتب: ${content.authorName}", fontSize = tanweerTextSize(11f), color = TextSecondary)
 
                         if (!content.description.isNullOrBlank()) {
-                            Text(text = content.description, fontSize = 13.sp, color = TextPrimary, lineHeight = 18.sp)
+                            Text(text = content.description, fontSize = tanweerTextSize(13f), color = TextPrimary, lineHeight = tanweerLineHeight(18f))
                         }
 
                         if (content.media.isNotEmpty()) {
-                            Text("📷 لوحات الشرح والسبورة (${content.media.size} لوحات):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-                            Text("لوحات الشرح موثقة سحابياً — اضغط 'نقل الدرس للدفتر' لمطالعتها وتنزيلها لمذاكرتها أوفلاين.", fontSize = 11.sp, color = TextSecondary)
+                            Text("📷 لوحات الشرح والسبورة (${content.media.size} لوحات):", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
+                            Text("لوحات الشرح موثقة سحابياً — اضغط 'نقل الدرس للدفتر' لمطالعتها وتنزيلها لمذاكرتها أوفلاين.", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -707,15 +810,15 @@ fun SearchScreen(
                             }
                         }
 
-                        Text(text = hw.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                        Text(text = "📅 تاريخ الطرح: ${hw.studyDate} • الاستحقاق: ${hw.dueDate}", fontSize = 11.sp, color = TextSecondary)
+                        Text(text = hw.title, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Black, color = TextPrimary)
+                        Text(text = "📅 تاريخ الطرح: ${hw.studyDate} • الاستحقاق: ${hw.dueDate}", fontSize = tanweerTextSize(11f), color = TextSecondary)
 
                         if (!hw.details.isNullOrBlank()) {
-                            Text(text = hw.details, fontSize = 13.sp, color = TextPrimary, lineHeight = 18.sp)
+                            Text(text = hw.details, fontSize = tanweerTextSize(13f), color = TextPrimary, lineHeight = tanweerLineHeight(18f))
                         }
 
                         if (!hw.pageNumbers.isNullOrBlank() || !hw.questionNumbers.isNullOrBlank()) {
-                            Text(text = "📖 الصفحات: ${hw.pageNumbers ?: "—"} • الأسئلة: ${hw.questionNumbers ?: "—"}", fontSize = 12.sp, color = CyanAccent)
+                            Text(text = "📖 الصفحات: ${hw.pageNumbers ?: "—"} • الأسئلة: ${hw.questionNumbers ?: "—"}", fontSize = tanweerTextSize(12f), color = CyanAccent)
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -727,7 +830,7 @@ fun SearchScreen(
                         ) {
                             Text(
                                 text = if (hw.isCompleted) "تم إنجاز هذا الواجب ✓" else "الواجب غير منجز بعد",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = if (hw.isCompleted) EmeraldGreen else WarmAmber,
                                 fontWeight = FontWeight.Bold
                             )
@@ -770,14 +873,14 @@ fun SearchScreen(
                             }
                         }
 
-                        Text(text = exam.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                        Text(text = "📅 موعد الاختبار: ${exam.examDate}", fontSize = 12.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                        Text(text = exam.title, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Black, color = TextPrimary)
+                        Text(text = "📅 موعد الاختبار: ${exam.examDate}", fontSize = tanweerTextSize(12f), color = WarmAmber, fontWeight = FontWeight.Bold)
 
                         if (!exam.requiredChapters.isNullOrBlank()) {
-                            Text(text = "المقرر والفصول: ${exam.requiredChapters}", fontSize = 13.sp, color = CyanAccent)
+                            Text(text = "المقرر والفصول: ${exam.requiredChapters}", fontSize = tanweerTextSize(13f), color = CyanAccent)
                         }
                         if (!exam.notes.isNullOrBlank()) {
-                            Text(text = "ملاحظات: ${exam.notes}", fontSize = 12.sp, color = TextSecondary)
+                            Text(text = "ملاحظات: ${exam.notes}", fontSize = tanweerTextSize(12f), color = TextSecondary)
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -789,7 +892,7 @@ fun SearchScreen(
                         ) {
                             Text(
                                 text = if (exam.isCompleted) "تمت المذاكرة بالكامل ✓" else "مطلوب المذاكرة",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = if (exam.isCompleted) EmeraldGreen else RubyRed,
                                 fontWeight = FontWeight.Bold
                             )
@@ -832,14 +935,14 @@ fun SearchScreen(
                             }
                         }
 
-                        Text(text = event.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                        Text(text = "📅 التاريخ: ${event.eventDate} ${event.timeStr?.let { "• $it" } ?: ""}", fontSize = 11.sp, color = TextSecondary)
+                        Text(text = event.title, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Black, color = TextPrimary)
+                        Text(text = "📅 التاريخ: ${event.eventDate} ${event.timeStr?.let { "• $it" } ?: ""}", fontSize = tanweerTextSize(11f), color = TextSecondary)
 
                         if (!event.location.isNullOrBlank()) {
-                            Text(text = "📍 المكان: ${event.location}", fontSize = 13.sp, color = CyanAccent, fontWeight = FontWeight.Bold)
+                            Text(text = "📍 المكان: ${event.location}", fontSize = tanweerTextSize(13f), color = CyanAccent, fontWeight = FontWeight.Bold)
                         }
                         if (!event.description.isNullOrBlank()) {
-                            Text(text = event.description, fontSize = 13.sp, color = TextPrimary, lineHeight = 18.sp)
+                            Text(text = event.description, fontSize = tanweerTextSize(13f), color = TextPrimary, lineHeight = tanweerLineHeight(18f))
                         }
                     }
                 }
@@ -865,7 +968,7 @@ fun SearchScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(text = "👤 ${msg.senderName}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = ElectricBlue)
+                            Text(text = "👤 ${msg.senderName}", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = ElectricBlue)
                             IconButton(onClick = { selectedChatMessageForDetail = null }) {
                                 Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextSecondary)
                             }
@@ -873,11 +976,11 @@ fun SearchScreen(
 
                         Text(
                             text = SimpleDateFormat("HH:mm • yyyy-MM-dd", Locale.US).format(Date(msg.timestamp)),
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextMuted
                         )
 
-                        Text(text = msg.text, fontSize = 14.sp, color = TextPrimary, lineHeight = 20.sp)
+                        Text(text = msg.text, fontSize = tanweerTextSize(14f), color = TextPrimary, lineHeight = tanweerLineHeight(20f))
 
                         Spacer(modifier = Modifier.height(6.dp))
 

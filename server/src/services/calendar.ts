@@ -90,7 +90,7 @@ export async function handleGetDayDetail(
   const contentList = [];
   for (const c of (contents.results as any[])) {
     const media = await env.DB.prepare(
-      `SELECT id, page_order, url, mime_type, file_size FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
+      `SELECT id, page_order, url, mime_type, file_size, checksum FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
     ).bind(c.id).all();
     contentList.push(mapContent(c, media.results || []));
   }

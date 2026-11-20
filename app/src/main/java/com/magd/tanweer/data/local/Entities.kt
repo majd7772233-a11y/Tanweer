@@ -29,7 +29,9 @@ data class GroupEntity(
     val role: String,
     val memberCount: Int,
     val isDiscoverable: Boolean = false,
-    val isOfficial: Boolean = false
+    val isOfficial: Boolean = false,
+    val visibility: String = "PUBLIC",
+    val chatPolicy: String = "MEMBERS"
 )
 
 @Entity(tableName = "cached_schedule_slots")
@@ -86,7 +88,8 @@ data class HomeworkEntity(
     val colorHex: String,
     val mediaUrlsJson: String = "[]",
     val createdAt: Long,
-    val syncStatus: String = "SYNCED"
+    val syncStatus: String = "SYNCED",
+    val isOfficial: Boolean = false
 )
 
 @Entity(tableName = "cached_homework_completions", primaryKeys = ["homeworkId", "userId"])
@@ -122,7 +125,8 @@ data class ExamEntity(
     val colorHex: String,
     val isCompleted: Boolean = false,
     val examType: String = "MONTHLY",
-    val syncStatus: String = "SYNCED"
+    val syncStatus: String = "SYNCED",
+    val isOfficial: Boolean = false
 )
 
 @Entity(tableName = "cached_events")
@@ -136,7 +140,9 @@ data class EventEntity(
     val category: String,
     val location: String?,
     val createdAt: Long,
-    val syncStatus: String = "SYNCED"
+    val syncStatus: String = "SYNCED",
+    val sourceName: String? = null,
+    val isOfficial: Boolean = false
 )
 
 @Entity(tableName = "cached_issues")
@@ -304,7 +310,7 @@ sealed class HomeworkToggleResult(val isCompleted: Boolean) {
 
 sealed class ExamDeleteResult(val message: String) {
     class Synced(message: String = "✅ تم حذف الاختبار من السيرفر والجدول بنجاح") : ExamDeleteResult(message)
-    class QueuedOffline(message: String = "🟡 أزيل من جهازك وسيتم حذف نسخة السيرفر تلقائياً عند توفر الإنترنت") : ExamDeleteResult(message)
+    class QueuedOffline(message: String = "🟡 حُفظ طلب الحذف؛ سيبقى الاختبار ظاهراً حتى يؤكد السيرفر حذفه عند عودة الاتصال") : ExamDeleteResult(message)
     class Failed(message: String = "❌ تعذر حذف نسخة السيرفر، يرجى المحاولة لاحقاً") : ExamDeleteResult(message)
 }
 

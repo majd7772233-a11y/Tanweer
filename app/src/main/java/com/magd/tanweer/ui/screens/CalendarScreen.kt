@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.*
 import com.magd.tanweer.ui.SubScreen
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -45,10 +47,29 @@ fun CalendarScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
-
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
+    val calendarSyncState by viewModel.calendarSyncState.collectAsStateWithLifecycle()
+    val calendarSyncMonthScope by viewModel.calendarSyncMonthScope.collectAsStateWithLifecycle()
     var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
     var showAddActionSheet by remember { mutableStateOf(false) }
+    val monthQueryFormat = remember { SimpleDateFormat("yyyy-MM", Locale.US) }
+    val currentCalendarMonth = remember(currentCalendar.timeInMillis) { monthQueryFormat.format(currentCalendar.time) }
+    val scopedCalendarSyncState = syncStateForScope(calendarSyncState, groupSyncScopeIds[GroupSyncSource.CALENDAR], activeGroupId)
+    val hasCalendarSnapshot = hasAuthoritativeCalendarMonthSnapshot(scopedCalendarSyncState, calendarSyncMonthScope, currentCalendarMonth)
+
+    val dayDetailsSyncState by viewModel.dayDetailsSyncState.collectAsStateWithLifecycle()
+    val dayDetailsSyncGroupId by viewModel.dayDetailsSyncGroupId.collectAsStateWithLifecycle()
+    val dayDetailsSyncDate by viewModel.dayDetailsSyncDate.collectAsStateWithLifecycle()
+    val scopedDayDetailsSyncState = syncStateForDayScope(
+        dayDetailsSyncState,
+        dayDetailsSyncGroupId,
+        dayDetailsSyncDate,
+        activeGroupId,
+        selectedDateStr,
+    )
+    val hasDayDetailsSnapshot = hasAuthoritativeSnapshot(scopedDayDetailsSyncState)
+    val hasConfirmedEmptyDay = shouldShowConfirmedCalendarEmpty(hasCalendarSnapshot, hasDayDetailsSnapshot)
 
     var showAddHolidayDialog by remember { mutableStateOf(false) }
     var holidayTitle by remember { mutableStateOf("") }
@@ -64,7 +85,6 @@ fun CalendarScreen(
 
     val monthYearFormat = remember { SimpleDateFormat("MMMM yyyy", Locale("ar")) }
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
-    val monthQueryFormat = remember { SimpleDateFormat("yyyy-MM", Locale.US) }
 
     LaunchedEffect(activeGroupId, currentCalendar.timeInMillis) {
         if (activeGroupId.isNotBlank()) {
@@ -150,6 +170,16 @@ fun CalendarScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        if ((dayContents.isNotEmpty() || dayHomeworks.isNotEmpty() || dayExams.isNotEmpty() || dayEvents.isNotEmpty()) &&
+            (scopedDayDetailsSyncState is SyncState.Error || scopedDayDetailsSyncState is SyncState.OfflineCached)) {
+            item {
+                SyncStatusBar(
+                    syncState = scopedDayDetailsSyncState,
+                    onRefresh = { viewModel.syncDayDetails(activeGroupId, selectedDateStr) }
+                )
+            }
+        }
+
         // Month Navigation Bar
         item {
             GlassCard(
@@ -176,13 +206,13 @@ fun CalendarScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = monthYearFormat.format(currentCalendar.time),
-                            fontSize = 17.sp,
+                            fontSize = tanweerTextSize(17f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
                         Text(
                             text = "التقويم الدراسي الزجاجي",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary
                         )
                     }
@@ -209,9 +239,6 @@ fun CalendarScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 val curMonthPrefix = remember(currentCalendar.timeInMillis) { monthQueryFormat.format(currentCalendar.time) }
-                val monthLessons = remember(allContents, curMonthPrefix) {
-                    allContents.count { it.studyDate?.startsWith(curMonthPrefix) == true }
-                }
 
                 Box(
                     modifier = Modifier
@@ -222,7 +249,7 @@ fun CalendarScreen(
                         .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("📖 $monthLessons دروس", fontSize = 11.sp, color = EmeraldGreen, fontWeight = FontWeight.Bold)
+                    Text("📖 تفاصيل الدروس", fontSize = tanweerTextSize(11f), color = EmeraldGreen, fontWeight = FontWeight.Bold)
                 }
 
                 Box(
@@ -234,7 +261,7 @@ fun CalendarScreen(
                         .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("🔴 ${exams.size} اختبارات", fontSize = 11.sp, color = RubyRed, fontWeight = FontWeight.Bold)
+                    Text("🔴 ${if (hasCalendarSnapshot) exams.size.toString() else "—"} اختبارات", fontSize = tanweerTextSize(11f), color = RubyRed, fontWeight = FontWeight.Bold)
                 }
 
                 Box(
@@ -246,7 +273,7 @@ fun CalendarScreen(
                         .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("📝 ${homeworks.size} واجبات", fontSize = 11.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Text("📝 ${if (hasCalendarSnapshot) homeworks.size.toString() else "—"} واجبات", fontSize = tanweerTextSize(11f), color = WarmAmber, fontWeight = FontWeight.Bold)
                 }
 
                 Box(
@@ -260,8 +287,8 @@ fun CalendarScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("🎪 ${events.size} فعاليات", fontSize = 11.sp, color = PurpleAccent, fontWeight = FontWeight.Bold)
-                        Text("‹", fontSize = 13.sp, color = PurpleAccent)
+                        Text("🎪 ${if (hasCalendarSnapshot) events.size.toString() else "—"} فعاليات", fontSize = tanweerTextSize(11f), color = PurpleAccent, fontWeight = FontWeight.Bold)
+                        Text("‹", fontSize = tanweerTextSize(13f), color = PurpleAccent)
                     }
                 }
             }
@@ -276,7 +303,7 @@ fun CalendarScreen(
                 listOf("أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت").forEach { name ->
                     Text(
                         text = name,
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         fontWeight = FontWeight.Bold,
                         color = if (name == "جمعة" || name == "سبت") TextMuted else CyanAccent,
                         textAlign = TextAlign.Center,
@@ -337,7 +364,7 @@ fun CalendarScreen(
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
                                         text = item.dayNumber.toString(),
-                                        fontSize = 13.sp,
+                                        fontSize = tanweerTextSize(13f),
                                         fontWeight = if (isSelected || item.isToday || item.hasHoliday) FontWeight.Bold else FontWeight.Normal,
                                         color = when {
                                             isSelected -> TextOnAccent
@@ -412,13 +439,13 @@ fun CalendarScreen(
                 Column {
                     Text(
                         text = "📖 تفاصيل: ${TanweerViewModel.getFormattedArabicDate(selectedDateStr)}",
-                        fontSize = 15.sp,
+                        fontSize = tanweerTextSize(15f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent
                     )
                     Text(
                         text = "يمكنك توثيق الدروس والواجبات لهذا التاريخ في أي وقت",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         color = TextSecondary
                     )
                 }
@@ -451,7 +478,7 @@ fun CalendarScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("🌴", fontSize = 32.sp)
+                        Text("🌴", fontSize = tanweerTextSize(32f))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -459,7 +486,7 @@ fun CalendarScreen(
                             ) {
                                 Text(
                                     text = "إجازة مدرسية رسمية",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = EmeraldGreen
                                 )
@@ -472,7 +499,7 @@ fun CalendarScreen(
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = selectedDayHoliday.title,
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextPrimary
                             )
@@ -480,7 +507,7 @@ fun CalendarScreen(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "المبرر الإداري: ${selectedDayHoliday.description}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextSecondary
                                 )
                             }
@@ -507,11 +534,11 @@ fun CalendarScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("🔴", fontSize = 16.sp)
+                                Text("🔴", fontSize = tanweerTextSize(16f))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "اختبار ${exam.subjectName}: ${exam.title}",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
@@ -519,14 +546,14 @@ fun CalendarScreen(
                             if (!exam.requiredChapters.isNullOrBlank()) {
                                 Text(
                                     text = "الفصول المقررة: ${exam.requiredChapters}",
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = RubyRed,
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
                             }
                             Text(
                                 text = "اضغط لعرض تفاصيل ومقرر الاختبار 🔍",
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 color = TextMuted,
                                 modifier = Modifier.padding(top = 2.dp)
                             )
@@ -555,18 +582,18 @@ fun CalendarScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "📝 واجب ${hw.subjectName}: ${hw.title}",
-                                fontSize = 14.sp,
+                                fontSize = tanweerTextSize(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             Text(
                                 text = "موعد التسليم: ${hw.dueDate}",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = WarmAmber
                             )
                             Text(
                                 text = "اضغط لعرض تفاصيل الواجب والمرفقات 🔍",
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 color = TextMuted,
                                 modifier = Modifier.padding(top = 2.dp)
                             )
@@ -609,12 +636,12 @@ fun CalendarScreen(
                                         "WORKSHOP" -> "💡"
                                         else -> "🎪"
                                     },
-                                    fontSize = 16.sp
+                                    fontSize = tanweerTextSize(16f)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "فعالية: ${ev.title}",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
@@ -622,7 +649,7 @@ fun CalendarScreen(
                             if (!ev.description.isNullOrBlank()) {
                                 Text(
                                     text = ev.description,
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary,
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
@@ -630,14 +657,14 @@ fun CalendarScreen(
                             if (!ev.location.isNullOrBlank() || !ev.timeStr.isNullOrBlank()) {
                                 Text(
                                     text = "${ev.timeStr?.let { "⏰ $it " } ?: ""}${ev.location?.let { "📍 $it" } ?: ""}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = PurpleAccent,
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
                             }
                             Text(
                                 text = "اضغط لعرض تفاصيل الفعالية 🔍",
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 color = TextMuted,
                                 modifier = Modifier.padding(top = 2.dp)
                             )
@@ -664,7 +691,7 @@ fun CalendarScreen(
                         ) {
                             Text(
                                 text = "${content.subjectIcon} درس ${content.subjectName}: ${content.title}",
-                                fontSize = 14.sp,
+                                fontSize = tanweerTextSize(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
@@ -673,7 +700,7 @@ fun CalendarScreen(
                         if (!content.description.isNullOrBlank()) {
                             Text(
                                 text = content.description,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextSecondary,
                                 modifier = Modifier.padding(top = 4.dp)
                             )
@@ -687,12 +714,12 @@ fun CalendarScreen(
                         ) {
                             Text(
                                 text = "بواسطة: ${content.authorName} (${content.authorGradeSection})",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = CyanAccent
                             )
                             Text(
                                 text = "📖 اضغط لفتح الصور والنقل للدفتر",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = CyanAccent,
                                 fontWeight = FontWeight.Bold
                             )
@@ -702,19 +729,36 @@ fun CalendarScreen(
             }
         } else if (dayExams.isEmpty() && dayHomeworks.isEmpty() && dayEvents.isEmpty()) {
             item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface.copy(alpha = 0.4f)
-                ) {
-                    Text(
-                        text = "لا توجد منشورات أو واجبات أو فعاليات مسجلة لهذا اليوم حتى الآن. يمكنك إضافة وتوثيق الحصة بالضغط على زر الإضافة أعلاه.",
-                        fontSize = 13.sp,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp)
-                    )
+                if (hasConfirmedEmptyDay) {
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = GlassSurface.copy(alpha = 0.4f)
+                    ) {
+                        Text(
+                            text = "لا توجد منشورات أو واجبات أو فعاليات مسجلة لهذا اليوم في آخر لقطة شهرية مؤكدة. يمكنك إضافة وتوثيق الحصة بالضغط على زر الإضافة أعلاه.",
+                            fontSize = tanweerTextSize(13f),
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp)
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PendingSyncEmptyState(
+                            dataLabel = stringResource(com.magd.tanweer.R.string.calendar_day_details_label, selectedDateStr),
+                            syncState = aggregateSyncStates(listOf(scopedCalendarSyncState, scopedDayDetailsSyncState))
+                        )
+                        TextButton(
+                            onClick = {
+                                viewModel.syncCalendarMonth(activeGroupId, monthQueryFormat.format(currentCalendar.time), isRefresh = true)
+                                viewModel.syncDayDetails(activeGroupId, selectedDateStr)
+                            }
+                        ) {
+                            Text(stringResource(com.magd.tanweer.R.string.calendar_retry_day_sync), color = CyanAccent)
+                        }
+                    }
                 }
             }
         }
@@ -735,13 +779,13 @@ fun CalendarScreen(
             ) {
                 Text(
                     text = "➕ إضافة وتوثيق ليوم: ${TanweerViewModel.getFormattedArabicDate(selectedDateStr)}",
-                    fontSize = 16.sp,
+                    fontSize = tanweerTextSize(16f),
                     fontWeight = FontWeight.Bold,
                     color = CyanAccent
                 )
                 Text(
                     text = "اختر نوع النشاط الذي ترغب في إضافته أو توثيقه لهذا التاريخ:",
-                    fontSize = 12.sp,
+                    fontSize = tanweerTextSize(12f),
                     color = TextSecondary
                 )
 
@@ -761,10 +805,10 @@ fun CalendarScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("📷", fontSize = 24.sp)
+                        Text("📷", fontSize = tanweerTextSize(24f))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("توثيق درس للشعبة", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("التقاط صور السبورة ومشاركتها مع زملاء الصف", fontSize = 11.sp, color = TextSecondary)
+                            Text("توثيق درس للشعبة", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("التقاط صور السبورة ومشاركتها مع زملاء الصف", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                         GlassPill(text = "درس", color = CyanAccent, bgColor = CyanGlow)
                     }
@@ -784,10 +828,10 @@ fun CalendarScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("📝", fontSize = 24.sp)
+                        Text("📝", fontSize = tanweerTextSize(24f))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("إضافة واجب أو تكليف مدرسي", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تسجيل الواجب المطلوب وتاريخ التسليم المعتمد", fontSize = 11.sp, color = TextSecondary)
+                            Text("إضافة واجب أو تكليف مدرسي", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("تسجيل الواجب المطلوب وتاريخ التسليم المعتمد", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                         GlassPill(text = "واجب", color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.15f))
                     }
@@ -807,10 +851,10 @@ fun CalendarScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("📑", fontSize = 24.sp)
+                        Text("📑", fontSize = tanweerTextSize(24f))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("إضافة اختبار أو تسميع دوري", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تحديد موعد الاختبار والفصول المقررة", fontSize = 11.sp, color = TextSecondary)
+                            Text("إضافة اختبار أو تسميع دوري", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("تحديد موعد الاختبار والفصول المقررة", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                         GlassPill(text = "اختبار", color = RubyRed, bgColor = RubyRed.copy(alpha = 0.15f))
                     }
@@ -830,10 +874,10 @@ fun CalendarScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("🎪", fontSize = 24.sp)
+                        Text("🎪", fontSize = tanweerTextSize(24f))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("إضافة فعالية أو مناسبة مدرسية", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تسجيل مسابقة، عطلة، أو نشاط صفي تفاعلي", fontSize = 11.sp, color = TextSecondary)
+                            Text("إضافة فعالية أو مناسبة مدرسية", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("تسجيل مسابقة، عطلة، أو نشاط صفي تفاعلي", fontSize = tanweerTextSize(11f), color = TextSecondary)
                         }
                         GlassPill(text = "فعالية", color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
                     }
@@ -856,10 +900,10 @@ fun CalendarScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text("🌴", fontSize = 24.sp)
+                            Text("🌴", fontSize = tanweerTextSize(24f))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("إعلان إجازة مدرسية رسمية", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
-                                Text("تعيين هذا اليوم كإجازة مع توثيق السبب والمبرر الإلزامي", fontSize = 11.sp, color = TextSecondary)
+                                Text("إعلان إجازة مدرسية رسمية", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = EmeraldGreen)
+                                Text("تعيين هذا اليوم كإجازة مع توثيق السبب والمبرر الإلزامي", fontSize = tanweerTextSize(11f), color = TextSecondary)
                             }
                             GlassPill(text = "إجازة", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
                         }
@@ -874,8 +918,8 @@ fun CalendarScreen(
             onDismissRequest = { if (!isSubmittingHoliday) showAddHolidayDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("🌴", fontSize = 22.sp)
-                    Text("إعلان إجازة مدرسية رسمية", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("🌴", fontSize = tanweerTextSize(22f))
+                    Text("إعلان إجازة مدرسية رسمية", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             },
             text = {
@@ -885,7 +929,7 @@ fun CalendarScreen(
                 ) {
                     Text(
                         text = "التاريخ: ${TanweerViewModel.getFormattedArabicDate(selectedDateStr)} ($selectedDateStr)",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         color = CyanAccent
                     )
 
@@ -915,10 +959,10 @@ fun CalendarScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column {
-                            Text("نطاق الإجازة", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("نطاق الإجازة", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
                             Text(
                                 if (isSchoolWideHoliday) "كامل المدرسة (جميع الشعب والمراحل)" else "شعبتي الحالية فقط",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                         }
@@ -932,7 +976,7 @@ fun CalendarScreen(
                         Text(
                             text = holidayError ?: "",
                             color = RubyRed,
-                            fontSize = 12.sp
+                            fontSize = tanweerTextSize(12f)
                         )
                     }
                 }
@@ -1020,20 +1064,20 @@ fun CalendarScreen(
                         }
                     }
 
-                    Text(text = hw.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                    Text(text = "📅 تاريخ الطرح: ${hw.studyDate} • الاستحقاق: ${hw.dueDate}", fontSize = 11.sp, color = TextSecondary)
+                    Text(text = hw.title, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Black, color = TextPrimary)
+                    Text(text = "📅 تاريخ الطرح: ${hw.studyDate} • الاستحقاق: ${hw.dueDate}", fontSize = tanweerTextSize(11f), color = TextSecondary)
 
                     if (!hw.details.isNullOrBlank()) {
-                        Text(text = hw.details, fontSize = 13.sp, color = TextPrimary, lineHeight = 18.sp)
+                        Text(text = hw.details, fontSize = tanweerTextSize(13f), color = TextPrimary, lineHeight = tanweerLineHeight(18f))
                     }
 
                     if (!hw.pageNumbers.isNullOrBlank() || !hw.questionNumbers.isNullOrBlank()) {
-                        Text(text = "📖 الصفحات: ${hw.pageNumbers ?: "—"} • الأسئلة: ${hw.questionNumbers ?: "—"}", fontSize = 12.sp, color = CyanAccent)
+                        Text(text = "📖 الصفحات: ${hw.pageNumbers ?: "—"} • الأسئلة: ${hw.questionNumbers ?: "—"}", fontSize = tanweerTextSize(12f), color = CyanAccent)
                     }
 
                     if (hw.mediaUrls.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = "المرفقات (${hw.mediaUrls.size}):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(text = "المرفقات (${hw.mediaUrls.size}):", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1060,7 +1104,7 @@ fun CalendarScreen(
                     ) {
                         Text(
                             text = if (hw.isCompleted) "تم إنجاز هذا الواجب ✓" else "الواجب غير منجز بعد",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             color = if (hw.isCompleted) EmeraldGreen else WarmAmber,
                             fontWeight = FontWeight.Bold
                         )
@@ -1106,14 +1150,14 @@ fun CalendarScreen(
                         }
                     }
 
-                    Text(text = exam.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                    Text(text = "📅 موعد الاختبار: ${exam.examDate}", fontSize = 12.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Text(text = exam.title, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Black, color = TextPrimary)
+                    Text(text = "📅 موعد الاختبار: ${exam.examDate}", fontSize = tanweerTextSize(12f), color = WarmAmber, fontWeight = FontWeight.Bold)
 
                     if (!exam.requiredChapters.isNullOrBlank()) {
-                        Text(text = "الفصول والمقرر: ${exam.requiredChapters}", fontSize = 13.sp, color = CyanAccent)
+                        Text(text = "الفصول والمقرر: ${exam.requiredChapters}", fontSize = tanweerTextSize(13f), color = CyanAccent)
                     }
                     if (!exam.notes.isNullOrBlank()) {
-                        Text(text = "ملاحظات: ${exam.notes}", fontSize = 12.sp, color = TextSecondary)
+                        Text(text = "ملاحظات: ${exam.notes}", fontSize = tanweerTextSize(12f), color = TextSecondary)
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
@@ -1125,7 +1169,7 @@ fun CalendarScreen(
                     ) {
                         Text(
                             text = if (exam.isCompleted) "تمت المذاكرة بالكامل ✓" else "مطلوب المذاكرة",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             color = if (exam.isCompleted) EmeraldGreen else RubyRed,
                             fontWeight = FontWeight.Bold
                         )
@@ -1173,14 +1217,14 @@ fun CalendarScreen(
                         }
                     }
 
-                    Text(text = event.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                    Text(text = "📅 التاريخ: ${event.eventDate} ${event.timeStr?.let { "• $it" } ?: ""}", fontSize = 11.sp, color = TextSecondary)
+                    Text(text = event.title, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Black, color = TextPrimary)
+                    Text(text = "📅 التاريخ: ${event.eventDate} ${event.timeStr?.let { "• $it" } ?: ""}", fontSize = tanweerTextSize(11f), color = TextSecondary)
 
                     if (!event.location.isNullOrBlank()) {
-                        Text(text = "📍 المكان: ${event.location}", fontSize = 13.sp, color = CyanAccent, fontWeight = FontWeight.Bold)
+                        Text(text = "📍 المكان: ${event.location}", fontSize = tanweerTextSize(13f), color = CyanAccent, fontWeight = FontWeight.Bold)
                     }
                     if (!event.description.isNullOrBlank()) {
-                        Text(text = event.description, fontSize = 13.sp, color = TextPrimary, lineHeight = 18.sp)
+                        Text(text = event.description, fontSize = tanweerTextSize(13f), color = TextPrimary, lineHeight = tanweerLineHeight(18f))
                     }
                 }
             }

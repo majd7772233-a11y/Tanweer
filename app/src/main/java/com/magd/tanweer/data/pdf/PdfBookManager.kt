@@ -4,8 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import android.os.StatFs
 import android.util.Log
 import android.util.LruCache
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -14,9 +16,48 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.InputStream
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+
+internal data class PdfRenderDimensions(val width: Int, val height: Int)
+
+internal fun calculatePdfRenderDimensions(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    targetWidth: Int,
+    targetHeight: Int
+): PdfRenderDimensions {
+    require(sourceWidth > 0 && sourceHeight > 0) { "PDF page dimensions must be positive" }
+    require(targetWidth > 0 && targetHeight > 0) { "PDF target dimensions must be positive" }
+    val scale = minOf(targetWidth.toFloat() / sourceWidth, targetHeight.toFloat() / sourceHeight)
+    return PdfRenderDimensions(
+        width = (sourceWidth * scale).toInt().coerceAtLeast(1),
+        height = (sourceHeight * scale).toInt().coerceAtLeast(1)
+    )
+}
+
+internal fun parsePdfContentRangeStart(header: String?): Long? {
+    val match = Regex("^bytes\\s+(\\d+)-\\d+/(?:\\d+|\\*)$", RegexOption.IGNORE_CASE)
+        .matchEntire(header?.trim().orEmpty()) ?: return null
+    return match.groupValues[1].toLongOrNull()
+}
+
+internal fun pdfResponseAppendOffset(
+    existingPartialBytes: Long,
+    responseCode: Int,
+    contentRangeStart: Long?
+): Long? {
+    if (responseCode == 200) return 0L
+    if (responseCode == 206 && existingPartialBytes > 0L &&
+        contentRangeStart == existingPartialBytes
+    ) return existingPartialBytes
+    return null
+}
+
+internal fun shouldResumePdfPartial(partialBytes: Long, validator: String?): Boolean =
+    partialBytes > 0L && !validator.isNullOrBlank()
 
 sealed class PdfDownloadState {
     object Idle : PdfDownloadState()
@@ -32,9 +73,9 @@ class PdfBookManager(private val context: Context) {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    // 25% of available memory for rendered PDF Bitmaps LRU Cache
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-    private val cacheSize = maxMemory / 4
+    // Keep rendered pages within one eighth of the app heap and at most 64 MiB.
+    private val cacheSize = (maxMemory / 8).coerceAtMost(64 * 1024)
 
     private val bitmapCache = object : LruCache<String, Bitmap>(cacheSize) {
         override fun sizeOf(key: String, bitmap: Bitmap): Int {
@@ -93,30 +134,81 @@ class PdfBookManager(private val context: Context) {
         return if (file.exists()) file.length() else 0L
     }
 
+    private fun isManagedBookArtifact(file: File): Boolean {
+        val name = file.name
+        return name.endsWith(".pdf") || name.endsWith(".pdf.part") ||
+            name.endsWith(".pdf.part.meta") ||
+            (name.contains(".pdf") && name.contains(".corrupt-"))
+    }
+
     fun getTotalBooksStorageBytes(): Long {
         val dir = File(context.filesDir, "pdf_books")
         if (!dir.exists()) return 0L
-        return dir.listFiles()?.filter { it.isFile && it.name.endsWith(".pdf") }?.sumOf { it.length() } ?: 0L
+        return dir.listFiles()?.filter { it.isFile && isManagedBookArtifact(it) }
+            ?.sumOf { it.length() } ?: 0L
+    }
+
+    private fun bookArtifactCandidates(bookId: String): List<File> {
+        val dir = File(context.filesDir, "pdf_books")
+        val canonicalName = "${getCanonicalBookId(bookId)}.pdf"
+        val rawName = bookId.replace("[^a-zA-Z0-9_-]".toRegex(), "_") + ".pdf"
+        val baseNames = setOf(canonicalName, rawName)
+        return dir.listFiles()?.filter { file ->
+            file.isFile && baseNames.any { base ->
+                file.name == base || file.name == "$base.part" ||
+                    file.name == "$base.part.meta" || file.name.startsWith("$base.corrupt-") ||
+                    file.name.startsWith("$base.part.corrupt-")
+            }
+        } ?: emptyList()
     }
 
     fun deleteBookFile(bookId: String): Boolean {
-        if (currentBookId == bookId) {
-            closeRenderer()
-        }
-        val file = getCachedFile(bookId)
-        return if (file.exists()) file.delete() else false
+        if (currentBookId == bookId || currentBookId == getCanonicalBookId(bookId)) closeRenderer()
+        val artifacts = bookArtifactCandidates(bookId)
+        if (artifacts.isEmpty()) return false
+        var allDeleted = true
+        artifacts.forEach { if (!it.delete()) allDeleted = false }
+        return allDeleted
     }
 
     fun deleteAllDownloadedBooks(): Int {
         closeRenderer()
         val dir = File(context.filesDir, "pdf_books")
         if (!dir.exists()) return 0
-        val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".pdf") } ?: emptyList()
-        var count = 0
-        for (f in files) {
-            if (f.delete()) count++
+        val files = dir.listFiles()?.filter { it.isFile && isManagedBookArtifact(it) } ?: emptyList()
+        var deletedBooks = 0
+        files.forEach { file ->
+            val wasBook = file.name.endsWith(".pdf")
+            if (file.delete() && wasBook) deletedBooks++
         }
-        return count
+        return deletedBooks
+    }
+
+    /**
+     * Removes abandoned partial downloads and legacy cache temp files after a generous age.
+     * Recent partial files are retained so a request with a matching validator can resume.
+     */
+    fun cleanupOrphanedDownloadFiles(maxAgeMillis: Long = 30L * 24 * 60 * 60 * 1000): Int {
+        val now = System.currentTimeMillis()
+        var removed = 0
+        val bookDir = File(context.filesDir, "pdf_books")
+        bookDir.listFiles()?.forEach { file ->
+            if (file.isFile && file.name.endsWith(".pdf.part.meta")) {
+                val partial = File(file.parentFile, file.name.removeSuffix(".meta"))
+                if (!partial.exists() && file.delete()) removed++
+            } else if (file.isFile && file.name.endsWith(".pdf.part") &&
+                now - file.lastModified() > maxAgeMillis
+            ) {
+                val metadata = File(file.parentFile, file.name + ".meta")
+                if (file.delete()) removed++
+                if (metadata.exists() && metadata.delete()) removed++
+            }
+        }
+        context.cacheDir.listFiles()?.filter {
+            it.isFile && it.name.startsWith("temp_") && it.name.endsWith(".pdf") &&
+                now - it.lastModified() > 24L * 60 * 60 * 1000
+        }?.forEach { if (it.delete()) removed++ }
+        return removed
     }
 
     fun formatFileSize(bytes: Long): String {
@@ -133,74 +225,203 @@ class PdfBookManager(private val context: Context) {
     }
 
     fun downloadAndOpenBook(bookId: String, downloadUrl: String): Flow<PdfDownloadState> = flow {
+        cleanupOrphanedDownloadFiles()
         val targetFile = getCachedFile(bookId)
+        val partialFile = File(targetFile.parentFile, targetFile.name + ".part")
+        val validatorFile = File(targetFile.parentFile, targetFile.name + ".part.meta")
 
-        // Check if already cached
         if (targetFile.exists() && targetFile.length() > 1024) {
             try {
                 val pages = initRenderer(bookId, targetFile)
                 emit(PdfDownloadState.Ready(targetFile, pages))
                 return@flow
-            } catch (e: Exception) {
-                Log.w("PdfBookManager", "Cached file corrupted, redownloading", e)
-                targetFile.delete()
+            } catch (error: Exception) {
+                Log.w("PdfBookManager", "Cached PDF is invalid; preserving it while downloading a replacement", error)
             }
         }
 
-        emit(PdfDownloadState.Downloading(0f, 0L, 0L))
+        // A complete partial left by process death can be promoted without downloading it again.
+        if (partialFile.exists() && partialFile.length() > 1024 && hasPdfSignature(partialFile)) {
+            try {
+                val pages = verifyPdfFile(partialFile)
+                if (currentBookId == bookId) closeRenderer()
+                promoteVerifiedPdf(partialFile, targetFile)
+                validatorFile.delete()
+                val openedPages = initRenderer(bookId, targetFile)
+                emit(PdfDownloadState.Ready(targetFile, if (openedPages > 0) openedPages else pages))
+                return@flow
+            } catch (error: Exception) {
+                Log.d("PdfBookManager", "Partial PDF is not complete yet; continuing with a safe resume", error)
+            }
+        }
 
+        var validator = if (validatorFile.exists()) {
+            validatorFile.readText().trim().takeIf { it.isNotBlank() }
+        } else null
+        var existingBytes = if (partialFile.exists()) partialFile.length() else 0L
+        if (!shouldResumePdfPartial(existingBytes, validator)) {
+            if (partialFile.exists()) partialFile.delete()
+            validatorFile.delete()
+            existingBytes = 0L
+            validator = null
+        }
+
+        emit(PdfDownloadState.Downloading(0f, existingBytes, 0L))
         try {
-            val request = Request.Builder()
+            val requestBuilder = Request.Builder()
                 .url(downloadUrl)
                 .header("User-Agent", "Tanweer-Android-App")
-                .build()
-
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful || response.body == null) {
-                emit(PdfDownloadState.Error("فشل تحميل ملف الكتاب من الخادم (رمز الخطأ: ${response.code})"))
-                return@flow
+            if (existingBytes > 0L && !validator.isNullOrBlank()) {
+                requestBuilder.header("Range", "bytes=$existingBytes-")
+                requestBuilder.header("If-Range", validator)
             }
 
-            val body = response.body!!
-            val totalBytes = body.contentLength().coerceAtLeast(1L)
-            var downloadedBytes = 0L
+            client.newCall(requestBuilder.build()).execute().use { response ->
+                val body = response.body ?: throw IOException("الخادم لم يرسل ملف الكتاب")
+                if (response.code == 416 && existingBytes > 0L) {
+                    partialFile.delete()
+                    validatorFile.delete()
+                    throw IOException("انتهت صلاحية جزء التنزيل السابق؛ أعد المحاولة لبدء تنزيل جديد")
+                }
+                if (!response.isSuccessful) {
+                    throw IOException("فشل تحميل ملف الكتاب من الخادم (رمز الخطأ: ${response.code})")
+                }
 
-            val inputStream: InputStream = body.byteStream()
-            val tempFile = File(context.cacheDir, "temp_${System.currentTimeMillis()}.pdf")
-            val outputStream = FileOutputStream(tempFile)
+                val contentRangeStart = parsePdfContentRangeStart(response.header("Content-Range"))
+                val appendOffset = pdfResponseAppendOffset(existingBytes, response.code, contentRangeStart)
+                    ?: throw IOException("استجابة استكمال تنزيل الكتاب غير متوافقة؛ أعد المحاولة")
+                val append = appendOffset > 0L
 
-            val buffer = ByteArray(8 * 1024)
-            var bytesRead: Int
-            var lastEmitTime = 0L
+                val responseValidator = response.header("ETag")
+                    ?.takeIf { it.isNotBlank() && !it.startsWith("W/", ignoreCase = true) }
+                    ?: response.header("Last-Modified")?.takeIf { it.isNotBlank() }
+                if (append && responseValidator != validator) {
+                    partialFile.delete()
+                    validatorFile.delete()
+                    throw IOException("تعذر التحقق من تطابق نسخة الكتاب المستكملة؛ أعد التنزيل من البداية")
+                }
 
-            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                outputStream.write(buffer, 0, bytesRead)
-                downloadedBytes += bytesRead
+                if (!append && partialFile.exists() && !partialFile.delete()) {
+                    throw IOException("تعذر إعادة بدء تنزيل الكتاب")
+                }
 
-                val now = System.currentTimeMillis()
-                if (now - lastEmitTime > 100 || downloadedBytes == totalBytes) {
-                    lastEmitTime = now
-                    val progress = (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                    emit(PdfDownloadState.Downloading(progress, downloadedBytes, totalBytes))
+                if (responseValidator != null) {
+                    FileOutputStream(validatorFile, false).use { metadata ->
+                        metadata.write(responseValidator.toByteArray(Charsets.UTF_8))
+                        metadata.fd.sync()
+                    }
+                } else {
+                    validatorFile.delete()
+                }
+
+                val remainingBytes = body.contentLength()
+                val totalBytes = if (remainingBytes >= 0L) appendOffset + remainingBytes else 0L
+                val parentPath = partialFile.parentFile?.absolutePath
+                    ?: throw IOException("مسار تخزين الكتاب غير صالح")
+                if (remainingBytes >= 0L && StatFs(parentPath).availableBytes < remainingBytes) {
+                    throw IOException("المساحة المتاحة لا تكفي لتنزيل الكتاب")
+                }
+
+                var downloadedBytes = appendOffset
+                var lastEmitTime = 0L
+                FileOutputStream(partialFile, append).use { output ->
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(16 * 1024)
+                        while (true) {
+                            val bytesRead = input.read(buffer)
+                            if (bytesRead == -1) break
+                            if (StatFs(parentPath).availableBytes < bytesRead) {
+                                throw IOException("نفدت مساحة التخزين أثناء تنزيل الكتاب")
+                            }
+                            output.write(buffer, 0, bytesRead)
+                            downloadedBytes += bytesRead
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmitTime > 100L ||
+                                (totalBytes > 0L && downloadedBytes >= totalBytes)
+                            ) {
+                                lastEmitTime = now
+                                val progress = if (totalBytes > 0L) {
+                                    (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                                } else 0f
+                                emit(PdfDownloadState.Downloading(progress, downloadedBytes, totalBytes))
+                            }
+                        }
+                    }
+                    output.fd.sync()
                 }
             }
 
-            outputStream.flush()
-            outputStream.close()
-            inputStream.close()
+            if (!partialFile.exists() || partialFile.length() <= 1024 || !hasPdfSignature(partialFile)) {
+                preserveDamagedArtifact(partialFile)
+                validatorFile.delete()
+                throw IOException("الملف المستلم ليس ملف PDF صالحاً أو أنه غير مكتمل")
+            }
 
-            // Move temp file to permanent destination
-            tempFile.copyTo(targetFile, overwrite = true)
-            tempFile.delete()
-
-            val pages = initRenderer(bookId, targetFile)
-            emit(PdfDownloadState.Ready(targetFile, pages))
-
-        } catch (e: Exception) {
-            Log.e("PdfBookManager", "Error downloading book PDF", e)
-            emit(PdfDownloadState.Error(e.message ?: "حدث خطأ غير متوقع أثناء تحميل الكتاب"))
+            val pages = verifyPdfFile(partialFile)
+            if (currentBookId == bookId) closeRenderer()
+            promoteVerifiedPdf(partialFile, targetFile)
+            validatorFile.delete()
+            val openedPages = initRenderer(bookId, targetFile)
+            emit(PdfDownloadState.Ready(targetFile, if (openedPages > 0) openedPages else pages))
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            Log.e("PdfBookManager", "Error downloading book PDF", error)
+            emit(PdfDownloadState.Error(error.message ?: "حدث خطأ غير متوقع أثناء تحميل الكتاب"))
         }
     }.flowOn(Dispatchers.IO)
+
+    private fun hasPdfSignature(file: File): Boolean {
+        if (!file.exists() || file.length() < 5L) return false
+        return try {
+            FileInputStream(file).use { input ->
+                val header = ByteArray(1024)
+                val count = input.read(header)
+                count > 0 && String(header, 0, count, Charsets.ISO_8859_1).contains("%PDF-")
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun verifyPdfFile(file: File): Int {
+        if (file.length() <= 1024L || !hasPdfSignature(file)) {
+            throw IOException("ملف PDF تالف أو غير مكتمل")
+        }
+        val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            val renderer = PdfRenderer(descriptor)
+            try {
+                if (renderer.pageCount <= 0) throw IOException("ملف PDF لا يحتوي صفحات")
+                return renderer.pageCount
+            } finally {
+                renderer.close()
+            }
+        } finally {
+            descriptor.close()
+        }
+    }
+
+    private fun preserveDamagedArtifact(file: File) {
+        if (!file.exists()) return
+        val backup = File(file.parentFile, file.name + ".corrupt-" + System.currentTimeMillis())
+        if (!file.renameTo(backup)) {
+            Log.w("PdfBookManager", "Could not preserve damaged PDF artifact: " + file.name)
+        }
+    }
+
+    private fun promoteVerifiedPdf(partial: File, target: File) {
+        var damagedBackup: File? = null
+        if (target.exists()) {
+            damagedBackup = File(target.parentFile, target.name + ".corrupt-" + System.currentTimeMillis())
+            if (!target.renameTo(damagedBackup)) {
+                throw IOException("تعذر حفظ نسخة الكتاب السابقة قبل الاستبدال")
+            }
+        }
+        if (!partial.renameTo(target)) {
+            damagedBackup?.let { it.renameTo(target) }
+            throw IOException("تعذر نقل ملف PDF المكتمل إلى التخزين الدائم")
+        }
+    }
 
     @Synchronized
     private fun initRenderer(bookId: String, file: File): Int {
@@ -211,7 +432,12 @@ class PdfBookManager(private val context: Context) {
         closeRenderer()
 
         val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-        val renderer = PdfRenderer(pfd)
+        val renderer = try {
+            PdfRenderer(pfd)
+        } catch (error: Exception) {
+            pfd.close()
+            throw error
+        }
         currentPfd = pfd
         currentRenderer = renderer
         currentBookId = bookId
@@ -232,24 +458,25 @@ class PdfBookManager(private val context: Context) {
         try {
             synchronized(renderer) {
                 val page = renderer.openPage(pageIndex)
-                val srcWidth = page.width
-                val srcHeight = page.height
-
-                // Calculate scaled dimensions maintaining aspect ratio
-                val scale = minOf(targetWidth.toFloat() / srcWidth, targetHeight.toFloat() / srcHeight).coerceAtLeast(1.5f)
-                val renderWidth = (srcWidth * scale).toInt()
-                val renderHeight = (srcHeight * scale).toInt()
-
-                val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
-                // Draw white background before rendering
-                val canvas = android.graphics.Canvas(bitmap)
-                canvas.drawColor(android.graphics.Color.WHITE)
-
-                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                page.close()
-
-                bitmapCache.put(cacheKey, bitmap)
-                return@withContext bitmap
+                try {
+                    val dimensions = calculatePdfRenderDimensions(
+                        sourceWidth = page.width,
+                        sourceHeight = page.height,
+                        targetWidth = targetWidth,
+                        targetHeight = targetHeight
+                    )
+                    val bitmap = Bitmap.createBitmap(
+                        dimensions.width,
+                        dimensions.height,
+                        Bitmap.Config.ARGB_8888
+                    )
+                    android.graphics.Canvas(bitmap).drawColor(android.graphics.Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    bitmapCache.put(cacheKey, bitmap)
+                    return@withContext bitmap
+                } finally {
+                    page.close()
+                }
             }
         } catch (e: Exception) {
             Log.e("PdfBookManager", "Failed to render page $pageIndex", e)
@@ -261,9 +488,17 @@ class PdfBookManager(private val context: Context) {
 
     @Synchronized
     fun closeRenderer() {
+        val renderer = currentRenderer
+        val descriptor = currentPfd
         try {
-            currentRenderer?.close()
-            currentPfd?.close()
+            if (renderer != null) {
+                synchronized(renderer) {
+                    renderer.close()
+                    descriptor?.close()
+                }
+            } else {
+                descriptor?.close()
+            }
         } catch (e: Exception) {
             Log.w("PdfBookManager", "Error closing renderer", e)
         } finally {

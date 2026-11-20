@@ -1,14 +1,15 @@
 /**
  * Tanweer Control Center (Owner Dashboard & Management Core)
  * Unified Administrative Engine & Cloudflare Worker Dashboard
- * URL: https://tanweer.magd.workers.dev/dashboard
+ * URL: /dashboard (relative to the current Worker origin)
  */
 
 import { Env } from '../env';
 import { errorResponse, jsonResponse } from '../lib/response';
 import { Role, normalizeRole, ROLE_METADATA } from '../lib/roles';
 import { generateId } from '../lib/ids';
-import { hashString, hashPassword, generateRandomToken, generateRecoveryCode, LEGACY_DEFAULT_PEPPER } from '../lib/crypto';
+import { hashString, hashPassword, generateRandomToken, generateRecoveryCode, encryptSensitivePayload } from '../lib/crypto';
+import { buildRecoveryCodeRotationStatements } from './notifications';
 import { isValidIsoDate } from '../lib/validation';
 import { applyDecisionExecution } from './governance';
 import { cleanupOrphanMedia } from './media';
@@ -52,9 +53,8 @@ export async function verifyOwnerAuth(request: Request, env: Env): Promise<{ isO
     return { isOwner: false, ownerId: '' };
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
-
-  // 1. Direct Secret Header check (for API / automated operations)
+  // 1. Direct Secret Header check (for API / automated operations).
+  // This path validates the configured owner secret directly without creating a session.
   const headerSecret = request.headers.get('X-Owner-Secret');
   if (headerSecret && headerSecret === secretKey) {
     return { isOwner: true, ownerId: 'SYSTEM_OWNER' };
@@ -76,6 +76,11 @@ export async function verifyOwnerAuth(request: Request, env: Env): Promise<{ isO
   }
 
   if (!token) {
+    return { isOwner: false, ownerId: '' };
+  }
+
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
     return { isOwner: false, ownerId: '' };
   }
 
@@ -137,7 +142,10 @@ export async function handleOwnerLogin(request: Request, env: Env): Promise<Resp
     return errorResponse('CONFIGURATION_ERROR', 'لوحة التحكم معطلة: مفتاح المالك TANWEER_OWNER_SECRET غير مهيأ في متغيرات البيئة', 500);
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIGURATION_ERROR', 'جلسات لوحة المالك معطلة: مفتاح الجلسات السري غير مهيأ في الخادم', 500);
+  }
 
   let secret = '';
   const contentType = request.headers.get('Content-Type') || '';
@@ -204,29 +212,45 @@ export async function handleOwnerLogin(request: Request, env: Env): Promise<Resp
  * Handles Owner Logout and server-side session revocation.
  */
 export async function handleOwnerLogout(request?: Request, env?: Env): Promise<Response> {
+  const cookieHeader = `${OWNER_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+
+  const failure = (code: string, message: string) => new Response(JSON.stringify({
+    success: false,
+    error: { code, message },
+  }), {
+    status: 500,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Set-Cookie': cookieHeader,
+    },
+  });
+
   if (request && env) {
-    try {
-      const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
-      let token: string | null = null;
-      const authHeader = request.headers.get('Authorization');
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.substring(7).trim();
-      } else {
-        const cookieHeader = request.headers.get('Cookie');
-        if (cookieHeader) {
-          const match = cookieHeader.match(/(?:^|;\s*)tanweer_owner_token=([^;]+)/);
-          if (match) {
-            token = decodeURIComponent(match[1]).trim();
-          }
-        }
+    let token: string | null = null;
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else {
+      const cookie = request.headers.get('Cookie');
+      if (cookie) {
+        const match = cookie.match(/(?:^|;\s*)tanweer_owner_token=([^;]+)/);
+        if (match) token = decodeURIComponent(match[1]).trim();
+      }
+    }
+
+    if (token) {
+      const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+      if (!pepper) {
+        return failure('CONFIG_ERROR', 'تعذر إبطال جلسة المالك لأن مفتاح الجلسات السري غير مهيأ في الخادم');
       }
 
-      if (token) {
+      try {
         const tokenHash = await hashString(token, pepper);
-        await env.DB.prepare(`
-          UPDATE owner_sessions SET revoked = 1 WHERE token_hash = ?
-        `).bind(tokenHash).run();
+        const revoke = await env.DB.prepare(
+          `UPDATE owner_sessions SET revoked = 1 WHERE token_hash = ?`
+        ).bind(tokenHash).run();
 
+        // A missing or already-revoked token is also a completed logout.
         await logRoleAudit(
           env.DB,
           'OWNER_LOGOUT',
@@ -235,13 +259,13 @@ export async function handleOwnerLogout(request?: Request, env?: Env): Promise<R
           null,
           'تم تسجيل خروج مالك النظام وإبطال رمز الجلسة في الخادم'
         );
+      } catch (error) {
+        console.error('Failed to revoke owner session in DB:', error);
+        return failure('LOGOUT_FAILED', 'تعذر إبطال جلسة المالك في قاعدة البيانات. لم يتم تأكيد تسجيل الخروج.');
       }
-    } catch (e) {
-      console.error('Failed to revoke owner session in DB:', e);
     }
   }
 
-  const cookieHeader = `${OWNER_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
   return new Response(JSON.stringify({ success: true, message: 'تم تسجيل الخروج وإبطال الجلسة بنجاح' }), {
     status: 200,
     headers: {
@@ -279,12 +303,12 @@ export async function handleGetDashboardStats(env: Env): Promise<Response> {
       activeSessionsTotal,
       auditLogsTotal
     ] = await Promise.all([
-      env.DB.prepare(`SELECT COUNT(*) as count FROM users`).first<{ count: number }>(),
+      env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role != 'SYSTEM_OWNER'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'STUDENT' OR role = 'MEMBER'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'MODERATOR'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'TEACHER' OR role = 'VERIFIED_TEACHER'`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'ADMIN'`).first<{ count: number }>(),
-      env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE status = 'DISABLED'`).first<{ count: number }>().catch(() => ({ count: 0 })),
+      env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE role != 'SYSTEM_OWNER' AND status = 'DISABLED'`).first<{ count: number }>().catch(() => ({ count: 0 })),
       env.DB.prepare(`SELECT COUNT(*) as count FROM groups`).first<{ count: number }>(),
       env.DB.prepare(`SELECT COUNT(*) as count FROM role_requests WHERE status = 'PENDING'`).first<{ count: number }>().catch(() => ({ count: 0 })),
       env.DB.prepare(`SELECT COUNT(*) as count FROM role_requests`).first<{ count: number }>().catch(() => ({ count: 0 })),
@@ -361,7 +385,7 @@ export async function handleGetDashboardUsers(request: Request, env: Env): Promi
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
   const offset = Math.max(parseInt(url.searchParams.get('offset') || '0'), 0);
 
-  let whereClause = ` WHERE 1=1`;
+  let whereClause = ` WHERE role != 'SYSTEM_OWNER'`;
   const binds: any[] = [];
 
   if (search) {
@@ -439,6 +463,7 @@ export async function handleChangeUserRole(
     id: string;
     full_name: string;
     role: string;
+    status: string;
   }>();
 
   if (!user) {
@@ -606,21 +631,82 @@ export async function handleRevokeUserSessions(
 }
 
 /**
- * God Mode: Reissues temporary recovery credentials for a user from User Details Modal (TA-16).
- * Single-use, hash-only stored, attempt-limited, expiration-enforced, session-revocable, audit-logged.
- * NEVER returns the old password or old hash.
+ * God Mode: rotates a user's permanent recovery code and delivers it only through
+ * the user's encrypted, account-scoped in-app notification. Temporary passwords
+ * remain a separate, expiring, single-use credential.
  */
+/**
+ * Revokes a user's permanent recovery credential without issuing a replacement.
+ * The historical schema marks recovery_code_hash NOT NULL, so a random non-hash marker
+ * is stored; future reissue always replaces it with a real keyed hash.
+ */
+export async function handleRevokeUserRecoveryCode(
+  userId: string,
+  actorId: string,
+  request: Request,
+  env: Env
+): Promise<Response> {
+  const user = await env.DB.prepare(
+    `SELECT id, full_name, role FROM users WHERE id = ?`
+  ).bind(userId).first<{ id: string; full_name: string; role: string }>();
+
+  if (!user) return errorResponse('USER_NOT_FOUND', 'المستخدم غير موجود', 404);
+  if (normalizeRole(user.role) === Role.SYSTEM_OWNER) {
+    return errorResponse('FORBIDDEN', 'لا يمكن إلغاء رمز استرداد مالك المنظومة من هذا المسار', 403);
+  }
+  if (typeof env.DB.batch !== 'function') {
+    return errorResponse('RECOVERY_REVOCATION_UNAVAILABLE', 'قاعدة البيانات لا تدعم الإلغاء الآمن بصورة ذرية حالياً', 503);
+  }
+
+  const now = Date.now();
+  const revokedMarker = `REVOKED_${generateRandomToken()}`;
+  const statements = [
+    env.DB.prepare(`UPDATE users SET recovery_code_hash = ?, updated_at = ? WHERE id = ?`)
+      .bind(revokedMarker, now, userId),
+    env.DB.prepare(`UPDATE user_recovery_tokens SET revoked = 1
+      WHERE user_id = ? AND type = 'RECOVERY_CODE' AND revoked = 0`).bind(userId),
+    env.DB.prepare(`DELETE FROM user_notifications WHERE user_id = ? AND type = 'RECOVERY_CODE_RESET'`).bind(userId),
+  ];
+
+  try {
+    const results = await env.DB.batch(statements);
+    if (results.length !== statements.length || results[0]?.meta?.changes !== 1) {
+      return errorResponse('RECOVERY_REVOCATION_FAILED', 'تعذر إلغاء رمز الاسترداد بصورة مكتملة', 500);
+    }
+  } catch (error) {
+    console.error('Failed to revoke permanent recovery code:', error);
+    return errorResponse('RECOVERY_REVOCATION_FAILED', 'تعذر إلغاء رمز الاسترداد حالياً. لم يتم تأكيد العملية.', 503);
+  }
+
+  await logRoleAudit(
+    env.DB,
+    'REVOKE_RECOVERY_CODE',
+    actorId,
+    'SYSTEM_OWNER',
+    userId,
+    `تم إلغاء رمز الاسترداد الدائم للمستخدم ${user.full_name}`,
+    request.headers.get('CF-Connecting-IP')
+  );
+
+  return jsonResponse({
+    success: true,
+    revoked: true,
+    message: 'تم إلغاء رمز الاسترداد. لن يعمل الرمز السابق، ويمكن إصدار رمز بديل لاحقاً.',
+  });
+}
+
 export async function handleReissueUserCredentials(
   userId: string,
   actorId: string,
   request: Request,
   env: Env
 ): Promise<Response> {
-  const user = await env.DB.prepare(`SELECT id, full_name, phone_number, role FROM users WHERE id = ?`).bind(userId).first<{
+  const user = await env.DB.prepare(`SELECT id, full_name, phone_number, role, COALESCE(status, 'ACTIVE') AS status FROM users WHERE id = ?`).bind(userId).first<{
     id: string;
     full_name: string;
     phone_number: string;
     role: string;
+    status: string;
   }>();
 
   if (!user) {
@@ -629,6 +715,9 @@ export async function handleReissueUserCredentials(
 
   if (normalizeRole(user.role) === Role.SYSTEM_OWNER) {
     return errorResponse('FORBIDDEN', 'لا يمكن إعادة تعيين بيانات اعتماد مالك المنظومة من هذا المسار', 403);
+  }
+  if (user.status !== 'ACTIVE') {
+    return errorResponse('ACCOUNT_NOT_ACTIVE', 'لا يمكن إصدار بيانات استرداد لحساب غير نشط. أعد تفعيل الحساب أولاً.', 409);
   }
 
   let body: {
@@ -642,9 +731,14 @@ export async function handleReissueUserCredentials(
 
   const credentialType = body.type === 'TEMP_PASSWORD' ? 'TEMP_PASSWORD' : 'RECOVERY_CODE';
   const expiresInHours = Math.max(1, Math.min(Number(body.expiresInHours) || 24, 72));
-  const revokeExistingSessions = body.revokeExistingSessions !== false;
+  const revokeExistingSessions = credentialType === 'RECOVERY_CODE'
+    ? body.revokeExistingSessions === true
+    : body.revokeExistingSessions !== false;
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || LEGACY_DEFAULT_PEPPER;
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح إصدار بيانات الاعتماد غير مهيأ في الخادم', 500);
+  }
   const now = Date.now();
   const expiresAt = now + expiresInHours * 3600 * 1000;
 
@@ -686,32 +780,34 @@ export async function handleReissueUserCredentials(
     `).run();
   } catch {}
 
-  // Invalidate any existing active recovery tokens for this user
-  await env.DB.prepare(
-    `UPDATE user_recovery_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0`
-  ).bind(userId).run();
-
-  // Insert single-use recovery token record with expiration
-  await env.DB.prepare(`
-    INSERT INTO user_recovery_tokens (id, user_id, token_hash, type, max_uses, uses_count, expires_at, revoked, created_by, created_at)
-    VALUES (?, ?, ?, ?, 1, 0, ?, 0, ?, ?)
-  `).bind(tokenId, userId, tokenHash, credentialType, expiresAt, actorId, now).run();
-
-  // Update appropriate column on users table
   if (credentialType === 'RECOVERY_CODE') {
-    await env.DB.prepare(
-      `UPDATE users SET recovery_code_hash = ?, updated_at = ? WHERE id = ?`
-    ).bind(tokenHash, now, userId).run();
+    if (typeof env.DB.batch !== 'function') {
+      return errorResponse('RECOVERY_ROTATION_UNAVAILABLE', 'قاعدة البيانات لا تدعم تسليم رمز الاسترداد بصورة ذرية وآمنة حالياً', 503);
+    }
+    const encryptedPayload = await encryptSensitivePayload(JSON.stringify({ recoveryCode: plainSecret }), pepper);
+    const statements = buildRecoveryCodeRotationStatements(env.DB, userId, tokenId, tokenHash, encryptedPayload, actorId, now);
+    if (revokeExistingSessions) statements.push(env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId));
+    try {
+      const results = await env.DB.batch(statements);
+      if (results.length !== statements.length || results[0]?.meta?.changes !== 1 ||
+          results[3]?.meta?.changes !== 1 || results[4]?.meta?.changes !== 1) {
+        return errorResponse('RECOVERY_ROTATION_FAILED', 'تعذر حفظ رمز الاسترداد ورسالة التسليم بصورة مكتملة', 500);
+      }
+    } catch (error) {
+      console.error('Failed to issue and privately deliver a recovery code:', error);
+      return errorResponse('RECOVERY_ROTATION_FAILED', 'تعذر إصدار رمز الاسترداد وتسليمه حالياً. لم يتم تأكيد العملية.', 503);
+    }
   } else {
-    // TA-21: Update password_hash so normal login with phone + password works seamlessly
-    await env.DB.prepare(
-      `UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`
-    ).bind(tokenHash, now, userId).run();
-  }
-
-  // Optionally revoke existing sessions to immediately protect the account
-  if (revokeExistingSessions) {
-    await env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
+    // Temporary passwords remain short-lived and single-use.
+    await env.DB.prepare(`UPDATE user_recovery_tokens SET revoked = 1
+      WHERE user_id = ? AND type = 'TEMP_PASSWORD' AND revoked = 0`).bind(userId).run();
+    await env.DB.prepare(`INSERT INTO user_recovery_tokens
+      (id, user_id, token_hash, type, max_uses, uses_count, expires_at, revoked, created_by, created_at)
+      VALUES (?, ?, ?, 'TEMP_PASSWORD', 1, 0, ?, 0, ?, ?)`)
+      .bind(tokenId, userId, tokenHash, expiresAt, actorId, now).run();
+    await env.DB.prepare(`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`)
+      .bind(tokenHash, now, userId).run();
+    if (revokeExistingSessions) await env.DB.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
   }
 
   await logRoleAudit(
@@ -720,19 +816,22 @@ export async function handleReissueUserCredentials(
     actorId,
     'SYSTEM_OWNER',
     userId,
-    `تم إصدار ${credentialType === 'RECOVERY_CODE' ? 'رمز استرداد' : 'بيانات اعتماد مؤقتة'} للمستخدم ${user.full_name} صالح لمرة واحدة لمدة (${expiresInHours}) ساعة${revokeExistingSessions ? ' مع إنهاء كافة جلساته السابقة' : ''}`,
+    credentialType === 'RECOVERY_CODE'
+      ? `تم تدوير رمز الاسترداد الدائم للمستخدم ${user.full_name} وتسليم نسخة مشفرة إلى صندوق إشعارات حسابه${revokeExistingSessions ? ' مع إنهاء جلساته الحالية' : ''}`
+      : `تم إصدار كلمة مرور مؤقتة للمستخدم ${user.full_name} صالحة لمرة واحدة لمدة (${expiresInHours}) ساعة${revokeExistingSessions ? ' مع إنهاء كافة جلساته السابقة' : ''}`,
     request.headers.get('CF-Connecting-IP')
   );
 
+  if (credentialType === 'RECOVERY_CODE') {
+    return jsonResponse({
+      success: true, credentialType, delivery: 'PRIVATE_IN_APP_NOTIFICATION', sessionsRevoked: revokeExistingSessions,
+      message: 'تم إصدار رمز استرداد دائم وتسليم نسخة مشفرة إلى إشعارات حساب المستخدم. سيظهر له داخل التطبيق عند تسجيل الدخول.',
+    });
+  }
   return jsonResponse({
-    success: true,
-    credentialType,
-    temporarySecret: plainSecret,
-    expiresAt,
-    expiresInHours,
-    singleUse: true,
-    sessionsRevoked: revokeExistingSessions,
-    message: `تم إصدار ${credentialType === 'RECOVERY_CODE' ? 'رمز استرداد مؤقت' : 'كلمة مرور مؤقتة'} بنجاح. أبلغه للمستخدم، حيث يمكن استخدامه لمرة واحدة فقط خلال ${expiresInHours} ساعة.`,
+    success: true, credentialType, temporarySecret: plainSecret, expiresAt, expiresInHours,
+    singleUse: true, sessionsRevoked: revokeExistingSessions,
+    message: `تم إصدار كلمة مرور مؤقتة بنجاح. يمكن استخدامها لمرة واحدة فقط خلال ${expiresInHours} ساعة.`,
   });
 }
 
@@ -907,8 +1006,16 @@ export async function handleApproveRoleRequest(
     return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
   }
 
-  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER || 'tanweer-pepper-2026';
+  const pepper = env.SESSION_PEPPER || env.PASSWORD_PEPPER;
+  if (!pepper) {
+    return errorResponse('CONFIG_ERROR', 'مفتاح التحقق السري غير مهيأ في الخادم', 500);
+  }
+
   const targetRole = normalizeRole(req.requested_role);
+  if (targetRole !== Role.MODERATOR && targetRole !== Role.TEACHER) {
+    return errorResponse('INVALID_ROLE', 'الرتبة المطلوبة غير مسموح بتفعيلها عبر رمز التحقق', 400);
+  }
+
   const now = Date.now();
   const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
 
@@ -922,23 +1029,52 @@ export async function handleApproveRoleRequest(
   const codeHash = await hashString(codeRaw, pepper);
   const codeId = generateId('code');
 
-  // Insert verification code record storing only code_hash (no plain text in DB)
-  await env.DB.prepare(
-    `INSERT INTO role_verification_codes (id, request_id, user_id, role, code_hash, code_display, attempts, max_attempts, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?, NULL, 0, 5, ?, ?)`
-  ).bind(
-    codeId,
-    requestId,
-    req.user_id,
-    targetRole,
-    codeHash,
-    expiresAt,
-    now
-  ).run();
+  // Claim the pending request first. Concurrent approvals cannot both issue a code.
+  const claim = await env.DB.prepare(
+    `UPDATE role_requests
+     SET status = 'APPROVED', reviewed_by = ?, review_notes = ?, reviewed_at = ?
+     WHERE id = ? AND status = 'PENDING'`
+  ).bind(actorId, 'تم اعتماد الطلب وجارٍ إصدار رمز تفعيل مشفر', now, requestId).run();
+
+  if (claim.meta?.changes !== 1) {
+    return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
+  }
+
+  // Insert verification code record storing only code_hash (no plain text in DB).
+  // Restore PENDING if the insert fails so the request can be safely retried.
+  try {
+    await env.DB.prepare(
+      `INSERT INTO role_verification_codes (id, request_id, user_id, role, code_hash, code_display, attempts, max_attempts, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, 0, 5, ?, ?)`
+    ).bind(
+      codeId,
+      requestId,
+      req.user_id,
+      targetRole,
+      codeHash,
+      expiresAt,
+      now
+    ).run();
+  } catch (error) {
+    try {
+      await env.DB.prepare(
+        `UPDATE role_requests
+         SET status = 'PENDING', reviewed_by = NULL, review_notes = NULL, reviewed_at = NULL
+         WHERE id = ? AND status = 'APPROVED' AND reviewed_by = ?
+           AND NOT EXISTS (SELECT 1 FROM role_verification_codes WHERE request_id = ?)`
+      ).bind(requestId, actorId, requestId).run();
+    } catch (rollbackError) {
+      console.error('Failed to restore role request after code issuance error:', rollbackError);
+    }
+    console.error('Failed to issue role verification code:', error);
+    return errorResponse('ROLE_CODE_CREATION_FAILED', 'تعذر إصدار رمز التفعيل حالياً. بقي الطلب متاحاً لإعادة المحاولة.', 500);
+  }
 
   await env.DB.prepare(
-    `UPDATE role_requests SET status = 'APPROVED', reviewed_by = ?, review_notes = ?, reviewed_at = ? WHERE id = ?`
-  ).bind(actorId, 'تم اعتماد الطلب وتوليد رمز تفعيل مشفر بنجاح', now, requestId).run();
+    `UPDATE role_requests
+     SET review_notes = ?
+     WHERE id = ? AND status = 'APPROVED' AND reviewed_by = ?`
+  ).bind('تم اعتماد الطلب وتوليد رمز تفعيل مشفر بنجاح', requestId, actorId).run();
 
   await logRoleAudit(
     env.DB,
@@ -984,10 +1120,26 @@ export async function handleRejectRoleRequest(
     return errorResponse('REQUEST_NOT_FOUND', 'طلب الترقية غير موجود', 404);
   }
 
+  if (req.status !== 'PENDING') {
+    return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
+  }
+
   const now = Date.now();
+  const rejection = await env.DB.prepare(
+    `UPDATE role_requests
+     SET status = 'REJECTED', reviewed_by = ?, review_notes = ?, reviewed_at = ?
+     WHERE id = ? AND status = 'PENDING'`
+  ).bind(actorId, body.reason?.trim() || 'لم يستوفِ الشروط المطلوبة', now, requestId).run();
+
+  if (rejection.meta?.changes !== 1) {
+    return errorResponse('ALREADY_REVIEWED', 'تم البت في هذا الطلب مسبقاً');
+  }
+
+  // Revoke any orphaned, still-unused code linked to this request.
   await env.DB.prepare(
-    `UPDATE role_requests SET status = 'REJECTED', reviewed_by = ?, review_notes = ?, reviewed_at = ? WHERE id = ?`
-  ).bind(actorId, body.reason || 'لم يستوفِ الشروط المطلوبة', now, requestId).run();
+    `UPDATE role_verification_codes SET used_at = ?
+     WHERE request_id = ? AND used_at IS NULL`
+  ).bind(now, requestId).run();
 
   await logRoleAudit(
     env.DB,
@@ -1011,7 +1163,7 @@ export async function handleRejectRoleRequest(
 export async function handleGetDashboardRoles(env: Env): Promise<Response> {
   try {
     const counts = await env.DB.prepare(
-      `SELECT role, COUNT(*) as count FROM users GROUP BY role`
+      `SELECT role, COUNT(*) as count FROM users WHERE role != 'SYSTEM_OWNER' GROUP BY role`
     ).all<{ role: string; count: number }>();
 
     const countsMap: Record<string, number> = {};
@@ -1142,7 +1294,7 @@ export async function handleGetDashboardContents(request: Request, env: Env): Pr
 export async function handleGetDashboardContentDetail(contentId: string, env: Env): Promise<Response> {
   const content = await env.DB.prepare(`
     SELECT c.*, u.full_name as author_name, u.phone_number as author_phone,
-           g.name as group_name, s.name as subject_name
+           g.name as group_name, COALESCE(s.name_ar, s.id) as subject_name
     FROM contents c
     LEFT JOIN users u ON c.created_by = u.id
     LEFT JOIN groups g ON c.group_id = g.id
@@ -1161,16 +1313,39 @@ export async function handleGetDashboardContentDetail(contentId: string, env: En
     ORDER BY page_order ASC
   `).bind(contentId).all<any>();
 
-  const mediaList = (mediaRows.results || []).map((m: any) => ({
-    id: m.id,
-    pageOrder: m.page_order,
-    objectKey: m.object_key,
-    url: m.url,
-    previewUrl: `/api/dashboard/media/${m.id}`,
-    mimeType: m.mime_type,
-    fileSize: m.file_size,
-    isPrimary: m.is_primary === 1,
-  }));
+  const mediaList = (mediaRows.results || []).map((m: any) => {
+    // Older content_media rows may have an empty object_key while url stores
+    // the media_blobs ID in the legacy public media route.
+    let linkedMediaId = String(m.object_key || '').trim();
+    if (!linkedMediaId && m.url) {
+      try {
+        const mediaPath = new URL(String(m.url), 'https://tanweer.invalid').pathname;
+        const pathSegments = mediaPath.split('/').filter(Boolean);
+        const isInternalMediaRoute = pathSegments.length >= 4
+          && pathSegments[pathSegments.length - 4] === 'api'
+          && pathSegments[pathSegments.length - 2] === 'media'
+          && (pathSegments[pathSegments.length - 3] === 'v1' || pathSegments[pathSegments.length - 3] === 'dashboard');
+        if (isInternalMediaRoute) {
+          linkedMediaId = decodeURIComponent(pathSegments[pathSegments.length - 1]);
+        }
+      } catch {
+        // Keep the original URL below when it is not a recognized internal media route.
+      }
+    }
+
+    return {
+      id: m.id,
+      pageOrder: m.page_order,
+      objectKey: linkedMediaId || m.object_key,
+      url: m.url,
+      previewUrl: linkedMediaId
+        ? `/api/dashboard/media/${encodeURIComponent(linkedMediaId)}`
+        : (m.url || ''),
+      mimeType: m.mime_type,
+      fileSize: m.file_size,
+      isPrimary: m.is_primary === 1,
+    };
+  });
 
   return jsonResponse({
     success: true,
@@ -1604,10 +1779,10 @@ export async function handleResetDashboardSchedule(groupId: string, actorId: str
  */
 export async function handleGetDashboardDecisions(env: Env): Promise<Response> {
   const rows = await env.DB.prepare(`
-    SELECT cd.*, g.name as group_name, u.full_name as creator_name
+    SELECT cd.*, g.name as group_name, COALESCE(u.full_name, cd.requester_name) as creator_name
     FROM community_decisions cd
     LEFT JOIN groups g ON cd.group_id = g.id
-    LEFT JOIN users u ON cd.created_by = u.id
+    LEFT JOIN users u ON cd.requested_by = u.id
     ORDER BY cd.created_at DESC LIMIT 100
   `).all();
   return jsonResponse({ success: true, decisions: rows.results || [] });
@@ -2385,7 +2560,7 @@ export function renderLoginHtml(errorMessage?: string): Response {
           body: JSON.stringify({ secret })
         });
         const data = await res.json();
-        if (data.success) {
+        if (res.ok && data?.success === true) {
           window.location.href = '/dashboard';
         } else {
           errorDiv.textContent = data.message || 'مفتاح المالك السري غير صحيح';
@@ -2497,6 +2672,13 @@ export function renderDashboardHtml(): Response {
       overflow-y: auto;
     }
     .nav-item {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      text-align: right;
+      font-family: inherit;
       display: flex;
       align-items: center;
       gap: 0.75rem;
@@ -2507,6 +2689,12 @@ export function renderDashboardHtml(): Response {
       font-weight: 600;
       font-size: 0.85rem;
       transition: all 0.2s;
+    }
+    .nav-item:focus-visible,
+    .menu-toggle-btn:focus-visible,
+    .action-btn:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 2px;
     }
     .nav-item:hover {
       background: rgba(255, 255, 255, 0.04);
@@ -2823,62 +3011,62 @@ export function renderDashboardHtml(): Response {
           <div class="brand-sub">غرفة التحكم المركزية (God Mode)</div>
         </div>
       </div>
-      <button class="menu-toggle-btn" onclick="toggleMobileMenu()">☰</button>
+      <button type="button" class="menu-toggle-btn" aria-label="فتح قائمة التنقل" aria-controls="dashboardNav" aria-expanded="false" onclick="toggleMobileMenu()">☰</button>
     </div>
 
     <nav class="nav-links" id="dashboardNav">
-      <div class="nav-item active" onclick="switchTab('overview')">
+      <button type="button" class="nav-item active" data-tab="overview" aria-controls="tab-overview" aria-current="page" onclick="switchTab('overview')">
         <span>📊</span> <span>نظرة عامة والمنظومة</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('users')">
+      </button>
+      <button type="button" class="nav-item" data-tab="users" aria-controls="tab-users" onclick="switchTab('users')">
         <span>👥</span> <span>Users (المستخدمون)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('roles')">
+      </button>
+      <button type="button" class="nav-item" data-tab="roles" aria-controls="tab-roles" onclick="switchTab('roles')">
         <span>👑</span> <span>Roles (عرض الرتب)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('requests')">
+      </button>
+      <button type="button" class="nav-item" data-tab="requests" aria-controls="tab-requests" onclick="switchTab('requests')">
         <span>📋</span> <span>Role Requests (طلبات الترقية)</span>
         <span class="nav-badge" id="requestsBadge" style="display:none;">0</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('contents')">
+      </button>
+      <button type="button" class="nav-item" data-tab="contents" aria-controls="tab-contents" onclick="switchTab('contents')">
         <span>📚</span> <span>Lessons & Content (الدروس)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('homeworks')">
+      </button>
+      <button type="button" class="nav-item" data-tab="homeworks" aria-controls="tab-homeworks" onclick="switchTab('homeworks')">
         <span>📝</span> <span>Homework & Exams (الواجبات)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('events')">
+      </button>
+      <button type="button" class="nav-item" data-tab="events" aria-controls="tab-events" onclick="switchTab('events')">
         <span>🎪</span> <span>Events (الفعاليات المدرسية)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('holidays')">
+      </button>
+      <button type="button" class="nav-item" data-tab="holidays" aria-controls="tab-holidays" onclick="switchTab('holidays')">
         <span>🌴</span> <span>Holidays (الإجازات المعتمدة)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('issues')">
+      </button>
+      <button type="button" class="nav-item" data-tab="issues" aria-controls="tab-issues" onclick="switchTab('issues')">
         <span>❓</span> <span>Issues & Q&A (الاستفسارات)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('schedules')">
+      </button>
+      <button type="button" class="nav-item" data-tab="schedules" aria-controls="tab-schedules" onclick="switchTab('schedules')">
         <span>📅</span> <span>Schedules (جداول الحصص)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('decisions')">
+      </button>
+      <button type="button" class="nav-item" data-tab="decisions" aria-controls="tab-decisions" onclick="switchTab('decisions')">
         <span>🗳️</span> <span>Governance & Votes (القرارات)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('chat')">
+      </button>
+      <button type="button" class="nav-item" data-tab="chat" aria-controls="tab-chat" onclick="switchTab('chat')">
         <span>💬</span> <span>Live Chat (المحادثات الحية)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('corrections')">
+      </button>
+      <button type="button" class="nav-item" data-tab="corrections" aria-controls="tab-corrections" onclick="switchTab('corrections')">
         <span>✏️</span> <span>Corrections (طلبات التصحيح)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('groups')">
+      </button>
+      <button type="button" class="nav-item" data-tab="groups" aria-controls="tab-groups" onclick="switchTab('groups')">
         <span>🏫</span> <span>Groups (الشعب والنوادي)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('sql')">
+      </button>
+      <button type="button" class="nav-item" data-tab="sql" aria-controls="tab-sql" onclick="switchTab('sql')">
         <span>🛠️</span> <span>SQL Studio (استوديو البيانات)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('audit')">
+      </button>
+      <button type="button" class="nav-item" data-tab="audit" aria-controls="tab-audit" onclick="switchTab('audit')">
         <span>📜</span> <span>Audit Log (سجل العمليات)</span>
-      </div>
-      <div class="nav-item" onclick="switchTab('system')">
+      </button>
+      <button type="button" class="nav-item" data-tab="system" aria-controls="tab-system" onclick="switchTab('system')">
         <span>⚙️</span> <span>Security & System (الأمان والتصفير)</span>
-      </div>
+      </button>
     </nav>
 
     <div class="owner-info">
@@ -2903,6 +3091,8 @@ export function renderDashboardHtml(): Response {
       <!-- Overview Tab: All 18 System Sections -->
       <section id="tab-overview">
         <h3 style="font-size:1rem; font-weight:800; color:var(--cyan); margin-bottom:1rem;">✨ TANWEER CONTROL CENTER — إحصائيات المنظومة الحية</h3>
+        <div id="overviewLoadNotice" role="status" aria-live="polite" hidden style="margin:0 0 0.85rem; padding:0.65rem 0.8rem; border:1px solid var(--border); border-radius:10px; font-size:0.82rem;"></div>
+        <div id="overviewLoadNotice" role="status" aria-live="polite" hidden style="margin:0 0 0.85rem; padding:0.65rem 0.8rem; border:1px solid var(--border); border-radius:10px; font-size:0.82rem;"></div>
         <div class="stats-grid">
           <div class="stat-card" onclick="switchTab('users')" style="cursor:pointer;">
             <div class="stat-num" id="statUsers" style="color:var(--cyan);">-</div>
@@ -2985,15 +3175,15 @@ export function renderDashboardHtml(): Response {
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">👥 إدارة المستخدمين والرتب والحسابات</h2>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="userSearch" placeholder="بحث بالاسم أو الهاتف..." oninput="debounceUserSearch()">
-              <select class="role-select" id="userRoleFilter" onchange="loadUsers()">
+              <input type="text" class="search-input" id="userSearch" aria-label="بحث المستخدمين بالاسم أو الهاتف" placeholder="بحث بالاسم أو الهاتف..." oninput="debounceUserSearch()">
+              <select class="role-select" id="userRoleFilter" aria-label="تصفية المستخدمين حسب الرتبة" onchange="loadUsers()">
                 <option value="ALL">جميع الرتب</option>
                 <option value="STUDENT">طالب (STUDENT)</option>
                 <option value="MODERATOR">مشرف (MODERATOR)</option>
                 <option value="TEACHER">أستاذ (TEACHER)</option>
                 <option value="ADMIN">مدير (ADMIN)</option>
               </select>
-              <select class="role-select" id="userStatusFilter" onchange="loadUsers()">
+              <select class="role-select" id="userStatusFilter" aria-label="تصفية المستخدمين حسب حالة الحساب" onchange="loadUsers()">
                 <option value="ALL">جميع الحالات</option>
                 <option value="ACTIVE">نشط (ACTIVE)</option>
                 <option value="DISABLED">مجمّد (DISABLED)</option>
@@ -3118,7 +3308,7 @@ export function renderDashboardHtml(): Response {
         <div class="section-card">
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">📋 طلبات ترقية الرتب (Role Requests)</h2>
-            <select class="role-select" id="requestStatusFilter" onchange="loadRequests()">
+            <select class="role-select" id="requestStatusFilter" aria-label="تصفية طلبات ترقية الرتب حسب الحالة" onchange="loadRequests()">
               <option value="PENDING">الطلبات المعلقة فقط ⏳</option>
               <option value="ALL">جميع الطلبات</option>
               <option value="APPROVED">المعتمدة ✅</option>
@@ -3181,7 +3371,7 @@ export function renderDashboardHtml(): Response {
               <div style="font-size:0.8rem; color:var(--text-sec);">انقر على أي درس لعرض تفاصيله الأكاديمية وصوره بالكامل</div>
             </div>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="contentSearchInput" placeholder="بحث بعنوان الدرس أو الكاتب..." oninput="debounceContentSearch()">
+              <input type="text" class="search-input" id="contentSearchInput" aria-label="بحث الدروس بعنوان الدرس أو الكاتب" placeholder="بحث بعنوان الدرس أو الكاتب..." oninput="debounceContentSearch()">
               <button class="action-btn" onclick="loadContents(0)">تحديث 🔄</button>
             </div>
           </div>
@@ -3214,7 +3404,7 @@ export function renderDashboardHtml(): Response {
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">📝 إدارة الواجبات المدرسية والاختبارات</h2>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="homeworkSearchInput" placeholder="بحث بالواجب أو المادة..." oninput="debounceHomeworkSearch()">
+              <input type="text" class="search-input" id="homeworkSearchInput" aria-label="بحث الواجبات بالعنوان أو المادة" placeholder="بحث بالواجب أو المادة..." oninput="debounceHomeworkSearch()">
               <button class="action-btn" onclick="loadHomeworks(0); loadExams(0);">تحديث 🔄</button>
             </div>
           </div>
@@ -3241,7 +3431,7 @@ export function renderDashboardHtml(): Response {
           <div style="display:flex; justify-content:space-between; align-items:center; margin:1.5rem 0 0.5rem; flex-wrap:wrap; gap:0.5rem;">
             <h3 style="font-size:0.95rem; color:var(--ruby); margin:0;">الاختبارات المجدولة:</h3>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="examSearchInput" placeholder="بحث بالاختبار أو المقرر..." oninput="debounceExamSearch()" style="width:220px;">
+              <input type="text" class="search-input" id="examSearchInput" aria-label="بحث الاختبارات بالاسم أو المقرر" placeholder="بحث بالاختبار أو المقرر..." oninput="debounceExamSearch()" style="width:220px;">
               <button class="action-btn" onclick="loadExams(0)">تحديث 🔄</button>
             </div>
           </div>
@@ -3273,7 +3463,7 @@ export function renderDashboardHtml(): Response {
           <div class="section-header">
             <h2 style="font-size:1.1rem; font-weight:800;">🎪 الفعاليات والأنشطة المدرسية</h2>
             <div class="filter-bar">
-              <input type="text" class="search-input" id="eventSearch" placeholder="بحث بعنوان الفعالية..." oninput="debounceEventSearch()">
+              <input type="text" class="search-input" id="eventSearch" aria-label="بحث الفعاليات بالعنوان" placeholder="بحث بعنوان الفعالية..." oninput="debounceEventSearch()">
               <button class="action-btn" onclick="loadEvents(0)">تحديث 🔄</button>
             </div>
           </div>
@@ -3367,7 +3557,7 @@ export function renderDashboardHtml(): Response {
               <div style="font-size:0.8rem; color:var(--text-sec);">استعراض جداول الشعب بالشبكة الأسبوعية (الحصص والمواد والأوقات) وتصفيرها إدارياً</div>
             </div>
             <div class="filter-bar">
-              <select class="search-input" id="scheduleGroupFilter" onchange="onScheduleGroupFilterChanged(this.value)">
+              <select class="search-input" id="scheduleGroupFilter" aria-label="تصفية الجداول حسب الشعبة" onchange="onScheduleGroupFilterChanged(this.value)">
                 <option value="">جميع الشعب (نظرة عامة)</option>
               </select>
               <button class="action-btn" onclick="loadSchedules()">تحديث 🔄</button>
@@ -3446,14 +3636,14 @@ export function renderDashboardHtml(): Response {
               <div style="font-size:0.8rem; color:var(--text-sec);">عرض رسائل الشات بتسلسل زمني سليم مع تصفية الشعب والبحث الفوري</div>
             </div>
             <div class="filter-bar" style="display:flex; flex-wrap:wrap; gap:0.5rem;">
-              <select class="search-input" id="chatGroupFilter" onchange="loadChatMessages(0)">
+              <select class="search-input" id="chatGroupFilter" aria-label="تصفية المحادثات حسب الشعبة أو المجموعة" onchange="loadChatMessages(0)">
                 <option value="">جميع الشعب والمجموعات</option>
               </select>
-              <select class="search-input" id="chatOrderFilter" onchange="loadChatMessages(0)" style="width:140px;">
+              <select class="search-input" id="chatOrderFilter" aria-label="ترتيب رسائل المحادثة زمنياً" onchange="loadChatMessages(0)" style="width:140px;">
                 <option value="ASC">الأقدم أولاً (تسلسل زمني)</option>
                 <option value="DESC">الأحدث أولاً</option>
               </select>
-              <input type="text" class="search-input" id="chatSearchInput" placeholder="بحث بنص الرسالة أو المرسل..." oninput="debounceChatSearch()" style="width:200px;">
+              <input type="text" class="search-input" id="chatSearchInput" aria-label="بحث رسائل المحادثة بالنص أو المرسل" placeholder="بحث بنص الرسالة أو المرسل..." oninput="debounceChatSearch()" style="width:200px;">
               <button class="action-btn" onclick="loadChatMessages(0)">تحديث 🔄</button>
             </div>
           </div>
@@ -3510,13 +3700,14 @@ export function renderDashboardHtml(): Response {
           <h2 style="font-size:1.1rem; font-weight:800; color:var(--cyan); margin-bottom:0.75rem;">🛠️ استوديو SQL المباشر لقاعدة البيانات (D1 Studio)</h2>
           <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:1rem;">تنفيذ استعلامات SQL حرة مباشرة على قاعدة بيانات تنوير D1 مع تسجيل رقابي كامل.</p>
           <div style="display:flex; flex-direction:column; gap:0.75rem; margin-bottom:1rem;">
-            <textarea id="sqlQuery" style="width:100%; height:110px; background:rgba(3,7,18,0.8); border:1px solid var(--border-accent); border-radius:10px; padding:0.75rem; color:#A5F3FC; font-family:monospace; font-size:0.9rem;" placeholder="SELECT * FROM users LIMIT 10;"></textarea>
+            <label for="sqlQuery" style="font-size:0.82rem; color:var(--text-sec);">استعلام SQL</label>
+            <textarea id="sqlQuery" aria-label="استعلام SQL" style="width:100%; height:110px; background:rgba(3,7,18,0.8); border:1px solid var(--border-accent); border-radius:10px; padding:0.75rem; color:#A5F3FC; font-family:monospace; font-size:0.9rem;" placeholder="SELECT * FROM users LIMIT 10;"></textarea>
             <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
               <button class="action-btn" onclick="document.getElementById('sqlQuery').value='SELECT name, tbl_name FROM sqlite_master WHERE type=\\'table\\';'">عرض الجداول 📋</button>
               <button class="action-btn approve" onclick="runSqlConsole()">تنفيذ الاستعلام ⚡</button>
             </div>
           </div>
-          <div id="sqlResult" style="background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:10px; padding:1rem; font-family:monospace; font-size:0.85rem; max-height:400px; overflow:auto;">
+          <div id="sqlResult" role="region" aria-label="نتائج استعلام SQL" aria-live="polite" aria-atomic="false" tabindex="0" style="background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:10px; padding:1rem; font-family:monospace; font-size:0.85rem; max-height:400px; overflow:auto;">
             النتائج ستظهر هنا...
           </div>
         </div>
@@ -3557,7 +3748,7 @@ export function renderDashboardHtml(): Response {
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.5rem;">
             <div style="background:rgba(255,255,255,0.02); padding:1.25rem; border-radius:12px; border:1px solid var(--border);">
               <h3 style="font-size:0.95rem; color:var(--cyan); margin-bottom:0.75rem;">بيانات الخادم (Cloudflare Workers)</h3>
-              <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">المسار المعتمد: <code>https://tanweer.magd.workers.dev/dashboard</code></p>
+              <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">المسار المعتمد: <code>/dashboard</code> (على عنوان البيئة الحالية)</p>
               <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">حالة البيئة: <strong id="sysEnv" style="color:var(--emerald);">-</strong></p>
               <p style="font-size:0.85rem; color:var(--text-sec); margin-bottom:0.4rem;">الموقع الجغرافي: <strong>Cloudflare Edge Network</strong></p>
               <p style="font-size:0.85rem; color:var(--text-sec);">قاعدة البيانات: <strong>Cloudflare D1 (مفعلة ومتصلة)</strong></p>
@@ -3597,8 +3788,8 @@ export function renderDashboardHtml(): Response {
       <div class="modal-sub" id="roleModalUser">-</div>
 
       <div class="form-group">
-        <label>الرتبة الجديدة المعتمدة</label>
-        <select class="form-control" id="modalNewRole">
+        <label for="modalNewRole">الرتبة الجديدة المعتمدة</label>
+        <select class="form-control" id="modalNewRole" aria-label="الرتبة الجديدة">
           <option value="STUDENT">👤 طالب (STUDENT)</option>
           <option value="MODERATOR">🛡️ مسؤول / مشرف (MODERATOR)</option>
           <option value="TEACHER">🎓 أستاذ معتمد (TEACHER)</option>
@@ -3607,8 +3798,8 @@ export function renderDashboardHtml(): Response {
       </div>
 
       <div class="form-group">
-        <label>مبرر التعديل (يسجل في سجل الرقابة)</label>
-        <input type="text" class="form-control" id="modalRoleReason" placeholder="مثلاً: تكليف بإشراف الشعبة أو معلم المادة">
+        <label for="modalRoleReason">مبرر التعديل (يسجل في سجل الرقابة)</label>
+        <input type="text" class="form-control" id="modalRoleReason" aria-label="مبرر التعديل المسجل في سجل الرقابة" placeholder="مثلاً: تكليف بإشراف الشعبة أو معلم المادة">
       </div>
 
       <div class="modal-actions">
@@ -3747,15 +3938,18 @@ export function renderDashboardHtml(): Response {
       <div style="margin-top:1.25rem; padding:1rem; border-radius:10px; background:rgba(0, 229, 255, 0.03); border:1px solid rgba(0, 229, 255, 0.2);">
         <h4 style="font-size:0.9rem; color:var(--cyan); margin:0 0 0.5rem 0;">🔑 إدارة بيانات الدخول ورمز الاسترداد البديل</h4>
         <div style="font-size:0.8rem; color:var(--text-sec); margin-bottom:0.75rem;">
-          يمكن لمالك المنظومة توليد رمز استرداد جديد أحادي الاستخدام (صالح لـ 24 ساعة) لمساعدة الطالب أو المعلم عند فقدان وسيلة دخوله. يتم حفظ التجزئة المشفرة فقط دون إظهار أي كلمة مرور سابقة.
+          يمكن لمالك المنظومة إصدار رمز استرداد دائم جديد. تُحفظ بصمة للتحقق ونسخة مشفرة للتسليم الخاص داخل إشعارات حساب المستخدم، ولا يظهر الرمز في لوحة الإدارة.
         </div>
         <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; margin-bottom:0.5rem;">
           <label style="font-size:0.8rem; color:var(--text-sec); display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
-            <input type="checkbox" id="udReissueRevokeSessions" checked style="cursor:pointer;">
+            <input type="checkbox" id="udReissueRevokeSessions" style="cursor:pointer;">
             إبطال الجلسات الحالية النشطة فوراً لضمان الأمان
           </label>
           <button class="action-btn" onclick="reissueUserCredentialsFromModal()" style="background:var(--cyan); color:#000; font-weight:700; padding:0.4rem 0.8rem; font-size:0.8rem;">
             ⚡ إصدار رمز استرداد جديد
+          </button>
+          <button class="action-btn reject" onclick="revokeUserRecoveryCodeFromModal()" style="padding:0.4rem 0.8rem; font-size:0.8rem;">
+            إلغاء رمز الاسترداد الحالي
           </button>
         </div>
         <div id="udReissueResult" style="display:none; margin-top:0.5rem; padding:0.75rem; border-radius:8px; background:rgba(0,0,0,0.5); border:1px solid var(--border);"></div>
@@ -3892,7 +4086,7 @@ export function renderDashboardHtml(): Response {
           لحماية المنظومة من التصفير العرضي، لن يتم فحص أو معاينة الجداول حتى يتم التحقق من صحة مفتاح المالك السري أولاً. (لا يتم حفظ المفتاح في التخزين المحلي).
         </p>
         <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
-          <input type="password" id="purgeStage1Secret" class="form-control" placeholder="أدخل TANWEER_OWNER_SECRET" style="flex:1; min-width:240px;">
+          <input type="password" id="purgeStage1Secret" aria-label="مفتاح مالك النظام للتحقق من التصفير" class="form-control" placeholder="أدخل TANWEER_OWNER_SECRET" style="flex:1; min-width:240px;">
           <button id="purgeStage1Btn" class="action-btn approve" onclick="submitPurgeStage1()" style="padding:0.6rem 1.25rem;">
             التحقق وفحص السجلات المتأثرة 🔍
           </button>
@@ -3945,7 +4139,7 @@ export function renderDashboardHtml(): Response {
             اكتب كلمة <strong>YES</strong> بحروف كبيرة للتأكيد والبدء الفوري في تفريغ الجداول وتدوير <code>data_generation</code>:
           </p>
           <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
-            <input type="text" id="purgeConfirmYesInput" class="form-control" placeholder="اكتب YES للتأكيد" style="max-width:200px; text-align:center; font-weight:900; letter-spacing:2px; color:var(--ruby);" oninput="checkPurgeConfirmMatch()">
+            <input type="text" id="purgeConfirmYesInput" aria-label="اكتب YES لتأكيد التصفير الشامل" class="form-control" placeholder="اكتب YES للتأكيد" style="max-width:200px; text-align:center; font-weight:900; letter-spacing:2px; color:var(--ruby);" oninput="checkPurgeConfirmMatch()">
             <button id="executePurgeFinalBtn" class="action-btn reject" onclick="executePurgeFinal()" disabled style="padding:0.75rem 1.5rem; font-weight:800; opacity:0.5; cursor:not-allowed;">
               تنفيذ التصفير الشامل وتدوير الجيل فورياً 💣
             </button>
@@ -3974,24 +4168,24 @@ export function renderDashboardHtml(): Response {
       <div class="modal-sub">يتم تثبيت الإجازة في التقويم الدراسي والشعب المحددة</div>
 
       <div class="form-group">
-        <label>عنوان الإجازة (مثال: إجازة عيد الاستقلال / إجازة رسمية)</label>
+        <label for="holidayTitle">عنوان الإجازة (مثال: إجازة عيد الاستقلال / إجازة رسمية)</label>
         <input type="text" class="form-control" id="holidayTitle" placeholder="مثلاً: إجازة نهاية الأسبوع الرسمية">
       </div>
 
       <div class="form-group">
-        <label>تاريخ الإجازة (YYYY-MM-DD)</label>
+        <label for="holidayDate">تاريخ الإجازة (YYYY-MM-DD)</label>
         <input type="date" class="form-control" id="holidayDate">
       </div>
 
       <div class="form-group">
-        <label>نطاق الإجازة</label>
+        <label for="holidayGroupId">نطاق الإجازة</label>
         <select class="form-control" id="holidayGroupId">
           <option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>
         </select>
       </div>
 
       <div class="form-group">
-        <label>السبب والمبرر الإداري الرسمي (إلزامي) ⚠️</label>
+        <label for="holidayReason">السبب والمبرر الإداري الرسمي (إلزامي) ⚠️</label>
         <textarea class="form-control" id="holidayReason" rows="2" placeholder="اكتب سبب ومبرر اعتماد الإجازة لتوثيقها بالسجلات..."></textarea>
       </div>
 
@@ -4061,9 +4255,15 @@ export function renderDashboardHtml(): Response {
     }
 
     function switchTab(tabId) {
-      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-      const activeNav = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes(tabId));
-      if (activeNav) activeNav.classList.add('active');
+      document.querySelectorAll('.nav-item').forEach(el => {
+        el.classList.remove('active');
+        el.removeAttribute('aria-current');
+      });
+      const activeNav = Array.from(document.querySelectorAll('.nav-item')).find(el => el.dataset.tab === tabId);
+      if (activeNav) {
+        activeNav.classList.add('active');
+        activeNav.setAttribute('aria-current', 'page');
+      }
 
       const tabs = [
         'overview', 'users', 'roles', 'teachers', 'moderators', 'admins', 'groups', 
@@ -4101,6 +4301,13 @@ export function renderDashboardHtml(): Response {
       };
       document.getElementById('pageTitle').textContent = titles[tabId] || 'غرفة التحكم';
 
+      const mobileNav = document.getElementById('dashboardNav');
+      const ownerInfo = document.querySelector('.owner-info');
+      if (mobileNav?.classList.contains('mobile-open')) {
+        mobileNav.classList.remove('mobile-open');
+        ownerInfo?.classList.remove('mobile-open');
+      }
+
       if (tabId === 'overview') loadStats();
       if (tabId === 'users') loadUsers(0);
       if (tabId === 'roles') loadRoles();
@@ -4123,48 +4330,139 @@ export function renderDashboardHtml(): Response {
       if (tabId === 'audit') loadAudit(0);
     }
 
+    function dashboardResponseMessage(data, fallback) {
+      const rawError = data?.error;
+      const errorMessage = typeof rawError === 'string' ? rawError : (typeof rawError?.message === 'string' ? rawError.message : '');
+      const serverMessage = typeof data?.message === 'string' ? data.message : '';
+      return (errorMessage || serverMessage || fallback || 'تعذر إكمال الطلب').trim();
+    }
+
+    function dashboardMutationSucceeded(response, data) {
+      return response?.ok === true && data?.success === true;
+    }
+
+    function dashboardMutationFailureMessage(response, data, fallback) {
+      if (response?.ok !== true && data?.success === true) return 'لم يؤكد الخادم نجاح العملية عبر HTTP؛ تحقق قبل إعادة المحاولة.';
+      return dashboardResponseMessage(data, fallback);
+    }
+
+    function renderDashboardTableError(tbody, colspan, data, fallback, retryAction) {
+      if (!tbody) return;
+      const message = escapeHtml(dashboardResponseMessage(data, fallback));
+      const retry = typeof retryAction === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(retryAction)
+        ? '<button type="button" class="action-btn" style="margin-inline-start:0.5rem;" onclick="' + retryAction + '()">إعادة المحاولة</button>'
+        : '';
+      tbody.innerHTML = '<tr><td colspan="' + String(colspan) + '" role="alert" style="text-align:center; color:var(--ruby); padding:1rem;">' + message + retry + '</td></tr>';
+    }
+
+    function renderDashboardTableEmpty(tbody, colspan, message) {
+      if (!tbody) return;
+      tbody.innerHTML = '<tr><td colspan="' + String(colspan) + '" role="status" style="text-align:center; color:var(--text-sec); padding:1rem;">' + escapeHtml(message) + '</td></tr>';
+    }
+
+    function renderDashboardPanelError(container, data, fallback, retryAction) {
+      if (!container) return;
+      const message = escapeHtml(dashboardResponseMessage(data, fallback));
+      const retry = typeof retryAction === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(retryAction)
+        ? '<button type="button" class="action-btn" style="margin-inline-start:0.5rem;" onclick="' + retryAction + '()">إعادة المحاولة</button>'
+        : '';
+      container.innerHTML = '<div role="alert" style="text-align:center; color:var(--ruby); grid-column:1/-1; padding:1rem;">' + message + retry + '</div>';
+    }
+
+    function renderDashboardPanelEmpty(container, message) {
+      if (!container) return;
+      container.innerHTML = '<div role="status" style="text-align:center; color:var(--text-sec); grid-column:1/-1; padding:1rem;">' + escapeHtml(message) + '</div>';
+    }
+
+    function setDashboardSelectError(select, message) {
+      if (!select) return;
+      select.innerHTML = '<option value="">' + escapeHtml(message) + '</option>';
+      select.setAttribute('aria-invalid', 'true');
+      select.title = message;
+    }
+
+    function clearDashboardSelectError(select) {
+      if (!select) return;
+      select.removeAttribute('aria-invalid');
+      select.removeAttribute('title');
+    }
+
+    function showOverviewLoadNotice(message, isError = false) {
+      const notice = document.getElementById('overviewLoadNotice');
+      if (!notice) return;
+      notice.textContent = message || '';
+      notice.hidden = !message;
+      notice.style.color = isError ? 'var(--ruby)' : 'var(--text-sec)';
+      notice.setAttribute('role', isError ? 'alert' : 'status');
+    }
+
+    function dashboardCountText(value) {
+      if (value === null || value === undefined || value === '') return '—';
+      const number = Number(value);
+      return Number.isFinite(number) && number >= 0 ? String(value) : '—';
+    }
+
     async function loadStats() {
+      showOverviewLoadNotice('جارٍ التحقق من إحصاءات المنظومة...');
       try {
         const res = await fetch('/api/dashboard/stats');
         const data = await res.json();
-        if (!data.success) return;
-        const s = data.stats;
-        document.getElementById('statUsers').textContent = s.users.total;
-        document.getElementById('statTeachers').textContent = s.teachers;
-        document.getElementById('statModerators').textContent = s.moderators;
-        document.getElementById('statAdmins').textContent = s.administrators;
-        document.getElementById('statGroups').textContent = s.groups;
-        document.getElementById('statPendingRequests').textContent = s.roleRequests.pending;
-
-        document.getElementById('statContents').textContent = s.content;
-        document.getElementById('statHomeworks').textContent = s.homework;
-        document.getElementById('statExams').textContent = s.exams;
-        document.getElementById('statEvents').textContent = s.events;
-        document.getElementById('statSchedules').textContent = s.schedules.slots;
-        document.getElementById('statIssues').textContent = s.issues;
-        document.getElementById('statChat').textContent = s.chat;
-        document.getElementById('statMedia').textContent = s.media;
-        document.getElementById('statVotes').textContent = s.votes;
-        document.getElementById('statSecurity').textContent = s.security.activeSessions;
-        document.getElementById('statAudit').textContent = s.auditLog;
-
-        document.getElementById('acadLessons').textContent = s.content;
-        document.getElementById('acadHomeworks').textContent = s.homework;
-        document.getElementById('acadExams').textContent = s.exams;
-        document.getElementById('acadEvents').textContent = s.events;
-
-        document.getElementById('sysEnv').textContent = s.system.environment;
-
-        if (s.roleRequests.pending > 0) {
-          const b = document.getElementById('requestsBadge');
-          b.textContent = s.roleRequests.pending;
-          b.style.display = 'inline-block';
+        const s = data?.stats;
+        const counts = [
+          s?.users?.total, s?.teachers, s?.moderators, s?.administrators, s?.groups,
+          s?.roleRequests?.pending, s?.content, s?.homework, s?.exams, s?.events,
+          s?.schedules?.slots, s?.issues, s?.chat, s?.media, s?.votes,
+          s?.security?.activeSessions, s?.auditLog
+        ];
+        const validCounts = counts.every(value => value !== null && value !== undefined && value !== '' &&
+          Number.isFinite(Number(value)) && Number(value) >= 0);
+        if (!res.ok || data?.success !== true || !s?.system?.environment || !validCounts) {
+          showOverviewLoadNotice(dashboardResponseMessage(data, 'تعذر تحديث الإحصاءات؛ الأرقام الظاهرة — إن وُجدت — هي آخر لقطة مؤكدة.'), true);
+          return;
         }
+        document.getElementById('statUsers').textContent = dashboardCountText(s.users.total);
+        document.getElementById('statTeachers').textContent = dashboardCountText(s.teachers);
+        document.getElementById('statModerators').textContent = dashboardCountText(s.moderators);
+        document.getElementById('statAdmins').textContent = dashboardCountText(s.administrators);
+        document.getElementById('statGroups').textContent = dashboardCountText(s.groups);
+        document.getElementById('statPendingRequests').textContent = dashboardCountText(s.roleRequests.pending);
+        document.getElementById('statContents').textContent = dashboardCountText(s.content);
+        document.getElementById('statHomeworks').textContent = dashboardCountText(s.homework);
+        document.getElementById('statExams').textContent = dashboardCountText(s.exams);
+        document.getElementById('statEvents').textContent = dashboardCountText(s.events);
+        document.getElementById('statSchedules').textContent = dashboardCountText(s.schedules.slots);
+        document.getElementById('statIssues').textContent = dashboardCountText(s.issues);
+        document.getElementById('statChat').textContent = dashboardCountText(s.chat);
+        document.getElementById('statMedia').textContent = dashboardCountText(s.media);
+        document.getElementById('statVotes').textContent = dashboardCountText(s.votes);
+        document.getElementById('statSecurity').textContent = dashboardCountText(s.security.activeSessions);
+        document.getElementById('statAudit').textContent = dashboardCountText(s.auditLog);
+        document.getElementById('sysEnv').textContent = s.system.environment;
+        const badge = document.getElementById('requestsBadge');
+        if (badge) {
+          badge.textContent = dashboardCountText(s.roleRequests.pending);
+          badge.style.display = Number(s.roleRequests.pending) > 0 ? 'inline-block' : 'none';
+        }
+        showOverviewLoadNotice('');
       } catch (e) {
-        console.error(e);
+        showOverviewLoadNotice('تعذر الاتصال بالخادم لتحديث الإحصاءات؛ الأرقام الظاهرة — إن وُجدت — هي آخر لقطة مؤكدة.', true);
+        console.error('Owner Dashboard statistics refresh failed', e);
       }
     }
 
+    function toggleMobileMenu() {
+      const nav = document.getElementById('dashboardNav');
+      const ownerInfo = document.querySelector('.owner-info');
+      const menuButton = document.querySelector('.menu-toggle-btn');
+      if (!nav) return;
+
+      const isOpen = nav.classList.toggle('mobile-open');
+      if (ownerInfo) ownerInfo.classList.toggle('mobile-open', isOpen);
+      if (menuButton) {
+        menuButton.setAttribute('aria-expanded', String(isOpen));
+        menuButton.setAttribute('aria-label', isOpen ? 'إغلاق قائمة التنقل' : 'فتح قائمة التنقل');
+      }
+    }
     function debounceUserSearch() {
       clearTimeout(searchTimeout);
       searchTimeout = setTimeout(() => loadUsers(0), 300);
@@ -4207,9 +4505,13 @@ export function renderDashboardHtml(): Response {
         const url = \`/api/dashboard/users?q=\${encodeURIComponent(q)}&role=\${encodeURIComponent(role)}&status=\${encodeURIComponent(status)}&offset=\${offset}&limit=\${pagination.users.limit}\`;
         const res = await fetch(url);
         const data = await res.json();
-        if (!data.success || !data.users.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد حسابات مطابقة</td></tr>';
-          renderPaginationControls('usersPagination', 0, pagination.users.limit, 0, 0, 'loadUsers');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.users)) {
+          renderDashboardTableError(tbody, 7, data, 'تعذر تحميل حسابات المستخدمين', 'loadUsers');
+          return;
+        }
+        if (data.users.length === 0) {
+          renderDashboardTableEmpty(tbody, 7, 'لا توجد حسابات مطابقة لعبارة البحث.');
+          renderPaginationControls('usersPagination', data.offset ?? offset, data.limit ?? pagination.users.limit, data.count ?? 0, data.totalCount ?? 0, 'loadUsers');
           return;
         }
 
@@ -4279,8 +4581,8 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId);
         const data = await res.json();
-        if (!data.success) {
-          alert(data.message || 'فشل جلب بيانات المستخدم');
+        if (!res.ok || data?.success !== true) {
+          alert(dashboardResponseMessage(data, 'فشل جلب بيانات المستخدم'));
           closeUserDetailModal();
           return;
         }
@@ -4374,6 +4676,10 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ sessionId })
         });
         const data = await res.json();
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر إنهاء الجلسة'));
+          return;
+        }
         showToast(data.message || 'تم إنهاء الجلسة بنجاح');
         openUserDetailModal(userId);
         loadStats();
@@ -4387,6 +4693,10 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/users/\${activeUserId}/revoke-sessions\`, { method: 'POST' });
         const data = await res.json();
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر إنهاء جميع جلسات المستخدم'));
+          return;
+        }
         showToast(data.message || 'تم إنهاء جميع الجلسات');
         openUserDetailModal(activeUserId);
         loadStats();
@@ -4401,63 +4711,81 @@ export function renderDashboardHtml(): Response {
       const resContainer = document.getElementById('udReissueResult');
       resContainer.style.display = 'block';
       resContainer.innerHTML = '<div style="color:var(--text-sec); font-size:0.8rem;">جاري إصدار رمز استرداد جديد...</div>';
-
       try {
-        const res = await fetch(\`/api/dashboard/users/\${activeUserId}/reissue-credentials\`, {
+        const res = await fetch('/api/dashboard/users/' + encodeURIComponent(activeUserId) + '/reissue-credentials', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ revokeExistingSessions, expiresInHours: 24 })
+          body: JSON.stringify({ type: 'RECOVERY_CODE', revokeExistingSessions })
         });
         const data = await res.json();
-        if (data.success) {
-          const secret = escapeHtml(data.temporarySecret);
-          resContainer.innerHTML = \`
-            <div style="color:var(--emerald); font-weight:bold; font-size:0.85rem; margin-bottom:0.4rem;">✓ تم إنشاء رمز استرداد بديل بنجاح:</div>
-            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem;">
-              <code style="font-size:1.1rem; color:var(--cyan); font-weight:800; background:rgba(0,229,255,0.1); padding:0.4rem 0.8rem; border-radius:6px; letter-spacing:1px;" id="reissuedCodeText">\${secret}</code>
-              <button class="action-btn" onclick="navigator.clipboard.writeText(document.getElementById('reissuedCodeText').innerText); showToast('تم نسخ رمز الاسترداد بنجاح');" style="padding:0.4rem 0.8rem; font-size:0.8rem;">📋 نسخ</button>
-            </div>
-            <div style="color:var(--amber); font-size:0.75rem;">⚠️ هذا الرمز أحادي الاستخدام وصالح لـ 24 ساعة فقط. لن يظهر هذا الرمز مرة أخرى، يرجى نسخه وتزويده للمستخدم فوراً.</div>
-          \`;
-          showToast('تم إصدار رمز الاسترداد بنجاح');
-          const resRefresh = await fetch('/api/dashboard/users/' + activeUserId);
+        if (dashboardMutationSucceeded(res, data)) {
+          resContainer.innerHTML = '<div style="color:var(--emerald); font-weight:bold; font-size:0.85rem; margin-bottom:0.4rem;">✓ تم إنشاء رمز استرداد دائم بنجاح.</div>' +
+            '<div style="color:var(--text-sec); font-size:0.78rem; line-height:1.8;">حُفظت الرسالة التي تحتوي الرمز مشفرة داخل إشعارات حساب المستخدم. لن يظهر الرمز في لوحة الإدارة أو استجابة الخادم؛ يستطيع صاحب الحساب فقط عرضه من ملفه الشخصي بعد تسجيل الدخول.</div>' +
+            '<div style="color:var(--amber); font-size:0.75rem; margin-top:0.35rem;">يبقى الرمز صالحاً حتى تغييره من المستخدم أو إلغائه من الإدارة.</div>';
+          showToast('تم تسليم رمز الاسترداد إلى إشعارات حساب المستخدم');
+          const resRefresh = await fetch('/api/dashboard/users/' + encodeURIComponent(activeUserId));
           const dataRefresh = await resRefresh.json();
-          if (dataRefresh.success) {
+          if (resRefresh.ok && dataRefresh?.success === true && Array.isArray(dataRefresh.sessions)) {
             const sBody = document.getElementById('udSessionsTableBody');
             const sessions = dataRefresh.sessions || [];
             if (sessions.length) {
               sBody.innerHTML = sessions.map(s => {
                 const sId = escapeHtml(s.id);
-                return \`<tr>
-                  <td><code>\${escapeHtml(s.id.substring(0, 10))}...</code></td>
-                  <td>\${escapeHtml(s.ip_address)}</td>
-                  <td>\${escapeHtml(s.device_info)}</td>
-                  <td>\${new Date(s.created_at).toLocaleString('ar-EG')}</td>
-                  <td>
-                    <button class="action-btn reject" data-user="\${escapeHtml(activeUserId)}" data-session="\${sId}" onclick="revokeSingleSession(this.getAttribute('data-user'), this.getAttribute('data-session'))" style="font-size:0.7rem; padding:0.2rem 0.5rem;">طرد</button>
-                  </td>
-                </tr>\`;
+                return '<tr>' +
+                  '<td><code>' + escapeHtml(s.id.substring(0, 10)) + '...</code></td>' +
+                  '<td>' + escapeHtml(s.ip_address) + '</td>' +
+                  '<td>' + escapeHtml(s.device_info) + '</td>' +
+                  '<td>' + new Date(s.created_at).toLocaleString('ar-EG') + '</td>' +
+                  '<td><button class="action-btn reject" data-user="' + escapeHtml(activeUserId) + '" data-session="' + sId + '" onclick="revokeSingleSession(this.getAttribute(\\'data-user\\'), this.getAttribute(\\'data-session\\'))" style="font-size:0.7rem; padding:0.2rem 0.5rem;">طرد</button></td>' +
+                  '</tr>';
               }).join('');
             } else {
               sBody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">لا توجد جلسات نشطة حالياً</td></tr>';
             }
           }
         } else {
-          resContainer.innerHTML = \`<div style="color:var(--ruby); font-size:0.85rem;">\${escapeHtml(data.message || 'فشلت عملية إصدار الرمز')}</div>\`;
+          resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">' + escapeHtml(dashboardMutationFailureMessage(res, data, 'فشلت عملية إصدار الرمز')) + '</div>';
         }
       } catch (e) {
         resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
       }
     }
 
+    async function revokeUserRecoveryCodeFromModal() {
+      if (!activeUserId) return;
+      if (!confirm('هل تريد إلغاء رمز الاسترداد الحالي لهذا الحساب؟ لن يعمل الرمز بعد ذلك، ولن يتم إنشاء بديل تلقائياً.')) return;
+      const resContainer = document.getElementById('udReissueResult');
+      resContainer.style.display = 'block';
+      resContainer.innerHTML = '<div style="color:var(--text-sec); font-size:0.8rem;">جارٍ إلغاء رمز الاسترداد...</div>';
+      try {
+        const res = await fetch('/api/dashboard/users/' + encodeURIComponent(activeUserId) + '/revoke-recovery-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (dashboardMutationSucceeded(res, data)) {
+          resContainer.innerHTML = '<div style="color:var(--amber); font-size:0.85rem; font-weight:bold;">✓ ' + escapeHtml(data.message || 'تم إلغاء رمز الاسترداد') + '</div>';
+          showToast('تم إلغاء رمز الاسترداد السابق');
+        } else {
+          resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">' + escapeHtml(dashboardMutationFailureMessage(res, data, 'فشل إلغاء رمز الاسترداد')) + '</div>';
+        }
+      } catch (error) {
+        resContainer.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ في الاتصال بالخادم</div>';
+      }
+    }
     async function loadRoles() {
       const container = document.getElementById('rolesList');
       container.innerHTML = '<div style="text-align:center; color:var(--text-sec); grid-column:1/-1;">جاري جلب بيانات الرتب...</div>';
       try {
         const res = await fetch('/api/dashboard/roles');
         const data = await res.json();
-        if (!data.success || !data.roles.length) {
-          container.innerHTML = '<div style="text-align:center; color:var(--ruby); grid-column:1/-1;">فشل تحميل الرتب</div>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.roles)) {
+          renderDashboardPanelError(container, data, 'تعذر تحميل تعريفات الرتب', 'loadRoles');
+          return;
+        }
+        if (data.roles.length === 0) {
+          renderDashboardPanelEmpty(container, 'لم يُرجع الخادم تعريفات للرتب.');
           return;
         }
         container.innerHTML = data.roles.map(r => \`
@@ -4495,8 +4823,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users?role=TEACHER');
         const data = await res.json();
-        if (!data.success || !data.users.length) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا يوجد أساتذة مسجلين بعد</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.users)) {
+          renderDashboardTableError(tbody, 5, data, 'تعذر تحميل قائمة TEACHER', 'loadTeachers');
+          return;
+        }
+        if (data.users.length === 0) {
+          renderDashboardTableEmpty(tbody, 5, 'لا يوجد أساتذة مسجلون حالياً.');
           return;
         }
         tbody.innerHTML = data.users.map(u => {
@@ -4523,8 +4855,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users?role=MODERATOR');
         const data = await res.json();
-        if (!data.success || !data.users.length) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا يوجد مشرفون مسجلون</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.users)) {
+          renderDashboardTableError(tbody, 5, data, 'تعذر تحميل قائمة MODERATOR', 'loadModerators');
+          return;
+        }
+        if (data.users.length === 0) {
+          renderDashboardTableEmpty(tbody, 5, 'لا يوجد مشرفون مسجلون حالياً.');
           return;
         }
         tbody.innerHTML = data.users.map(u => {
@@ -4551,8 +4887,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users?role=ADMIN');
         const data = await res.json();
-        if (!data.success || !data.users.length) {
-          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-sec);">لا يوجد مدراء إضافيون</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.users)) {
+          renderDashboardTableError(tbody, 4, data, 'تعذر تحميل قائمة ADMIN', 'loadAdmins');
+          return;
+        }
+        if (data.users.length === 0) {
+          renderDashboardTableEmpty(tbody, 4, 'لا يوجد مديرون إضافيون مسجلون حالياً.');
           return;
         }
         tbody.innerHTML = data.users.map(u => {
@@ -4595,13 +4935,13 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ newRole, reason })
         });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           closeRoleModal();
           showToast(data.message);
           loadUsers();
           loadStats();
         } else {
-          alert(data.message || 'فشلت العملية');
+          alert(dashboardMutationFailureMessage(res, data, 'فشلت العملية'));
         }
       } catch (e) {
         alert('حدث خطأ');
@@ -4613,6 +4953,10 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId + '/disable', { method: 'POST' });
         const data = await res.json();
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر تجميد الحساب'));
+          return;
+        }
         showToast(data.message || 'تم تجميد الحساب بنجاح');
         loadUsers();
         loadStats();
@@ -4625,6 +4969,10 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId + '/enable', { method: 'POST' });
         const data = await res.json();
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر تنشيط الحساب'));
+          return;
+        }
         showToast(data.message || 'تم تنشيط الحساب بنجاح');
         loadUsers();
         loadStats();
@@ -4638,6 +4986,10 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/users/' + userId + '/revoke-sessions', { method: 'POST' });
         const data = await res.json();
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر إنهاء جلسات المستخدم'));
+          return;
+        }
         showToast(data.message || 'تم إنهاء الجلسات');
         loadStats();
       } catch (e) {
@@ -4653,8 +5005,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/role-requests?status=' + status);
         const data = await res.json();
-        if (!data.success || !data.requests.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد طلبات في هذه الحالة</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.requests)) {
+          renderDashboardTableError(tbody, 7, data, 'تعذر تحميل طلبات الترقية', 'loadRequests');
+          return;
+        }
+        if (data.requests.length === 0) {
+          renderDashboardTableEmpty(tbody, 7, 'لا توجد طلبات في الحالة المحددة.');
           return;
         }
 
@@ -4698,7 +5054,7 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/role-requests/' + encodeURIComponent(id) + '/approve', { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           currentGeneratedCode = data.code;
           document.getElementById('generatedCodeDisplay').textContent = data.code;
           document.getElementById('codeModalSub').textContent = \`تم اعتماد ترقية \${data.applicantName} إلى \${data.targetRole}\`;
@@ -4714,7 +5070,7 @@ export function renderDashboardHtml(): Response {
           loadRequests();
           loadStats();
         } else {
-          alert(data.message || 'فشلت العملية');
+          alert(dashboardMutationFailureMessage(res, data, 'فشلت العملية'));
         }
       } catch (e) {
         alert('حدث خطأ');
@@ -4740,6 +5096,10 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ reason })
         });
         const data = await res.json();
+        if (!dashboardMutationSucceeded(res, data)) {
+          alert(dashboardMutationFailureMessage(res, data, 'تعذر رفض طلب الترقية'));
+          return;
+        }
         showToast(data.message || 'تم رفض الطلب');
         loadRequests();
         loadStats();
@@ -4750,18 +5110,27 @@ export function renderDashboardHtml(): Response {
 
     async function loadGroups() {
       const tbody = document.getElementById('groupsTableBody');
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">جاري تحميل المجموعات...</td></tr>';
       try {
         const res = await fetch('/api/dashboard/groups');
         const data = await res.json();
+        if (!res.ok || data?.success !== true || !Array.isArray(data.groups)) {
+          renderDashboardTableError(tbody, 5, data, 'تعذر تحميل المجموعات', 'loadGroups');
+          return;
+        }
+        if (data.groups.length === 0) {
+          renderDashboardTableEmpty(tbody, 5, 'لا توجد مجموعات مسجلة في البيانات المعادة من الخادم.');
+          return;
+        }
         tbody.innerHTML = data.groups.map(g => \`<tr>
           <td><code>\${escapeHtml(g.id)}</code></td>
           <td><strong>\${escapeHtml(g.name)}</strong></td>
           <td><span class="badge admin">\${escapeHtml(g.type)}</span></td>
-          <td>\${escapeHtml(g.member_count)} عضو</td>
+          <td>\${dashboardCountText(g.member_count)} عضو</td>
           <td>\${escapeHtml(g.academic_year_id)}</td>
         </tr>\`).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--ruby);">فشل تحميل المجموعات</td></tr>';
+        renderDashboardTableError(tbody, 5, null, 'تعذر الاتصال بالخادم لتحميل المجموعات.', 'loadGroups');
       }
     }
 
@@ -4775,9 +5144,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/contents?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.contents.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.contents.length) {
-          tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--text-sec);">لا توجد دروس مطابقة</td></tr>';
-          renderPaginationControls('contentsPagination', 0, pagination.contents.limit, 0, 0, 'loadContents');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.contents)) {
+          renderDashboardTableError(tbody, 8, data, 'تعذر تحميل الدروس', 'loadContents');
+          return;
+        }
+        if (data.contents.length === 0) {
+          renderDashboardTableEmpty(tbody, 8, 'لا توجد دروس مطابقة.');
+          renderPaginationControls('contentsPagination', data.offset ?? offset, data.limit ?? pagination.contents.limit, data.count ?? 0, data.totalCount ?? 0, 'loadContents');
           return;
         }
 
@@ -4824,11 +5197,11 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/contents/' + encodeURIComponent(contentId) + '/pin', { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast(data.isPinned ? 'تم تثبيت الدرس بنجاح 📌' : 'تم إلغاء تثبيت الدرس بنجاح');
           loadContents(pagination.contents.offset);
         } else {
-          alert(data.message || 'فشل تحديث حالة التثبيت');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل تحديث حالة التثبيت'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -4845,8 +5218,8 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/contents/' + encodeURIComponent(contentId));
         const data = await res.json();
-        if (!data.success) {
-          alert(data.message || 'فشل جلب تفاصيل الدرس');
+        if (!res.ok || data?.success !== true) {
+          alert(dashboardResponseMessage(data, 'فشل جلب تفاصيل الدرس'));
           closeContentDetailModal();
           return;
         }
@@ -4914,9 +5287,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/homeworks?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.homeworks.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.homeworks.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد واجبات مطابقة</td></tr>';
-          renderPaginationControls('homeworksPagination', 0, pagination.homeworks.limit, 0, 0, 'loadHomeworks');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.homeworks)) {
+          renderDashboardTableError(tbody, 6, data, 'تعذر تحميل الواجبات', 'loadHomeworks');
+          return;
+        }
+        if (data.homeworks.length === 0) {
+          renderDashboardTableEmpty(tbody, 6, 'لا توجد واجبات مطابقة.');
+          renderPaginationControls('homeworksPagination', data.offset ?? offset, data.limit ?? pagination.homeworks.limit, data.count ?? 0, data.totalCount ?? 0, 'loadHomeworks');
           return;
         }
 
@@ -4949,56 +5326,89 @@ export function renderDashboardHtml(): Response {
     }
 
     async function openHomeworkDetailModal(hwId) {
-      document.getElementById('homeworkDetailModal').style.display = 'flex';
-      document.getElementById('hwModalTitle').textContent = 'جاري التحميل...';
-      document.getElementById('hwModalGroupSubject').textContent = '';
-      document.getElementById('hwModalDueDate').textContent = '-';
-      document.getElementById('hwModalAuthor').textContent = '-';
-      document.getElementById('hwModalDetails').textContent = '';
-      document.getElementById('hwModalMediaCount').textContent = '0';
-      document.getElementById('hwModalMediaGrid').innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">جاري جلب المرفقات...</div>';
+      const modal = document.getElementById('homeworkDetailModal');
+      if (!modal) return;
+
+      const titleElement = document.getElementById('hdTitle');
+      const subjectGroupElement = document.getElementById('hdSubjectGroup');
+      const studyDateElement = document.getElementById('hdStudyDate');
+      const dueDateElement = document.getElementById('hdDueDate');
+      const taskTypeElement = document.getElementById('hdTaskType');
+      const authorElement = document.getElementById('hdAuthor');
+      const pagesElement = document.getElementById('hdPages');
+      const questionsElement = document.getElementById('hdQuestions');
+      const detailsElement = document.getElementById('hdDetails');
+      const mediaCountElement = document.getElementById('hdMediaCount');
+      const grid = document.getElementById('hdMediaGrid');
+      const deleteButton = document.getElementById('hdDeleteBtn');
+
+      modal.style.display = 'flex';
+      if (titleElement) titleElement.textContent = 'جاري تحميل تفاصيل الواجب...';
+      if (subjectGroupElement) subjectGroupElement.textContent = '';
+      if (studyDateElement) studyDateElement.textContent = '-';
+      if (dueDateElement) dueDateElement.textContent = '-';
+      if (taskTypeElement) taskTypeElement.textContent = '-';
+      if (authorElement) authorElement.textContent = '-';
+      if (pagesElement) pagesElement.textContent = '-';
+      if (questionsElement) questionsElement.textContent = '-';
+      if (detailsElement) detailsElement.textContent = '';
+      if (mediaCountElement) mediaCountElement.textContent = '0';
+      if (grid) grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">جاري جلب المرفقات...</div>';
+      if (deleteButton) { deleteButton.disabled = true; deleteButton.onclick = null; }
 
       try {
         const res = await fetch('/api/dashboard/homeworks/' + encodeURIComponent(hwId));
         const data = await res.json();
-        if (!data.success) {
-          alert(data.message || 'فشل جلب تفاصيل الواجب');
-          closeHomeworkDetailModal();
+        if (!res.ok || !data.success) {
+          const message = data.message || 'فشل جلب تفاصيل الواجب';
+          if (titleElement) titleElement.textContent = 'تعذر تحميل تفاصيل الواجب';
+          if (detailsElement) detailsElement.textContent = message;
+          if (grid) grid.innerHTML = '<div style="color:var(--ruby); font-size:0.8rem; grid-column:1/-1;">' + escapeHtml(message) + '</div>';
           return;
         }
 
         const hw = data.homework || {};
-        const media = data.media || [];
+        const media = Array.isArray(hw.media) ? hw.media : (Array.isArray(data.media) ? data.media : []);
         const subjectName = hw.subject_name || hw.subject_id || '';
         const groupName = hw.group_name || hw.group_id || '';
+        const taskType = String(hw.task_type || 'HOMEWORK').toUpperCase();
 
-        document.getElementById('hwModalTitle').textContent = (hw.title || '') + ' 📝';
-        document.getElementById('hwModalGroupSubject').textContent = \`الشعبة: \${groupName} | المادة: \${subjectName}\`;
-        document.getElementById('hwModalDueDate').textContent = hw.due_date || '-';
-        document.getElementById('hwModalAuthor').textContent = hw.author_name || '-';
-        document.getElementById('hwModalDetails').textContent = hw.details || 'لا يوجد شرح تفصيلي إضافي';
-        document.getElementById('hwModalMediaCount').textContent = media.length;
+        if (titleElement) titleElement.textContent = (hw.title || 'واجب دراسي') + ' 📝';
+        if (subjectGroupElement) subjectGroupElement.textContent = 'الشعبة: ' + groupName + ' | المادة: ' + subjectName;
+        if (studyDateElement) studyDateElement.textContent = hw.study_date || '-';
+        if (dueDateElement) dueDateElement.textContent = hw.due_date || '-';
+        if (taskTypeElement) taskTypeElement.textContent = taskType === 'TASK' ? 'مهمة دراسية' : 'واجب منزلي';
+        if (authorElement) authorElement.textContent = hw.author_name || '-';
+        if (pagesElement) pagesElement.textContent = hw.page_numbers || '-';
+        if (questionsElement) questionsElement.textContent = hw.question_numbers || '-';
+        if (detailsElement) detailsElement.textContent = hw.details || 'لا توجد تعليمات إضافية لهذا الواجب';
+        if (mediaCountElement) mediaCountElement.textContent = String(media.length);
 
-        const grid = document.getElementById('hwModalMediaGrid');
-        if (media.length) {
-          grid.innerHTML = media.map(m => {
-            const safeUrl = encodeURI(m.media_url || m.url || '');
-            const safeMime = escapeHtml(m.mime_type || 'صورة');
-            return \`
-              <div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.4); text-align:center; cursor:pointer;" data-url="\${escapeHtml(safeUrl)}" onclick="openMediaLightbox(this.getAttribute('data-url'))">
-                <img src="\${escapeHtml(safeUrl)}" alt="مرفق الواجب" style="width:100%; height:90px; object-fit:cover; display:block;">
-                <div style="padding:0.3rem; font-size:0.7rem; color:var(--text-muted); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
-                  \${safeMime}
-                </div>
-              </div>
-            \`;
-          }).join('');
-        } else {
-          grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">لا توجد صور أو مرفقات مرفوعة مع هذا الواجب</div>';
+        if (grid) {
+          if (media.length) {
+            grid.innerHTML = media.map(m => {
+              const rawUrl = m.previewUrl || m.media_url || m.url || '';
+              const safeUrl = escapeHtml(encodeURI(String(rawUrl)));
+              const safeMime = escapeHtml(m.mime_type || m.mimeType || 'مرفق');
+              return '<div style="border:1px solid var(--border); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.4); text-align:center; cursor:pointer;" data-url="' + safeUrl + '" onclick="openMediaLightbox(this.dataset.url)">' +
+                '<img src="' + safeUrl + '" alt="مرفق الواجب" style="width:100%; height:90px; object-fit:cover; display:block;">' +
+                '<div style="padding:0.3rem; font-size:0.7rem; color:var(--text-muted); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">' + safeMime + '</div>' +
+                '</div>';
+            }).join('');
+          } else {
+            grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem; grid-column:1/-1;">لا توجد صور أو مرفقات مرفوعة مع هذا الواجب</div>';
+          }
         }
-      } catch (e) {
-        alert('حدث خطأ أثناء تحميل بيانات الواجب');
-        closeHomeworkDetailModal();
+
+        if (deleteButton && hw.id) {
+          deleteButton.disabled = false;
+          deleteButton.onclick = () => deleteHomework(hw.id, hw.title || 'الواجب');
+        }
+      } catch (error) {
+        console.error('Failed to load homework details:', error);
+        if (titleElement) titleElement.textContent = 'تعذر تحميل تفاصيل الواجب';
+        if (detailsElement) detailsElement.textContent = 'حدث خطأ أثناء الاتصال بالخادم. حاول تحديث القائمة ثم إعادة المحاولة.';
+        if (grid) grid.innerHTML = '<div style="color:var(--ruby); font-size:0.8rem; grid-column:1/-1;">تعذر تحميل المرفقات</div>';
       }
     }
 
@@ -5011,12 +5421,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/homeworks/' + encodeURIComponent(hwId), { method: 'DELETE' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم حذف الواجب بنجاح');
+          closeHomeworkDetailModal();
           loadHomeworks(pagination.homeworks.offset);
           loadStats();
         } else {
-          alert(data.message || 'فشل حذف الواجب');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل حذف الواجب'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -5033,9 +5444,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/exams?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.exams.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.exams.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد اختبارات مسجلة</td></tr>';
-          renderPaginationControls('examsPagination', 0, pagination.exams.limit, 0, 0, 'loadExams');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.exams)) {
+          renderDashboardTableError(tbody, 7, data, 'تعذر تحميل الاختبارات', 'loadExams');
+          return;
+        }
+        if (data.exams.length === 0) {
+          renderDashboardTableEmpty(tbody, 7, 'لا توجد اختبارات مسجلة.');
+          renderPaginationControls('examsPagination', data.offset ?? offset, data.limit ?? pagination.exams.limit, data.count ?? 0, data.totalCount ?? 0, 'loadExams');
           return;
         }
 
@@ -5077,12 +5492,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/exams/' + encodeURIComponent(examId), { method: 'DELETE' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم حذف الاختبار بنجاح');
           loadExams(pagination.exams.offset);
           loadStats();
         } else {
-          alert(data.message || 'فشل حذف الاختبار');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل حذف الاختبار'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -5099,9 +5514,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/events?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.events.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.events.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد أحداث مسجلة</td></tr>';
-          renderPaginationControls('eventsPagination', 0, pagination.events.limit, 0, 0, 'loadEvents');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.events)) {
+          renderDashboardTableError(tbody, 6, data, 'تعذر تحميل الفعاليات', 'loadEvents');
+          return;
+        }
+        if (data.events.length === 0) {
+          renderDashboardTableEmpty(tbody, 6, 'لا توجد فعاليات مسجلة.');
+          renderPaginationControls('eventsPagination', data.offset ?? offset, data.limit ?? pagination.events.limit, data.count ?? 0, data.totalCount ?? 0, 'loadEvents');
           return;
         }
 
@@ -5130,8 +5549,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/holidays');
         const data = await res.json();
-        if (!data.success || !data.holidays.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-sec);">لا توجد إجازات مدرسية مسجلة حالياً</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.holidays)) {
+          renderDashboardTableError(tbody, 6, data, 'تعذر تحميل الإجازات المدرسية', 'loadHolidays');
+          return;
+        }
+        if (data.holidays.length === 0) {
+          renderDashboardTableEmpty(tbody, 6, 'لا توجد إجازات مدرسية مسجلة حالياً.');
           return;
         }
 
@@ -5157,17 +5580,24 @@ export function renderDashboardHtml(): Response {
       document.getElementById('holidayDate').value = new Date().toISOString().split('T')[0];
       document.getElementById('holidayReason').value = '';
       
+      const sel = document.getElementById('holidayGroupId');
+      sel.innerHTML = '<option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>';
       try {
         const res = await fetch('/api/dashboard/groups');
         const data = await res.json();
-        const sel = document.getElementById('holidayGroupId');
-        sel.innerHTML = '<option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>';
-        if (data.groups) {
-          data.groups.forEach(g => {
-            sel.innerHTML += \`<option value="\${escapeHtml(g.id)}">شعبة: \${escapeHtml(g.name)}</option>\`;
-          });
+        if (!res.ok || data?.success !== true || !Array.isArray(data.groups)) {
+          setDashboardSelectError(sel, dashboardResponseMessage(data, 'تعذر تحميل الشعب؛ يمكنك اختيار كامل المدرسة أو إعادة المحاولة لاحقاً.'));
+          sel.insertAdjacentHTML('afterbegin', '<option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>');
+          return;
         }
-      } catch (e) {}
+        clearDashboardSelectError(sel);
+        data.groups.forEach(g => {
+          sel.innerHTML += \`<option value="\${escapeHtml(g.id)}">شعبة: \${escapeHtml(g.name)}</option>\`;
+        });
+      } catch (e) {
+        setDashboardSelectError(sel, 'تعذر الاتصال بالخادم؛ يمكنك اختيار كامل المدرسة أو إعادة المحاولة لاحقاً.');
+        sel.insertAdjacentHTML('afterbegin', '<option value="all">🏫 كامل المدرسة (جميع الشعب والمراحل)</option>');
+      }
 
       document.getElementById('holidayModal').style.display = 'flex';
     }
@@ -5201,13 +5631,13 @@ export function renderDashboardHtml(): Response {
           })
         });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast(data.message || 'تم اعتماد وتثبيت الإجازة المدرسية بنجاح 🌴');
           closeHolidayModal();
           loadHolidays();
           loadStats();
         } else {
-          alert(data.message || 'فشلت عملية إنشاء الإجازة');
+          alert(dashboardMutationFailureMessage(res, data, 'فشلت عملية إنشاء الإجازة'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء إنشاء الإجازة');
@@ -5219,12 +5649,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/holidays/' + encodeURIComponent(id), { method: 'DELETE' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast(data.message || 'تم حذف الإجازة بنجاح');
           loadHolidays();
           loadStats();
         } else {
-          alert(data.message || 'فشل حذف الإجازة');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل حذف الإجازة'));
         }
       } catch (e) {
         alert('حدث خطأ');
@@ -5241,9 +5671,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/issues?status=\${status}&offset=\${offset}&limit=\${pagination.issues.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.issues.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد بلاغات مسجلة</td></tr>';
-          renderPaginationControls('issuesPagination', 0, pagination.issues.limit, 0, 0, 'loadIssues');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.issues)) {
+          renderDashboardTableError(tbody, 7, data, 'تعذر تحميل البلاغات', 'loadIssues');
+          return;
+        }
+        if (data.issues.length === 0) {
+          renderDashboardTableEmpty(tbody, 7, 'لا توجد بلاغات مسجلة ضمن هذا المرشح.');
+          renderPaginationControls('issuesPagination', data.offset ?? offset, data.limit ?? pagination.issues.limit, data.count ?? 0, data.totalCount ?? 0, 'loadIssues');
           return;
         }
 
@@ -5277,32 +5711,44 @@ export function renderDashboardHtml(): Response {
         try {
           const gRes = await fetch('/api/dashboard/groups');
           const gData = await gRes.json();
-          if (gData.groups) {
+          if (!gRes.ok || gData?.success !== true || !Array.isArray(gData.groups)) {
+            setDashboardSelectError(groupFilter, dashboardResponseMessage(gData, 'تعذر تحميل قائمة الشعب'));
+          } else if (gData.groups.length === 0) {
+            groupFilter.innerHTML = '<option value="">لا توجد مجموعات مسجلة</option>';
+            clearDashboardSelectError(groupFilter);
+          } else {
+            clearDashboardSelectError(groupFilter);
             groupFilter.innerHTML = '<option value="">-- جميع الشعب الدراسية --</option>';
             gData.groups.forEach(g => {
               groupFilter.innerHTML += \`<option value="\${escapeHtml(g.id)}">\${escapeHtml(g.name)} (\${escapeHtml(g.grade || '')})</option>\`;
             });
           }
-        } catch (e) {}
+        } catch (e) {
+          setDashboardSelectError(groupFilter, 'تعذر الاتصال بالخادم لتحميل الشعب');
+        }
       }
 
       const selectedGroupId = groupFilter?.value || '';
       try {
         const res = await fetch('/api/dashboard/schedules' + (selectedGroupId ? '?groupId=' + encodeURIComponent(selectedGroupId) : ''));
         const data = await res.json();
-        if (!data.success || !data.groups || !data.groups.length) {
-          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-sec);">لا توجد جداول مسجلة للشعب المحددة</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.groups)) {
+          renderDashboardTableError(tbody, 4, data, 'تعذر تحميل الجداول الدراسية', 'loadSchedules');
+          return;
+        }
+        if (data.groups.length === 0) {
+          renderDashboardTableEmpty(tbody, 4, 'لا توجد جداول مسجلة للمجموعات المحددة.');
           return;
         }
 
         tbody.innerHTML = data.groups.map(g => {
           const safeId = escapeHtml(g.id);
           const safeName = escapeHtml(g.name);
-          const totalSlots = g.totalSlots || (g.slots ? g.slots.length : 0);
+          const totalSlots = g.totalSlots ?? (Array.isArray(g.slots) ? g.slots.length : null);
 
           return \`<tr>
             <td><strong>\${safeName}</strong> <span style="font-size:0.75rem; color:var(--text-sec);">(\${escapeHtml(g.grade || '')})</span></td>
-            <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${totalSlots} حصة مسجلة</span></td>
+            <td><span class="badge" style="background:rgba(0,229,255,0.08); border:1px solid var(--border);">\${dashboardCountText(totalSlots)} حصة مسجلة</span></td>
             <td><code>الأحد - الخميس (7 حصص يومياً)</code></td>
             <td>
               <button class="action-btn" onclick="viewWeeklyGrid('\${safeId}', '\${safeName}')">عرض الجدول الأسبوعي 📅</button>
@@ -5324,6 +5770,23 @@ export function renderDashboardHtml(): Response {
       const container = document.getElementById('weeklyScheduleGridContainer');
       const titleElem = document.getElementById('weeklyGridGroupTitle');
       const tableBody = document.getElementById('weeklyGridTableBody');
+      const renderLoadError = message => {
+        if (!tableBody) return;
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 8;
+        cell.setAttribute('role', 'alert');
+        cell.style.cssText = 'text-align:center; color:var(--ruby); padding:1rem;';
+        cell.textContent = message;
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'action-btn';
+        retry.textContent = 'إعادة المحاولة';
+        retry.addEventListener('click', () => viewWeeklyGrid(groupId, groupName));
+        cell.append(document.createTextNode(' '), retry);
+        row.appendChild(cell);
+        tableBody.replaceChildren(row);
+      };
       if (titleElem) titleElem.textContent = 'الجدول الأسبوعي المعتمد: ' + groupName;
       if (tableBody) tableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;">جاري جلب وتوزيع حصص الأسبوع...</td></tr>';
       container.style.display = 'block';
@@ -5332,7 +5795,14 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/schedules?groupId=' + encodeURIComponent(groupId));
         const data = await res.json();
-        const slots = data.slots || [];
+        if (!res.ok || data?.success !== true || !Array.isArray(data.slots)) {
+          const message = !res.ok && data?.success === true
+            ? 'تعذر تأكيد تحميل الجدول من الخادم.'
+            : dashboardResponseMessage(data, 'تعذر تحميل الحصص الأسبوعية');
+          renderLoadError(message);
+          return;
+        }
+        const slots = data.slots;
         const days = [
           { key: 0, name: 'الأحد' },
           { key: 1, name: 'الإثنين' },
@@ -5360,7 +5830,7 @@ export function renderDashboardHtml(): Response {
 
         tableBody.innerHTML = rowsHtml;
       } catch (e) {
-        tableBody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--ruby);">فشل تحميل الحصص الأسبوعية</td></tr>';
+        renderLoadError('تعذر الاتصال بالخادم لتحميل الحصص الأسبوعية.');
       }
     }
 
@@ -5374,12 +5844,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/schedules/' + encodeURIComponent(groupId) + '/reset', { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم تصفير جدول الشعبة بنجاح ⚠️');
           closeWeeklyGrid();
           loadSchedules();
         } else {
-          alert(data.message || 'فشل تصفير الجدول');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل تصفير الجدول'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -5393,8 +5863,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/decisions');
         const data = await res.json();
-        if (!data.success || !data.decisions || !data.decisions.length) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-sec);">لا توجد قرارات أو تصويتات مسجلة</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.decisions)) {
+          renderDashboardTableError(tbody, 7, data, 'تعذر تحميل القرارات والتصويتات', 'loadDecisions');
+          return;
+        }
+        if (data.decisions.length === 0) {
+          renderDashboardTableEmpty(tbody, 7, 'لا توجد قرارات أو تصويتات مسجلة.');
           return;
         }
 
@@ -5403,8 +5877,8 @@ export function renderDashboardHtml(): Response {
           const reqType = escapeHtml(d.request_type || d.type || 'قرار');
           const reason = escapeHtml(d.reason || d.description || '-');
           const group = escapeHtml(d.group_name || d.group_id || 'عام');
-          const yesVotes = d.votes_for ?? d.yes_votes ?? 0;
-          const noVotes = d.votes_against ?? d.no_votes ?? 0;
+          const yesVotes = dashboardCountText(d.votes_for ?? d.yes_votes);
+          const noVotes = dashboardCountText(d.votes_against ?? d.no_votes);
           const status = (d.status || 'PENDING').toUpperCase();
           const creator = escapeHtml(d.creator_name || d.created_by || '-');
 
@@ -5442,11 +5916,11 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/decisions/' + encodeURIComponent(id) + '/apply', { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم اعتماد القرار وتطبيقه بنجاح ✅');
           loadDecisions();
         } else {
-          alert(data.message || 'فشل تطبيق القرار');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل تطبيق القرار'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -5458,11 +5932,11 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/decisions/' + encodeURIComponent(id) + '/reject', { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم رفض القرار وإغلاقه');
           loadDecisions();
         } else {
-          alert(data.message || 'فشل رفض القرار');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل رفض القرار'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
@@ -5476,8 +5950,12 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/corrections');
         const data = await res.json();
-        if (!data.success || !data.corrections || !data.corrections.length) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا توجد مقترحات تصحيح مسجلة</td></tr>';
+        if (!res.ok || data?.success !== true || !Array.isArray(data.corrections)) {
+          renderDashboardTableError(tbody, 5, data, 'تعذر تحميل مقترحات التصحيح', 'loadCorrections');
+          return;
+        }
+        if (data.corrections.length === 0) {
+          renderDashboardTableEmpty(tbody, 5, 'لا توجد مقترحات تصحيح مسجلة.');
           return;
         }
 
@@ -5500,13 +5978,22 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/groups');
         const data = await res.json();
-        if (data.groups) {
-          sel.innerHTML = '<option value="">-- جميع الشعب --</option>';
-          data.groups.forEach(g => {
-            sel.innerHTML += \`<option value="\${escapeHtml(g.id)}">\${escapeHtml(g.name)}</option>\`;
-          });
+        if (!res.ok || data?.success !== true || !Array.isArray(data.groups)) {
+          setDashboardSelectError(sel, dashboardResponseMessage(data, 'تعذر تحميل قائمة الشعب'));
+          return;
         }
-      } catch (e) {}
+        clearDashboardSelectError(sel);
+        sel.innerHTML = '<option value="">-- جميع الشعب --</option>';
+        if (data.groups.length === 0) {
+          sel.innerHTML = '<option value="">لا توجد مجموعات مسجلة</option>';
+          return;
+        }
+        data.groups.forEach(g => {
+          sel.innerHTML += \`<option value="\${escapeHtml(g.id)}">\${escapeHtml(g.name)}</option>\`;
+        });
+      } catch (e) {
+        setDashboardSelectError(sel, 'تعذر الاتصال بالخادم لتحميل قائمة الشعب');
+      }
     }
 
     async function loadChatMessages(offset = 0) {
@@ -5521,9 +6008,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/chat-messages?q=\${encodeURIComponent(q)}&groupId=\${encodeURIComponent(groupId)}&order=\${encodeURIComponent(order)}&offset=\${offset}&limit=\${pagination.chat.limit}\`);
         const data = await res.json();
-        if (!data.success || !data.messages.length) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-sec);">لا توجد رسائل مطابقة</td></tr>';
-          renderPaginationControls('chatPagination', 0, pagination.chat.limit, 0, 0, 'loadChatMessages');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.messages)) {
+          renderDashboardTableError(tbody, 5, data, 'تعذر تحميل رسائل المحادثة', 'loadChatMessages');
+          return;
+        }
+        if (data.messages.length === 0) {
+          renderDashboardTableEmpty(tbody, 5, 'لا توجد رسائل مطابقة للبحث أو المجموعة المحددة.');
+          renderPaginationControls('chatPagination', data.offset ?? offset, data.limit ?? pagination.chat.limit, data.count ?? 0, data.totalCount ?? 0, 'loadChatMessages');
           return;
         }
 
@@ -5559,28 +6050,30 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch('/api/dashboard/chat-messages/' + encodeURIComponent(msgId), { method: 'DELETE' });
         const data = await res.json();
-        if (data.success) {
+        if (dashboardMutationSucceeded(res, data)) {
           showToast('تم حذف الرسالة بنجاح');
           loadChatMessages(pagination.chat.offset);
           loadStats();
         } else {
-          alert(data.message || 'فشل حذف الرسالة');
+          alert(dashboardMutationFailureMessage(res, data, 'فشل حذف الرسالة'));
         }
       } catch (e) {
         alert('حدث خطأ أثناء الاتصال بالخادم');
       }
     }
 
-    // SQL Studio Runner (D-04)
+    // SQL Studio Runner — consumes the canonical handleExecuteSql response.
     async function runSqlConsole() {
-      const query = document.getElementById('sqlQueryInput')?.value.trim();
-      const output = document.getElementById('sqlConsoleOutput');
+      const query = document.getElementById('sqlQuery')?.value.trim() || '';
+      const output = document.getElementById('sqlResult');
+      if (!output) return;
+
       if (!query) {
-        alert('الرجاء كتابة استعلام SQL أولاً');
+        output.textContent = 'الرجاء كتابة استعلام SQL أولاً';
         return;
       }
 
-      output.innerHTML = '<div style="color:var(--text-sec); font-size:0.85rem;">جاري تنفيذ الاستعلام في قاعدة البيانات...</div>';
+      output.innerHTML = '<div role="status" style="color:var(--text-sec); font-size:0.85rem;">جاري تنفيذ الاستعلام في قاعدة البيانات...</div>';
 
       try {
         const res = await fetch('/api/dashboard/sql', {
@@ -5589,41 +6082,67 @@ export function renderDashboardHtml(): Response {
           body: JSON.stringify({ query })
         });
         const data = await res.json();
-        if (!data.success) {
-          output.innerHTML = \`<div style="color:var(--ruby); font-family:monospace; font-size:0.85rem; padding:0.5rem; background:rgba(239,83,80,0.1); border-radius:6px;">خطأ في التنفيذ: \${escapeHtml(data.message || 'فشل الاستعلام')}</div>\`;
+
+        if (!res.ok || data?.success !== true) {
+          const serverError = typeof data?.error === 'string' ? data.error.trim() : '';
+          const serverMessage = typeof data?.message === 'string' ? data.message.trim() : '';
+          const message = serverError || serverMessage || 'فشل الاستعلام';
+          output.innerHTML = '<div role="alert" style="color:var(--ruby); font-family:monospace; font-size:0.85rem; padding:0.5rem; background:rgba(239,83,80,0.1); border-radius:6px;">خطأ في التنفيذ: ' + escapeHtml(message) + '</div>';
           return;
         }
 
-        if (data.isMutation) {
-          output.innerHTML = \`<div style="color:var(--emerald); font-family:monospace; font-size:0.85rem; padding:0.5rem; background:rgba(0,230,118,0.1); border-radius:6px;">تم تنفيذ أمر التعديل بنجاح! تم التأثير على \${data.changes || 0} صف.</div>\`;
+        if (data.type === 'MUTATION') {
+          const rawChanges = data.meta?.changes;
+          const changes = Number(rawChanges);
+          const changesText = Number.isFinite(changes) && changes >= 0
+            ? 'تم التأثير على ' + String(changes) + ' صف.'
+            : 'عدد الصفوف المتأثرة غير متاح.';
+          const message = typeof data.message === 'string' && data.message.trim()
+            ? data.message.trim()
+            : 'تم تنفيذ أمر التعديل بنجاح.';
+          output.innerHTML = '<div role="status" style="color:var(--emerald); font-family:monospace; font-size:0.85rem; padding:0.5rem; background:rgba(0,230,118,0.1); border-radius:6px;">' + escapeHtml(message) + ' ' + escapeHtml(changesText) + '</div>';
           return;
         }
 
-        const rows = data.results || data.rows || [];
+        if (data.type !== 'SELECT' || !Array.isArray(data.data)) {
+          output.innerHTML = '<div role="alert" style="color:var(--ruby); font-family:monospace; font-size:0.85rem; padding:0.5rem;">استجابة الخادم غير متوافقة مع عقد SQL Studio.</div>';
+          return;
+        }
+
+        const rows = data.data;
+        const rowCount = Number.isInteger(data.rowCount) && data.rowCount >= 0 ? data.rowCount : rows.length;
         if (!rows.length) {
-          output.innerHTML = '<div style="color:var(--text-sec); font-size:0.85rem;">تم تنفيذ الاستعلام بنجاح. لا توجد نتائج معادة (0 صفوف).</div>';
+          output.innerHTML = '<div role="status" style="color:var(--text-sec); font-size:0.85rem;">تم تنفيذ الاستعلام بنجاح. لا توجد نتائج معادة (' + String(rowCount) + ' صفوف).</div>';
           return;
         }
 
-        const cols = Object.keys(rows[0]);
-        let tableHtml = \`<div style="margin-bottom:0.4rem; font-size:0.8rem; color:var(--cyan);">عدد السجلات المعادة: \${rows.length}</div>\`;
+        const cols = Object.keys(rows[0] || {});
+        if (!cols.length) {
+          output.innerHTML = '<div role="status" style="color:var(--text-sec); font-size:0.85rem;">أعاد الاستعلام ' + String(rowCount) + ' صفوف دون حقول قابلة للعرض.</div>';
+          return;
+        }
+
+        let tableHtml = '<div style="margin-bottom:0.4rem; font-size:0.8rem; color:var(--cyan);">عدد السجلات المعادة: ' + String(rowCount) + '</div>';
         tableHtml += '<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:0.75rem; font-family:monospace;"><thead><tr style="background:rgba(255,255,255,0.05);">';
         cols.forEach(col => {
-          tableHtml += \`<th style="padding:0.4rem 0.6rem; border:1px solid var(--border); text-align:right;">\${escapeHtml(col)}</th>\`;
+          tableHtml += '<th scope="col" style="padding:0.4rem 0.6rem; border:1px solid var(--border); text-align:right;">' + escapeHtml(col) + '</th>';
         });
         tableHtml += '</tr></thead><tbody>';
-        rows.forEach(r => {
+        rows.forEach(row => {
           tableHtml += '<tr>';
           cols.forEach(col => {
-            const val = r[col];
-            tableHtml += \`<td style="padding:0.4rem 0.6rem; border:1px solid var(--border); text-align:right;">\${escapeHtml(val === null ? 'NULL' : String(val))}</td>\`;
+            const value = row[col];
+            tableHtml += '<td style="padding:0.4rem 0.6rem; border:1px solid var(--border); text-align:right;">' + escapeHtml(value === null || value === undefined ? 'NULL' : String(value)) + '</td>';
           });
           tableHtml += '</tr>';
         });
         tableHtml += '</tbody></table></div>';
         output.innerHTML = tableHtml;
-      } catch (e) {
-        output.innerHTML = '<div style="color:var(--ruby); font-size:0.85rem;">حدث خطأ أثناء الاتصال بالخادم</div>';
+      } catch (error) {
+        const message = error && typeof error.message === 'string' && error.message
+          ? error.message
+          : 'حدث خطأ أثناء الاتصال بالخادم';
+        output.innerHTML = '<div role="alert" style="color:var(--ruby); font-size:0.85rem;">حدث خطأ: ' + escapeHtml(message) + '</div>';
       }
     }
 
@@ -5636,9 +6155,13 @@ export function renderDashboardHtml(): Response {
       try {
         const res = await fetch(\`/api/dashboard/audit-logs?q=\${encodeURIComponent(q)}&offset=\${offset}&limit=\${pagination.audit.limit}\`);
         const data = await res.json();
-        if (!data.logs || !data.logs.length) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">لا توجد سجلات بعد</td></tr>';
-          renderPaginationControls('auditPagination', 0, pagination.audit.limit, 0, 0, 'loadAudit');
+        if (!res.ok || data?.success !== true || !Array.isArray(data.logs)) {
+          renderDashboardTableError(tbody, 6, data, 'تعذر تحميل سجل الرقابة', 'loadAudit');
+          return;
+        }
+        if (data.logs.length === 0) {
+          renderDashboardTableEmpty(tbody, 6, 'لا توجد سجلات ضمن البحث الحالي.');
+          renderPaginationControls('auditPagination', data.offset ?? offset, data.limit ?? pagination.audit.limit, data.count ?? 0, data.totalCount ?? 0, 'loadAudit');
           return;
         }
 
@@ -5662,17 +6185,17 @@ export function renderDashboardHtml(): Response {
 
     function openPurgeModal() {
       currentPurgeSecret = '';
-      const secretInput = document.getElementById('purgeModalSecretInput');
+      const secretInput = document.getElementById('purgeStage1Secret');
       if (secretInput) secretInput.value = '';
       const errBox = document.getElementById('purgeStage1Error');
       if (errBox) { errBox.style.display = 'none'; errBox.textContent = ''; }
-      const stage1 = document.getElementById('purgeModalStage1');
+      const stage1 = document.getElementById('purgeStage1Section');
       if (stage1) stage1.style.display = 'block';
-      const stage2 = document.getElementById('purgeModalStage2');
+      const stage2 = document.getElementById('purgeStage2Section');
       if (stage2) stage2.style.display = 'none';
-      const confirmInput = document.getElementById('purgeConfirmInput');
+      const confirmInput = document.getElementById('purgeConfirmYesInput');
       if (confirmInput) confirmInput.value = '';
-      const execBtn = document.getElementById('executePurgeBtn');
+      const execBtn = document.getElementById('executePurgeFinalBtn');
       if (execBtn) {
         execBtn.disabled = true;
         execBtn.style.opacity = '0.5';
@@ -5683,15 +6206,15 @@ export function renderDashboardHtml(): Response {
 
     function closePurgeModal() {
       currentPurgeSecret = '';
-      const secretInput = document.getElementById('purgeModalSecretInput');
+      const secretInput = document.getElementById('purgeStage1Secret');
       if (secretInput) secretInput.value = '';
-      const confirmInput = document.getElementById('purgeConfirmInput');
+      const confirmInput = document.getElementById('purgeConfirmYesInput');
       if (confirmInput) confirmInput.value = '';
       document.getElementById('purgeModal').style.display = 'none';
     }
 
     async function submitPurgeStage1() {
-      const secretInput = document.getElementById('purgeModalSecretInput');
+      const secretInput = document.getElementById('purgeStage1Secret');
       const errBox = document.getElementById('purgeStage1Error');
       const secret = (secretInput?.value || '').trim();
 
@@ -5706,7 +6229,7 @@ export function renderDashboardHtml(): Response {
       }
 
       if (errBox) { errBox.style.display = 'none'; errBox.textContent = ''; }
-      const submitBtn = document.getElementById('submitPurgeStage1Btn');
+      const submitBtn = document.getElementById('purgeStage1Btn');
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'جاري التحقق من السر وفحص الجداول...'; }
 
       try {
@@ -5719,13 +6242,13 @@ export function renderDashboardHtml(): Response {
 
         if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'التحقق والمتابعة للمعاينة 🔒'; }
 
-        if (!data.success) {
+        if (!dashboardMutationSucceeded(res, data)) {
           currentPurgeSecret = '';
           if (errBox) {
             errBox.style.display = 'block';
             errBox.textContent = data.message || 'فشل التحقق من الرمز السري أو جلب المعاينة';
           } else {
-            alert(data.message || 'فشل التحقق من الرمز السري');
+            alert(dashboardMutationFailureMessage(res, data, 'فشل التحقق من الرمز السري'));
           }
           return;
         }
@@ -5735,69 +6258,41 @@ export function renderDashboardHtml(): Response {
         if (secretInput) secretInput.value = '';
 
         // Transition from Stage 1 to Stage 2
-        document.getElementById('purgeModalStage1').style.display = 'none';
-        document.getElementById('purgeModalStage2').style.display = 'block';
+        document.getElementById('purgeStage1Section').style.display = 'none';
+        document.getElementById('purgeStage2Section').style.display = 'block';
 
         const counts = data.counts || data.preview || {};
-        const fullyPurged = data.fullyPurgedTables || [
-          'contents', 'content_media', 'homeworks', 'homework_media', 'exams',
-          'events', 'schedule_slots', 'chat_messages', 'notifications', 'school_holidays',
-          'decisions', 'decision_votes', 'reports', 'attendance', 'badges',
-          'user_badges', 'correction_suggestions', 'rate_limits', 'sync_mutations',
-          'outbox_mutations', 'groups', 'subjects', 'content_reads', 'content_views',
-          'content_useful', 'teacher_assistants', 'admin_audit_logs', 'system_audit_logs',
-          'role_audit_logs', 'sync_generation_history', 'audit_logs'
-        ];
+        const fullyPurged = Array.isArray(data.fullyPurgedTables) ? data.fullyPurgedTables : [];
+        const partiallyPurged = Array.isArray(data.partiallyPurgedTables) ? data.partiallyPurgedTables : [];
+        const preserved = Array.isArray(data.preservedTables) ? data.preservedTables : [];
 
-        let summaryHtml = \`
-          <div style="background:rgba(0,229,255,0.05); border:1px solid rgba(0,229,255,0.3); border-radius:8px; padding:0.8rem; margin-bottom:1rem;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-size:0.85rem; color:var(--text-sec);">جيل البيانات الحالي: <code>\${escapeHtml(String(data.currentGeneration || 'غير محدد'))}</code></span>
-              <span style="font-size:0.85rem; color:var(--cyan); font-weight:bold;">جيل البيانات الجديد: <code>\${escapeHtml(String(data.nextGeneration || ''))}</code></span>
-            </div>
-          </div>
+        document.getElementById('purgeTotalRecordsDisplay').textContent = Number(data.totalRecords || 0).toLocaleString();
+        document.getElementById('purgeNextGenDisplay').textContent = data.nextGeneration || '-';
 
-          <div style="margin-bottom:0.8rem;">
-            <div style="font-size:0.85rem; font-weight:bold; color:var(--ruby); margin-bottom:0.4rem;">
-              🗑️ جداول سيتم تصفيرها وحذفها بالكامل (31 جدولاً):
-            </div>
-            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:0.4rem; font-size:0.75rem; max-height:160px; overflow-y:auto; padding:0.4rem; background:rgba(0,0,0,0.3); border-radius:6px; border:1px solid var(--border);">
-        \`;
+        document.getElementById('purgeFullyPurgedGrid').innerHTML = fullyPurged.map(entry => {
+          const table = typeof entry === 'string' ? entry : (entry.table || '');
+          const count = typeof entry === 'string' ? (counts[table] ?? 0) : (entry.count ?? counts[table] ?? 0);
+          return '<div style="display:flex; justify-content:space-between; gap:0.5rem; padding:0.25rem 0.4rem; background:rgba(255,255,255,0.02); border-radius:4px;">' +
+            '<span>' + escapeHtml(table) + '</span>' +
+            '<strong style="color:var(--ruby);">' + escapeHtml(String(count)) + '</strong>' +
+            '</div>';
+        }).join('') || '<div style="color:var(--text-muted);">لا توجد جداول للتصفير.</div>';
 
-        for (const tbl of fullyPurged) {
-          const count = counts[tbl] !== undefined ? counts[tbl] : (counts[tbl] ?? 0);
-          summaryHtml += \`
-            <div style="display:flex; justify-content:space-between; padding:0.25rem 0.4rem; background:rgba(255,255,255,0.02); border-radius:4px;">
-              <span>\${escapeHtml(tbl)}</span>
-              <strong style="color:var(--ruby);">\${escapeHtml(String(count))}</strong>
-            </div>
-          \`;
-        }
+        document.getElementById('purgePartiallyPurgedBox').innerHTML = partiallyPurged.map(entry => {
+          return '<div style="padding:0.35rem 0; border-bottom:1px solid var(--border);">' +
+            '<strong>' + escapeHtml(entry.table || '') + '</strong>' +
+            '<div>سيتم حذف: ' + escapeHtml(String(entry.purgedCount ?? 0)) + ' — سيبقى: ' + escapeHtml(String(entry.retainedCount ?? 0)) + '</div>' +
+            '<div style="color:var(--text-muted);">' + escapeHtml(entry.policy || '') + '</div>' +
+            '</div>';
+        }).join('') || '<div style="color:var(--text-muted);">لا توجد جداول ذات تصفير جزئي.</div>';
 
-        summaryHtml += \`
-            </div>
-          </div>
-
-          <div style="margin-bottom:0.8rem;">
-            <div style="font-size:0.85rem; font-weight:bold; color:var(--amber); margin-bottom:0.4rem;">
-              ⚠️ جداول سيتم تصفيرها جزئياً (جدولان):
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem; font-size:0.75rem;">
-              <div style="background:rgba(255,160,0,0.05); border:1px solid rgba(255,160,0,0.2); padding:0.4rem; border-radius:4px;">
-                <strong>users</strong>: يتم الإبقاء على حساب المالك وحذف باقي الحسابات
-              </div>
-              <div style="background:rgba(255,160,0,0.05); border:1px solid rgba(255,160,0,0.2); padding:0.4rem; border-radius:4px;">
-                <strong>device_sync_tokens</strong>: يتم إلغاء وإبطال جميع رموز الأجهزة القديمة
-              </div>
-            </div>
-          </div>
-
-          <div style="background:rgba(0,230,118,0.05); border:1px solid rgba(0,230,118,0.2); border-radius:6px; padding:0.5rem 0.8rem; font-size:0.75rem; color:var(--emerald);">
-            🛡️ جداول محفوظة بالكامل دون مساس: <strong>schema_migrations</strong> (لحماية بنية وتاريخ مخطط قاعدة البيانات)
-          </div>
-        \`;
-
-        document.getElementById('purgeStage2Summary').innerHTML = summaryHtml;
+        document.getElementById('purgePreservedBox').innerHTML = preserved.map(entry => {
+          return '<div style="padding:0.35rem 0; border-bottom:1px solid var(--border);">' +
+            '<strong>' + escapeHtml(entry.table || '') + '</strong>' +
+            '<div>' + escapeHtml(entry.action || '') + '</div>' +
+            '<div style="color:var(--text-muted);">السجلات الحالية: ' + escapeHtml(String(entry.totalRecords ?? 0)) + '</div>' +
+            '</div>';
+        }).join('') || '<div style="color:var(--text-muted);">لا توجد جداول محفوظة.</div>';
       } catch (e) {
         if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'التحقق والمتابعة للمعاينة 🔒'; }
         if (errBox) {
@@ -5810,8 +6305,8 @@ export function renderDashboardHtml(): Response {
     }
 
     function checkPurgeConfirmMatch() {
-      const txt = (document.getElementById('purgeConfirmInput')?.value || '').trim();
-      const btn = document.getElementById('executePurgeBtn');
+      const txt = (document.getElementById('purgeConfirmYesInput')?.value || '').trim();
+      const btn = document.getElementById('executePurgeFinalBtn');
       if (!btn) return;
       if (txt === 'YES') {
         btn.disabled = false;
@@ -5825,7 +6320,7 @@ export function renderDashboardHtml(): Response {
     }
 
     async function executePurgeFinal() {
-      const confirmation = (document.getElementById('purgeConfirmInput')?.value || '').trim();
+      const confirmation = (document.getElementById('purgeConfirmYesInput')?.value || '').trim();
       if (confirmation !== 'YES' || !currentPurgeSecret) {
         alert('يجب كتابة كلمة YES بالحروف الإنجليزية الكبيرة للتأكيد.');
         return;
@@ -5835,12 +6330,10 @@ export function renderDashboardHtml(): Response {
         return;
       }
 
-      const execBtn = document.getElementById('executePurgeBtn');
+      const execBtn = document.getElementById('executePurgeFinalBtn');
       if (execBtn) { execBtn.disabled = true; execBtn.textContent = 'جاري تصفير قاعدة البيانات وتوليد الجيل الجديد...'; }
 
       const secretToSend = currentPurgeSecret;
-      // Wipe from in-memory variable immediately
-      currentPurgeSecret = '';
 
       try {
         const res = await fetch('/api/dashboard/system/purge', {
@@ -5853,18 +6346,35 @@ export function renderDashboardHtml(): Response {
           })
         });
         const data = await res.json();
-        if (data.success) {
-          const purgedCount = Array.isArray(data.tablesPurged) ? data.tablesPurged.length : (data.totalTables || 31);
+        if (dashboardMutationSucceeded(res, data)) {
+          if (typeof data.newGeneration !== 'string' || !data.newGeneration.trim() ||
+              !Array.isArray(data.tablesPurged) || data.tablesPurged.length === 0) {
+            currentPurgeSecret = '';
+            if (execBtn) execBtn.textContent = 'تحقق من الحالة بتحديث الصفحة';
+            alert('استجابة الخادم لا تحتوي تأكيداً كاملاً لجيل البيانات والجداول. لا تعاود العملية قبل التحقق من الحالة.');
+            return;
+          }
+          currentPurgeSecret = '';
+          const purgedCount = data.tablesPurged.length;
           alert(\`تم تصفير البيانات بنجاح!\nالجيل الجديد: \${data.newGeneration}\nتم تفريغ \${purgedCount} جدولاً.\`);
           closePurgeModal();
           window.location.reload();
         } else {
-          alert(data.message || 'فشلت عملية التصفير');
-          if (execBtn) { execBtn.disabled = false; execBtn.textContent = 'تأكيد التصفير الشامل والنهائي للنظام ⚠️'; }
+          const confirmationUncertain = !res.ok && res.status >= 500;
+          if (confirmationUncertain) {
+            currentPurgeSecret = '';
+            if (execBtn) execBtn.textContent = 'تحقق من الحالة بتحديث الصفحة';
+            alert('لم يصل تأكيد موثوق لنتيجة العملية. قد يكون الخادم أكملها قبل تعذر إرسال الرد؛ لا تعاود التنفيذ قبل تحديث الصفحة والتحقق من الحالة.');
+            return;
+          }
+          alert(dashboardMutationFailureMessage(res, data, 'فشلت العملية'));
+          if (execBtn) { execBtn.disabled = false; execBtn.textContent = 'تأكيد العملية النهائية للنظام'; }
         }
       } catch (e) {
-        alert('حدث خطأ أثناء تنفيذ عملية التصفير');
-        if (execBtn) { execBtn.disabled = false; execBtn.textContent = 'تأكيد التصفير الشامل والنهائي للنظام ⚠️'; }
+        currentPurgeSecret = '';
+        if (execBtn) execBtn.textContent = 'تحقق من الحالة بتحديث الصفحة';
+        alert('انقطع الاتصال قبل وصول تأكيد موثوق. قد تكون العملية اكتملت؛ لا تعاود التنفيذ قبل تحديث الصفحة والتحقق من جيل البيانات.');
+        // Keep the destructive action disabled until the result is explicitly checked.
       }
     }
 

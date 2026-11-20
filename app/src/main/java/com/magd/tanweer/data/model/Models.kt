@@ -38,6 +38,11 @@ data class ApiError(
     val message: String
 )
 
+@JsonClass(generateAdapter = true)
+data class UpdateStudentStatusRequest(
+    val status: String
+)
+
 data class GradeInfo(
     val id: Int,
     val name: String,
@@ -150,7 +155,10 @@ data class GroupItem(
     val description: String? = null,
     val icon: String? = null,
     val role: String = "MEMBER",
-    val memberCount: Int = 1
+    val memberCount: Int = 1,
+    val visibility: String = "PUBLIC",
+    val chatPolicy: String = "MEMBERS",
+    val membershipStatus: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -253,7 +261,9 @@ data class JoinGroupBody(
 data class CreateGroupRequest(
     val name: String,
     val description: String? = null,
-    val icon: String? = "👥"
+    val icon: String? = "👥",
+    val visibility: String = "PUBLIC",
+    val chatPolicy: String = "MEMBERS"
 )
 
 @JsonClass(generateAdapter = true)
@@ -375,12 +385,38 @@ data class ModeratorStats(
 )
 
 @JsonClass(generateAdapter = true)
-data class AdminDashboardResponse(
+data class AppNotification(
+    val id: String,
+    val type: String,
+    val title: String,
+    val body: String,
+    val createdAt: Long = 0L,
+    val recoveryCode: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class NotificationsResponse(
     val success: Boolean = true,
+    val notifications: List<AppNotification> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class RecoveryCodeResponse(
+    val success: Boolean = false,
+    val recoveryCode: String? = null,
+    val message: String? = null,
+    val error: ApiError? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminDashboardResponse(
+    val success: Boolean = false,
     val school: SchoolAdminInfo? = null,
     val stats: SchoolStats? = null,
     val teachers: List<UserBrief> = emptyList(),
-    val moderators: List<UserBrief> = emptyList()
+    val moderators: List<UserBrief> = emptyList(),
+    val students: List<UserBrief> = emptyList(),
+    val admins: List<UserBrief> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)
@@ -393,12 +429,21 @@ data class SchoolAdminInfo(
 @JsonClass(generateAdapter = true)
 data class SchoolStats(
     val totalUsers: Int = 0,
+    val totalStudents: Int = 0,
     val totalTeachers: Int = 0,
     val totalModerators: Int = 0,
+    val totalAdmins: Int = 0,
+    val totalDisabledUsers: Int = 0,
     val totalGroups: Int = 0,
+    val totalActiveMemberships: Int = 0,
     val totalLessons: Int = 0,
     val totalHomeworks: Int = 0,
-    val totalExams: Int = 0
+    val totalExams: Int = 0,
+    val totalEvents: Int = 0,
+    val totalAnnouncements: Int = 0,
+    val totalIssues: Int = 0,
+    val totalMedia: Int = 0,
+    val totalMediaBytes: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)
@@ -408,7 +453,11 @@ data class UserBrief(
     val phone_number: String,
     val role: String,
     val grade_id: Int = 0,
-    val section_id: String = ""
+    val section_id: String = "",
+    val active_group_count: Int = 0,
+    val status: String = "ACTIVE",
+    val last_seen: Long? = null,
+    val created_at: Long? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -461,7 +510,8 @@ data class HomeworkItem(
     val mediaUrls: List<String> = emptyList(),
     val isCompleted: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
-    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val syncStatus: String = "SYNCED", // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val isOfficial: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
@@ -478,7 +528,8 @@ data class ExamItem(
     val colorHex: String = "#FF3366",
     val isCompleted: Boolean = false,
     val examType: String = "MONTHLY",
-    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val syncStatus: String = "SYNCED", // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val isOfficial: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
@@ -492,7 +543,9 @@ data class SchoolEventItem(
     val category: String = "ACTIVITY", // 'ACTIVITY', 'COMPETITION', 'TRIP', 'ANNOUNCEMENT', 'HOLIDAY'
     val location: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val syncStatus: String = "SYNCED" // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val syncStatus: String = "SYNCED", // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
+    val sourceName: String? = null,
+    val isOfficial: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
