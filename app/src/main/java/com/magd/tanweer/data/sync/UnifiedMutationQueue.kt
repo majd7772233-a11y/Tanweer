@@ -267,7 +267,7 @@ class UnifiedMutationQueue private constructor(
                     val text = obj.optString("text", "")
                     val groupId = obj.optString("groupId", "")
                     val res = api.postGroupMessage(groupId, PostMessageRequest(id = item.entityId, text = text))
-                    if (res.isSuccessful && res.body()?.success == true) {
+                    if (res.isSuccessful && res.body()?.confirmsMessage(item.entityId, groupId, text) == true) {
                         db.chatDao().updateMessageStatus(item.entityId, "SENT")
                         outboxDao.deleteOutbox(item.id)
                         true
@@ -758,7 +758,7 @@ class UnifiedMutationQueue private constructor(
                 // If message has exceeded 15s in SENDING, try fallback HTTP send or mark as FAILED
                 try {
                     val res = api.postGroupMessage(msg.groupId, PostMessageRequest(id = msg.id, text = msg.text))
-                    if (res.isSuccessful && res.body()?.success == true) {
+                    if (res.isSuccessful && res.body()?.confirmsMessage(msg.id, msg.groupId, msg.text) == true) {
                         db.chatDao().updateMessageStatus(msg.id, "SENT")
                     } else {
                         db.chatDao().updateMessageStatus(msg.id, "FAILED")

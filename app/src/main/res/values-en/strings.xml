@@ -18,4 +18,17 @@
     <string name="search_results_verifying">Search sources are being checked; no-results will not be confirmed until sync finishes.</string>
     <string name="search_results_unverified">Search sources could not be verified. Use the refresh action to try again.</string>
     <string name="search_results_pending">Search-source sync is not complete, so the absence of results cannot be confirmed.</string>
+    <string name="scan_draft_save_failed">Unable to save the temporary image. Please select it again.</string>
+    <string name="pdf_speech_text_invalid">The extracted text on this page is unclear or corrupted. Speech has stopped to avoid reading content that does not match the book. You can switch to My Notes to read your notes only.</string>
+    <string name="admin_staff_teachers">Approved teachers</string>
+    <string name="admin_staff_teacher">Teacher</string>
+    <string name="admin_staff_moderators">Class moderators</string>
+    <string name="admin_staff_moderator">Moderator</string>
+    <string name="admin_staff_admins">School administrators</string>
+    <string name="admin_staff_admin">Administrator</string>
+    <string name="admin_staff_class_scope">Grade %1$d • Section %2$s</string>
+    <string name="admin_staff_group_scope">Linked to %1$d groups • no fixed academic class</string>
+    <string name="admin_staff_phone">Phone: %1$s</string>
+    <string name="admin_status_disabled">Disabled</string>
+    <string name="admin_status_active">Active</string>
 </resources>

@@ -1,5 +1,8 @@
 package com.magd.tanweer.ui.screens
 
+import com.magd.tanweer.R
+
+
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -113,7 +117,7 @@ fun HomeworkScreen(
     var selectedTaskTypeFilter by remember { mutableStateOf<String?>(null) }
     val isAddModalOpenFromVm by viewModel.isAddHomeworkModalOpen.collectAsStateWithLifecycle()
     val initialDueDateFromVm by viewModel.initialHomeworkDueDate.collectAsStateWithLifecycle()
-    var isLocalAddModalOpen by remember { mutableStateOf(false) }
+    var isLocalAddModalOpen by rememberSaveable { mutableStateOf(false) }
     val isAddModalOpen = isLocalAddModalOpen || isAddModalOpenFromVm
     var fullScreenImagePreviewUrl by remember { mutableStateOf<String?>(null) }
     var pendingReminderHw by remember { mutableStateOf<com.magd.tanweer.data.model.HomeworkItem?>(null) }
@@ -498,6 +502,9 @@ fun HomeworkScreen(
                         onResult = { result ->
                             finishSubmission()
                             if (result.isSuccess) {
+                                scanPages.forEach { page ->
+                                    ImageProcessingUtils.deleteDraftSource(context, page.uri)
+                                }
                                 val outcome = result.getOrNull()
                                 if (outcome?.isSynced == true) {
                                     Toast.makeText(context, "تم حفظ ونشر الواجب على الخادم بنجاح ✨", Toast.LENGTH_SHORT).show()
@@ -1001,14 +1008,44 @@ fun AddHomeworkDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var selectedSubjId by remember { mutableStateOf(subjects.firstOrNull()?.id ?: "math") }
-    var title by remember { mutableStateOf("") }
-    var details by remember { mutableStateOf("") }
-    var pageNumbers by remember { mutableStateOf("") }
-    var questionNumbers by remember { mutableStateOf("") }
-    var dueDate by remember(initialDueDate) { mutableStateOf(initialDueDate ?: TanweerViewModel.getTodayDateString()) }
-    var taskType by remember { mutableStateOf("HOMEWORK") }
-    var scannedPages by remember { mutableStateOf<List<HomeworkScanPage>>(emptyList()) }
+    var selectedSubjId by rememberSaveable { mutableStateOf(subjects.firstOrNull()?.id ?: "math") }
+    var title by rememberSaveable { mutableStateOf("") }
+    var details by rememberSaveable { mutableStateOf("") }
+    var pageNumbers by rememberSaveable { mutableStateOf("") }
+    var questionNumbers by rememberSaveable { mutableStateOf("") }
+    var dueDate by rememberSaveable(initialDueDate) { mutableStateOf(initialDueDate ?: TanweerViewModel.getTodayDateString()) }
+    var taskType by rememberSaveable { mutableStateOf("HOMEWORK") }
+    val scannedPagesSaver = remember(context) {
+        scanPageListSaver<HomeworkScanPage>(
+            toRecord = { page ->
+                ScanPageDraftRecord(
+                    id = page.id,
+                    sourceUri = page.uri?.toString(),
+                    processedFilePath = page.processedResult?.file?.absolutePath,
+                    rotation = page.rotation,
+                    autoEnhance = page.autoEnhance,
+                    blackAndWhite = false,
+                    isProcessing = page.isProcessing
+                )
+            },
+            fromRecord = { record, processed, preview, shouldResume ->
+                HomeworkScanPage(
+                    id = record.id,
+                    uri = record.sourceUri?.let(Uri::parse),
+                    rawBitmap = null,
+                    processedResult = processed,
+                    displayBitmap = preview,
+                    rotation = record.rotation,
+                    autoEnhance = record.autoEnhance,
+                    isProcessing = shouldResume
+                )
+            }
+        )
+    }
+    var scannedPages by rememberSaveable(stateSaver = scannedPagesSaver) {
+        mutableStateOf<List<HomeworkScanPage>>(emptyList())
+    }
+    val processingPageIds = remember { mutableSetOf<String>() }
     var showDatePicker by remember { mutableStateOf(false) }
     var isSubmitting by remember { mutableStateOf(false) }
 
@@ -1065,23 +1102,71 @@ fun AddHomeworkDialog(
 
     fun processPageItem(page: HomeworkScanPage, onUpdated: (HomeworkScanPage) -> Unit) {
         scope.launch {
+            val sourceUri = ImageProcessingUtils.persistDraftSource(
+                context = context,
+                pageId = page.id,
+                sourceUri = page.uri,
+                rawBitmap = page.rawBitmap
+            )
+            if (sourceUri == null) {
+                onUpdated(page.copy(isProcessing = false))
+                Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+                return@launch
+            }
+
+            val sourcePage = page.copy(uri = sourceUri, rawBitmap = null, isProcessing = true)
+            onUpdated(sourcePage)
+
             val result = ImageProcessingUtils.loadAndProcessImage(
                 context = context,
-                uri = page.uri,
-                rawBitmap = page.rawBitmap,
+                uri = sourceUri,
+                rawBitmap = null,
                 autoEnhance = page.autoEnhance,
                 blackAndWhite = false,
                 rotationDegrees = page.rotation
             )
-            val bmp = result?.file?.let {
-                BitmapFactory.decodeFile(it.absolutePath)
+            val preview = result?.file?.let {
+                ImageProcessingUtils.decodeProcessedPreview(it.absolutePath)
             }
             onUpdated(
-                page.copy(
+                sourcePage.copy(
                     processedResult = result,
-                    displayBitmap = bmp,
+                    displayBitmap = preview,
                     isProcessing = false
                 )
+            )
+        }
+    }
+
+    LaunchedEffect(scannedPages.filter {
+        it.isProcessing && it.processedResult == null
+    }.map { it.id }) {
+        scannedPages.filter { it.isProcessing && it.processedResult == null }.forEach { page ->
+            if (processingPageIds.add(page.id)) {
+                processPageItem(page) { updated ->
+                    if (scannedPages.any { it.id == updated.id }) {
+                        scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
+                    } else {
+                        // The user removed this page while its background processing was
+                        // still running. Delete any output produced after the removal.
+                        ImageProcessingUtils.deleteDraftPage(
+                            context = context,
+                            sourceUri = updated.uri,
+                            processedFilePath = updated.processedResult?.file?.absolutePath
+                        )
+                    }
+                    if (!updated.isProcessing) processingPageIds.remove(page.id)
+                }
+            }
+        }
+    }
+
+    fun discardDraftPages() {
+        scannedPages.forEach { page ->
+            ImageProcessingUtils.deleteDraftPage(
+                context = context,
+                sourceUri = page.uri,
+                processedFilePath = page.processedResult?.file?.absolutePath
             )
         }
     }
@@ -1090,15 +1175,18 @@ fun AddHomeworkDialog(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 5)
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
+            uris.forEach { uri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
             val newPages = uris.map { uri ->
                 HomeworkScanPage(uri = uri, isProcessing = true)
             }
             scannedPages = scannedPages + newPages
-            newPages.forEach { p ->
-                processPageItem(p) { updated ->
-                    scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
-                }
-            }
         }
     }
 
@@ -1106,10 +1194,18 @@ fun AddHomeworkDialog(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap: Bitmap? ->
         if (bitmap != null) {
-            val newPage = HomeworkScanPage(rawBitmap = bitmap, isProcessing = true)
-            scannedPages = scannedPages + newPage
-            processPageItem(newPage) { updated ->
-                scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
+            val pageId = java.util.UUID.randomUUID().toString()
+            val sourceUri = ImageProcessingUtils.persistCameraPreview(context, pageId, bitmap)
+            if (sourceUri == null) {
+                Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+            } else {
+                val newPage = HomeworkScanPage(
+                    id = pageId,
+                    uri = sourceUri,
+                    rawBitmap = null,
+                    isProcessing = true
+                )
+                scannedPages = scannedPages + newPage
             }
         }
     }
@@ -1129,7 +1225,7 @@ fun AddHomeworkDialog(
     }
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) { discardDraftPages(); onDismiss() } },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Scaffold(
@@ -1150,7 +1246,7 @@ fun AddHomeworkDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             IconButton(
-                                onClick = onDismiss,
+                                onClick = { if (!isSubmitting) { discardDraftPages(); onDismiss() } },
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
@@ -1185,7 +1281,7 @@ fun AddHomeworkDialog(
                     ) {
                         GlassOutlinedButton(
                             text = "إلغاء",
-                            onClick = onDismiss,
+                            onClick = { if (!isSubmitting) { discardDraftPages(); onDismiss() } },
                             modifier = Modifier.weight(1f)
                         )
                         GlassButton(
@@ -1459,6 +1555,11 @@ fun AddHomeworkDialog(
                                     // Remove Page Button
                                     IconButton(
                                         onClick = {
+                                            ImageProcessingUtils.deleteDraftPage(
+                                                context = context,
+                                                sourceUri = page.uri,
+                                                processedFilePath = page.processedResult?.file?.absolutePath
+                                            )
                                             scannedPages = scannedPages.filter { it.id != page.id }
                                         },
                                         modifier = Modifier

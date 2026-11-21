@@ -1,5 +1,8 @@
 package com.magd.tanweer.ui.screens
 
+import com.magd.tanweer.R
+
+
 import android.Manifest
 import android.graphics.Bitmap
 import android.net.Uri
@@ -23,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,37 +71,122 @@ fun UploadLessonDialog(
     val selectedDate by viewModel.selectedDate.collectAsState()
     val gradeSubjects = remember { viewModel.getSubjectsForCurrentGrade() }
 
-    var selectedSubjectId by remember {
+    var selectedSubjectId by rememberSaveable {
         mutableStateOf(initialSubjectId ?: gradeSubjects.firstOrNull()?.id ?: "math")
     }
-    var title by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var studyDate by remember { mutableStateOf(selectedDate) }
-    var globalAutoEnhance by remember { mutableStateOf(true) }
+    var title by rememberSaveable { mutableStateOf("") }
+    var description by rememberSaveable { mutableStateOf("") }
+    var studyDate by rememberSaveable { mutableStateOf(selectedDate) }
+    var globalAutoEnhance by rememberSaveable { mutableStateOf(true) }
 
-    var scannedPages by remember { mutableStateOf<List<LessonScanPage>>(emptyList()) }
+    val scannedPagesSaver = remember(context) {
+        scanPageListSaver<LessonScanPage>(
+            toRecord = { page ->
+                ScanPageDraftRecord(
+                    id = page.id,
+                    sourceUri = page.uri?.toString(),
+                    processedFilePath = page.processedResult?.file?.absolutePath,
+                    rotation = page.rotation,
+                    autoEnhance = page.autoEnhance,
+                    blackAndWhite = page.blackAndWhite,
+                    isProcessing = page.isProcessing
+                )
+            },
+            fromRecord = { record, processed, preview, shouldResume ->
+                LessonScanPage(
+                    id = record.id,
+                    uri = record.sourceUri?.let(Uri::parse),
+                    rawBitmap = null,
+                    processedResult = processed,
+                    displayBitmap = preview,
+                    rotation = record.rotation,
+                    autoEnhance = record.autoEnhance,
+                    blackAndWhite = record.blackAndWhite,
+                    isProcessing = shouldResume
+                )
+            }
+        )
+    }
+    var scannedPages by rememberSaveable(stateSaver = scannedPagesSaver) {
+        mutableStateOf<List<LessonScanPage>>(emptyList())
+    }
     var isUploading by remember { mutableStateOf(false) }
+    val processingPageIds = remember { mutableSetOf<String>() }
 
-    // Re-process a specific page when filters change
+    // Persist source media before processing so a recreated Activity can resume this page.
     fun processPageItem(page: LessonScanPage, onUpdated: (LessonScanPage) -> Unit) {
         scope.launch {
+            val sourceUri = ImageProcessingUtils.persistDraftSource(
+                context = context,
+                pageId = page.id,
+                sourceUri = page.uri,
+                rawBitmap = page.rawBitmap
+            )
+            if (sourceUri == null) {
+                onUpdated(page.copy(isProcessing = false))
+                Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+                return@launch
+            }
+
+            val sourcePage = page.copy(uri = sourceUri, rawBitmap = null, isProcessing = true)
+            onUpdated(sourcePage)
+
             val result = ImageProcessingUtils.loadAndProcessImage(
                 context = context,
-                uri = page.uri,
-                rawBitmap = page.rawBitmap,
+                uri = sourceUri,
+                rawBitmap = null,
                 autoEnhance = page.autoEnhance,
                 blackAndWhite = page.blackAndWhite,
                 rotationDegrees = page.rotation
             )
-            val bmp = result?.file?.let {
-                android.graphics.BitmapFactory.decodeFile(it.absolutePath)
+            val preview = result?.file?.let {
+                ImageProcessingUtils.decodeProcessedPreview(it.absolutePath)
             }
             onUpdated(
-                page.copy(
+                sourcePage.copy(
                     processedResult = result,
-                    displayBitmap = bmp,
+                    displayBitmap = preview,
                     isProcessing = false
                 )
+            )
+        }
+    }
+
+    LaunchedEffect(scannedPages.filter {
+        it.isProcessing && it.processedResult == null
+    }.map { it.id }) {
+        scannedPages.filter { it.isProcessing && it.processedResult == null }.forEach { page ->
+            if (processingPageIds.add(page.id)) {
+                processPageItem(page) { updated ->
+                    if (scannedPages.any { it.id == updated.id }) {
+                        scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
+                    } else {
+                        // The user removed this page while its background processing was
+                        // still running. Delete any output produced after the removal.
+                        ImageProcessingUtils.deleteDraftPage(
+                            context = context,
+                            sourceUri = updated.uri,
+                            processedFilePath = updated.processedResult?.file?.absolutePath
+                        )
+                    }
+                    if (!updated.isProcessing) processingPageIds.remove(page.id)
+                }
+            }
+        }
+    }
+
+    fun discardDraftSources() {
+        scannedPages.forEach { page ->
+            ImageProcessingUtils.deleteDraftSource(context, page.uri)
+        }
+    }
+
+    fun discardDraftPages() {
+        scannedPages.forEach { page ->
+            ImageProcessingUtils.deleteDraftPage(
+                context = context,
+                sourceUri = page.uri,
+                processedFilePath = page.processedResult?.file?.absolutePath
             )
         }
     }
@@ -107,6 +196,14 @@ fun UploadLessonDialog(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 8)
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
+            uris.forEach { uri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
             val newPages = uris.map { uri ->
                 LessonScanPage(
                     uri = uri,
@@ -115,11 +212,6 @@ fun UploadLessonDialog(
                 )
             }
             scannedPages = scannedPages + newPages
-            newPages.forEach { p ->
-                processPageItem(p) { updated ->
-                    scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
-                }
-            }
         }
     }
 
@@ -128,14 +220,19 @@ fun UploadLessonDialog(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap: Bitmap? ->
         if (bitmap != null) {
-            val newPage = LessonScanPage(
-                rawBitmap = bitmap,
-                autoEnhance = globalAutoEnhance,
-                isProcessing = true
-            )
-            scannedPages = scannedPages + newPage
-            processPageItem(newPage) { updated ->
-                scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
+            val pageId = UUID.randomUUID().toString()
+            val sourceUri = ImageProcessingUtils.persistCameraPreview(context, pageId, bitmap)
+            if (sourceUri == null) {
+                Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+            } else {
+                val newPage = LessonScanPage(
+                    id = pageId,
+                    uri = sourceUri,
+                    rawBitmap = null,
+                    autoEnhance = globalAutoEnhance,
+                    isProcessing = true
+                )
+                scannedPages = scannedPages + newPage
             }
         }
     }
@@ -152,7 +249,7 @@ fun UploadLessonDialog(
     }
 
     Dialog(
-        onDismissRequest = { if (!isUploading) onDismiss() },
+        onDismissRequest = { if (!isUploading) { discardDraftPages(); onDismiss() } },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Scaffold(
@@ -173,7 +270,7 @@ fun UploadLessonDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             IconButton(
-                                onClick = { if (!isUploading) onDismiss() },
+                                onClick = { if (!isUploading) { discardDraftPages(); onDismiss() } },
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
@@ -209,7 +306,7 @@ fun UploadLessonDialog(
                         GlassOutlinedButton(
                             text = "إلغاء",
                             enabled = !isUploading,
-                            onClick = onDismiss,
+                            onClick = { if (!isUploading) { discardDraftPages(); onDismiss() } },
                             modifier = Modifier.weight(1f)
                         )
                         GlassButton(
@@ -242,6 +339,7 @@ fun UploadLessonDialog(
                                             } else {
                                                 Toast.makeText(context, outcome?.message ?: "تم حفظ الدرس محلياً، وجارٍ جدولة النشر تلقائياً فور توفر الاتصال ⏳", Toast.LENGTH_LONG).show()
                                             }
+                                            discardDraftSources()
                                             onDismiss()
                                         } else {
                                             val errorMsg = result.exceptionOrNull()?.message ?: "حدث خطأ أثناء نشر الدرس"
@@ -436,6 +534,11 @@ fun UploadLessonDialog(
                                                 )
                                                 IconButton(
                                                     onClick = {
+                                                        ImageProcessingUtils.deleteDraftPage(
+                                                            context = context,
+                                                            sourceUri = page.uri,
+                                                            processedFilePath = page.processedResult?.file?.absolutePath
+                                                        )
                                                         scannedPages = scannedPages.filter { it.id != page.id }
                                                     },
                                                     modifier = Modifier.size(22.dp)

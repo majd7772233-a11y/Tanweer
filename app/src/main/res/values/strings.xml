@@ -20,4 +20,17 @@
     <string name="search_results_verifying">جارٍ التحقق من مصادر البحث؛ لن نؤكد عدم وجود نتائج قبل اكتمال المزامنة.</string>
     <string name="search_results_unverified">تعذر التحقق من مصادر البحث. استخدم زر التحديث للمحاولة مجدداً.</string>
     <string name="search_results_pending">لم تكتمل مزامنة مصادر البحث بعد؛ لذلك لا يمكن تأكيد عدم وجود نتائج.</string>
+    <string name="scan_draft_save_failed">تعذر حفظ الصورة المؤقتة. أعد اختيارها من فضلك.</string>
+    <string name="pdf_speech_text_invalid">النص المستخرج من هذه الصفحة غير واضح أو تالف؛ أوقفت القراءة حتى لا تسمع محتوى غير مطابق للكتاب. يمكنك اختيار وضع «ملاحظاتي» لقراءة ملاحظاتك فقط.</string>
+    <string name="admin_staff_teachers">المعلمون المعتمدون</string>
+    <string name="admin_staff_teacher">معلم</string>
+    <string name="admin_staff_moderators">مشرفو الشعب</string>
+    <string name="admin_staff_moderator">مشرف</string>
+    <string name="admin_staff_admins">مديرو المدرسة</string>
+    <string name="admin_staff_admin">مدير</string>
+    <string name="admin_staff_class_scope">الصف %1$d • شعبة %2$s</string>
+    <string name="admin_staff_group_scope">مرتبط بـ %1$d مجموعة • دون شعبة دراسية ثابتة</string>
+    <string name="admin_staff_phone">هاتف: %1$s</string>
+    <string name="admin_status_disabled">موقوف</string>
+    <string name="admin_status_active">نشط</string>
 </resources>

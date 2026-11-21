@@ -1,4 +1,4 @@
-import { Env } from './env';
+import { Env, UserContext } from './env';
 import { parseScheduleVoteType } from './services/scheduleValidation';
 import { authenticateRequest } from './middleware/auth';
 import { errorResponse, jsonResponse } from './lib/response';
@@ -80,6 +80,14 @@ async function handleUnifiedScheduleProposalVote(
   return handleVoteCommunityDecision(decision.id, user, voteRequest, env);
 }
 
+function resolveDefaultGroupId(user: UserContext, requestedGroupId: string | null): string | null {
+  const requested = requestedGroupId?.trim();
+  if (requested) return requested;
+  const configuredDefault = user.defaultGroupId?.trim();
+  if (configuredDefault) return configuredDefault;
+  if (user.role === 'ADMIN' || !user.gradeId || !user.sectionId) return null;
+  return 'class_' + user.gradeId + '_' + user.sectionId;
+}
 export async function handleApiRoute(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -360,13 +368,15 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
 
   // Calendar & Day
   if (path === '/api/v1/calendar' && method === 'GET') {
-    const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
+    const groupId = resolveDefaultGroupId(user, url.searchParams.get('groupId'));
+    if (!groupId) return errorResponse('GROUP_REQUIRED', 'حدد المجموعة المدرسية المطلوبة أولاً.', 400);
     const month = url.searchParams.get('month') || '';
     return handleGetCalendarOverview(groupId, month, user, env);
   }
   if (path.startsWith('/api/v1/day/') && method === 'GET') {
     const date = path.split('/')[4];
-    const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
+    const groupId = resolveDefaultGroupId(user, url.searchParams.get('groupId'));
+    if (!groupId) return errorResponse('GROUP_REQUIRED', 'حدد المجموعة المدرسية المطلوبة أولاً.', 400);
     return handleGetDayDetail(groupId, date, user, env);
   }
 
@@ -375,7 +385,8 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
     return handleGetAcademicArchive(user, env);
   }
   if (path === '/api/v1/contents' && method === 'GET') {
-    const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
+    const groupId = resolveDefaultGroupId(user, url.searchParams.get('groupId'));
+    if (!groupId) return errorResponse('GROUP_REQUIRED', 'حدد المجموعة المدرسية المطلوبة أولاً.', 400);
     return handleGetContents(groupId, user, env);
   }
   if (path === '/api/v1/media/upload' && method === 'POST') {
@@ -405,7 +416,8 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
 
   // Homeworks
   if (path === '/api/v1/homeworks' && method === 'GET') {
-    const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
+    const groupId = resolveDefaultGroupId(user, url.searchParams.get('groupId'));
+    if (!groupId) return errorResponse('GROUP_REQUIRED', 'حدد المجموعة المدرسية المطلوبة أولاً.', 400);
     return handleGetHomeworks(groupId, user, env);
   }
   if (path === '/api/v1/homeworks' && method === 'POST') {
@@ -427,7 +439,8 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
 
   // Exams
   if (path === '/api/v1/exams' && method === 'GET') {
-    const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
+    const groupId = resolveDefaultGroupId(user, url.searchParams.get('groupId'));
+    if (!groupId) return errorResponse('GROUP_REQUIRED', 'حدد المجموعة المدرسية المطلوبة أولاً.', 400);
     return handleGetExams(groupId, user, env);
   }
   if (path === '/api/v1/exams' && method === 'POST') {
@@ -452,7 +465,8 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
 
   // Events
   if (path === '/api/v1/events' && method === 'GET') {
-    const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
+    const groupId = resolveDefaultGroupId(user, url.searchParams.get('groupId'));
+    if (!groupId) return errorResponse('GROUP_REQUIRED', 'حدد المجموعة المدرسية المطلوبة أولاً.', 400);
     return handleGetEvents(groupId, user, env);
   }
   if (path === '/api/v1/events' && method === 'POST') {
@@ -474,7 +488,8 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
 
   // Issues
   if (path === '/api/v1/issues' && method === 'GET') {
-    const groupId = url.searchParams.get('groupId') || `class_${user.gradeId}_${user.sectionId}`;
+    const groupId = resolveDefaultGroupId(user, url.searchParams.get('groupId'));
+    if (!groupId) return errorResponse('GROUP_REQUIRED', 'حدد المجموعة المدرسية المطلوبة أولاً.', 400);
     return handleGetIssues(groupId, user, env);
   }
   if (path === '/api/v1/issues' && method === 'POST') {
@@ -515,7 +530,11 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
 
   // Books
   if (path === '/api/v1/books' && method === 'GET') {
-    const gradeId = parseInt(url.searchParams.get('gradeId') || user.gradeId.toString());
+    const gradeIdParameter = url.searchParams.get('gradeId');
+    const gradeId = Number(gradeIdParameter ?? (user.role === 'ADMIN' ? '' : user.gradeId.toString()));
+    if (!Number.isInteger(gradeId) || gradeId < 7 || gradeId > 12) {
+      return errorResponse('GRADE_REQUIRED', 'حدد الصف الدراسي المطلوب أولاً.', 400);
+    }
     return handleGetBooks(gradeId, env);
   }
 

@@ -17,7 +17,12 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 
+internal fun shouldReconcileChatHistoryAfterOpen(
+    hasConnectedInCurrentSession: Boolean,
+    hasScheduledRetry: Boolean
+): Boolean = hasConnectedInCurrentSession || hasScheduledRetry
 enum class ConnectionStatus {
     DISCONNECTED,
     CONNECTING,
@@ -28,9 +33,17 @@ class RealtimeChatManager(
     private val client: OkHttpClient = NetworkModule.okHttpClient
 ) {
     private val lock = Any()
+    // Use WebSocket protocol Ping/Pong on this dedicated client. Do not change the
+    // shared Retrofit client's timeout behaviour for ordinary HTTP requests.
+    private val webSocketClient = client.newBuilder()
+        .pingInterval(25L, TimeUnit.SECONDS)
+        .build()
     private var webSocket: WebSocket? = null
     private var currentGroupId: String? = null
     private var onMessageReceived: ((JSONObject) -> Unit)? = null
+    private var onReconnectedReceived: (() -> Unit)? = null
+    private var hasConnectedInCurrentSession = false
+    private var hasScheduledRetry = false
     private var sessionGeneration = 0L
     private var socketGeneration = 0L
     private var reconnectGeneration = 0L
@@ -42,7 +55,11 @@ class RealtimeChatManager(
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    fun connect(groupId: String, onMessage: (JSONObject) -> Unit) {
+    fun connect(
+        groupId: String,
+        onMessage: (JSONObject) -> Unit,
+        onReconnected: (() -> Unit)? = null
+    ) {
         if (groupId.isBlank()) {
             disconnect()
             return
@@ -55,6 +72,7 @@ class RealtimeChatManager(
                 (_status.value == ConnectionStatus.CONNECTING || _status.value == ConnectionStatus.CONNECTED)
             ) {
                 onMessageReceived = onMessage
+                onReconnectedReceived = onReconnected
                 return
             }
 
@@ -67,6 +85,9 @@ class RealtimeChatManager(
             reconnectJob = null
             currentGroupId = groupId
             onMessageReceived = onMessage
+            onReconnectedReceived = onReconnected
+            hasConnectedInCurrentSession = false
+            hasScheduledRetry = false
             reconnectAttempt = 0
             _status.value = ConnectionStatus.CONNECTING
         }
@@ -99,6 +120,7 @@ class RealtimeChatManager(
             }
 
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                var reconnectCallback: (() -> Unit)? = null
                 synchronized(lock) {
                     if (currentGroupId != groupId ||
                         sessionGeneration != generation ||
@@ -107,11 +129,24 @@ class RealtimeChatManager(
                         webSocket.cancel()
                         return
                     }
+                    reconnectCallback = if (
+                        shouldReconcileChatHistoryAfterOpen(
+                            hasConnectedInCurrentSession = hasConnectedInCurrentSession,
+                            hasScheduledRetry = hasScheduledRetry
+                        )
+                    ) {
+                        onReconnectedReceived
+                    } else {
+                        null
+                    }
+                    hasConnectedInCurrentSession = true
+                    hasScheduledRetry = false
                     this@RealtimeChatManager.webSocket = webSocket
                     reconnectAttempt = 0
                     _status.value = ConnectionStatus.CONNECTED
                 }
                 Log.d("RealtimeChatManager", "Connected to group WS: $groupId")
+                reconnectCallback?.invoke()
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -173,7 +208,7 @@ class RealtimeChatManager(
         }
 
         val created = try {
-            client.newWebSocket(request, listener)
+            webSocketClient.newWebSocket(request, listener)
         } catch (error: Exception) {
             if (isSessionCurrent(groupId, generation, attemptId)) {
                 synchronized(lock) { _status.value = ConnectionStatus.DISCONNECTED }
@@ -212,6 +247,7 @@ class RealtimeChatManager(
 
             reconnectGeneration += 1
             val reconnectToken = reconnectGeneration
+            hasScheduledRetry = true
             val delayMs = RealtimeReconnectPolicy.delayMillis(reconnectAttempt)
             reconnectAttempt += 1
             _status.value = ConnectionStatus.DISCONNECTED
@@ -253,6 +289,9 @@ class RealtimeChatManager(
             webSocket = null
             currentGroupId = null
             onMessageReceived = null
+            onReconnectedReceived = null
+            hasConnectedInCurrentSession = false
+            hasScheduledRetry = false
             reconnectAttempt = 0
             _status.value = ConnectionStatus.DISCONNECTED
         }

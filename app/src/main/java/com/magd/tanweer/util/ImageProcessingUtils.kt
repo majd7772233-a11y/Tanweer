@@ -2,6 +2,7 @@ package com.magd.tanweer.util
 
 import android.content.Context
 import android.graphics.*
+import android.util.Log
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -144,6 +145,189 @@ object ImageProcessingUtils {
         }
     }
 
+    /**
+     * Persist a small camera-preview bitmap before leaving the Activity result callback.
+     * PNG is used for this source copy so the later configured image pipeline remains
+     * the only lossy/compression step.
+     */
+    fun persistCameraPreview(context: Context, pageId: String, bitmap: Bitmap): Uri? {
+        val sourceFile = draftSourceFile(context, pageId)
+        val partialFile = File(sourceFile.parentFile, sourceFile.name + ".part")
+        return try {
+            sourceFile.parentFile?.mkdirs()
+            partialFile.delete()
+            FileOutputStream(partialFile).use { output ->
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                    throw IllegalStateException("Could not persist camera preview")
+                }
+                output.fd.sync()
+            }
+            sourceFile.delete()
+            if (!partialFile.renameTo(sourceFile)) {
+                throw IllegalStateException("Could not finalize camera preview source")
+            }
+            Uri.fromFile(sourceFile)
+        } catch (error: Exception) {
+            partialFile.delete()
+            Log.w("ImageProcessingUtils", "Could not persist camera preview for draft page $pageId", error)
+            null
+        }
+    }
+
+    /**
+     * Copies picker content into app-private storage so Activity/process recreation
+     * does not depend on a transient external URI grant.
+     */
+    suspend fun persistDraftSource(
+        context: Context,
+        pageId: String,
+        sourceUri: Uri?,
+        rawBitmap: Bitmap?
+    ): Uri? = withContext(Dispatchers.IO) {
+        val sourceFile = draftSourceFile(context, pageId)
+        val partialFile = File(sourceFile.parentFile, sourceFile.name + ".part")
+        try {
+            sourceFile.parentFile?.mkdirs()
+            if (sourceFile.isFile && sourceFile.length() > 0L && isValidImageFile(sourceFile)) {
+                return@withContext Uri.fromFile(sourceFile)
+            }
+
+            sourceFile.delete()
+            partialFile.delete()
+            if (rawBitmap != null) {
+                FileOutputStream(partialFile).use { output ->
+                    if (!rawBitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                        throw IllegalStateException("Could not persist camera source bitmap")
+                    }
+                    output.fd.sync()
+                }
+            } else {
+                val uri = sourceUri ?: return@withContext null
+                val source = context.contentResolver.openInputStream(uri) ?: return@withContext null
+                source.use { input ->
+                    FileOutputStream(partialFile).use { output ->
+                        input.copyTo(output)
+                        output.fd.sync()
+                    }
+                }
+            }
+
+            if (!partialFile.isFile || partialFile.length() <= 0L || !isValidImageFile(partialFile)) {
+                partialFile.delete()
+                return@withContext null
+            }
+            if (!partialFile.renameTo(sourceFile)) {
+                throw IllegalStateException("Could not finalize draft source media")
+            }
+            Uri.fromFile(sourceFile)
+        } catch (error: Exception) {
+            partialFile.delete()
+            Log.w("ImageProcessingUtils", "Could not persist source media for draft page $pageId", error)
+            null
+        }
+    }
+
+    private fun isValidImageFile(file: File): Boolean {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, options)
+        return options.outWidth > 0 && options.outHeight > 0
+    }
+
+    fun restoreProcessedPageResult(filePath: String?): ProcessedPageResult? {
+        if (filePath.isNullOrBlank()) return null
+        val file = File(filePath)
+        if (!file.isFile || file.length() <= 0L) return null
+        return try {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, options)
+            if (options.outWidth <= 0 || options.outHeight <= 0) return null
+            val bytes = file.readBytes()
+            ProcessedPageResult(
+                file = file,
+                byteArray = bytes,
+                sizeBytes = bytes.size.toLong(),
+                sha256 = calculateSha256(bytes),
+                width = options.outWidth,
+                height = options.outHeight
+            )
+        } catch (error: Exception) {
+            Log.w("ImageProcessingUtils", "Could not restore processed draft page $filePath", error)
+            null
+        }
+    }
+
+    fun decodeProcessedPreview(filePath: String?, maxDimension: Int = 640): Bitmap? {
+        if (filePath.isNullOrBlank() || maxDimension <= 0) return null
+        val file = File(filePath)
+        if (!file.isFile || file.length() <= 0L) return null
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+            var sampleSize = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sampleSize * 2) >= maxDimension
+            ) {
+                sampleSize *= 2
+            }
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+            BitmapFactory.decodeFile(file.absolutePath, options)
+        } catch (error: Exception) {
+            Log.w("ImageProcessingUtils", "Could not decode processed draft preview $filePath", error)
+            null
+        }
+    }
+    fun deleteDraftSource(context: Context, sourceUri: Uri?) {
+        if (sourceUri?.scheme != "file") return
+        val sourceFile = sourceUri.path?.let(::File) ?: return
+        val draftDirectory = File(context.filesDir, "scan_draft_sources")
+        try {
+            if (sourceFile.canonicalFile.parentFile == draftDirectory.canonicalFile &&
+                sourceFile.name.endsWith(".source")
+            ) {
+                sourceFile.delete()
+            }
+        } catch (error: Exception) {
+            Log.w("ImageProcessingUtils", "Could not delete draft source media", error)
+        }
+    }
+
+    /**
+     * Deletes a processed image only while it is still an unsent draft attachment.
+     * Canonical-path validation prevents this helper from deleting arbitrary files.
+     * Successfully submitted pages must not call this: an offline mutation may still
+     * reference the pending_uploads file until the server confirms publication.
+     */
+    fun deleteProcessedDraftFile(context: Context, processedFilePath: String?) {
+        if (processedFilePath.isNullOrBlank()) return
+        try {
+            val file = File(processedFilePath).canonicalFile
+            val pendingDirectory = File(context.filesDir, "pending_uploads").canonicalFile
+            if (
+                file.parentFile == pendingDirectory &&
+                file.name.startsWith("page_") &&
+                file.name.endsWith(".jpg") &&
+                file.isFile
+            ) {
+                file.delete()
+            }
+        } catch (error: Exception) {
+            Log.w("ImageProcessingUtils", "Could not delete unsent processed draft page", error)
+        }
+    }
+
+    fun deleteDraftPage(context: Context, sourceUri: Uri?, processedFilePath: String?) {
+        deleteDraftSource(context, sourceUri)
+        deleteProcessedDraftFile(context, processedFilePath)
+    }
+
+    private fun draftSourceFile(context: Context, pageId: String): File {
+        val safeId = pageId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+        return File(File(context.filesDir, "scan_draft_sources"), "source_$safeId.source")
+    }
     private fun decodeSampledBitmapFromUri(context: Context, uri: Uri, maxDim: Int): Bitmap? {
         var input: InputStream? = null
         return try {

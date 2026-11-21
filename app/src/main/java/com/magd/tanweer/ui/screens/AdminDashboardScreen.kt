@@ -1,5 +1,7 @@
 package com.magd.tanweer.ui.screens
 
+import com.magd.tanweer.R
+
 import com.magd.tanweer.ui.theme.tanweerTextSize
 import com.magd.tanweer.ui.theme.tanweerLineHeight
 
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -42,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -197,6 +201,14 @@ fun AdminDashboardScreen(viewModel: TanweerViewModel) {
                 }
             }
         }
+
+        val schoolTeachers = dashboardData?.teachers.orEmpty()
+        val schoolModerators = dashboardData?.moderators.orEmpty()
+        val schoolAdmins = dashboardData?.admins.orEmpty()
+
+        adminStaffSection(R.string.admin_staff_teachers, R.string.admin_staff_teacher, schoolTeachers, CyanAccent, "teacher")
+        adminStaffSection(R.string.admin_staff_moderators, R.string.admin_staff_moderator, schoolModerators, EmeraldGreen, "moderator")
+        adminStaffSection(R.string.admin_staff_admins, R.string.admin_staff_admin, schoolAdmins, WarmAmber, "admin")
 
         item {
             GlassCard(
@@ -513,7 +525,7 @@ private fun AdminStudentCard(
                     )
                 }
                 GlassPill(
-                    text = if (isDisabled) "موقوف" else "نشط",
+                    text = stringResource(if (isDisabled) R.string.admin_status_disabled else R.string.admin_status_active),
                     color = if (isDisabled) WarmAmber else EmeraldGreen,
                     bgColor = (if (isDisabled) WarmAmber else EmeraldGreen).copy(alpha = 0.12f)
                 )
@@ -544,6 +556,85 @@ private fun AdminStudentCard(
     }
 }
 
+private fun LazyListScope.adminStaffSection(
+    titleRes: Int,
+    roleLabelRes: Int,
+    staff: List<UserBrief>,
+    accent: Color,
+    keyPrefix: String
+) {
+    if (staff.isEmpty()) return
+
+    item(key = "$keyPrefix-section") {
+        val title = stringResource(titleRes)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(title, color = accent, fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold)
+            GlassPill(
+                text = staff.size.toString(),
+                color = accent,
+                bgColor = accent.copy(alpha = 0.12f)
+            )
+        }
+    }
+
+    items(staff, key = { "$keyPrefix-${it.id}" }) { member ->
+        AdminStaffCard(member = member, roleLabelRes = roleLabelRes, accent = accent)
+    }
+}
+
+@Composable
+private fun AdminStaffCard(member: UserBrief, roleLabelRes: Int, accent: Color) {
+    val roleLabel = stringResource(roleLabelRes)
+    val subtitle = if (member.grade_id > 0 && member.section_id.isNotBlank()) {
+        stringResource(R.string.admin_staff_class_scope, member.grade_id, member.section_id)
+    } else {
+        stringResource(R.string.admin_staff_group_scope, member.active_group_count)
+    }
+    val isDisabled = member.status.equals("DISABLED", ignoreCase = true)
+
+    GlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = MidnightSurface,
+        borderColor = accent.copy(alpha = 0.22f)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(accent.copy(alpha = 0.12f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = member.full_name.take(1),
+                    color = accent,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = tanweerTextSize(15f)
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(member.full_name, color = TextPrimary, fontSize = tanweerTextSize(12f), fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.admin_staff_phone, member.phone_number), color = TextSecondary, fontSize = tanweerTextSize(10f))
+                Text(subtitle, color = TextMuted, fontSize = tanweerTextSize(10f))
+            }
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                GlassPill(text = roleLabel, color = accent, bgColor = accent.copy(alpha = 0.12f))
+                GlassPill(
+                    text = stringResource(if (isDisabled) R.string.admin_status_disabled else R.string.admin_status_active),
+                    color = if (isDisabled) WarmAmber else EmeraldGreen,
+                    bgColor = (if (isDisabled) WarmAmber else EmeraldGreen).copy(alpha = 0.12f)
+                )
+            }
+        }
+    }
+}
 private fun UserBrief.matchesAdminSearch(query: String): Boolean {
     val value = query.trim()
     if (value.isBlank()) return true

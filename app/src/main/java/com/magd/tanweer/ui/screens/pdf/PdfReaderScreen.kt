@@ -1,5 +1,7 @@
 package com.magd.tanweer.ui.screens.pdf
 
+import com.magd.tanweer.R
+
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -60,6 +62,7 @@ import com.magd.tanweer.data.repository.TanweerRepository
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.FocusNoisePlayer
+import com.magd.tanweer.util.PdfSpeechTextQuality
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -473,6 +476,14 @@ fun PdfReaderScreen(
                         .joinToString(". ")
                     enqueueSpeech(notesRead, TextToSpeech.QUEUE_FLUSH, "$requestId:0", requestId)
                 } else {
+                    if (!PdfSpeechTextQuality.isSafeForSpeech(pageText)) {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.pdf_speech_text_invalid),
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@launch
+                    }
                     val chunks = pageText.chunked(3000)
                     var acceptedAllChunks = true
                     for ((idx, chunk) in chunks.withIndex()) {

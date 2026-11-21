@@ -550,7 +550,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             localSessionReady.await()
             dataGenerationReady.await()
             if (db.userDao().getUserSync() == null) return@launch
-            _isCheckingAuth.value = true
+            // Keep the current Compose tree mounted while the background consistency
+            // check runs. Replacing the root with the startup splash here discards
+            // open dialogs and their in-progress drafts after Photo Picker / Camera.
             try {
                 val purged = verifyServerDataGeneration()
                 if (!purged && dataGenerationVerified && _autoSyncEnabled.value) {
@@ -558,8 +560,6 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 }
             } catch (e: Exception) {
                 android.util.Log.w("TanweerViewModel", "Foreground data-generation verification failed", e)
-            } finally {
-                _isCheckingAuth.value = false
             }
         }
     }
@@ -1500,7 +1500,17 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _chatHistorySyncState.value = SyncState.Loading
         viewModelScope.launch {
             try {
-                val result = repository.connectToGroupChat(requestedGroupId, user.id)
+                val result = repository.connectToGroupChat(requestedGroupId, user.id) { reconciled ->
+                    if (requestId == chatHistoryRequestGeneration &&
+                        _chatHistorySyncGroupId.value == requestedGroupId
+                    ) {
+                        _chatHistorySyncState.value = when (reconciled) {
+                            is SyncResult.Success -> SyncState.Success()
+                            is SyncResult.Offline -> SyncState.OfflineCached()
+                            is SyncResult.Error -> SyncState.Error(reconciled.message, reconciled.isNetworkError)
+                        }
+                    }
+                }
                 if (requestId != chatHistoryRequestGeneration || _chatHistorySyncGroupId.value != requestedGroupId) return@launch
                 _chatHistorySyncState.value = when (result) {
                     is SyncResult.Success -> SyncState.Success()

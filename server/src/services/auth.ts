@@ -349,7 +349,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
     );
   }
 
-  const classGroupId = (user.grade_id && user.section_id && user.role !== Role.ADMIN) ? `class_${user.grade_id}_${user.section_id}` : '';
+  const classGroupId = (user.grade_id && user.section_id && normalizeRole(user.role) !== Role.ADMIN) ? `class_${user.grade_id}_${user.section_id}` : '';
 
   return jsonResponse({
     success: true,
@@ -358,8 +358,8 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
       id: user.id,
       fullName: user.full_name,
       phoneNumber: user.phone_number,
-      gradeId: user.grade_id,
-      sectionId: user.section_id,
+      gradeId: normalizeRole(user.role) === Role.ADMIN ? null : user.grade_id,
+      sectionId: normalizeRole(user.role) === Role.ADMIN ? null : user.section_id,
       role: sanitizePublicRole(user.role),
       defaultGroupId: classGroupId,
     },
@@ -515,7 +515,7 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
     return errorResponse('RECOVERY_CODE_REVOKED', 'تم تغيير أو إلغاء رمز الاسترداد أثناء تسجيل الدخول. استخدم الرمز الأحدث.', 409);
   }
 
-  const classGroupId = (user.grade_id && user.section_id && user.role !== Role.ADMIN) ? `class_${user.grade_id}_${user.section_id}` : '';
+  const classGroupId = (user.grade_id && user.section_id && normalizeRole(user.role) !== Role.ADMIN) ? `class_${user.grade_id}_${user.section_id}` : '';
 
   return jsonResponse({
     success: true,
@@ -524,8 +524,8 @@ export async function handleLoginWithRecoveryCode(request: Request, env: Env): P
       id: user.id,
       fullName: user.full_name,
       phoneNumber: user.phone_number,
-      gradeId: user.grade_id,
-      sectionId: user.section_id,
+      gradeId: normalizeRole(user.role) === Role.ADMIN ? null : user.grade_id,
+      sectionId: normalizeRole(user.role) === Role.ADMIN ? null : user.section_id,
       role: sanitizePublicRole(user.role),
       defaultGroupId: classGroupId,
     },

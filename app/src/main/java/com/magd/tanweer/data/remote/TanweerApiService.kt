@@ -288,6 +288,22 @@ data class ChatMessagesResponse(
     val messages: List<ChatMessageItem> = emptyList()
 )
 
+/** HTTP acknowledgement returned after the Worker persists a group chat message. */
+@JsonClass(generateAdapter = true)
+data class PostGroupMessageResponse(
+    val success: Boolean = false,
+    val message: ChatMessageItem? = null,
+    val error: ApiError? = null
+) {
+    fun confirmsMessage(expectedId: String, expectedGroupId: String, expectedText: String): Boolean =
+        success && message?.let { ack ->
+            ack.id == expectedId &&
+                ack.groupId == expectedGroupId &&
+                ack.text == expectedText.trim() &&
+                ack.status.equals("SENT", ignoreCase = true)
+        } == true
+}
+
 @JsonClass(generateAdapter = true)
 data class ContentsResponse(
     val success: Boolean = true,
@@ -429,7 +445,7 @@ interface TanweerApiService {
     suspend fun postGroupMessage(
         @Path("id") groupId: String,
         @Body req: PostMessageRequest
-    ): Response<GenericResponse>
+    ): Response<PostGroupMessageResponse>
 
     @GET("api/v1/schedule/{groupId}")
     suspend fun getSchedule(@Path("groupId") groupId: String): Response<com.magd.tanweer.data.model.ScheduleResponse>

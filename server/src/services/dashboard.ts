@@ -6,6 +6,7 @@
 
 import { Env } from '../env';
 import { errorResponse, jsonResponse } from '../lib/response';
+import { getCurrentAcademicYearId } from '../lib/school';
 import { Role, normalizeRole, ROLE_METADATA } from '../lib/roles';
 import { generateId } from '../lib/ids';
 import { hashString, hashPassword, generateRandomToken, generateRecoveryCode, encryptSensitivePayload } from '../lib/crypto';
@@ -440,6 +441,88 @@ export async function handleGetDashboardUsers(request: Request, env: Env): Promi
   });
 }
 
+export type AdminClassRestorePoint = {
+  grade_id: number;
+  section_id: string;
+};
+
+export type ResolvedAdminClassAssignment = {
+  gradeId: number;
+  sectionId: string;
+  restoreSavedMemberships: boolean;
+};
+
+export function resolveAdminClassAssignment(
+  restorePoint: AdminClassRestorePoint | null,
+  requestedGradeId: unknown,
+  requestedSectionId: unknown
+): { assignment: ResolvedAdminClassAssignment } | { error: 'INVALID_CLASS_ASSIGNMENT' | 'ADMIN_CLASS_RESTORE_UNAVAILABLE' } {
+  const hasRequestedGrade = requestedGradeId !== undefined;
+  const hasRequestedSection = requestedSectionId !== undefined;
+  const hasExplicitAssignment = hasRequestedGrade || hasRequestedSection;
+
+  if (hasExplicitAssignment && (
+    typeof requestedGradeId !== 'number' ||
+    !Number.isInteger(requestedGradeId) ||
+    requestedGradeId <= 0 ||
+    typeof requestedSectionId !== 'string' ||
+    !requestedSectionId.trim()
+  )) {
+    return { error: 'INVALID_CLASS_ASSIGNMENT' };
+  }
+
+  const hasValidRestorePoint = !!restorePoint &&
+    Number.isInteger(restorePoint.grade_id) &&
+    restorePoint.grade_id > 0 &&
+    typeof restorePoint.section_id === 'string' &&
+    !!restorePoint.section_id.trim();
+
+  const gradeId = hasExplicitAssignment
+    ? requestedGradeId as number
+    : (hasValidRestorePoint ? restorePoint!.grade_id : 0);
+  const sectionId = hasExplicitAssignment
+    ? (requestedSectionId as string).trim().toUpperCase()
+    : (hasValidRestorePoint ? restorePoint!.section_id.trim().toUpperCase() : '');
+
+  if (!Number.isInteger(gradeId) || gradeId <= 0 || !sectionId) {
+    return { error: 'ADMIN_CLASS_RESTORE_UNAVAILABLE' };
+  }
+
+  return {
+    assignment: {
+      gradeId,
+      sectionId,
+      restoreSavedMemberships: !hasExplicitAssignment ||
+        (!!hasValidRestorePoint &&
+          gradeId === restorePoint!.grade_id &&
+          sectionId === restorePoint!.section_id.trim().toUpperCase()),
+    },
+  };
+}
+async function ensureAdminAcademicClassGroup(
+  db: D1Database,
+  gradeId: number,
+  sectionId: string,
+  now: number
+): Promise<string | null> {
+  const scope = await db.prepare(
+    "SELECT g.name_ar AS grade_name, s.name_ar AS section_name FROM grades g JOIN sections s ON s.grade_id = g.id WHERE g.id = ? AND UPPER(s.section_id) = UPPER(?)"
+  ).bind(gradeId, sectionId).first<{ grade_name: string; section_name: string }>();
+  if (!scope) return null;
+
+  const groupId = "class_" + gradeId + "_" + sectionId;
+  const academicYearId = await getCurrentAcademicYearId(db);
+  const groupName = scope.grade_name + " — شعبة (" + scope.section_name + ")";
+  await db.batch([
+    db.prepare(
+      "INSERT OR IGNORE INTO groups (id, name, type, description, academic_year_id, created_at) VALUES (?, ?, 'CLASS', ?, ?, ?)"
+    ).bind(groupId, groupName, "المجموعة الدراسية الرسمية لـ " + groupName, academicYearId, now),
+    db.prepare(
+      "INSERT OR IGNORE INTO group_sections (group_id, grade_id, section_id) VALUES (?, ?, ?)"
+    ).bind(groupId, gradeId, sectionId),
+  ]);
+  return groupId;
+}
 /**
  * Updates a user's role and logs the audit event.
  */
@@ -449,7 +532,7 @@ export async function handleChangeUserRole(
   request: Request,
   env: Env
 ): Promise<Response> {
-  const body = await request.json() as { newRole?: string; reason?: string };
+  const body = await request.json() as { newRole?: string; reason?: string; gradeId?: number; sectionId?: string };
   if (!body.newRole) {
     return errorResponse('INVALID_INPUT', 'يرجى تحديد الرتبة الجديدة');
   }
@@ -459,10 +542,12 @@ export async function handleChangeUserRole(
     return errorResponse('FORBIDDEN', 'لا يمكن تعيين رتبة مالك المنظومة (SYSTEM_OWNER) عبر لوحة التحكم. المالك فريد ويتم تكوينه حصراً في متغيرات البيئة.', 403);
   }
 
-  const user = await env.DB.prepare(`SELECT id, full_name, role FROM users WHERE id = ?`).bind(userId).first<{
+  const user = await env.DB.prepare(`SELECT id, full_name, role, grade_id, section_id FROM users WHERE id = ?`).bind(userId).first<{
     id: string;
     full_name: string;
     role: string;
+    grade_id: number;
+    section_id: string;
     status: string;
   }>();
 
@@ -473,7 +558,7 @@ export async function handleChangeUserRole(
   const oldRole = normalizeRole(user.role);
   const now = Date.now();
 
-  const bodyWithScope = body as { newRole?: string; reason?: string; scope?: string; groupId?: string };
+  const bodyWithScope = body as { newRole?: string; reason?: string; scope?: string; groupId?: string; gradeId?: number; sectionId?: string };
   if (bodyWithScope.groupId || bodyWithScope.scope === 'GROUP') {
     // Group-scoped role update
     if (bodyWithScope.groupId) {
@@ -482,25 +567,159 @@ export async function handleChangeUserRole(
       ).bind(newRole, bodyWithScope.groupId, userId).run();
     }
   } else {
-    // Global role update
-    await env.DB.prepare(`UPDATE users SET role = ?, updated_at = ? WHERE id = ?`).bind(newRole, now, userId).run();
-    if (newRole === Role.STUDENT) {
-      // Complete downgrade: clean up all elevated group roles across all groups
-      await env.DB.prepare(
-        `UPDATE group_members SET role = ? WHERE user_id = ?`
-      ).bind(Role.STUDENT, userId).run();
-    } else if (newRole === Role.MODERATOR) {
-      // Downgrade any higher teacher/admin group roles
-      await env.DB.prepare(
-        `UPDATE group_members SET role = ? WHERE user_id = ? AND (role = 'TEACHER' OR role = 'ADMIN' OR role = 'VERIFIED_TEACHER')`
-      ).bind(Role.MODERATOR, userId).run();
-    } else if (newRole === Role.TEACHER || newRole === Role.ADMIN) {
-      await env.DB.prepare(
-        `UPDATE group_members SET role = ? WHERE user_id = ?`
-      ).bind(newRole, userId).run();
+    // Global role update.
+    if (newRole === Role.ADMIN) {
+      // A school ADMIN must have a valid academic scope saved for later restoration.
+      if (oldRole !== Role.ADMIN) {
+        const validClassScope = await env.DB.prepare(
+          "SELECT 1 AS valid FROM grades g JOIN sections s ON s.grade_id = g.id WHERE g.id = ? AND UPPER(s.section_id) = UPPER(?)"
+        ).bind(user.grade_id, user.section_id).first<{ valid: number }>();
+
+        if (!validClassScope) {
+          return errorResponse(
+            'ADMIN_PROMOTION_REQUIRES_CLASS_ASSIGNMENT',
+            'تعذر ترقية الحساب إلى مدير المدرسة لأنه لا يملك صفاً وشعبة أكاديميين صالحين لحفظهما واستعادتهما لاحقاً.',
+            409
+          );
+        }
+
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT OR IGNORE INTO admin_role_restore_points (user_id, grade_id, section_id, saved_at) SELECT id, grade_id, section_id, ? FROM users WHERE id = ?"
+          ).bind(now, userId),
+          env.DB.prepare(
+            "INSERT OR IGNORE INTO admin_class_membership_restore_points (user_id, group_id, role, status, joined_at) SELECT gm.user_id, gm.group_id, gm.role, gm.status, gm.joined_at FROM group_members gm JOIN groups g ON g.id = gm.group_id WHERE gm.user_id = ? AND UPPER(g.type) = 'CLASS'"
+          ).bind(userId),
+          env.DB.prepare(
+            "UPDATE users SET role = ?, grade_id = 0, section_id = '', updated_at = ? WHERE id = ?"
+          ).bind(newRole, now, userId),
+          env.DB.prepare(
+            "DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE UPPER(type) = 'CLASS')"
+          ).bind(userId),
+        ]);
+      } else {
+        // Existing administrators remain detached; do not overwrite their restore point.
+        await env.DB.batch([
+          env.DB.prepare(
+            "UPDATE users SET role = ?, grade_id = 0, section_id = '', updated_at = ? WHERE id = ?"
+          ).bind(newRole, now, userId),
+          env.DB.prepare(
+            "DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE UPPER(type) = 'CLASS')"
+          ).bind(userId),
+        ]);
+      }
+    } else {
+      // Restore a previous class assignment before an ADMIN becomes an academic role.
+      if (oldRole === Role.ADMIN) {
+        const restorePoint = await env.DB.prepare(
+          "SELECT grade_id, section_id FROM admin_role_restore_points WHERE user_id = ?"
+        ).bind(userId).first<{ grade_id: number; section_id: string }>();
+
+        const resolvedAssignment = resolveAdminClassAssignment(
+          restorePoint,
+          bodyWithScope.gradeId,
+          bodyWithScope.sectionId
+        );
+        if ('error' in resolvedAssignment) {
+          if (resolvedAssignment.error === 'INVALID_CLASS_ASSIGNMENT') {
+            return errorResponse(
+              'INVALID_CLASS_ASSIGNMENT',
+              'يجب إرسال رقم الصف ورمز الشعبة معاً وبقيم صحيحة.',
+              400
+            );
+          }
+          return errorResponse(
+            'ADMIN_CLASS_RESTORE_UNAVAILABLE',
+            'لا يوجد إسناد صف وشعبة محفوظ لهذا المدير. حدّد صفاً وشعبة صالحين في طلب تغيير الدور.',
+            409
+          );
+        }
+
+        const targetGradeId = resolvedAssignment.assignment.gradeId;
+        const targetSectionId = resolvedAssignment.assignment.sectionId;
+        const shouldRestoreSavedMemberships = resolvedAssignment.assignment.restoreSavedMemberships;
+        const targetGroupId = await ensureAdminAcademicClassGroup(
+          env.DB,
+          targetGradeId,
+          targetSectionId,
+          now
+        );
+        if (!targetGroupId) {
+          return errorResponse(
+            'INVALID_CLASS_ASSIGNMENT',
+            'الصف أو الشعبة المحددة غير موجودة في الهيكل الدراسي.',
+            400
+          );
+        }
+
+
+        const savedMembershipCount = shouldRestoreSavedMemberships
+          ? await env.DB.prepare(
+              "SELECT COUNT(*) AS total FROM admin_class_membership_restore_points WHERE user_id = ?"
+            ).bind(userId).first<{ total: number }>()
+          : null;
+
+        const restoreStatements = [
+          env.DB.prepare(
+            "UPDATE users SET role = ?, grade_id = ?, section_id = ?, updated_at = ? WHERE id = ?"
+          ).bind(newRole, targetGradeId, targetSectionId, now, userId),
+        ];
+
+        if (shouldRestoreSavedMemberships) {
+          restoreStatements.push(
+            env.DB.prepare(
+              "INSERT OR REPLACE INTO group_members (group_id, user_id, role, status, joined_at) SELECT group_id, user_id, role, status, joined_at FROM admin_class_membership_restore_points WHERE user_id = ?"
+            ).bind(userId)
+          );
+        } else {
+          restoreStatements.push(
+            env.DB.prepare(
+              "DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE UPPER(type) = 'CLASS')"
+            ).bind(userId)
+          );
+        }
+
+        if (!savedMembershipCount || (savedMembershipCount.total ?? 0) === 0) {
+          restoreStatements.push(
+            env.DB.prepare(
+              "INSERT OR REPLACE INTO group_members (group_id, user_id, role, status, joined_at) VALUES (?, ?, ?, 'ACTIVE', ?)"
+            ).bind(targetGroupId, userId, newRole, now)
+          );
+        }
+
+        restoreStatements.push(
+          env.DB.prepare(
+            "DELETE FROM admin_class_membership_restore_points WHERE user_id = ?"
+          ).bind(userId),
+          env.DB.prepare(
+            "DELETE FROM admin_role_restore_points WHERE user_id = ?"
+          ).bind(userId)
+        );
+
+        await env.DB.batch(restoreStatements);
+      } else {
+        await env.DB.prepare(
+          "UPDATE users SET role = ?, updated_at = ? WHERE id = ?"
+        ).bind(newRole, now, userId).run();
+      }
+
+      if (newRole === Role.STUDENT) {
+        // Complete downgrade: clean up all elevated group roles across all groups.
+        await env.DB.prepare(
+          "UPDATE group_members SET role = ? WHERE user_id = ?"
+        ).bind(Role.STUDENT, userId).run();
+      } else if (newRole === Role.MODERATOR) {
+        // Downgrade any higher teacher/admin group roles.
+        await env.DB.prepare(
+          "UPDATE group_members SET role = ? WHERE user_id = ? AND (role = 'TEACHER' OR role = 'ADMIN' OR role = 'VERIFIED_TEACHER')"
+        ).bind(Role.MODERATOR, userId).run();
+      } else if (newRole === Role.TEACHER) {
+        await env.DB.prepare(
+          "UPDATE group_members SET role = ? WHERE user_id = ?"
+        ).bind(newRole, userId).run();
+      }
     }
   }
-
   await logRoleAudit(
     env.DB,
     'CHANGE_USER_ROLE',

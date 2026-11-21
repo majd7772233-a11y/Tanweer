@@ -34,11 +34,11 @@ export async function handleGetProfile(user: UserContext, env: Env): Promise<Res
       id: user.userId,
       fullName: user.fullName,
       phoneNumber: user.phoneNumber,
-      gradeId: user.gradeId,
-      gradeName: gradeNameMap[user.gradeId] || `الصف ${user.gradeId}`,
-      sectionId: user.sectionId,
+      gradeId: normalizeRole(user.role) === Role.ADMIN ? null : user.gradeId,
+      gradeName: normalizeRole(user.role) === Role.ADMIN ? 'الإدارة المدرسية' : (gradeNameMap[user.gradeId] || `الصف ${user.gradeId}`),
+      sectionId: normalizeRole(user.role) === Role.ADMIN ? null : user.sectionId,
       role: sanitizePublicRole(user.role),
-      defaultGroupId: `class_${user.gradeId}_${user.sectionId}`,
+      defaultGroupId: normalizeRole(user.role) === Role.ADMIN ? '' : `class_${user.gradeId}_${user.sectionId}`,
       stats: {
         lessonsCount: contributions?.lessons_count || 0,
         homeworksCount: contributions?.homeworks_count || 0,
@@ -59,6 +59,13 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
   const newFullName = body.fullName ? body.fullName.trim().replace(/\s+/g, ' ') : user.fullName;
   const gradeChanged = body.gradeId !== undefined && body.gradeId !== user.gradeId;
   const sectionChanged = body.sectionId !== undefined && body.sectionId.toUpperCase() !== user.sectionId;
+  if (normalizeRole(user.role) === Role.ADMIN && (gradeChanged || sectionChanged)) {
+    return errorResponse(
+      'ADMIN_CLASS_ASSIGNMENT_NOT_ALLOWED',
+      'حساب مدير المدرسة مستقل عن الصفوف والشعب ولا يمكن إسناده إلى شعبة من هذا الملف.',
+      403
+    );
+  }
 
   if (body.fullName) {
     const valName = validateArabicFullName(newFullName);
@@ -176,11 +183,11 @@ export async function handleUpdateProfile(user: UserContext, request: Request, e
       id: user.userId,
       fullName: newFullName,
       phoneNumber: user.phoneNumber,
-      gradeId: user.gradeId,
-      gradeName: gradeNameMap[user.gradeId] || `الصف ${user.gradeId}`,
-      sectionId: user.sectionId,
+      gradeId: normalizeRole(user.role) === Role.ADMIN ? null : user.gradeId,
+      gradeName: normalizeRole(user.role) === Role.ADMIN ? 'الإدارة المدرسية' : (gradeNameMap[user.gradeId] || `الصف ${user.gradeId}`),
+      sectionId: normalizeRole(user.role) === Role.ADMIN ? null : user.sectionId,
       role: sanitizePublicRole(user.role),
-      defaultGroupId: `class_${user.gradeId}_${user.sectionId}`,
+      defaultGroupId: normalizeRole(user.role) === Role.ADMIN ? '' : `class_${user.gradeId}_${user.sectionId}`,
     },
   });
 }

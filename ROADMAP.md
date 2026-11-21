@@ -59,6 +59,33 @@
 
 > لا تُغلق المرحلة حتى تثبت سلامة المسودات، وحالة الرسائل التي حفظها الخادم، واستقرار الاتصال، وهوية مدير المدرسة، وتوافق صلاحيات API مع الواجهة.
 
+### سجل التنفيذ المحلي حتى 21 نوفمبر 2026
+
+هذه حالة تنفيذ مصدرية واختبارات آلية فقط؛ لا تعني اجتياز القبول النهائي. لم تُجرَ اختبارات تشغيل حقيقية على المحاكي أو الهاتف في هذه الجولة، بناءً على قرار تأجيل جميعها إلى المرحلة الخامسة.
+
+| البند | ما نُفذ في الشيفرة المحلية | الحالة وحدود الإثبات |
+|---|---|---|
+| P1-01 — المسودات | فحص foreground لم يعد يرفع isCheckingAuth ولا يستبدل شجرة Compose بـSplash؛ حقول الدرس والواجب تستخدم rememberSaveable، ومرفقات المسح تُنسخ إلى مساحة التطبيق الخاصة ويعاد بناء بيانات الصفحات من Saver. زر إلغاء الدرس ينظف ملفات المسودة غير المرسلة. | IMPLEMENTED — يحتاج اختبار Photo Picker/Camera وعودة Activity/تدوير/إعادة إنشاء فعلية في Phase 5. لا تُحذف ملفات المعالجة التي يشير إليها outbox أو الرفع المؤجل. |
+| P1-02 — RenderThread | لا تغيير رسومي أو بصري. أُضيف توضيح ظروف Ultra Power Saving وطول جلسة التشغيل وقرار عدم تقليل المؤثرات. | DEFERRED / ENVIRONMENT-CONFOUNDED — لا يغلق قبل اختبار مضبوط في Phase 5. |
+| P1-03 — PDF/TTS | أضيف PdfSpeechTextQuality ليوقف النطق للنص الواضح التلف/المحارف التحكم/أنماط التشويه المعروفة، مع السماح بنصوص عربية/إنجليزية وصفحات معادلات. | PARTIAL MITIGATION — يمنع نطق استخراج تالف بوضوح، لكنه لا يصلح Glyph maps أو Encoding أو RTL في ملفات PDF. اختبار عينات الكتب الفعلية في Phase 5. |
+| P1-04 — HTTP chat ACK | أضيف DTO يطابق message ككائن، وتحقق ACK من id/groupId/text/status، مع تحديث تاريخ المجموعة بعد إعادة الاتصال. | IMPLEMENTED IN SOURCE — اختبارات DTO ضمن Android مرت؛ اختبار جهازين وتأكيد حفظ D1 والـcomposer في Phase 5. |
+| P1-05 — WebSocket | أضيف Ping/Pong بروتوكولي عبر OkHttp client مخصص للمحادثات، وHistory reconciliation بعد reconnect مع حواجز generation/Mutex. | IMPLEMENTED IN SOURCE — لا يوجد إثبات بعد لوصول ثنائي الاتجاه تحت انقطاع/عودة الشبكة؛ Phase 5. |
+| P1-06 — فصل ADMIN | Migration 0034 تحفظ الصف والعضويات الصفية القديمة في restore points، وتزيل عضوية CLASS فقط وتبقي المجموعة العامة. login/profile يعيدان ADMIN بلا صف/شعبة؛ تغيير الدور يدعم الاستعادة أو إسناد صف/شعبة بديلين صالحين. | IMPLEMENTED IN SOURCE — سياسة الاستعادة 6/6 اختبارات خادمية؛ لم تُطبق migration على أي قاعدة Staging/Production. التحقق من حسابات QA وتسجيل الدخول في Phase 5. |
+| P1-07 — صلاحيات/لوحة ADMIN | حُصرت صلاحيات التدقيق وتغيير الأدوار العامة وإلغاء الجلسات ومراجعة الطلبات والعمليات الشاملة على SYSTEM_OWNER، وجميع /api/dashboard/* خلف verifyOwnerAuth. لوحة المدرسة تعرض مؤشرات المدرسة وقوائم قراءة للمعلمين والمشرفين والمديرين، وتتيح إجراءات الطلاب المحددة فقط عبر endpoints مدرسية مستقلة؛ إدارة الأجهزة الشخصية تبقى في مسارات الحساب الذاتية. | IMPLEMENTED — حُسم الحد الفاصل: ADMIN مدير مدرسة وليس Owner؛ لا تُمنح له أدوات الحوكمة العامة أو سجلات Owner أو إبطال جلسات الآخرين. اختبارات الصلاحيات والخادم تؤكد الفصل. |
+ملاحظة النطاق المعماري الحالي: كل قاعدة D1/Worker في هذا الإصدار تمثل مدرسة واحدة؛ المجموعة all هي المجموعة المدرسية المشتركة. لا يحتوي المخطط الحالي على school_id أو district_id أو عزل tenants داخل قاعدة مشتركة. دعم عدة مدارس/مديريات في D1 واحدة يحتاج مرحلة تصميم وعزل مستقلة، ولا يُدّعى ضمن Phase 1.
+
+**نتائج التحقق المحلي الحالية (21 نوفمبر 2026):**
+- Server: npm test نجح — 42 ملفاً / 293 اختباراً؛ npm run lint نجح (tsc --noEmit).
+- Android: :app:assembleStagingDebug نجح، والترجمة Kotlin/Java ناجحة. مجموعة Unit Test المحلية نفذت 124 اختباراً؛ 123 نجح وواحد تعثر على Windows/Robolectric في StudentNotebookManagerTest.valid notebook records round trip through atomic storage. نتيجة Linux CI على SHA النهائي مطلوبة للتحقق الكامل.
+- تشخيص AtomicFile: أُعيد إنتاج الحالة مع فحص فعلي للملفات؛ بعد الحفظ الثاني يحتوي student_notebook_records.json.new على السجلين بينما يظل الملف الأساسي على السجل الأول. فحص تنفيذ Robolectric لـAndroid 14 أكد أن finishWrite يعتمد على File.renameTo لاستبدال الملف الأساسي، وهو سلوك لا يطابق دلالات rename على Android/Linux عند وجود الوجهة. أُعيد إعداد الاختبار إلى API 34 الأصلي؛ لم يُخفَ الاختبار ولم يتغير كود الإنتاج أو توقع الاختبار. اختبار API 23 لم يصل إلى التنفيذ بسبب تعذر تنزيل android-all-instrumented 6.0.1 من Maven. سير عمل Android الحالي ينفذ Unit Test على ubuntu-latest قبل بناء APK؛ نجاح الاختبار على Linux CI للـSHA النهائي هو شرط الإغلاق. لا نسجل الاختبار PASS قبل ظهور نتيجة CI.
+- لم يُثبت أي APK ولم يُفتح أي تطبيق على الأجهزة. لا توجد نتيجة قبول حقيقية للمحاكي/الهاتف في هذه الجولة.
+### إغلاق نطاق التنفيذ للمرحلة الأولى (21 نوفمبر 2026)
+
+- اكتمل تنفيذ الإصلاحات المصدرية P1-01 وP1-04 وP1-05 وP1-06، وحُسم نطاق P1-07 لصالح إبقاء صلاحيات Owner العامة منفصلة عن إدارة المدرسة. P1-03 لديه حاجز جودة يمنع نطق النص الواضح التلف فقط؛ لا ندّعي إصلاح Glyph maps/Encoding/RTL من دون عينات PDF فعلية.
+- P1-02 يبقى مؤجلاً بقرار المستخدم إلى Phase 5 بسبب ظروف Ultra Power Saving والجلسات الطويلة؛ لم نخفض Blur أو الظلال أو التدرجات أو الحركة أو أي جودة بصرية.
+- تُعد المرحلة مكتملة من ناحية تنفيذ المصدر بعد نجاح فحوص CI على SHA النهائي. قبول الكاميرا/Photo Picker، اختبار جهازين للمحادثة، عينات PDF، حسابات QA/ترحيل D1، واختبار RenderThread المضبوط على المحاكي والهاتف تبقى أعمال قبول Phase 5 صريحة وليست ادعاء نجاح في Phase 1.
+- حدود النشر: Migration 0034 مصدر فقط ولم تُطبّق على D1. لا Worker deploy أو secret change أو Staging/Production write. PR #6 يبقى مفتوحاً وDraft، ولا merge إلى main.
+
 ## P1-01 — فقد نموذج الدرس/الواجب عند العودة من منتقي الصور أو الكاميرا
 
 **مراجع التقرير:** TNW-UI-001، TNW-UI-001B، TNW-UI-001C، TNW-HW-ATTACHMENT-LOSS-001.
@@ -91,11 +118,17 @@
 
 **Backtrace المسجل:** libGLESv2_enc.so / GL2Encoder::updateProgramInfoAfterLink، ثم libhwui.so / GrGLProgramBuilder::CreateProgram وGrGLGpu::ProgramCache::findOrCreateProgram وGrOpsRenderPass::bindPipeline وCircularRRectOp::onExecute، وصولاً إلى SkiaOpenGLPipeline::draw وRenderThread::threadLoop.
 
-**سياق الواقعة:** العملية كانت تعمل نحو 6,530 ثانية (نحو 109 دقائق)، وRSS قرابة 219MB. كانت الواجهة تعرض Hub/الأرشيف/الحوكمة؛ لا يثبت التقرير أن فتح بطاقة واحدة سبب الانهيار. الاحتمالات تشمل تراكم موارد الرسم/برامج shaders أو renderer للمحاكي أو مزيج blur/rounded/gradients.
+**سياق الواقعة:** العملية كانت تعمل نحو 6,530 ثانية (نحو 109 دقائق)، وRSS قرابة 219MB. كانت الواجهة تعرض Hub/الأرشيف/الحوكمة؛ لا يثبت التقرير أن فتح بطاقة واحدة سبب الانهيار.
+
+**توضيح المستخدم بعد مراجعة ظروف الاختبار (21 نوفمبر 2026):** أفاد المستخدم بأن المحاكي/الجهاز كان يعمل في وضع توفير الطاقة الفائق أثناء عدد كبير من الاختبارات، وأن ذلك كان يسبب بطئاً عاماً شديداً. كما كان الجهاز يعمل أحياناً من 08:00 صباحاً حتى 23:00 مساءً دون توقف، وكانت جولات الاختبار المتأخرة تتم بعد هذا الحمل الطويل. هذه عوامل بيئية مربكة ومعقولة قد تفسر ضغط renderer أو تضخيمه، لكنها لا تثبت وحدها سبب `std::bad_alloc`.
+
+**قرار التصميم:** لا تخفّض جودة المؤثرات، ولا تزل Blur أو الظلال أو Gradients أو Rounded clipping أو الحركة، ولا تستبدلها بتصميم أبسط استناداً إلى هذه الواقعة وحدها. لا يوجد حالياً دليل يبرر تشويه الواجهة لحل مشكلة محتملة في وضع المحاكي/الطاقة.
+
+**خطة التحقق قبل أي تعديل بصري/رسومي:** أعد الاختبار بعد تشغيل بارد وترك الجهاز يستقر، مع تعطيل Ultra Power Saving واستخدام وضع أداء/طاقة عادي، ثم قارن جلسة مماثلة على المحاكي وجهاز فعلي. سجل مدة التشغيل وRSS وGPU/renderer وApplicationExitInfo/tombstone. لا يُفتح تعديل موارد الرسم إلا إذا تكرر الانهيار في ظروف طبيعية قابلة للتكرار وأثبت profiler نمو موارد مرتبطاً بالتطبيق.
 
 **الأثر:** التطبيق أغلق وعاد إلى Launcher؛ لم يسجل التقرير فقد بيانات من الحادث.
 
-**الإصلاح المطلوب:** راجع كثافة المؤثرات والظلال والـblur والـgradients والـrounded clipping وإعادة استخدام موارد الرسم؛ أضف مراقبة لذاكرة GPU/renderer خلال جلسة طويلة. لا تعتبر تغيير إعداد المحاكي حلاً للمنتج.
+**الحالة الحالية:** DEFERRED — مرشح سبب بيئي؛ لم يُغلق العيب بعد. لا تغيير بصري مخطط قبل إعادة الاختبار المضبوط. إذا عاد الانهيار في ظروف طبيعية، افحص دورة حياة موارد renderer وإعادة استخدامها بقياسات profiler، مع الحفاظ على الشكل والمؤثرات الأصلية.
 
 **اختبارات القبول:** جلسة تنقل طويلة تكرر فتح/إغلاق Hub والحوكمة والأرشيف، قياس الذاكرة وGPU، تشغيل على محاكي وجهاز فعلي، وجمع tombstone عند تكرار الحادث.
 
@@ -919,7 +952,7 @@
 
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
-| Phase 1 — P1 trust / persistence / stability | NOT STARTED | — | — |
+| Phase 1 — P1 trust / persistence / stability | IMPLEMENTED IN SOURCE / EXACT-SHA CI PENDING | local worktree on work/release-readiness; commit/push pending | Server: 42 files / 293 tests + TypeScript pass; Android assembleStagingDebug pass; focused Android regressions 16/16 pass; full local Android 123/124 on Windows/Robolectric (the sole AtomicFile round-trip failure is reproduced as a host rename semantic mismatch; original API 34 assertion retained); isolated SQLite migration 0034 and FK check pass; authoritative Ubuntu Android CI pending; physical acceptance Phase 5 |
 | Phase 2 — P2 data correctness / sync truth | NOT STARTED | — | — |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |

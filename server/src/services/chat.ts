@@ -181,7 +181,9 @@ export async function handlePostGroupMessage(
   const messageId = (body.id && typeof body.id === 'string' && body.id.length > 3) ? body.id : generateId('msg');
   const now = Date.now();
   const gradeNameMap: Record<number, string> = { 7: 'سابع', 8: 'ثامن', 9: 'تاسع', 10: 'أول ثانوي', 11: 'ثاني ثانوي', 12: 'ثالث ثانوي' };
-  const senderGradeSection = `${gradeNameMap[user.gradeId] || user.gradeId} — ${user.sectionId}`;
+  const senderGradeSection = normalizeRole(user.role) === Role.ADMIN
+    ? 'الإدارة المدرسية'
+    : String(gradeNameMap[user.gradeId] || user.gradeId) + ' — ' + user.sectionId;
 
   // Server-authoritative sender identity from UserContext
   const insertResult = await env.DB.prepare(

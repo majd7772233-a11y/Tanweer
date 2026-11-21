@@ -373,12 +373,24 @@ describe('Dashboard Roles & Authentication Security Boundaries', () => {
   });
 
   describe('In-App School Admin Management Security', () => {
-    it('SECURITY: Rejects teachers and students from Admin Dashboard (403)', async () => {
+    it('SECURITY: Rejects teachers, students, and the System Owner from the school Admin Dashboard (403)', async () => {
       const studentRes = await handleGetAdminDashboardData(studentUser, env);
       expect(studentRes.status).toBe(403);
 
       const teacherRes = await handleGetAdminDashboardData(teacherUser, env);
       expect(teacherRes.status).toBe(403);
+
+      // System Owner has a separate, concealed system dashboard and must not
+      // enter the school administrator dashboard.
+      const ownerRes = await handleGetAdminDashboardData({
+        ...adminUser,
+        userId: 'SYSTEM_OWNER',
+        fullName: 'مالك المنظومة',
+        gradeId: 0,
+        sectionId: '',
+        role: Role.SYSTEM_OWNER,
+      }, env);
+      expect(ownerRes.status).toBe(403);
     });
 
     it('Allows school Admin to access School Admin Dashboard (200)', async () => {

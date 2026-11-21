@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
@@ -2681,16 +2682,77 @@ class TanweerRepository(
         chatManager.disconnect()
     }
 
-    suspend fun connectToGroupChat(groupId: String, myUserId: String) = withContext(Dispatchers.IO) {
+    private suspend fun refreshActiveChatHistory(
+        groupId: String,
+        generation: Long
+    ): SyncResult {
+        if (!isActiveChatConnection(groupId, generation)) {
+            return SyncResult.Error("انتهت جلسة المحادثة قبل تحديث سجل الرسائل")
+        }
+
+        return try {
+            val response = api.getGroupMessages(groupId)
+            val body = response.body()
+
+            if (!isActiveChatConnection(groupId, generation)) {
+                SyncResult.Error("تم تغيير المجموعة قبل اكتمال تحديث سجل الرسائل")
+            } else if (response.isSuccessful && body?.success == true) {
+                if (body.messages.any { it.groupId != groupId || it.id.isBlank() }) {
+                    SyncResult.Error("رد سجل المحادثة لا يطابق المجموعة المطلوبة؛ احتُفظ بالرسائل المحلية")
+                } else {
+                    val messages = body.messages.map { item ->
+                        ChatMessageEntity(
+                            id = item.id,
+                            groupId = item.groupId,
+                            senderId = item.senderId,
+                            senderName = item.senderName,
+                            senderGradeSection = item.senderGradeSection,
+                            text = item.text,
+                            timestamp = item.timestamp,
+                            status = "SENT"
+                        )
+                    }
+
+                    if (!isActiveChatConnection(groupId, generation)) {
+                        return SyncResult.Error("تم تغيير المجموعة قبل حفظ سجل المحادثة")
+                    }
+                    if (messages.isNotEmpty()) {
+                        db.chatDao().insertMessages(messages)
+                        recentMessageIds.addAll(messages.map { it.id })
+                    }
+                    SyncResult.Success(messages.size)
+                }
+            } else {
+                resolveHttpError(response, "تعذر تحديث سجل المحادثة")
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (isActiveChatConnection(groupId, generation)) {
+                Log.w("TanweerRepository", "Could not refresh history for active chat group $groupId", error)
+            }
+            resolveException(error, "تعذر تحديث سجل المحادثة")
+        }
+    }
+
+    suspend fun connectToGroupChat(
+        groupId: String,
+        myUserId: String,
+        onHistoryReconciled: ((SyncResult) -> Unit)? = null
+    ) = withContext(Dispatchers.IO) {
         val generation = synchronized(chatConnectionLock) {
             chatConnectionGeneration += 1
             activeChatGroupId = groupId
             chatConnectionGeneration
         }
+        val historyMutex = Mutex()
+        suspend fun refreshHistory(): SyncResult = historyMutex.withLock {
+            refreshActiveChatHistory(groupId, generation)
+        }
 
         // Open/switch the live channel immediately. A slow history request must not
         // keep the previous group's socket alive or later replace a newer selection.
-        chatManager.connect(groupId) { json ->
+        chatManager.connect(groupId, onMessage = { json ->
             if (!isActiveChatConnection(groupId, generation)) return@connect
             try {
                 val type = json.optString("type", "")
@@ -2758,46 +2820,19 @@ class TanweerRepository(
             } catch (e: Exception) {
                 Log.e("TanweerRepository", "Error handling incoming chat WS frame", e)
             }
-        }
-
-        // History is authoritative only for the still-active group generation.
-        try {
-            val res = api.getGroupMessages(groupId)
-            val body = res.body()
-            if (!isActiveChatConnection(groupId, generation)) {
-                SyncResult.Error("تم تغيير المحادثة قبل اكتمال تحديث سجلها")
-            } else if (res.isSuccessful && body?.success == true) {
-                if (body.messages.any { it.groupId != groupId || it.id.isBlank() }) {
-                    SyncResult.Error("رد الخادم لسجل المحادثة لا يطابق المجموعة المطلوبة؛ احتُفظ بالرسائل المحلية")
-                } else {
-                    val messages = body.messages.map {
-                        ChatMessageEntity(
-                            id = it.id,
-                            groupId = it.groupId,
-                            senderId = it.senderId,
-                            senderName = it.senderName,
-                            senderGradeSection = it.senderGradeSection,
-                            text = it.text,
-                            timestamp = it.timestamp,
-                            status = "SENT"
-                        )
+        }, onReconnected = {
+            CoroutineScope(Dispatchers.IO).launch {
+                val result = refreshHistory()
+                if (isActiveChatConnection(groupId, generation)) {
+                    if (result !is SyncResult.Success) {
+                        Log.w("TanweerRepository", "Chat history reconciliation after reconnect failed for $groupId")
                     }
-                    if (isActiveChatConnection(groupId, generation) && messages.isNotEmpty()) {
-                        db.chatDao().insertMessages(messages)
-                    }
-                    SyncResult.Success(messages.size)
+                    onHistoryReconciled?.invoke(result)
                 }
-            } else {
-                resolveHttpError(res, "تعذر جلب سجل المحادثة")
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            if (isActiveChatConnection(groupId, generation)) {
-                Log.w("TanweerRepository", "Could not refresh history for active chat group $groupId", e)
-            }
-            resolveException(e, "تعذر جلب سجل المحادثة")
-        }
+        })
+
+        refreshHistory()
     }
 
     suspend fun disconnectFromGroupChat() = withContext(Dispatchers.IO) {
@@ -2839,7 +2874,7 @@ class TanweerRepository(
                 groupId,
                 PostMessageRequest(id = messageId, text = text)
             )
-            response.isSuccessful && response.body()?.success == true
+            response.isSuccessful && response.body()?.confirmsMessage(messageId, groupId, text) == true
         } catch (error: Exception) {
             Log.w("TanweerRepository", "HTTP chat delivery confirmation failed", error)
             false

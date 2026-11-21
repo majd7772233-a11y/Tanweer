@@ -69,7 +69,9 @@ export async function getUserFromToken(token: string, env: Env): Promise<UserCon
     sectionId: session.section_id,
     role: safeRole,
     deviceId: session.device_id,
-    defaultGroupId: `class_${session.grade_id}_${session.section_id}`,
+    defaultGroupId: safeRole === Role.ADMIN || !session.grade_id || !session.section_id
+      ? ''
+      : 'class_' + session.grade_id + '_' + session.section_id,
   };
 }
 

@@ -110,7 +110,9 @@ export default {
         const gradeNameMap: Record<number, string> = {
           7: 'سابع', 8: 'ثامن', 9: 'تاسع', 10: 'أول ثانوي', 11: 'ثاني ثانوي', 12: 'ثالث ثانوي'
         };
-        const gradeSection = `${gradeNameMap[user.gradeId] || user.gradeId} — ${user.sectionId}`;
+        const gradeSection = user.role === 'ADMIN'
+          ? 'الإدارة المدرسية'
+          : String(gradeNameMap[user.gradeId] || user.gradeId) + ' — ' + user.sectionId;
 
         // Create new request with verified identity headers injected server-side
         const modifiedHeaders = new Headers(request.headers);

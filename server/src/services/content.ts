@@ -222,7 +222,9 @@ export async function handleCreateContent(user: UserContext, request: Request, e
   const gradeNameMap: Record<number, string> = {
     7: 'سابع', 8: 'ثامن', 9: 'تاسع', 10: 'أول ثانوي', 11: 'ثاني ثانوي', 12: 'ثالث ثانوي'
   };
-  const authorGradeSection = `${gradeNameMap[user.gradeId] || user.gradeId} — ${user.sectionId}`;
+  const authorGradeSection = user.role === 'ADMIN'
+    ? 'الإدارة المدرسية'
+    : String(gradeNameMap[user.gradeId] || user.gradeId) + ' — ' + user.sectionId;
 
   // Treat the lesson row and all of its media rows as one publication.
   // D1 batch is transactional: a failed media insert must not leave a published

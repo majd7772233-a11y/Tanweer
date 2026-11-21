@@ -81,16 +81,16 @@ export async function hasPermission(
     return false;
   }
 
-  // 3. Strict Global System Permissions (Must have global ADMIN)
-  const GLOBAL_SYSTEM_PERMISSIONS = new Set<Permission>([
+  // 3. System-wide governance permissions are reserved for SYSTEM_OWNER.
+  const OWNER_ONLY_SYSTEM_PERMISSIONS = new Set<Permission>([
     Permission.MANAGE_USERS,
     Permission.REVOKE_SESSIONS,
     Permission.VIEW_AUDIT_LOG,
     Permission.REVIEW_ROLE_REQUESTS,
   ]);
 
-  if (GLOBAL_SYSTEM_PERMISSIONS.has(permission)) {
-    return globalRole === Role.ADMIN;
+  if (OWNER_ONLY_SYSTEM_PERMISSIONS.has(permission)) {
+    return false;
   }
 
   // 3. Global ADMIN has full access to all resources

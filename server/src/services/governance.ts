@@ -1036,7 +1036,11 @@ export async function handleGetModeratorDashboardData(user: UserContext, env: En
     return errorResponse('FORBIDDEN', 'هذا المركز مخصص للمشرفين والمسؤولين', 403);
   }
 
-  const defaultGroupId = user.defaultGroupId || `class_${user.gradeId}_${user.sectionId}`;
+  const defaultGroupId = user.defaultGroupId?.trim() ||
+    (normRole === Role.ADMIN ? '' : 'class_' + user.gradeId + '_' + user.sectionId);
+  if (!defaultGroupId) {
+    return errorResponse('GROUP_REQUIRED', 'حدد المجموعة المطلوب إدارة مناقشاتها أولاً.', 400);
+  }
 
   const pendingCorrections = await env.DB.prepare(
     `SELECT cc.*, c.title as content_title FROM content_corrections cc LEFT JOIN contents c ON cc.content_id = c.id WHERE cc.group_id = ? AND cc.status = 'PENDING'`
@@ -1072,7 +1076,7 @@ export async function handleGetModeratorDashboardData(user: UserContext, env: En
 // School Admin School Management Center
 export async function handleGetAdminDashboardData(user: UserContext, env: Env): Promise<Response> {
   const normRole = normalizeRole(user.role);
-  if (normRole !== Role.ADMIN && normRole !== Role.SYSTEM_OWNER) {
+  if (normRole !== Role.ADMIN) {
     return errorResponse('FORBIDDEN', 'هذا المركز مخصص لمدير المدرسة', 403);
   }
 

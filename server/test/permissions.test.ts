@@ -96,7 +96,10 @@ describe('Permissions Matrix & Security Enforcements', () => {
   it('verifies that admin has full school management rights', async () => {
     expect(await hasPermission(adminUser, Permission.MODERATE_CONTENT)).toBe(true);
     expect(await hasPermission(adminUser, Permission.MANAGE_SCHEDULE)).toBe(true);
-    expect(await hasPermission(adminUser, Permission.MANAGE_USERS)).toBe(true);
+    expect(await hasPermission(adminUser, Permission.MANAGE_USERS)).toBe(false);
+    expect(await hasPermission(adminUser, Permission.REVOKE_SESSIONS)).toBe(false);
+    expect(await hasPermission(adminUser, Permission.VIEW_AUDIT_LOG)).toBe(false);
+    expect(await hasPermission(adminUser, Permission.REVIEW_ROLE_REQUESTS)).toBe(false);
     expect(await hasPermission(adminUser, Permission.MANAGE_GROUP_MEMBERS)).toBe(true);
 
     // Admin cannot access owner server dashboard
@@ -108,6 +111,8 @@ describe('Permissions Matrix & Security Enforcements', () => {
     expect(await hasPermission(ownerUser, Permission.MANAGE_SCHEDULE)).toBe(true);
     expect(await hasPermission(ownerUser, Permission.MANAGE_USERS)).toBe(true);
     expect(await hasPermission(ownerUser, Permission.VIEW_AUDIT_LOG)).toBe(true);
+    expect(await hasPermission(ownerUser, Permission.REVOKE_SESSIONS)).toBe(true);
+    expect(await hasPermission(ownerUser, Permission.REVIEW_ROLE_REQUESTS)).toBe(true);
     expect(await hasPermission(ownerUser, Permission.ACCESS_OWNER_DASHBOARD)).toBe(true);
   });
 
