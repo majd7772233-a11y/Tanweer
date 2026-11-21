@@ -80,6 +80,7 @@
 - تشخيص AtomicFile: أُعيد إنتاج الحالة مع فحص فعلي للملفات؛ بعد الحفظ الثاني يحتوي student_notebook_records.json.new على السجلين بينما يظل الملف الأساسي على السجل الأول. فحص تنفيذ Robolectric لـAndroid 14 أكد أن finishWrite يعتمد على File.renameTo لاستبدال الملف الأساسي، وهو سلوك لا يطابق دلالات rename على Android/Linux عند وجود الوجهة. أُعيد إعداد الاختبار إلى API 34 الأصلي؛ لم يُخفَ الاختبار ولم يتغير كود الإنتاج أو توقع الاختبار. اختبار API 23 لم يصل إلى التنفيذ بسبب تعذر تنزيل android-all-instrumented 6.0.1 من Maven. سير عمل Android الحالي ينفذ Unit Test على ubuntu-latest قبل بناء APK؛ نجاح الاختبار على Linux CI للـSHA النهائي هو شرط الإغلاق. لا نسجل الاختبار PASS قبل ظهور نتيجة CI.
 - لم يُثبت أي APK ولم يُفتح أي تطبيق على الأجهزة. لا توجد نتيجة قبول حقيقية للمحاكي/الهاتف في هذه الجولة.
 ### إغلاق نطاق التنفيذ للمرحلة الأولى (21 نوفمبر 2026)
+- فحص CI على SHA f98371e10aa3ad303f28815e73ad90416f50c799 (21 نوفمبر 2026): Android run 44936152421 نجح في testStagingDebugUnitTest ثم assembleStagingDebug على Ubuntu؛ Server run 44936152423 نجح في TypeScript وdependency security baseline و42 ملف اختبار / 293 اختباراً وWrangler Production bundle validation. تم بذلك حسم اختلاف AtomicFile الخاص بويندوز دون تعديل الاختبار أو كود الإنتاج.
 
 - اكتمل تنفيذ الإصلاحات المصدرية P1-01 وP1-04 وP1-05 وP1-06، وحُسم نطاق P1-07 لصالح إبقاء صلاحيات Owner العامة منفصلة عن إدارة المدرسة. P1-03 لديه حاجز جودة يمنع نطق النص الواضح التلف فقط؛ لا ندّعي إصلاح Glyph maps/Encoding/RTL من دون عينات PDF فعلية.
 - P1-02 يبقى مؤجلاً بقرار المستخدم إلى Phase 5 بسبب ظروف Ultra Power Saving والجلسات الطويلة؛ لم نخفض Blur أو الظلال أو التدرجات أو الحركة أو أي جودة بصرية.
@@ -952,7 +953,7 @@
 
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
-| Phase 1 — P1 trust / persistence / stability | IMPLEMENTED IN SOURCE / EXACT-SHA CI PENDING | local worktree on work/release-readiness; commit/push pending | Server: 42 files / 293 tests + TypeScript pass; Android assembleStagingDebug pass; focused Android regressions 16/16 pass; full local Android 123/124 on Windows/Robolectric (the sole AtomicFile round-trip failure is reproduced as a host rename semantic mismatch; original API 34 assertion retained); isolated SQLite migration 0034 and FK check pass; authoritative Ubuntu Android CI pending; physical acceptance Phase 5 |
+| Phase 1 — P1 trust / persistence / stability | IMPLEMENTATION + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | f98371e10aa3ad303f28815e73ad90416f50c799 | Android Ubuntu: testStagingDebugUnitTest PASS; assembleStagingDebug PASS. Server: TypeScript, dependency security baseline, Wrangler bundle validation PASS; 42 files / 293 tests PASS. Local Windows/Robolectric AtomicFile issue is host-specific and the unchanged API34 test passed on Ubuntu. Migration 0034 remains memory-SQLite-only; P1-02 explicitly deferred and P1-03 remains a text-quality guard pending real PDF extraction work/verification in Phase 5. Device acceptance Phase 5. |
 | Phase 2 — P2 data correctness / sync truth | NOT STARTED | — | — |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |
