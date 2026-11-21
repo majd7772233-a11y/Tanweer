@@ -964,7 +964,7 @@
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
 | Phase 1 — P1 trust / persistence / stability | IMPLEMENTATION + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | f98371e10aa3ad303f28815e73ad90416f50c799 | Android Ubuntu: testStagingDebugUnitTest PASS; assembleStagingDebug PASS. Server: TypeScript, dependency security baseline, Wrangler bundle validation PASS; 42 files / 293 tests PASS. Local Windows/Robolectric AtomicFile issue is host-specific and the unchanged API34 test passed on Ubuntu. Migration 0034 remains memory-SQLite-only; P1-02 explicitly deferred and P1-03 remains a text-quality guard pending real PDF extraction work/verification in Phase 5. Device acceptance Phase 5. |
-| Phase 2 — P2 data correctness / sync truth | IN PROGRESS — P2-01 implementation + automated regressions verified; Phase 5 acceptance open | pending P2-01 commit | Focused Android 17/17; full Android 128/129 (one known Windows/Robolectric AtomicFile failure; Ubuntu CI passed the unchanged test in Phase 1); Staging Debug assemble PASS. P2-02 onward not started. |
+| Phase 2 — P2 data correctness / sync truth | P2-01 CODE + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | 412bba30859426a891ba860a92aa201446007537 | Android CI 44948329141 PASS (Ubuntu unit tests, Staging Debug assemble, Debug artifact upload); Server CI 44948329112 PASS (typecheck, audit baseline, 42 files / 293 tests, Wrangler production + staging dry-run). Local Windows suite 128/129 with the known AtomicFile host issue; focused P2-01 17/17. P2-02 onward not started. |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |
 | Phase 5 — final acceptance | NOT STARTED | — | — |
