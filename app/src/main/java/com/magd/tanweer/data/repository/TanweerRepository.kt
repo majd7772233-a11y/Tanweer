@@ -33,6 +33,35 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 
+private fun mapExamEntity(entity: ExamEntity): ExamItem = ExamItem(
+    id = entity.id,
+    groupId = entity.groupId,
+    examDate = entity.examDate,
+    subjectId = entity.subjectId,
+    title = entity.title,
+    requiredChapters = entity.requiredChapters,
+    notes = entity.notes,
+    subjectName = entity.subjectName,
+    subjectIcon = entity.subjectIcon,
+    colorHex = entity.colorHex,
+    isCompleted = entity.isCompleted,
+    examType = if (entity.examType == "QUIZ") "MONTHLY" else entity.examType,
+    syncStatus = entity.syncStatus,
+    isOfficial = entity.isOfficial
+)
+
+private fun buildExamCreatePayload(exam: ExamEntity): String =
+    JSONObject().apply {
+        put("id", exam.id)
+        put("groupId", exam.groupId)
+        put("examDate", exam.examDate)
+        put("subjectId", exam.subjectId)
+        put("title", exam.title)
+        put("requiredChapters", exam.requiredChapters)
+        put("notes", exam.notes)
+        put("examType", exam.examType)
+        put("isOfficial", exam.isOfficial)
+    }.toString()
 sealed class SyncResult {
     data class Success(val count: Int = 0) : SyncResult()
     data class Offline(val reason: String = "وضع عدم الاتصال") : SyncResult()
@@ -933,7 +962,7 @@ class TanweerRepository(
                         }
                         val reconciledDayExams = ServerSnapshotReconciliation.preservePending(
                             serverRows = exams,
-                            localPendingRows = db.examDao().getPendingExams(groupId)
+                            localPendingRows = db.examDao().getExamSnapshotPreservationRows(groupId)
                         ) { it.id }
                         db.examDao().insertExams(reconciledDayExams)
                     }
@@ -1083,7 +1112,7 @@ class TanweerRepository(
                 db.withTransaction {
                     val reconciledExams = ServerSnapshotReconciliation.preservePending(
                         serverRows = exams,
-                        localPendingRows = db.examDao().getPendingExams(groupId)
+                        localPendingRows = db.examDao().getExamSnapshotPreservationRows(groupId)
                     ) { it.id }
                     db.examDao().clearSyncedExams(groupId)
                     if (reconciledExams.isNotEmpty()) db.examDao().insertExams(reconciledExams)
@@ -1222,7 +1251,7 @@ class TanweerRepository(
                         }
                         val reconciledMonthExams = ServerSnapshotReconciliation.preservePending(
                             serverRows = exams,
-                            localPendingRows = db.examDao().getPendingExams(groupId)
+                            localPendingRows = db.examDao().getExamSnapshotPreservationRows(groupId)
                         ) { it.id }
                         db.examDao().insertExams(reconciledMonthExams)
                         count += exams.size
@@ -2430,52 +2459,17 @@ class TanweerRepository(
         }
     }
 
-    fun getExams(groupId: String): Flow<List<ExamItem>> {
-        return db.examDao().getExams(groupId).map { list ->
-            list.map {
-                ExamItem(
-                    id = it.id,
-                    groupId = it.groupId,
-                    examDate = it.examDate,
-                    subjectId = it.subjectId,
-                    title = it.title,
-                    requiredChapters = it.requiredChapters,
-                    notes = it.notes,
-                    subjectName = it.subjectName,
-                    subjectIcon = it.subjectIcon,
-                    colorHex = it.colorHex,
-                    isCompleted = it.isCompleted,
-                    examType = if (it.examType == "QUIZ") "MONTHLY" else it.examType,
-                    syncStatus = it.syncStatus,
-                    isOfficial = it.isOfficial
-                )
-            }
-        }
-    }
+    fun getExams(groupId: String): Flow<List<ExamItem>> =
+        db.examDao().getExams(groupId).map { rows -> rows.map(::mapExamEntity) }
 
-    fun getAllHistoricalExams(): Flow<List<ExamItem>> {
-        return db.examDao().getAllHistoricalExams().map { list ->
-            list.map {
-                ExamItem(
-                    id = it.id,
-                    groupId = it.groupId,
-                    examDate = it.examDate,
-                    subjectId = it.subjectId,
-                    title = it.title,
-                    requiredChapters = it.requiredChapters,
-                    notes = it.notes,
-                    subjectName = it.subjectName,
-                    subjectIcon = it.subjectIcon,
-                    colorHex = it.colorHex,
-                    isCompleted = it.isCompleted,
-                    examType = if (it.examType == "QUIZ") "MONTHLY" else it.examType,
-                    syncStatus = it.syncStatus,
-                    isOfficial = it.isOfficial
-                )
-            }
-        }
-    }
+    fun getLocalPendingExams(groupId: String): Flow<List<ExamItem>> =
+        db.examDao().getLocalPendingExams(groupId).map { rows -> rows.map(::mapExamEntity) }
 
+    fun getFailedExams(groupId: String): Flow<List<ExamItem>> =
+        db.examDao().getFailedExams(groupId).map { rows -> rows.map(::mapExamEntity) }
+
+    fun getAllHistoricalExams(): Flow<List<ExamItem>> =
+        db.examDao().getAllHistoricalExams().map { rows -> rows.map(::mapExamEntity) }
     suspend fun getStoredBooksReleaseTag(): String? = withContext(Dispatchers.IO) {
         db.syncMetaDao().getSyncEtag("books_release_tag")
     }
@@ -3781,14 +3775,31 @@ class TanweerRepository(
                     Result.success(ExamAddResult.Synced(id))
                 }
             } else if (!isRetryableHttpStatus(res.code())) {
-                db.examDao().updateSyncStatus(id, "FAILED")
                 val body = res.body()
                 val message = body?.error?.message ?: body?.message ?: if (res.isSuccessful) {
                     "الخادم لم يؤكد حفظ الاختبار (success=false)"
                 } else if (res.code() in listOf(401, 403)) {
                     "لا تملك صلاحية حفظ هذا الاختبار (HTTP ${res.code()})"
                 } else {
-                    "رفض الخادم حفظ الاختبار بسبب بيانات غير مقبولة (HTTP ${res.code()})"
+                    "رفض الخادم حفظ هذا الاختبار بسبب بيانات غير مقبولة (HTTP ${res.code()})"
+                }
+                val failedAt = System.currentTimeMillis()
+                db.withTransaction {
+                    db.examDao().updateSyncStatus(id, "FAILED")
+                    db.outboxDao().insertOutbox(
+                        OutboxEntity(
+                            id = "ob_exc_${id}_rejected_${java.util.UUID.randomUUID()}",
+                            entityType = "EXAM_CREATE",
+                            entityId = id,
+                            operation = "CREATE",
+                            payloadJson = buildExamCreatePayload(entity),
+                            attempts = 1,
+                            createdAt = failedAt,
+                            lastAttemptAt = failedAt,
+                            error = message,
+                            status = "FAILED"
+                        )
+                    )
                 }
                 Result.failure(Exception(message))
             } else {
@@ -3847,6 +3858,89 @@ class TanweerRepository(
         }
     }
 
+    suspend fun retryFailedExam(examId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        examMutationMutex.lock()
+        try {
+            val exam = db.examDao().getExamById(examId)
+                ?: return@withContext Result.failure(IllegalStateException("الاختبار المحلي غير موجود"))
+            if (exam.syncStatus != "FAILED") {
+                return@withContext Result.failure(IllegalStateException("لا يمكن إعادة المحاولة إلا لاختبار فاشل"))
+            }
+
+            val activeMutation = db.outboxDao().getActiveExamCreateMutation(examId)
+            if (activeMutation != null) {
+                return@withContext Result.failure(IllegalStateException("توجد عملية إرسال نشطة لهذا الاختبار؛ انتظر اكتمالها"))
+            }
+
+            db.withTransaction {
+                val latestExam = db.examDao().getExamById(examId)
+                    ?: throw IllegalStateException("الاختبار المحلي غير موجود")
+                if (latestExam.syncStatus != "FAILED") {
+                    throw IllegalStateException("تغيرت حالة الاختبار؛ حدّث القائمة ثم أعد المحاولة")
+                }
+
+                val activeMutation = db.outboxDao().getActiveExamCreateMutation(examId)
+                if (activeMutation != null) {
+                    throw IllegalStateException("توجد عملية إرسال نشطة لهذا الاختبار؛ انتظر اكتمالها")
+                }
+                val latestMutation = db.outboxDao().getExamCreateMutation(examId)
+                if (latestMutation == null) {
+                    val now = System.currentTimeMillis()
+                    db.outboxDao().insertOutbox(
+                        OutboxEntity(
+                            id = "ob_exc_${examId}_retry_${java.util.UUID.randomUUID()}",
+                            entityType = "EXAM_CREATE",
+                            entityId = examId,
+                            operation = "CREATE",
+                            payloadJson = buildExamCreatePayload(latestExam),
+                            attempts = 1,
+                            createdAt = now,
+                            lastAttemptAt = now,
+                            error = "إعادة محاولة يدوية لسجل فشل سابق",
+                            status = "FAILED"
+                        )
+                    )
+                } else if (latestMutation.status != "FAILED") {
+                    throw IllegalStateException("توجد عملية إرسال نشطة لهذا الاختبار؛ انتظر اكتمالها")
+                }
+            }
+
+            val requeued = mutationQueue.retryFailedExamCreate(examId)
+            if (requeued <= 0) {
+                return@withContext Result.failure(IllegalStateException("تعذر إعادة إدراج الاختبار في قائمة الإرسال"))
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            examMutationMutex.unlock()
+        }
+    }
+
+    suspend fun discardFailedExam(examId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        examMutationMutex.lock()
+        try {
+            val discarded = db.withTransaction {
+                val exam = db.examDao().getExamById(examId) ?: return@withTransaction false
+                if (exam.syncStatus != "FAILED") return@withTransaction false
+
+                val activeMutation = db.outboxDao().getActiveExamCreateMutation(examId)
+                if (activeMutation != null) {
+                    return@withTransaction false
+                }
+
+                db.outboxDao().deleteFailedExamCreate(examId)
+                db.examDao().deleteExamById(examId)
+                true
+            }
+            if (discarded) Result.success(Unit)
+            else Result.failure(IllegalStateException("لم يُحذف السجل: حالته لم تعد فاشلة أو أن الإرسال ما زال نشطاً"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            examMutationMutex.unlock()
+        }
+    }
     suspend fun toggleExamCompletion(examId: String, targetStatus: Boolean): Result<Boolean> = withContext(Dispatchers.IO) {
         examMutationMutex.lock()
         try {

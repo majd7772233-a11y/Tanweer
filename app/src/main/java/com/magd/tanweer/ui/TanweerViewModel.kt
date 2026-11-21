@@ -2798,6 +2798,17 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun retryFailedExam(examId: String, onResult: ((Result<Unit>) -> Unit)? = null) {
+        viewModelScope.launch {
+            onResult?.invoke(repository.retryFailedExam(examId))
+        }
+    }
+
+    fun discardFailedExam(examId: String, onResult: ((Result<Unit>) -> Unit)? = null) {
+        viewModelScope.launch {
+            onResult?.invoke(repository.discardFailedExam(examId))
+        }
+    }
     fun deleteExam(examId: String, onResult: ((Result<com.magd.tanweer.data.local.ExamDeleteResult>) -> Unit)? = null) {
         viewModelScope.launch {
             val res = repository.deleteExamById(examId)

@@ -211,17 +211,23 @@ interface HomeworkDao {
 
 @Dao
 interface ExamDao {
-    @Query("SELECT * FROM cached_exams ORDER BY examDate ASC")
+    @Query("SELECT * FROM cached_exams WHERE syncStatus = 'SYNCED' ORDER BY examDate ASC")
     fun getAllHistoricalExams(): Flow<List<ExamEntity>>
 
     @Query("SELECT id FROM cached_exams")
     suspend fun getAllExamIds(): List<String>
 
-    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId ORDER BY examDate ASC")
+    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND syncStatus = 'SYNCED' ORDER BY examDate ASC")
     fun getExams(groupId: String): Flow<List<ExamEntity>>
 
-    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND examDate = :date")
+    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND examDate = :date AND syncStatus = 'SYNCED'")
     fun getExamsByDate(groupId: String, date: String): Flow<List<ExamEntity>>
+
+    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'LOCAL') ORDER BY examDate ASC")
+    fun getLocalPendingExams(groupId: String): Flow<List<ExamEntity>>
+
+    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND syncStatus = 'FAILED' ORDER BY examDate ASC")
+    fun getFailedExams(groupId: String): Flow<List<ExamEntity>>
 
     @Query("SELECT * FROM cached_exams WHERE id = :id LIMIT 1")
     suspend fun getExamById(id: String): ExamEntity?
@@ -247,16 +253,19 @@ interface ExamDao {
         insertExam(newEntity)
     }
 
-    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'LOCAL', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExams(groupId: String)
 
-    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'LOCAL', 'FAILED', 'DELETE_PENDING')")
     suspend fun getPendingExams(groupId: String): List<ExamEntity>
 
-    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    @Query("SELECT * FROM cached_exams WHERE groupId = :groupId AND syncStatus IN ('PENDING', 'SYNCING', 'LOCAL', 'DELETE_PENDING')")
+    suspend fun getExamSnapshotPreservationRows(groupId: String): List<ExamEntity>
+
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate = :date AND syncStatus NOT IN ('PENDING', 'SYNCING', 'LOCAL', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExamsForDate(groupId: String, date: String)
 
-    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'DELETE_PENDING')")
+    @Query("DELETE FROM cached_exams WHERE groupId = :groupId AND examDate LIKE :monthPrefix || '%' AND syncStatus NOT IN ('PENDING', 'SYNCING', 'LOCAL', 'FAILED', 'DELETE_PENDING')")
     suspend fun clearSyncedExamsForMonth(groupId: String, monthPrefix: String)
 
     @Query("DELETE FROM cached_exams WHERE groupId = :groupId")
@@ -550,6 +559,21 @@ interface OutboxDao {
 
     @Query("UPDATE outbox SET status = 'PENDING', attempts = 0, lastAttemptAt = 0, error = NULL WHERE status = 'FAILED' AND (:entityId IS NULL OR entityId = :entityId)")
     suspend fun requeueFailedItems(entityId: String? = null): Int
+
+    @Query("SELECT * FROM outbox WHERE status = 'FAILED' AND entityType IN ('EXAM_CREATE', 'EXAM') AND operation = 'CREATE' AND (:entityId IS NULL OR entityId = :entityId) ORDER BY createdAt ASC")
+    suspend fun getFailedExamCreateItems(entityId: String? = null): List<OutboxEntity>
+
+    @Query("SELECT * FROM outbox WHERE entityId = :entityId AND entityType IN ('EXAM_CREATE', 'EXAM') AND operation = 'CREATE' ORDER BY createdAt ASC LIMIT 1")
+    suspend fun getExamCreateMutation(entityId: String): OutboxEntity?
+
+    @Query("SELECT * FROM outbox WHERE entityId = :entityId AND entityType IN ('EXAM_CREATE', 'EXAM') AND operation = 'CREATE' AND status IN ('PENDING', 'SYNCING') ORDER BY createdAt ASC LIMIT 1")
+    suspend fun getActiveExamCreateMutation(entityId: String): OutboxEntity?
+
+    @Query("UPDATE outbox SET status = 'PENDING', attempts = 0, lastAttemptAt = 0, error = NULL WHERE status = 'FAILED' AND entityType IN ('EXAM_CREATE', 'EXAM') AND operation = 'CREATE' AND entityId = :entityId")
+    suspend fun requeueFailedExamCreate(entityId: String): Int
+
+    @Query("DELETE FROM outbox WHERE status = 'FAILED' AND entityType IN ('EXAM_CREATE', 'EXAM') AND operation = 'CREATE' AND entityId = :entityId")
+    suspend fun deleteFailedExamCreate(entityId: String): Int
 
     @Query("SELECT * FROM outbox WHERE id = :id LIMIT 1")
     suspend fun getOutboxItemById(id: String): OutboxEntity?

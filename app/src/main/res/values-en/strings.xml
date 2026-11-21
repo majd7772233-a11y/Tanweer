@@ -31,4 +31,20 @@
     <string name="admin_staff_phone">Phone: %1$s</string>
     <string name="admin_status_disabled">Disabled</string>
     <string name="admin_status_active">Active</string>
+    <string name="exam_local_pending_title">Exams awaiting sync (%1$d)</string>
+    <string name="exam_local_pending_description">These exams are saved on this device, but the server has not confirmed publication. They are excluded from the confirmed schedule and its counts.</string>
+    <string name="exam_local_status_syncing">Sending</string>
+    <string name="exam_local_status_pending">Waiting to send</string>
+    <string name="exam_failed_title">Exams that could not be sent (%1$d)</string>
+    <string name="exam_failed_description">The server did not confirm these records. You can retry with the same ID or discard the local draft.</string>
+    <string name="exam_local_item_meta">%1$s • %2$s</string>
+    <string name="exam_failed_retry">Retry</string>
+    <string name="exam_failed_discard">Discard draft</string>
+    <string name="exam_failed_discard_title">Discard this local exam?</string>
+    <string name="exam_failed_discard_message">“%1$s” and only its failed local send operation will be removed from this device. No server delete request will be sent.</string>
+    <string name="exam_failed_retry_queued">The exam was returned to the send queue.</string>
+    <string name="exam_failed_retry_error">Retry could not be started: %1$s</string>
+    <string name="exam_failed_discard_success">The local draft was discarded.</string>
+    <string name="exam_failed_discard_error">The draft could not be discarded: %1$s</string>
+    <string name="exam_failed_cancel">Keep draft</string>
 </resources>

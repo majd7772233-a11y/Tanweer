@@ -251,6 +251,16 @@
 **الملفات:** TanweerRepository.syncExams، ExamsScreen.kt، CalendarScreen.kt، ClassKnowledgeBaseScreen.kt، WhatDidIMissScreen.kt.
 **الأدلة:** %TEMP%\tanweer-exams-round-20261119، %TEMP%\tanweer-archive-knowledge-round-20261120\evidence، %TEMP%\tanweer-catchup-round-20261120\evidence، %TEMP%\tanweer-calendar-batch-20261119.
 
+**حالة التنفيذ — 2026-11-21:** IMPLEMENTED / AUTOMATED REGRESSION TESTS PASS / PHASE 5 ACCEPTANCE OPEN.
+
+- استعلامات القوائم المعتمدة والتاريخية واليومية تعيد SYNCED فقط؛ وهذا هو المصدر المشترك المستخدم في Exams وCalendar وClass Knowledge Base وAcademic History وHome وSearch وSubject Timeline وWhatDidIMiss والتنبيهات. لذلك لا تدخل FAILED أو المسودات غير المؤكدة في الأرقام المنشورة.
+- شاشة الاختبارات تعرض PENDING/SYNCING/LOCAL في مساحة انتظار المزامنة، وFAILED في مساحة مستقلة مع إعادة محاولة أو التخلص المحلي المؤكد. لا تعرض حالة «الجدول فارغ» فوق هذه السجلات عند عدم وجود اختبارات مؤكدة.
+- الرفض الدائم مثل HTTP 409 يحفظ سجل الاختبار الفاشل مع payload ورسالة الخطأ في Outbox. إعادة المحاولة ذرية ومحددة لعملية إنشاء الاختبار فقط، وتعيد الصف إلى PENDING وتمنع التكرار أثناء PENDING/SYNCING. عمليات التبديل والحذف والكيانات الأخرى لا يعاد إرسالها أو حذفها بواسطة هذا الزر.
+- دمج اللقطات: عند غياب سجل فاشل عن الخادم تبقى المسودة محلياً؛ وإذا أكدت لقطة صحيحة سجلاً بالمعرّف نفسه، تنتصر نسخة الخادم وتصبح SYNCED. لا تُحذف السجلات الفاشلة تلقائياً لمجرد فشل الإرسال.
+- **التحقق الآلي المحلي:** ExamVisibilityPolicyTest 5/5، PendingSnapshotRetentionTest 4/4، ExamDeleteOutboxTest 8/8 — المجموع 17/17 بلا فشل أو تخطي. المجموعة الكاملة 129 اختباراً: 128 ناجحة وفشل واحد فقط في StudentNotebookManagerTest.valid notebook records round trip through atomic storage بسبب سلوك File.renameTo على Windows/Robolectric؛ الاختبار لم يتغير، وقد اجتاز على Ubuntu في Android CI للمرحلة السابقة. لا تُخفَ هذه النتيجة ولا تُضعف توقع الاختبار.
+- **بناء Staging Debug:** نجح :app:assembleStagingDebug. الناتج app/build/outputs/apk/staging/debug/app-staging-debug.apk، الحجم 33,554,805 بايت، SHA-256 81D6FDCC6876A26DC082F0A9AB04ACEBDD07EE3FA1F0D434BF0B7454DAD64D17. بُني فقط ولم يُثبت أو يُشغّل.
+- **المتبقي لمرحلة 5:** تجربة Worker HTTP الحقيقية لرفض 409 ثم تصحيح السبب وإعادة إرسال ناجحة، إعادة فتح التطبيق بعد الفشل، مقارنة جهازين، ومراجعة الواجهة فعلياً في Exams/Calendar/Archive/WhatDidIMiss. لا تُعلَن هذه الاختبارات مقبولة قبل تنفيذها على الجهازين/البيئة الحقيقية وفق خطة Phase 5.
+
 ## P2-02 — نوع TASK/مشروع يُعرض ويُحسب كأنه واجب
 
 **مراجع التقرير:** TNW-CALENDAR-UX-002، TNW-HW-COUNT-001، TNW-CALENDAR-TASK-TYPE-RENDERING-001، وملاحظات إشعار الواجبات بتاريخ 19–20 نوفمبر.
@@ -954,7 +964,7 @@
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
 | Phase 1 — P1 trust / persistence / stability | IMPLEMENTATION + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | f98371e10aa3ad303f28815e73ad90416f50c799 | Android Ubuntu: testStagingDebugUnitTest PASS; assembleStagingDebug PASS. Server: TypeScript, dependency security baseline, Wrangler bundle validation PASS; 42 files / 293 tests PASS. Local Windows/Robolectric AtomicFile issue is host-specific and the unchanged API34 test passed on Ubuntu. Migration 0034 remains memory-SQLite-only; P1-02 explicitly deferred and P1-03 remains a text-quality guard pending real PDF extraction work/verification in Phase 5. Device acceptance Phase 5. |
-| Phase 2 — P2 data correctness / sync truth | NOT STARTED | — | — |
+| Phase 2 — P2 data correctness / sync truth | IN PROGRESS — P2-01 implementation + automated regressions verified; Phase 5 acceptance open | pending P2-01 commit | Focused Android 17/17; full Android 128/129 (one known Windows/Robolectric AtomicFile failure; Ubuntu CI passed the unchanged test in Phase 1); Staging Debug assemble PASS. P2-02 onward not started. |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |
 | Phase 5 — final acceptance | NOT STARTED | — | — |

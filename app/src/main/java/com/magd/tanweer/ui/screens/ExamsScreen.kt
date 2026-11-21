@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.R
 import com.magd.tanweer.data.model.ExamItem
 import com.magd.tanweer.data.model.Permission
 import com.magd.tanweer.data.model.SubjectItem
@@ -64,6 +66,8 @@ fun ExamsScreen(
 
     val exams by viewModel.repository.getExams(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val localPendingExams by viewModel.repository.getLocalPendingExams(activeGroupId).collectAsStateWithLifecycle(initialValue = emptyList())
+    val failedExams by viewModel.repository.getFailedExams(activeGroupId).collectAsStateWithLifecycle(initialValue = emptyList())
     val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
     val scopedExamsSyncState = syncStateForScope(examsSyncState, groupSyncScopeIds[GroupSyncSource.EXAMS], activeGroupId)
     val hasExamSnapshot = exams.isNotEmpty() || hasAuthoritativeSnapshot(scopedExamsSyncState)
@@ -78,6 +82,7 @@ fun ExamsScreen(
     val isAddExamModalOpen = isLocalAddExamModalOpen || isAddExamModalOpenFromVm
     var selectedExamForDetail by remember { mutableStateOf<ExamItem?>(null) }
     var examToDelete by remember { mutableStateOf<ExamItem?>(null) }
+    var failedExamToDiscard by remember { mutableStateOf<ExamItem?>(null) }
 
     val todayDateStr = remember { TanweerViewModel.getTodayDateString() }
     val canDeleteExams = remember(currentUser) {
@@ -214,7 +219,142 @@ fun ExamsScreen(
                 }
             }
 
-            if (exams.isEmpty()) {
+            if (localPendingExams.isNotEmpty()) {
+                item(key = "local_pending_exams_header") {
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = MidnightSurface,
+                        borderColor = WarmAmber.copy(alpha = 0.35f)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = stringResource(R.string.exam_local_pending_title, localPendingExams.size),
+                                color = WarmAmber,
+                                fontSize = tanweerTextSize(13f),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = stringResource(R.string.exam_local_pending_description),
+                                color = TextSecondary,
+                                fontSize = tanweerTextSize(11f)
+                            )
+                        }
+                    }
+                }
+                items(localPendingExams, key = { "local_pending_exam_${it.id}" }) { exam ->
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = MidnightSurface.copy(alpha = 0.9f),
+                        borderColor = WarmAmber.copy(alpha = 0.25f)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(
+                                    text = exam.title,
+                                    color = TextPrimary,
+                                    fontSize = tanweerTextSize(13f),
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = stringResource(R.string.exam_local_item_meta, exam.subjectName, exam.examDate),
+                                    color = TextSecondary,
+                                    fontSize = tanweerTextSize(11f)
+                                )
+                            }
+                            Text(
+                                text = stringResource(
+                                    if (exam.syncStatus == "SYNCING") R.string.exam_local_status_syncing else R.string.exam_local_status_pending
+                                ),
+                                color = WarmAmber,
+                                fontSize = tanweerTextSize(10f),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (failedExams.isNotEmpty()) {
+                item(key = "failed_local_exams_header") {
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = MidnightSurface,
+                        borderColor = RubyRed.copy(alpha = 0.4f)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = stringResource(R.string.exam_failed_title, failedExams.size),
+                                color = RubyRed,
+                                fontSize = tanweerTextSize(13f),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = stringResource(R.string.exam_failed_description),
+                                color = TextSecondary,
+                                fontSize = tanweerTextSize(11f)
+                            )
+                        }
+                    }
+                }
+                items(failedExams, key = { "failed_local_exam_${it.id}" }) { exam ->
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = MidnightSurface.copy(alpha = 0.95f),
+                        borderColor = RubyRed.copy(alpha = 0.35f)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = exam.title,
+                                color = TextPrimary,
+                                fontSize = tanweerTextSize(13f),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = stringResource(R.string.exam_local_item_meta, exam.subjectName, exam.examDate),
+                                color = TextSecondary,
+                                fontSize = tanweerTextSize(11f)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                GlassOutlinedButton(
+                                    text = stringResource(R.string.exam_failed_retry),
+                                    onClick = {
+                                        viewModel.retryFailedExam(exam.id) { result ->
+                                            val message = if (result.isSuccess) {
+                                                context.getString(R.string.exam_failed_retry_queued)
+                                            } else {
+                                                context.getString(
+                                                    R.string.exam_failed_retry_error,
+                                                    result.exceptionOrNull()?.message.orEmpty()
+                                                )
+                                            }
+                                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f).height(36.dp)
+                                )
+                                GlassButton(
+                                    text = stringResource(R.string.exam_failed_discard),
+                                    color = RubyRed,
+                                    textColor = Color.White,
+                                    onClick = { failedExamToDiscard = exam },
+                                    modifier = Modifier.weight(1f).height(36.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            if (exams.isEmpty() && localPendingExams.isEmpty() && failedExams.isEmpty()) {
                 item {
                     if (hasExamSnapshot) {
                         EmptyStateGlass(
@@ -650,6 +790,42 @@ fun ExamsScreen(
             )
         }
 
+        failedExamToDiscard?.let { exam ->
+            AlertDialog(
+                onDismissRequest = { failedExamToDiscard = null },
+                title = { Text(stringResource(R.string.exam_failed_discard_title), color = RubyRed, fontWeight = FontWeight.Bold) },
+                text = { Text(stringResource(R.string.exam_failed_discard_message, exam.title), color = TextPrimary) },
+                confirmButton = {
+                    GlassButton(
+                        text = stringResource(R.string.exam_failed_discard),
+                        color = RubyRed,
+                        textColor = Color.White,
+                        onClick = {
+                            viewModel.discardFailedExam(exam.id) { result ->
+                                val message = if (result.isSuccess) {
+                                    context.getString(R.string.exam_failed_discard_success)
+                                } else {
+                                    context.getString(
+                                        R.string.exam_failed_discard_error,
+                                        result.exceptionOrNull()?.message.orEmpty()
+                                    )
+                                }
+                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            }
+                            failedExamToDiscard = null
+                        }
+                    )
+                },
+                dismissButton = {
+                    GlassOutlinedButton(
+                        text = stringResource(R.string.exam_failed_cancel),
+                        onClick = { failedExamToDiscard = null }
+                    )
+                },
+                containerColor = MidnightSurface,
+                shape = RoundedCornerShape(18.dp)
+            )
+        }
         // Delete Confirm Dialog
         examToDelete?.let { exam ->
             AlertDialog(

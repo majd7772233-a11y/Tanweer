@@ -1,5 +1,6 @@
 package com.magd.tanweer.data.sync
 
+import androidx.room.withTransaction
 import android.content.Context
 import android.util.Log
 import com.magd.tanweer.data.local.OutboxDao
@@ -193,11 +194,30 @@ class UnifiedMutationQueue private constructor(
      */
     suspend fun retryFailedMutations(entityId: String? = null): Int = withContext(Dispatchers.IO) {
         if (entityId != null && entityId.isBlank()) return@withContext 0
+        val failedExamCreates = outboxDao.getFailedExamCreateItems(entityId)
         val requeued = outboxDao.requeueFailedItems(entityId)
+        if (requeued > 0) {
+            failedExamCreates.distinctBy { it.entityId }.forEach { failed ->
+                db.examDao().updateSyncStatus(failed.entityId, "PENDING")
+            }
+            triggerDrain()
+        }
+        requeued
+    }
+    suspend fun retryFailedExamCreate(entityId: String): Int = withContext(Dispatchers.IO) {
+        if (entityId.isBlank()) return@withContext 0
+
+        val requeued = db.withTransaction {
+            val count = outboxDao.requeueFailedExamCreate(entityId)
+            if (count > 0) {
+                db.examDao().updateSyncStatus(entityId, "PENDING")
+            }
+            count
+        }
+
         if (requeued > 0) triggerDrain()
         requeued
     }
-
     /**
      * Drains all pending items in the outbox queue using unified execution and atomic reservation.
      */
@@ -383,7 +403,8 @@ class UnifiedMutationQueue private constructor(
                             title = ex.title,
                             requiredChapters = ex.requiredChapters,
                             notes = ex.notes,
-                            examType = ex.examType
+                            examType = ex.examType,
+                            isOfficial = ex.isOfficial
                         )
                     } else if (item.payloadJson.isNotBlank() && item.payloadJson != "{}") {
                         try {
@@ -396,7 +417,8 @@ class UnifiedMutationQueue private constructor(
                                 title = obj.optString("title", ""),
                                 requiredChapters = obj.optString("requiredChapters", null),
                                 notes = obj.optString("notes", null),
-                                examType = obj.optString("examType", "MONTHLY")
+                                examType = obj.optString("examType", "MONTHLY"),
+                                isOfficial = obj.optBoolean("isOfficial", false)
                             )
                         } catch (_: Exception) { null }
                     } else {
@@ -422,21 +444,17 @@ class UnifiedMutationQueue private constructor(
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else if (!isRetryableHttpStatus(res.code())) {
-                            db.examDao().updateSyncStatus(item.entityId, "FAILED")
                             val body = res.body()
                             val message = body?.error?.message ?: body?.message
                                 ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ الاختبار (success=false)" else "رفض الخادم رفع الاختبار (${res.code()})"
-                            handleMutationFailure(item, message)
-                            outboxDao.deleteOutbox(item.id)
+                            markMutationPermanentlyFailed(item, message)
                             true
                         } else {
                             handleMutationFailure(item, "فشل رفع الاختبار إلى الخادم (${res.code()})")
                             false
                         }
                     } else {
-                        db.examDao().updateSyncStatus(item.entityId, "FAILED")
-                        handleMutationFailure(item, "تعذر العثور على بيانات الاختبار محلياً (id: ${item.entityId})")
-                        outboxDao.deleteOutbox(item.id)
+                        markMutationPermanentlyFailed(item, "تعذر العثور على بيانات الاختبار محلياً (id: ${item.entityId})")
                         true
                     }
                 }
@@ -718,6 +736,29 @@ class UnifiedMutationQueue private constructor(
         }
     }
 
+    private suspend fun markMutationPermanentlyFailed(item: OutboxEntity, errorMsg: String) {
+        db.withTransaction {
+            outboxDao.updateOutboxStatus(
+                id = item.id,
+                status = "FAILED",
+                now = System.currentTimeMillis(),
+                error = errorMsg
+            )
+            when (item.entityType) {
+                "HOMEWORK_UPLOAD", "HOMEWORK_CREATE" -> db.homeworkDao().updateSyncStatus(item.entityId, "FAILED")
+                "CONTENT_UPLOAD", "LESSON_CREATE" -> db.contentDao().updateSyncStatus(item.entityId, "FAILED")
+                "EXAM_CREATE" -> db.examDao().updateSyncStatus(item.entityId, "FAILED")
+                "EVENT_CREATE" -> db.eventDao().updateSyncStatus(item.entityId, "FAILED")
+            }
+        }
+        _syncErrors.emit(
+            SyncErrorInfo(
+                operation = item.operation,
+                entityId = item.entityId,
+                message = errorMsg
+            )
+        )
+    }
     private suspend fun handleMutationFailure(item: OutboxEntity, errorMsg: String) {
         val nextAttempts = item.attempts + 1
         val status = if (nextAttempts >= 5) "FAILED" else "PENDING"

@@ -33,4 +33,20 @@
     <string name="admin_staff_phone">هاتف: %1$s</string>
     <string name="admin_status_disabled">موقوف</string>
     <string name="admin_status_active">نشط</string>
+    <string name="exam_local_pending_title">اختبارات بانتظار المزامنة (%1$d)</string>
+    <string name="exam_local_pending_description">هذه الاختبارات محفوظة على جهازك ولم يؤكد الخادم نشرها بعد؛ لذلك لا تدخل في الجدول المعتمد أو عدّاداته.</string>
+    <string name="exam_local_status_syncing">جارٍ الإرسال</string>
+    <string name="exam_local_status_pending">بانتظار الإرسال</string>
+    <string name="exam_failed_title">تعذّر إرسال الاختبارات (%1$d)</string>
+    <string name="exam_failed_description">لم يؤكد الخادم حفظ هذه السجلات. يمكنك إعادة المحاولة بنفس المعرّف أو التخلص من المسودة المحلية.</string>
+    <string name="exam_local_item_meta">%1$s • %2$s</string>
+    <string name="exam_failed_retry">إعادة المحاولة</string>
+    <string name="exam_failed_discard">التخلص من المسودة</string>
+    <string name="exam_failed_discard_title">التخلص من الاختبار المحلي؟</string>
+    <string name="exam_failed_discard_message">سيُحذف «%1$s» من هذا الجهاز مع عملية إرساله الفاشلة فقط. لن يُرسل طلب حذف إلى الخادم.</string>
+    <string name="exam_failed_retry_queued">أُعيد الاختبار إلى قائمة الإرسال.</string>
+    <string name="exam_failed_retry_error">تعذرت إعادة المحاولة: %1$s</string>
+    <string name="exam_failed_discard_success">تم التخلص من المسودة المحلية.</string>
+    <string name="exam_failed_discard_error">تعذر التخلص من المسودة: %1$s</string>
+    <string name="exam_failed_cancel">إبقاء المسودة</string>
 </resources>
