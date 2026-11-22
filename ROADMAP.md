@@ -391,6 +391,20 @@
 **الملف:** CalendarScreen.kt.
 **الأدلة:** %TEMP%\tanweer-core-round-20261118 و%TEMP%\tanweer-calendar-batch-20261119\evidence.
 
+### P2-06 implementation checkpoint (2026-11-22)
+
+**Status:** IMPLEMENTED / FOCUSED LOCAL TESTS PASS (27/27) / LOCAL STAGING DEBUG BUILD PASS / EXACT-SHA CI PENDING / PHASE 5 DEVICE ACCEPTANCE OPEN.
+
+- **Month navigation:** Previous/next month navigation resets the navigation calendar to day 1 before applying the month offset, then updates both selectedDateStr and the ViewModel selected date. The selected day number is retained when possible and clamped to the target month's last valid day (e.g. January 31 -> February 28/29), so day details and selection never remain attached to the previous month.
+- **Monthly summaries:** Exams use examDate; events use eventDate; homework, projects and unknown assignment types use either studyDate or dueDate. Each record is counted at most once per month, while an assignment spanning two months appears in each month where its day markers appear. Counts continue to display — until the selected month has an authoritative calendar snapshot.
+- **Classification / trust boundary:** Existing HomeworkTaskTypePolicy classification remains unchanged: legacy blank/null records remain homework, TASK remains projects, and unknown future types remain separated. No global/group-wide totals are presented as monthly counts.
+- **Policy and tests:** Added CalendarMonthPolicy and CalendarMonthPolicyTest (7 tests), covering November/December/January rollover, leap and non-leap February, short months, invalid dates/months, and assignment study/due dates crossing month boundaries without double-counting within one month.
+- **Focused local verification:** CalendarMonthPolicyTest 7/7, HomeworkTaskTypePolicyTest 4/4, MissedDateRangePolicyTest 8/8, ExamReviewPolicyTest 3/3, and ExamVisibilityPolicyTest 5/5 passed: 27/27 total, zero failures, errors or skips. git diff --check passed.
+- **Local build:** :app:assembleStagingDebug passed. APK: app/build/outputs/apk/staging/debug/app-staging-debug.apk, 33,583,340 bytes, SHA-256 FAC6B0609DDC8750AEB95D8FC43B47E1C04EC5A03DEB00A865572263D3DF2E32. Built only; not installed or launched.
+- **Exact-SHA CI:** Pending the P2-06 implementation commit and its Android + Server workflow runs.
+- **Phase 5 remains open:** Visually verify month changes and monthly counters against the real November/December 2026 and January 2027 class records on the configured device timezone. No emulator or physical device was used.
+- **Safety / scope:** No backend/API contract, Room schema, migration, Worker/server source, sync behavior, deployment, secrets change, D1 apply/write, staging/production write, Release signing, emulator/phone install or launch, main update, PR merge or new branch was performed. PR #6 remains Open + Draft + unmerged; WebGPT task remains RUNNING.
+
 ## P2-07 — نموذج حالات الاستفسار لا يطابق المرشحات والبطاقات والتفاصيل
 
 **مراجع التقرير:** TNW-ISSUES-STATUS-001، وملاحظة تأخر التحديث بعد اعتماد إجابة الأستاذ ضمن TNW-TEACHER-ROUND-20261120.
@@ -1020,7 +1034,7 @@
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
 | Phase 1 — P1 trust / persistence / stability | IMPLEMENTATION + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | f98371e10aa3ad303f28815e73ad90416f50c799 | Android Ubuntu: testStagingDebugUnitTest PASS; assembleStagingDebug PASS. Server: TypeScript, dependency security baseline, Wrangler bundle validation PASS; 42 files / 293 tests PASS. Local Windows/Robolectric AtomicFile issue is host-specific and the unchanged API34 test passed on Ubuntu. Migration 0034 remains memory-SQLite-only; P1-02 explicitly deferred and P1-03 remains a text-quality guard pending real PDF extraction work/verification in Phase 5. Device acceptance Phase 5. |
-| Phase 2 - P2 data correctness / sync truth | P2-01 through P2-05 implementation and exact-SHA Android/Server CI verified; Phase 5 device acceptance open | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03: 35763ee8b6e8faa217df51798fcb2ec7274841b9; P2-04: 9e090054dfd2d0f9277a4ea9e4d6a208d40eb968; P2-05: e217ff83ca8f3bb2c2b6fd5d6b05df891985f149 | P2-05 Android 45032029810 PASS after rerunning transient Robolectric artifact-download failure (unit tests, Staging Debug assemble, Debug artifact upload); Server 45032029839 PASS (typecheck, dependency security baseline, 42 files / 293 tests, Wrangler Production + Staging dry-runs). Physical acceptance remains Phase 5. P2-06 onward not started. |
+| Phase 2 - P2 data correctness / sync truth | P2-01 through P2-05 implementation and exact-SHA Android/Server CI verified; P2-06 implementation and focused local verification passed, exact-SHA CI pending; Phase 5 device acceptance open | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03: 35763ee8b6e8faa217df51798fcb2ec7274841b9; P2-04: 9e090054dfd2d0f9277a4ea9e4d6a208d40eb968; P2-05: e217ff83ca8f3bb2c2b6fd5d6b05df891985f149; P2-06: implementation commit pending | P2-05 Android 45032029810 PASS after rerunning transient Robolectric artifact-download failure (unit tests, Staging Debug assemble, Debug artifact upload); Server 45032029839 PASS (typecheck, dependency security baseline, 42 files / 293 tests, Wrangler Production + Staging dry-runs). P2-06 local Android verification: 27/27 focused tests, Staging Debug assemble PASS; exact-SHA CI pending. Physical acceptance remains Phase 5. |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |
 | Phase 5 — final acceptance | NOT STARTED | — | — |

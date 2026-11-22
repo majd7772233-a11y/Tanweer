@@ -102,6 +102,18 @@ fun CalendarScreen(
         }
     }
 
+    fun changeCalendarMonth(monthOffset: Int) {
+        val next = currentCalendar.clone() as Calendar
+        next.set(Calendar.DAY_OF_MONTH, 1)
+        next.add(Calendar.MONTH, monthOffset)
+        currentCalendar = next
+
+        val targetMonth = monthQueryFormat.format(next.time)
+        val nextSelectedDate = CalendarMonthPolicy.resolveSelectedDate(selectedDateStr, targetMonth)
+        selectedDateStr = nextSelectedDate
+        viewModel.setSelectedDate(nextSelectedDate)
+    }
+
     // Day content queries
     val dayContents by viewModel.repository.getDayContents(activeGroupId, selectedDateStr)
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -115,26 +127,40 @@ fun CalendarScreen(
     val dayAssignments = remember(homeworks, selectedDateStr) {
         homeworks.filter { it.studyDate == selectedDateStr || it.dueDate == selectedDateStr }
     }
-    val calendarHomeworkCount = remember(homeworks) {
-        homeworks.count { HomeworkTaskTypePolicy.isHomework(it.taskType) }
+    val calendarHomeworkCount = remember(homeworks, currentCalendarMonth) {
+        CalendarMonthPolicy.countItemsInMonth(
+            homeworks.filter { HomeworkTaskTypePolicy.isHomework(it.taskType) },
+            currentCalendarMonth
+        ) { listOf(it.studyDate, it.dueDate) }
     }
-    val calendarProjectCount = remember(homeworks) {
-        homeworks.count { HomeworkTaskTypePolicy.isTask(it.taskType) }
+    val calendarProjectCount = remember(homeworks, currentCalendarMonth) {
+        CalendarMonthPolicy.countItemsInMonth(
+            homeworks.filter { HomeworkTaskTypePolicy.isTask(it.taskType) },
+            currentCalendarMonth
+        ) { listOf(it.studyDate, it.dueDate) }
     }
-    val calendarOtherAssignmentCount = remember(homeworks) {
-        homeworks.count { HomeworkTaskTypePolicy.classify(it.taskType) == HomeworkTaskKind.UNKNOWN }
+    val calendarOtherAssignmentCount = remember(homeworks, currentCalendarMonth) {
+        CalendarMonthPolicy.countItemsInMonth(
+            homeworks.filter {
+                HomeworkTaskTypePolicy.classify(it.taskType) == HomeworkTaskKind.UNKNOWN
+            },
+            currentCalendarMonth
+        ) { listOf(it.studyDate, it.dueDate) }
     }
-
     val exams by viewModel.repository.getExams(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
-
+    val calendarExamCount = remember(exams, currentCalendarMonth) {
+        CalendarMonthPolicy.countItemsInMonth(exams, currentCalendarMonth) { listOf(it.examDate) }
+    }
     val dayExams = remember(exams, selectedDateStr) {
         exams.filter { it.examDate == selectedDateStr }
     }
 
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
-
+    val calendarEventCount = remember(events, currentCalendarMonth) {
+        CalendarMonthPolicy.countItemsInMonth(events, currentCalendarMonth) { listOf(it.eventDate) }
+    }
     val dayEvents = remember(events, selectedDateStr) {
         events.filter { it.eventDate == selectedDateStr }
     }
@@ -214,11 +240,7 @@ fun CalendarScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = {
-                        val next = currentCalendar.clone() as Calendar
-                        next.add(Calendar.MONTH, -1)
-                        currentCalendar = next
-                    }) {
+                    IconButton(onClick = { changeCalendarMonth(-1) }) {
                         Icon(
                             Icons.AutoMirrored.Filled.KeyboardArrowRight,
                             contentDescription = "الشهر السابق",
@@ -240,11 +262,7 @@ fun CalendarScreen(
                         )
                     }
 
-                    IconButton(onClick = {
-                        val next = currentCalendar.clone() as Calendar
-                        next.add(Calendar.MONTH, 1)
-                        currentCalendar = next
-                    }) {
+                    IconButton(onClick = { changeCalendarMonth(1) }) {
                         Icon(
                             Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                             contentDescription = "الشهر التالي",
@@ -284,7 +302,7 @@ fun CalendarScreen(
                         .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("🔴 ${if (hasCalendarSnapshot) exams.size.toString() else "—"} اختبارات", fontSize = tanweerTextSize(11f), color = RubyRed, fontWeight = FontWeight.Bold)
+                    Text("🔴 ${if (hasCalendarSnapshot) calendarExamCount.toString() else "—"} اختبارات", fontSize = tanweerTextSize(11f), color = RubyRed, fontWeight = FontWeight.Bold)
                 }
 
                 Box(
@@ -330,7 +348,7 @@ fun CalendarScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("🎪 ${if (hasCalendarSnapshot) events.size.toString() else "—"} فعاليات", fontSize = tanweerTextSize(11f), color = PurpleAccent, fontWeight = FontWeight.Bold)
+                        Text("🎪 ${if (hasCalendarSnapshot) calendarEventCount.toString() else "—"} فعاليات", fontSize = tanweerTextSize(11f), color = PurpleAccent, fontWeight = FontWeight.Bold)
                         Text("‹", fontSize = tanweerTextSize(13f), color = PurpleAccent)
                     }
                 }
