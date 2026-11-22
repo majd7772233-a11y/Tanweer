@@ -49,6 +49,13 @@
     <string name="exam_failed_discard_success">تم التخلص من المسودة المحلية.</string>
     <string name="exam_failed_discard_error">تعذر التخلص من المسودة: %1$s</string>
     <string name="exam_failed_cancel">إبقاء المسودة</string>
+    <string name="exam_schedule_status_passed">موعد منقضٍ</string>
+    <string name="exam_schedule_status_upcoming">موعد قادم</string>
+    <string name="exam_review_status_reviewed">تمت المراجعة</string>
+    <string name="exam_review_status_not_reviewed">لم تتم المراجعة</string>
+    <string name="exam_review_progress">تمت مراجعة %1$d من %2$d اختبارات</string>
+    <string name="exam_schedule_status_today">موعد اليوم</string>
+    <string name="exam_count_format">%1$d اختبارات</string>
 
     <string name="homework_screen_summary">واجبات: %1$d • مشاريع: %2$d • غير مصنّف: %3$d</string>
     <string name="homework_screen_summary_loading">جارٍ التحقق من بيانات التكليفات...</string>

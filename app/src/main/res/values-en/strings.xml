@@ -47,6 +47,13 @@
     <string name="exam_failed_discard_success">The local draft was discarded.</string>
     <string name="exam_failed_discard_error">The draft could not be discarded: %1$s</string>
     <string name="exam_failed_cancel">Keep draft</string>
+    <string name="exam_schedule_status_passed">Date passed</string>
+    <string name="exam_schedule_status_upcoming">Upcoming date</string>
+    <string name="exam_review_status_reviewed">Reviewed</string>
+    <string name="exam_review_status_not_reviewed">Not reviewed</string>
+    <string name="exam_review_progress">%1$d of %2$d exams reviewed</string>
+    <string name="exam_schedule_status_today">Today</string>
+    <string name="exam_count_format">%1$d exams</string>
 
     <string name="homework_screen_summary">Homework: %1$d • Projects: %2$d • Other: %3$d</string>
     <string name="homework_screen_summary_loading">Checking assignment data...</string>

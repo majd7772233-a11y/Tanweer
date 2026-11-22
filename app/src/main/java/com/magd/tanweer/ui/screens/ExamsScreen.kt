@@ -50,6 +50,7 @@ import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.ExamReviewPolicy
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -630,7 +631,8 @@ fun ExamsScreen(
                 }
 
                 displayedMonths.forEach { (monthKey, monthExams) ->
-                    val completedCount = monthExams.count { it.isCompleted || isExamDatePassed(it.examDate, todayDateStr) }
+                    val reviewSummary = ExamReviewPolicy.summarize(monthExams)
+                    val completedCount = reviewSummary.reviewedCount
                     val fullMonthTitle = getArabicMonthTitle(monthKey)
 
                     // Month Header Section Card
@@ -666,15 +668,15 @@ fun ExamsScreen(
                                             color = TextPrimary
                                         )
                                         Text(
-                                            text = "تمت مراجعة $completedCount من ${monthExams.size} اختبارات",
+                                            text = stringResource(R.string.exam_review_progress, completedCount, reviewSummary.totalCount),
                                             fontSize = tanweerTextSize(11f),
-                                            color = if (completedCount == monthExams.size) EmeraldGreen else TextSecondary
+                                            color = if (reviewSummary.totalCount > 0 && completedCount == reviewSummary.totalCount) EmeraldGreen else TextSecondary
                                         )
                                     }
                                 }
 
                                 GlassPill(
-                                    text = "${monthExams.size} اختبارات",
+                                    text = stringResource(R.string.exam_count_format, reviewSummary.totalCount),
                                     color = RubyRed,
                                     bgColor = RubyRed.copy(alpha = 0.15f)
                                 )
@@ -1632,7 +1634,8 @@ fun ExamDetailModal(
     onScheduleReminder: () -> Unit,
     onOpenLibraryBook: () -> Unit
 ) {
-    val isDone = exam.isCompleted || isExamDatePassed(exam.examDate, todayDateStr)
+    val isDatePassed = isExamDatePassed(exam.examDate, todayDateStr)
+    val isReviewed = ExamReviewPolicy.isReviewed(exam)
     val dayName = remember(exam.examDate) { getArabicDayOfWeek(exam.examDate) }
 
     ModalBottomSheet(
@@ -1664,11 +1667,33 @@ fun ExamDetailModal(
                     }
                 }
 
-                GlassPill(
-                    text = if (isDone) "مكتمل ✓" else "قادم ⏳",
-                    color = if (isDone) EmeraldGreen else RubyRed,
-                    bgColor = if (isDone) EmeraldGreen.copy(alpha = 0.15f) else RubyRed.copy(alpha = 0.15f)
-                )
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    val dateStatusText = when {
+                        isDatePassed -> R.string.exam_schedule_status_passed
+                        exam.examDate == todayDateStr -> R.string.exam_schedule_status_today
+                        else -> R.string.exam_schedule_status_upcoming
+                    }
+                    val dateStatusColor = when {
+                        isDatePassed -> WarmAmber
+                        exam.examDate == todayDateStr -> EmeraldGreen
+                        else -> CyanAccent
+                    }
+                    GlassPill(
+                        text = stringResource(dateStatusText),
+                        color = dateStatusColor,
+                        bgColor = dateStatusColor.copy(alpha = 0.15f)
+                    )
+                    GlassPill(
+                        text = stringResource(
+                            if (isReviewed) R.string.exam_review_status_reviewed else R.string.exam_review_status_not_reviewed
+                        ),
+                        color = if (isReviewed) EmeraldGreen else RubyRed,
+                        bgColor = if (isReviewed) EmeraldGreen.copy(alpha = 0.15f) else RubyRed.copy(alpha = 0.15f)
+                    )
+                }
             }
 
             HorizontalDivider(color = GlassBorderSubtle)
