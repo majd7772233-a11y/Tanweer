@@ -333,7 +333,7 @@
 
 ### P2-04 implementation checkpoint (2026-11-22)
 
-**Status:** IMPLEMENTED / FOCUSED LOCAL TESTS PASS (8/8) / LOCAL STAGING DEBUG BUILD PASS / EXACT-SHA CI PENDING / PHASE 5 DEVICE ACCEPTANCE OPEN.
+**Status:** IMPLEMENTED / FOCUSED LOCAL TESTS PASS (8/8) / LOCAL STAGING DEBUG BUILD PASS / EXACT-SHA ANDROID + SERVER CI VERIFIED / PHASE 5 DEVICE ACCEPTANCE OPEN.
 
 - Added the shared ExamReviewPolicy. A review is true only when isCompleted is true on a SYNCED exam. FAILED, PENDING, SYNCING, LOCAL, and DELETE_PENDING rows are excluded from both the reviewed numerator and the confirmed denominator.
 - The monthly Exams summary now derives its reviewed count from explicit completion state only; an elapsed exam date can no longer be counted as a completed personal review. The month count badge uses the same confirmed-only denominator.
@@ -341,6 +341,7 @@
 - Added localized Arabic and English strings for both status dimensions and monthly progress/count labels.
 - Local focused tests: ExamReviewPolicyTest (3) and existing ExamVisibilityPolicyTest (5) passed, total 8/8 with zero failures, errors, or skips. Both resource XML files parse and contain no duplicate string keys. The previous combined isCompleted || isExamDatePassed expression no longer exists in ExamsScreen.kt.
 - Local :app:assembleStagingDebug passed. APK: app/build/outputs/apk/staging/debug/app-staging-debug.apk; size 33,576,366 bytes; SHA-256 53636AECC1F93AF92487618B2852FA22CD7AE9D90E402B3FCCCB3405DC074EDF. Built only; not installed or launched.
+- **Exact-SHA GitHub CI:** implementation commit 9e090054dfd2d0f9277a4ea9e4d6a208d40eb968 was validated by Android workflow run 45028829069 (success: testStagingDebugUnitTest, :app:assembleStagingDebug, and Debug APK artifact upload; release signing/build steps skipped) and Server workflow run 45028829155 (success: TypeScript typecheck, dependency security baseline, 42 Vitest files / 293 tests, and Wrangler Production + Staging dry-run validation). No deployment occurred.
 - **Still open for Phase 5:** reproduce the QAORAL1 review toggle on the Galaxy S9 / Android 10 and Android 15 devices; verify the header and monthly count update after server ACK, after leaving/reopening details, and after process recreation. Do not report device acceptance from Robolectric or CI.
 - No backend contract, Room schema, migration, or server code was changed. No deployment, secrets change, D1 apply/write, release signing, emulator/phone install or launch, main update, or PR merge was performed.
 
@@ -1004,7 +1005,7 @@
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
 | Phase 1 — P1 trust / persistence / stability | IMPLEMENTATION + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | f98371e10aa3ad303f28815e73ad90416f50c799 | Android Ubuntu: testStagingDebugUnitTest PASS; assembleStagingDebug PASS. Server: TypeScript, dependency security baseline, Wrangler bundle validation PASS; 42 files / 293 tests PASS. Local Windows/Robolectric AtomicFile issue is host-specific and the unchanged API34 test passed on Ubuntu. Migration 0034 remains memory-SQLite-only; P1-02 explicitly deferred and P1-03 remains a text-quality guard pending real PDF extraction work/verification in Phase 5. Device acceptance Phase 5. |
-| Phase 2 - P2 data correctness / sync truth | P2-01 through P2-03 implementation and exact-SHA CI verified; P2-04 implemented with 8/8 focused local tests and local Staging Debug build; P2-04 exact-SHA CI pending; Phase 5 device acceptance open | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03: 35763ee8b6e8faa217df51798fcb2ec7274841b9; P2-04: pending CI commit | P2-03 Android 45021785196 PASS; Server 45021785246 PASS. P2-04 local ExamReviewPolicyTest 3/3 + ExamVisibilityPolicyTest 5/5; Staging Debug assemble PASS. Physical acceptance remains Phase 5. P2-05 onward not started. |
+| Phase 2 - P2 data correctness / sync truth | P2-01 through P2-03 implementation and exact-SHA CI verified; P2-04 implementation, focused tests, local Staging Debug build, and exact-SHA Android/Server CI verified; Phase 5 device acceptance open | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03: 35763ee8b6e8faa217df51798fcb2ec7274841b9; P2-04: 9e090054dfd2d0f9277a4ea9e4d6a208d40eb968 | P2-04 Android run 45028829069 PASS (unit tests, Staging Debug assemble, Debug artifact upload); Server run 45028829155 PASS (typecheck, dependency security baseline, 42 files / 293 tests, Wrangler Production + Staging dry-runs). Physical acceptance remains Phase 5. P2-05 onward not started. |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |
 | Phase 5 — final acceptance | NOT STARTED | — | — |
