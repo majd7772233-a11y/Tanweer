@@ -131,6 +131,9 @@ fun ExamsScreen(
                     examDate = exam.examDate
                 )
                 when (res) {
+                    TanweerNotificationManager.ScheduleReminderResult.NOTIFICATIONS_DISABLED -> {
+                        Toast.makeText(context, context.getString(R.string.notification_reminders_disabled), Toast.LENGTH_SHORT).show()
+                    }
                     TanweerNotificationManager.ScheduleReminderResult.SUCCESS -> {
                         Toast.makeText(context, "تم جدولة تذكير لاختبار ${exam.subjectName} بنجاح 🔔", Toast.LENGTH_SHORT).show()
                     }
@@ -765,6 +768,9 @@ fun ExamsScreen(
                         examDate = exam.examDate
                     )
                     when (res) {
+                        TanweerNotificationManager.ScheduleReminderResult.NOTIFICATIONS_DISABLED -> {
+                            Toast.makeText(context, context.getString(R.string.notification_reminders_disabled), Toast.LENGTH_SHORT).show()
+                        }
                         TanweerNotificationManager.ScheduleReminderResult.SUCCESS -> {
                             Toast.makeText(context, "تم ضبط تذكير لاختبار ${exam.subjectName} بنجاح 🔔", Toast.LENGTH_SHORT).show()
                         }

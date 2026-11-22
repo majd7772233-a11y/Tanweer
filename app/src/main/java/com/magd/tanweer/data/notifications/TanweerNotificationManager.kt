@@ -16,19 +16,63 @@ import com.magd.tanweer.R
 import com.magd.tanweer.data.local.TanweerDatabase
 import com.magd.tanweer.util.HomeworkTaskKind
 import com.magd.tanweer.util.HomeworkTaskTypePolicy
+import com.magd.tanweer.util.NotificationDeliveryPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.atomic.AtomicLong
 
 object TanweerNotificationManager {
 
     const val CHANNEL_ID = "tanweer_academic_channel"
-    private const val NOTIFICATION_HOMEWORK_ID = 2001
-    private const val NOTIFICATION_EXAM_ID = 2002
-    private const val NOTIFICATION_SCHEDULE_ID = 2003
+    internal const val NOTIFICATION_HOMEWORK_ID = 2001
+    internal const val NOTIFICATION_EXAM_ID = 2002
+    internal const val NOTIFICATION_SCHEDULE_ID = 2003
+
+    private const val PREFERENCES_NAME = "tanweer_prefs"
+    private const val PREF_NOTIFY_HOMEWORK = "notify_homework"
+    private const val PREF_NOTIFY_EXAMS = "notify_exams"
+    private const val PREF_NOTIFY_SCHEDULE = "notify_schedule"
+    private const val PREF_HOMEWORK_REMINDER_IDS = "scheduled_homework_reminder_ids"
+    private const val PREF_EXAM_REMINDER_IDS = "scheduled_exam_reminder_ids"
+
+    private val notificationStateLock = Any()
+    private val homeworkNotificationGeneration = AtomicLong(0L)
+    private val examNotificationGeneration = AtomicLong(0L)
+    private val scheduleNotificationGeneration = AtomicLong(0L)
+
+    private data class NotificationSettingsSnapshot(
+        val homeworkEnabled: Boolean,
+        val scheduleEnabled: Boolean,
+        val examsEnabled: Boolean,
+        val autoSyncEnabled: Boolean,
+        val homeworkGeneration: Long,
+        val scheduleGeneration: Long,
+        val examGeneration: Long
+    )
+
+    internal fun homeworkNotificationGenerationSnapshot(): Long =
+        synchronized(notificationStateLock) { homeworkNotificationGeneration.get() }
+
+    internal fun examNotificationGenerationSnapshot(): Long =
+        synchronized(notificationStateLock) { examNotificationGeneration.get() }
+
+    private fun readNotificationSettings(context: Context): NotificationSettingsSnapshot =
+        synchronized(notificationStateLock) {
+            val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            NotificationSettingsSnapshot(
+                homeworkEnabled = preferences.getBoolean(PREF_NOTIFY_HOMEWORK, true),
+                scheduleEnabled = preferences.getBoolean(PREF_NOTIFY_SCHEDULE, true),
+                examsEnabled = preferences.getBoolean(PREF_NOTIFY_EXAMS, true),
+                autoSyncEnabled = preferences.getBoolean("auto_sync_enabled", true),
+                homeworkGeneration = homeworkNotificationGeneration.get(),
+                scheduleGeneration = scheduleNotificationGeneration.get(),
+                examGeneration = examNotificationGeneration.get()
+            )
+        }
 
     fun initChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -124,12 +168,264 @@ object TanweerNotificationManager {
         }
     }
 
+    fun setHomeworkNotificationsEnabled(context: Context, enabled: Boolean) {
+        val appContext = context.applicationContext
+        synchronized(notificationStateLock) {
+            appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_NOTIFY_HOMEWORK, enabled)
+                .apply()
+            homeworkNotificationGeneration.incrementAndGet()
+            if (!enabled) {
+                NotificationManagerCompat.from(appContext).cancel(NOTIFICATION_HOMEWORK_ID)
+            }
+        }
+        scheduleDailyReminder(appContext)
+        if (enabled) {
+            checkAndSendReminders(appContext)
+        } else {
+            cancelStoredHomeworkRemindersIfDisabled(appContext)
+            cancelCachedHomeworkRemindersIfDisabled(appContext)
+        }
+    }
+
+    fun setExamNotificationsEnabled(context: Context, enabled: Boolean) {
+        val appContext = context.applicationContext
+        synchronized(notificationStateLock) {
+            appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_NOTIFY_EXAMS, enabled)
+                .apply()
+            examNotificationGeneration.incrementAndGet()
+            if (!enabled) {
+                NotificationManagerCompat.from(appContext).cancel(NOTIFICATION_EXAM_ID)
+            }
+        }
+        scheduleDailyReminder(appContext)
+        if (enabled) {
+            checkAndSendReminders(appContext)
+        } else {
+            cancelStoredExamRemindersIfDisabled(appContext)
+            cancelCachedExamRemindersIfDisabled(appContext)
+        }
+    }
+
+    fun setScheduleNotificationsEnabled(context: Context, enabled: Boolean) {
+        val appContext = context.applicationContext
+        synchronized(notificationStateLock) {
+            appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_NOTIFY_SCHEDULE, enabled)
+                .apply()
+            scheduleNotificationGeneration.incrementAndGet()
+            if (!enabled) {
+                NotificationManagerCompat.from(appContext).cancel(NOTIFICATION_SCHEDULE_ID)
+            }
+        }
+        scheduleDailyReminder(appContext)
+        if (enabled) {
+            checkAndSendReminders(appContext)
+        }
+    }
+
+    private fun reminderRegistryKey(action: String): String? = when (action) {
+        TanweerAlarmReceiver.ACTION_HOMEWORK_REMINDER -> PREF_HOMEWORK_REMINDER_IDS
+        TanweerAlarmReceiver.ACTION_EXAM_REMINDER -> PREF_EXAM_REMINDER_IDS
+        else -> null
+    }
+
+    private fun rememberScheduledReminderLocked(context: Context, itemId: String, action: String) {
+        val key = reminderRegistryKey(action) ?: return
+        val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        val ids = preferences.getStringSet(key, emptySet()).orEmpty().toMutableSet()
+        ids.add(itemId)
+        preferences.edit().putStringSet(key, ids).apply()
+    }
+
+    private fun forgetReminderRegistryEntry(context: Context, itemId: String, action: String?) {
+        val keys = action?.let { listOfNotNull(reminderRegistryKey(it)) } ?: listOf(
+            PREF_HOMEWORK_REMINDER_IDS,
+            PREF_EXAM_REMINDER_IDS
+        )
+        val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        val editor = preferences.edit()
+        keys.forEach { key ->
+            val ids = preferences.getStringSet(key, emptySet()).orEmpty().toMutableSet()
+            if (ids.remove(itemId)) editor.putStringSet(key, ids)
+        }
+        editor.apply()
+    }
+
+    private fun cancelStoredHomeworkRemindersIfDisabled(context: Context) {
+        synchronized(notificationStateLock) {
+            val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            if (preferences.getBoolean(PREF_NOTIFY_HOMEWORK, true)) return
+            val ids = preferences.getStringSet(PREF_HOMEWORK_REMINDER_IDS, emptySet()).orEmpty().toList()
+            cancelHomeworkNotifications(context, ids)
+            preferences.edit().remove(PREF_HOMEWORK_REMINDER_IDS).apply()
+        }
+    }
+
+    private fun cancelStoredExamRemindersIfDisabled(context: Context) {
+        synchronized(notificationStateLock) {
+            val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            if (preferences.getBoolean(PREF_NOTIFY_EXAMS, true)) return
+            val ids = preferences.getStringSet(PREF_EXAM_REMINDER_IDS, emptySet()).orEmpty().toList()
+            cancelExamNotifications(context, ids)
+            preferences.edit().remove(PREF_EXAM_REMINDER_IDS).apply()
+        }
+    }
+
+    private fun cancelCachedHomeworkRemindersIfDisabled(context: Context) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val ids = TanweerDatabase.getInstance(context).homeworkDao().getAllHomeworkIds()
+                synchronized(notificationStateLock) {
+                    val enabled = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                        .getBoolean(PREF_NOTIFY_HOMEWORK, true)
+                    if (!enabled) {
+                        val registeredIds = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                            .getStringSet(PREF_HOMEWORK_REMINDER_IDS, emptySet()).orEmpty()
+                        cancelHomeworkNotifications(context, ids + registeredIds)
+                        context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                            .edit().remove(PREF_HOMEWORK_REMINDER_IDS).apply()
+                    }
+                }
+            } catch (error: Exception) {
+                Log.w("TanweerNotifications", "Could not cancel every cached homework reminder", error)
+            }
+        }
+    }
+
+    private fun cancelCachedExamRemindersIfDisabled(context: Context) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val ids = TanweerDatabase.getInstance(context).examDao().getAllExamIds()
+                synchronized(notificationStateLock) {
+                    val enabled = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                        .getBoolean(PREF_NOTIFY_EXAMS, true)
+                    if (!enabled) {
+                        val registeredIds = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                            .getStringSet(PREF_EXAM_REMINDER_IDS, emptySet()).orEmpty()
+                        cancelExamNotifications(context, ids + registeredIds)
+                        context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                            .edit().remove(PREF_EXAM_REMINDER_IDS).apply()
+                    }
+                }
+            } catch (error: Exception) {
+                Log.w("TanweerNotifications", "Could not cancel every cached exam reminder", error)
+            }
+        }
+    }
+
+    /**
+     * Cancels only homework/project summary and per-item alerts. Exam and
+     * schedule notifications remain untouched.
+     */
+    fun cancelHomeworkNotifications(context: Context, homeworkIds: Collection<String>) {
+        synchronized(notificationStateLock) {
+            val notifications = NotificationManagerCompat.from(context)
+            notifications.cancel(NOTIFICATION_HOMEWORK_ID)
+            homeworkIds.distinct().forEach { id ->
+                cancelReminder(context, id, TanweerAlarmReceiver.ACTION_HOMEWORK_REMINDER)
+            }
+        }
+    }
+
+    /**
+     * Cancels only exam summary and per-item alerts. Homework and schedule
+     * notifications remain untouched.
+     */
+    fun cancelExamNotifications(context: Context, examIds: Collection<String>) {
+        synchronized(notificationStateLock) {
+            val notifications = NotificationManagerCompat.from(context)
+            notifications.cancel(NOTIFICATION_EXAM_ID)
+            examIds.distinct().forEach { id ->
+                cancelReminder(context, id, TanweerAlarmReceiver.ACTION_EXAM_REMINDER)
+            }
+        }
+    }
+
+    private fun isPreferenceCurrentAndEnabled(
+        context: Context,
+        preferenceKey: String,
+        generation: AtomicLong,
+        expectedGeneration: Long
+    ): Boolean = synchronized(notificationStateLock) {
+        NotificationDeliveryPolicy.mayPost(
+            enabled = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .getBoolean(preferenceKey, true),
+            expectedGeneration = expectedGeneration,
+            currentGeneration = generation.get()
+        )
+    }
+
+    private fun postNotificationIfCurrent(
+        context: Context,
+        preferenceKey: String,
+        generation: AtomicLong,
+        expectedGeneration: Long,
+        notificationId: Int,
+        notification: android.app.Notification
+    ) {
+        synchronized(notificationStateLock) {
+            val notifications = NotificationManagerCompat.from(context)
+            val enabled = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .getBoolean(preferenceKey, true)
+            if (!enabled) {
+                notifications.cancel(notificationId)
+                return
+            }
+            if (!NotificationDeliveryPolicy.mayPost(
+                    enabled = enabled,
+                    expectedGeneration = expectedGeneration,
+                    currentGeneration = generation.get()
+                )
+            ) return
+            try {
+                notifications.notify(notificationId, notification)
+            } catch (_: SecurityException) {
+                // Notification permission can be revoked while this background
+                // operation is running.
+            }
+        }
+    }
+
+    private fun cancelNotificationIfCurrent(
+        context: Context,
+        generation: AtomicLong,
+        expectedGeneration: Long,
+        notificationId: Int
+    ) {
+        synchronized(notificationStateLock) {
+            if (generation.get() == expectedGeneration) {
+                NotificationManagerCompat.from(context).cancel(notificationId)
+            }
+        }
+    }
+
     fun checkAndSendReminders(context: Context) {
-        val prefs: SharedPreferences = context.getSharedPreferences("tanweer_prefs", Context.MODE_PRIVATE)
-        val notifyHw = prefs.getBoolean("notify_homework", true)
-        val notifySch = prefs.getBoolean("notify_schedule", true)
-        val notifyExm = prefs.getBoolean("notify_exams", true)
-        val autoSyncEnabled = prefs.getBoolean("auto_sync_enabled", true)
+        // Capture each preference with its generation atomically so a toggle
+        // between separate reads cannot make a stale OFF/ON decision current.
+        val settings = readNotificationSettings(context)
+        val notifyHw = settings.homeworkEnabled
+        val notifySch = settings.scheduleEnabled
+        val notifyExm = settings.examsEnabled
+        val homeworkGeneration = settings.homeworkGeneration
+        val examGeneration = settings.examGeneration
+        val scheduleGeneration = settings.scheduleGeneration
+        val autoSyncEnabled = settings.autoSyncEnabled
+
+        // Reconcile persisted OFF preferences after process recreation as well.
+        // This also removes any individual notification that survived a restart.
+        if (!notifyHw) {
+            cancelStoredHomeworkRemindersIfDisabled(context)
+            cancelCachedHomeworkRemindersIfDisabled(context)
+        }
+        if (!notifyExm) {
+            cancelStoredExamRemindersIfDisabled(context)
+            cancelCachedExamRemindersIfDisabled(context)
+        }
 
         initChannel(context)
         performBackgroundMaintenance(context)
@@ -198,7 +494,9 @@ object TanweerNotificationManager {
                 )
 
                 if (!notifyHw) {
-                    notifications.cancel(NOTIFICATION_HOMEWORK_ID)
+                    cancelNotificationIfCurrent(
+                        context, homeworkNotificationGeneration, homeworkGeneration, NOTIFICATION_HOMEWORK_ID
+                    )
                 } else {
                     try {
                         val homeworks = db.homeworkDao().getHomeworks(groupId).first()
@@ -227,10 +525,14 @@ object TanweerNotificationManager {
                                 .setContentIntent(pendingHwIntent)
                                 .setAutoCancel(true)
                                 .build()
-                            try { notifications.notify(NOTIFICATION_HOMEWORK_ID, notification) }
-                            catch (_: SecurityException) {}
+                            postNotificationIfCurrent(
+                                context, PREF_NOTIFY_HOMEWORK, homeworkNotificationGeneration,
+                                homeworkGeneration, NOTIFICATION_HOMEWORK_ID, notification
+                            )
                         } else if (mayDismissEmptySnapshot) {
-                            notifications.cancel(NOTIFICATION_HOMEWORK_ID)
+                            cancelNotificationIfCurrent(
+                                context, homeworkNotificationGeneration, homeworkGeneration, NOTIFICATION_HOMEWORK_ID
+                            )
                         }
                     } catch (error: Exception) {
                         Log.w("TanweerNotifications", "Could not verify homework state; keeping the existing alert", error)
@@ -238,7 +540,9 @@ object TanweerNotificationManager {
                 }
 
                 if (!notifyExm) {
-                    notifications.cancel(NOTIFICATION_EXAM_ID)
+                    cancelNotificationIfCurrent(
+                        context, examNotificationGeneration, examGeneration, NOTIFICATION_EXAM_ID
+                    )
                 } else {
                     try {
                         val exams = db.examDao().getExams(groupId).first()
@@ -256,10 +560,14 @@ object TanweerNotificationManager {
                                 .setContentIntent(pendingExamIntent)
                                 .setAutoCancel(true)
                                 .build()
-                            try { notifications.notify(NOTIFICATION_EXAM_ID, notification) }
-                            catch (_: SecurityException) {}
+                            postNotificationIfCurrent(
+                                context, PREF_NOTIFY_EXAMS, examNotificationGeneration,
+                                examGeneration, NOTIFICATION_EXAM_ID, notification
+                            )
                         } else if (mayDismissEmptySnapshot) {
-                            notifications.cancel(NOTIFICATION_EXAM_ID)
+                            cancelNotificationIfCurrent(
+                                context, examNotificationGeneration, examGeneration, NOTIFICATION_EXAM_ID
+                            )
                         }
                     } catch (error: Exception) {
                         Log.w("TanweerNotifications", "Could not verify exam state; keeping the existing alert", error)
@@ -267,7 +575,9 @@ object TanweerNotificationManager {
                 }
 
                 if (!notifySch) {
-                    notifications.cancel(NOTIFICATION_SCHEDULE_ID)
+                    cancelNotificationIfCurrent(
+                        context, scheduleNotificationGeneration, scheduleGeneration, NOTIFICATION_SCHEDULE_ID
+                    )
                 } else {
                     try {
                         val appDay = calendarDayToAppDayIndex(Calendar.getInstance().get(Calendar.DAY_OF_WEEK))
@@ -283,10 +593,14 @@ object TanweerNotificationManager {
                                 .setContentIntent(pendingScheduleIntent)
                                 .setAutoCancel(true)
                                 .build()
-                            try { notifications.notify(NOTIFICATION_SCHEDULE_ID, notification) }
-                            catch (_: SecurityException) {}
+                            postNotificationIfCurrent(
+                                context, PREF_NOTIFY_SCHEDULE, scheduleNotificationGeneration,
+                                scheduleGeneration, NOTIFICATION_SCHEDULE_ID, notification
+                            )
                         } else if (mayDismissEmptySnapshot) {
-                            notifications.cancel(NOTIFICATION_SCHEDULE_ID)
+                            cancelNotificationIfCurrent(
+                                context, scheduleNotificationGeneration, scheduleGeneration, NOTIFICATION_SCHEDULE_ID
+                            )
                         }
                     } catch (error: Exception) {
                         Log.w("TanweerNotifications", "Could not verify schedule state; keeping the existing alert", error)
@@ -318,6 +632,7 @@ object TanweerNotificationManager {
 
     enum class ScheduleReminderResult {
         SUCCESS,
+        NOTIFICATIONS_DISABLED,
         PERMISSION_NOTIFICATIONS_DENIED,
         PERMISSION_EXACT_ALARM_DENIED,
         ALARM_SERVICE_UNAVAILABLE,
@@ -331,6 +646,11 @@ object TanweerNotificationManager {
         subjectName: String,
         dueDate: String
     ): ScheduleReminderResult {
+        val expectedGeneration = homeworkNotificationGeneration.get()
+        if (!isPreferenceCurrentAndEnabled(
+                context, PREF_NOTIFY_HOMEWORK, homeworkNotificationGeneration, expectedGeneration
+            )
+        ) return ScheduleReminderResult.NOTIFICATIONS_DISABLED
         initChannel(context)
         return try {
             // Check Notification permission on Android 13+
@@ -404,10 +724,28 @@ object TanweerNotificationManager {
                 triggerTime = System.currentTimeMillis() + (3600 * 1000L)
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
-            } else {
-                alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+            val scheduled = synchronized(notificationStateLock) {
+                val stillEnabled = NotificationDeliveryPolicy.mayPost(
+                    enabled = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                        .getBoolean(PREF_NOTIFY_HOMEWORK, true),
+                    expectedGeneration = expectedGeneration,
+                    currentGeneration = homeworkNotificationGeneration.get()
+                )
+                if (stillEnabled) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                    } else {
+                        alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                    }
+                    rememberScheduledReminderLocked(
+                        context, homeworkId, TanweerAlarmReceiver.ACTION_HOMEWORK_REMINDER
+                    )
+                }
+                stillEnabled
+            }
+            if (!scheduled) {
+                pendingIntent.cancel()
+                return ScheduleReminderResult.NOTIFICATIONS_DISABLED
             }
             Log.d("TanweerNotifications", "Exact homework reminder scheduled at $triggerTime for $homeworkId")
             ScheduleReminderResult.SUCCESS
@@ -425,7 +763,8 @@ object TanweerNotificationManager {
         homeworkId: String,
         title: String,
         subjectName: String,
-        taskType: String = "HOMEWORK"
+        taskType: String = "HOMEWORK",
+        expectedGeneration: Long = homeworkNotificationGenerationSnapshot()
     ) {
         initChannel(context)
         val kind = HomeworkTaskTypePolicy.classify(taskType)
@@ -470,12 +809,10 @@ object TanweerNotificationManager {
             .setVibrate(longArrayOf(0, 350, 250, 350))
             .build()
 
-        try {
-            NotificationManagerCompat.from(context).notify(
-                (homeworkId.hashCode() and 0x7FFFFFFF),
-                notification
-            )
-        } catch (_: SecurityException) {}
+        postNotificationIfCurrent(
+            context, PREF_NOTIFY_HOMEWORK, homeworkNotificationGeneration,
+            expectedGeneration, (homeworkId.hashCode() and 0x7FFFFFFF), notification
+        )
     }
 
     fun scheduleExamReminder(
@@ -485,6 +822,11 @@ object TanweerNotificationManager {
         subjectName: String,
         examDate: String
     ): ScheduleReminderResult {
+        val expectedGeneration = examNotificationGeneration.get()
+        if (!isPreferenceCurrentAndEnabled(
+                context, PREF_NOTIFY_EXAMS, examNotificationGeneration, expectedGeneration
+            )
+        ) return ScheduleReminderResult.NOTIFICATIONS_DISABLED
         initChannel(context)
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -556,10 +898,28 @@ object TanweerNotificationManager {
                 triggerTime = System.currentTimeMillis() + (3600 * 1000L)
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
-            } else {
-                alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+            val scheduled = synchronized(notificationStateLock) {
+                val stillEnabled = NotificationDeliveryPolicy.mayPost(
+                    enabled = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                        .getBoolean(PREF_NOTIFY_EXAMS, true),
+                    expectedGeneration = expectedGeneration,
+                    currentGeneration = examNotificationGeneration.get()
+                )
+                if (stillEnabled) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                    } else {
+                        alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                    }
+                    rememberScheduledReminderLocked(
+                        context, examId, TanweerAlarmReceiver.ACTION_EXAM_REMINDER
+                    )
+                }
+                stillEnabled
+            }
+            if (!scheduled) {
+                pendingIntent.cancel()
+                return ScheduleReminderResult.NOTIFICATIONS_DISABLED
             }
             Log.d("TanweerNotifications", "Exact exam reminder scheduled at $triggerTime for $examId")
             ScheduleReminderResult.SUCCESS
@@ -598,6 +958,11 @@ object TanweerNotificationManager {
                 cancelAlarm(it.hashCode() and 0x7FFFFFFF, TanweerAlarmReceiver.ACTION_EXAM_REMINDER)
             }
             NotificationManagerCompat.from(context).cancelAll()
+            context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .remove(PREF_HOMEWORK_REMINDER_IDS)
+                .remove(PREF_EXAM_REMINDER_IDS)
+                .apply()
         } catch (e: Exception) {
             Log.w("TanweerNotifications", "Could not cancel every account reminder during local reset", e)
         }
@@ -625,6 +990,7 @@ object TanweerNotificationManager {
                 }
             }
             NotificationManagerCompat.from(context).cancel(requestCode)
+            forgetReminderRegistryEntry(context, itemId, action)
         } catch (error: Exception) {
             Log.w("TanweerNotifications", "Could not cancel reminder for " + itemId, error)
         }
@@ -634,7 +1000,8 @@ object TanweerNotificationManager {
         context: Context,
         examId: String,
         title: String,
-        subjectName: String
+        subjectName: String,
+        expectedGeneration: Long = examNotificationGenerationSnapshot()
     ) {
         initChannel(context)
         val openIntent = Intent(context, MainActivity::class.java).apply {
@@ -663,11 +1030,9 @@ object TanweerNotificationManager {
             .setVibrate(longArrayOf(0, 400, 200, 400))
             .build()
 
-        try {
-            NotificationManagerCompat.from(context).notify(
-                (examId.hashCode() and 0x7FFFFFFF),
-                notification
-            )
-        } catch (_: SecurityException) {}
+        postNotificationIfCurrent(
+            context, PREF_NOTIFY_EXAMS, examNotificationGeneration,
+            expectedGeneration, (examId.hashCode() and 0x7FFFFFFF), notification
+        )
     }
 }

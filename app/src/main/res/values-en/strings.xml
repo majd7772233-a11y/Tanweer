@@ -96,4 +96,5 @@
     <string name="other_individual_notification_big_text">Assignment reminder for %1$s:\n%2$s\nPlease review the assignment details.</string>
     <string name="calendar_day_add_description">You can document lessons and assignments for this date at any time.</string>
     <string name="calendar_empty_day_message">No lessons, assignments or events are recorded for this day in the last confirmed monthly snapshot. You can add and document the lesson using the button above.</string>
+    <string name="notification_reminders_disabled">Reminders are disabled in Settings. Enable this notification type first.</string>
 </resources>

@@ -236,32 +236,23 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     fun setNotifyHomework(notify: Boolean) {
         _notifyHomework.value = notify
-        prefs.edit().putBoolean("notify_homework", notify).apply()
         val app = getApplication<Application>()
-        com.magd.tanweer.data.notifications.TanweerNotificationManager.scheduleDailyReminder(app)
-        if (notify) {
-            com.magd.tanweer.data.notifications.TanweerNotificationManager.checkAndSendReminders(app)
-        }
+        com.magd.tanweer.data.notifications.TanweerNotificationManager
+            .setHomeworkNotificationsEnabled(app, notify)
     }
 
     fun setNotifySchedule(notify: Boolean) {
         _notifySchedule.value = notify
-        prefs.edit().putBoolean("notify_schedule", notify).apply()
         val app = getApplication<Application>()
-        com.magd.tanweer.data.notifications.TanweerNotificationManager.scheduleDailyReminder(app)
-        if (notify) {
-            com.magd.tanweer.data.notifications.TanweerNotificationManager.checkAndSendReminders(app)
-        }
+        com.magd.tanweer.data.notifications.TanweerNotificationManager
+            .setScheduleNotificationsEnabled(app, notify)
     }
 
     fun setNotifyExams(notify: Boolean) {
         _notifyExams.value = notify
-        prefs.edit().putBoolean("notify_exams", notify).apply()
         val app = getApplication<Application>()
-        com.magd.tanweer.data.notifications.TanweerNotificationManager.scheduleDailyReminder(app)
-        if (notify) {
-            com.magd.tanweer.data.notifications.TanweerNotificationManager.checkAndSendReminders(app)
-        }
+        com.magd.tanweer.data.notifications.TanweerNotificationManager
+            .setExamNotificationsEnabled(app, notify)
     }
 
     fun triggerHaptic(type: com.magd.tanweer.util.TanweerHapticManager.HapticType = com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK) {

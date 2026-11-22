@@ -140,6 +140,9 @@ fun HomeworkScreen(
                     dueDate = hw.dueDate
                 )
                 when (res) {
+                    TanweerNotificationManager.ScheduleReminderResult.NOTIFICATIONS_DISABLED -> {
+                        Toast.makeText(context, context.getString(R.string.notification_reminders_disabled), Toast.LENGTH_SHORT).show()
+                    }
                     TanweerNotificationManager.ScheduleReminderResult.SUCCESS -> {
                         Toast.makeText(context, "🔔 تم تفعيل تذكير دراسي دقيق على جهازك للواجب: ${hw.title}", Toast.LENGTH_SHORT).show()
                     }
@@ -468,6 +471,9 @@ fun HomeworkScreen(
                                 dueDate = hw.dueDate
                             )
                             when (result) {
+                                TanweerNotificationManager.ScheduleReminderResult.NOTIFICATIONS_DISABLED -> {
+                                    Toast.makeText(context, context.getString(R.string.notification_reminders_disabled), Toast.LENGTH_SHORT).show()
+                                }
                                 TanweerNotificationManager.ScheduleReminderResult.SUCCESS -> {
                                     Toast.makeText(context, "🔔 تم تفعيل تذكير دراسي دقيق على جهازك للواجب: ${hw.title}", Toast.LENGTH_SHORT).show()
                                 }

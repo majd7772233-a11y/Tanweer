@@ -302,6 +302,21 @@
 
 **الأدلة:** %TEMP%\tanweer-notifications-round-20261119\evidence، phone-settings-academic-notifications.xml، tanweer_prefs.xml ولقطات NotificationManager.
 
+### P2-03 implementation checkpoint (2026-11-22)
+
+**Status:** IMPLEMENTED / LOCAL AUTOMATED TESTS PASS / LOCAL STAGING DEBUG BUILD PASS / EXACT-SHA CI PENDING / PHASE 5 DEVICE ACCEPTANCE OPEN.
+
+- The three settings handlers now delegate to category-specific notification-manager operations. Turning homework, exams, or schedule notifications OFF cancels its summary ID (2001, 2002, or 2003) synchronously and does not cancel the other categories.
+- Homework and exam individual reminder IDs are persisted in separate SharedPreferences string-set registries at the same locked point where AlarmManager accepts the PendingIntent. This lets the OFF path cancel scheduled alarms and already-posted item notifications even when an item was later removed from Room. Cached Room IDs are also checked as a compatibility/recovery fallback. Account purge clears both registries.
+- OFF transitions increment a category generation. The settings values and generations are read atomically; summary/individual posts and new AlarmManager scheduling verify the enabled preference plus the same generation immediately before delivery/scheduling. This blocks old asynchronous checks and in-flight schedules from reviving alerts after OFF, including an OFF/ON race. Individual alarm receivers capture that generation before their asynchronous Room lookup and pass it through to the notification publisher, so an already-delivered stale broadcast cannot publish after a rapid OFF/ON transition.
+- A persisted OFF setting is reconciled by the next reminder check after process recreation. Individual homework/exam scheduling returns NOTIFICATIONS_DISABLED while its global type is OFF, and the calling screens display a localized Arabic/English explanation.
+- Local tests: NotificationToggleBehaviorTest 10/10 (Robolectric API 28), NotificationDeliveryPolicyTest 2/2, and existing AcademicReminderPolicyTest 3/3. Total 15/15, with zero failures, errors, or skips. These are automated local tests, not Android 10/15 physical-device acceptance.
+- Local :app:assembleStagingDebug passed. APK: app/build/outputs/apk/staging/debug/app-staging-debug.apk; size 33,573,932 bytes; SHA-256 2FE0E0C405BF84C21F890C34884BBB1E93BCDA7D66244796BE58AB9E55DC0CB7. Built only; not installed or launched.
+- git diff --check passed. The temporary Gradle memory/worker adjustments were reverted; gradle.properties matches its original tracked content.
+- **Still open for Phase 5:** verify the visible alert disappears immediately when toggled OFF and cannot reappear after a process restart on the actual Android 10 Galaxy S9 and Android 15 device; check both summary IDs and individual reminder IDs, then restore the QA preference baseline. Do not mark this physical-device acceptance as passed here.
+- **CI boundary:** exact-SHA GitHub Android CI has not yet run for this implementation commit. Record its final run and SHA in the follow-up CI closeout; no Worker deployment, secrets change, D1 migration, production write, Release signing, app installation/launch, main update, or PR merge was performed.
+
+
 ## P2-04 — موعد الاختبار يُخلط مع حالة المراجعة الشخصية
 
 **مراجع التقرير:** TNW-EXAM-STATUS-001 وTNW-EXAM-STATUS-002.
@@ -975,7 +990,7 @@
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
 | Phase 1 — P1 trust / persistence / stability | IMPLEMENTATION + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | f98371e10aa3ad303f28815e73ad90416f50c799 | Android Ubuntu: testStagingDebugUnitTest PASS; assembleStagingDebug PASS. Server: TypeScript, dependency security baseline, Wrangler bundle validation PASS; 42 files / 293 tests PASS. Local Windows/Robolectric AtomicFile issue is host-specific and the unchanged API34 test passed on Ubuntu. Migration 0034 remains memory-SQLite-only; P1-02 explicitly deferred and P1-03 remains a text-quality guard pending real PDF extraction work/verification in Phase 5. Device acceptance Phase 5. |
-| Phase 2 — P2 data correctness / sync truth | P2-01 + P2-02 IMPLEMENTATION AND AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172 | P2-01 Android + Server exact-SHA CI PASS. P2-02 Android run 45013081671 PASS; Server run 45013081388 PASS. P2-03 onward not started. Device/UI/notification acceptance remains Phase 5. |
+| Phase 2 ? P2 data correctness / sync truth | P2-01 + P2-02 IMPLEMENTATION AND AUTOMATED CI VERIFIED; P2-03 IMPLEMENTED / LOCAL TESTS + BUILD PASS / EXACT-SHA CI PENDING; PHASE 5 ACCEPTANCE OPEN | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03 SHA pending initial commit | P2-01 Android + Server exact-SHA CI PASS. P2-02 Android run 45013081671 PASS; Server run 45013081388 PASS. P2-03 local tests 13/13 and Staging Debug assemble PASS; exact-SHA Android CI pending. P2-04 onward not started. Phase 5 physical-device acceptance remains open. |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |
 | Phase 5 — final acceptance | NOT STARTED | — | — |

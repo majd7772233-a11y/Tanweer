@@ -98,4 +98,5 @@
     <string name="other_individual_notification_big_text">تذكير بالتكليف لمادة %1$s:\n%2$s\nيرجى مراجعة تفاصيل التكليف.</string>
     <string name="calendar_day_add_description">يمكنك توثيق الدروس والتكليفات لهذا التاريخ في أي وقت</string>
     <string name="calendar_empty_day_message">لا توجد منشورات أو تكليفات أو فعاليات مسجلة لهذا اليوم في آخر لقطة شهرية مؤكدة. يمكنك إضافة وتوثيق الحصة بالضغط على زر الإضافة أعلاه.</string>
+    <string name="notification_reminders_disabled">التذكيرات متوقفة من الإعدادات. فعّل إشعارات هذا النوع أولاً.</string>
 </resources>

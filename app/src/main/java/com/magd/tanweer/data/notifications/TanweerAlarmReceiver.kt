@@ -32,6 +32,7 @@ class TanweerAlarmReceiver : BroadcastReceiver() {
     }
 
     private fun dispatchHomeworkReminder(context: Context, homeworkId: String) {
+        val expectedGeneration = TanweerNotificationManager.homeworkNotificationGenerationSnapshot()
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -64,7 +65,8 @@ class TanweerAlarmReceiver : BroadcastReceiver() {
                         homework.id,
                         homework.title,
                         homework.subjectName,
-                        homework.taskType
+                        homework.taskType,
+                        expectedGeneration
                     )
                 } else {
                     TanweerNotificationManager.cancelReminder(context, homeworkId, ACTION_HOMEWORK_REMINDER)
@@ -78,6 +80,7 @@ class TanweerAlarmReceiver : BroadcastReceiver() {
     }
 
     private fun dispatchExamReminder(context: Context, examId: String) {
+        val expectedGeneration = TanweerNotificationManager.examNotificationGenerationSnapshot()
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -104,7 +107,7 @@ class TanweerAlarmReceiver : BroadcastReceiver() {
                 )
                 if (shouldNotify && exam != null) {
                     TanweerNotificationManager.showIndividualExamNotification(
-                        context, exam.id, exam.title, exam.subjectName
+                        context, exam.id, exam.title, exam.subjectName, expectedGeneration
                     )
                 } else {
                     TanweerNotificationManager.cancelReminder(context, examId, ACTION_EXAM_REMINDER)
