@@ -54,6 +54,11 @@
     <string name="exam_review_progress">%1$d of %2$d exams reviewed</string>
     <string name="exam_schedule_status_today">Today</string>
     <string name="exam_count_format">%1$d exams</string>
+    <string name="catchup_range_since_last_visit">Since last visit ⏳</string>
+    <string name="catchup_range_yesterday">Yesterday ⏪</string>
+    <string name="catchup_range_last_three_days">Last 3 days 📅</string>
+    <string name="catchup_range_this_week">This week 🗓️</string>
+    <string name="catchup_range_last_two_weeks">Last 2 weeks 📚</string>
 
     <string name="homework_screen_summary">Homework: %1$d • Projects: %2$d • Other: %3$d</string>
     <string name="homework_screen_summary_loading">Checking assignment data...</string>

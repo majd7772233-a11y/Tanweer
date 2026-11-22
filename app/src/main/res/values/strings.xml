@@ -56,6 +56,11 @@
     <string name="exam_review_progress">تمت مراجعة %1$d من %2$d اختبارات</string>
     <string name="exam_schedule_status_today">موعد اليوم</string>
     <string name="exam_count_format">%1$d اختبارات</string>
+    <string name="catchup_range_since_last_visit">منذ آخر دخول ⏳</string>
+    <string name="catchup_range_yesterday">يوم أمس ⏪</string>
+    <string name="catchup_range_last_three_days">آخر 3 أيام 📅</string>
+    <string name="catchup_range_this_week">الأسبوع الحالي 🗓️</string>
+    <string name="catchup_range_last_two_weeks">آخر أسبوعين 📚</string>
 
     <string name="homework_screen_summary">واجبات: %1$d • مشاريع: %2$d • غير مصنّف: %3$d</string>
     <string name="homework_screen_summary_loading">جارٍ التحقق من بيانات التكليفات...</string>

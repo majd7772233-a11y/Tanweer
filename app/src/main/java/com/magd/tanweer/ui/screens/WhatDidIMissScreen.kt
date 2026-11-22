@@ -38,16 +38,7 @@ import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.HomeworkTaskKind
 import com.magd.tanweer.util.HomeworkTaskTypePolicy
-import java.text.SimpleDateFormat
 import java.util.*
-
-enum class MissedTimeRange(val label: String, val daysBack: Int) {
-    SINCE_LAST_VISIT("منذ آخر دخول ⏳", 0),
-    YESTERDAY("يوم أمس ⏪", 1),
-    LAST_3_DAYS("آخر 3 أيام 📅", 3),
-    THIS_WEEK("الأسبوع الحالي 🗓️", 7),
-    LAST_TWO_WEEKS("آخر أسبوعين 📚", 14)
-}
 
 enum class CatchupCategoryFilter(val label: String, val icon: String) {
     ALL("الكل", "✨"),
@@ -105,22 +96,13 @@ fun WhatDidIMissScreen(
     var selectedCategoryFilter by remember { mutableStateOf(CatchupCategoryFilter.ALL) }
     var activeTranscriptionContent by remember { mutableStateOf<ContentItem?>(null) }
 
-    val sdf = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
-    val timeFormatter = remember { SimpleDateFormat("yyyy-MM-dd hh:mm a", Locale.getDefault()) }
-    val todayStr = remember { sdf.format(Date()) }
-
-    val (startDateStr, endDateStr) = remember(selectedRange, lastOpenDate) {
-        val today = sdf.format(Date())
-        if (selectedRange == MissedTimeRange.SINCE_LAST_VISIT) {
-            val sinceDate = lastOpenDate.ifBlank { today }
-            Pair(sinceDate, today)
-        } else {
-            val cal = Calendar.getInstance()
-            cal.add(Calendar.DAY_OF_YEAR, -selectedRange.daysBack)
-            val from = sdf.format(cal.time)
-            Pair(from, today)
-        }
-    }
+    val resolvedDateRange = MissedDateRangePolicy.resolve(
+        range = selectedRange,
+        lastOpenDate = lastOpenDate,
+        nowMillis = System.currentTimeMillis()
+    )
+    val startDateStr = resolvedDateRange.startDate
+    val endDateStr = resolvedDateRange.endDate
 
     val allContents by viewModel.repository.getAllContents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -237,7 +219,7 @@ fun WhatDidIMissScreen(
                                     .padding(horizontal = 14.dp, vertical = 7.dp)
                             ) {
                                 Text(
-                                    text = range.label,
+                                    text = stringResource(range.labelRes),
                                     fontSize = tanweerTextSize(12f),
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isSelected) TextOnAccent else TextSecondary
