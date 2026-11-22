@@ -1,7 +1,5 @@
 package com.magd.tanweer.ui.screens
 
-import com.magd.tanweer.R
-
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
