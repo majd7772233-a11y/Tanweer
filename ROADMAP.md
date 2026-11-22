@@ -472,7 +472,7 @@
 
 ### P2-09 implementation checkpoint (2026-11-22)
 
-**الحالة:** IMPLEMENTED LOCALLY / ANDROID FOCUSED TESTS PASS (22/22) / STAGING DEBUG BUILD PASS / EXACT-SHA CI PENDING / PHASE 5 DEVICE ACCEPTANCE OPEN.
+**الحالة:** IMPLEMENTED / ANDROID FOCUSED TESTS PASS (22/22) / STAGING DEBUG BUILD PASS / EXACT-SHA ANDROID + SERVER CI PASS / PHASE 5 DEVICE ACCEPTANCE OPEN.
 
 - **سبب المشكلة:** نموذج `AddHomeworkDialog` كان يعرض موعد التسليم فقط، بينما `TanweerViewModel.addHomework()` يلتقط `selected_study_date` المخزّن دون إظهار القيمة التي ستُحفظ للمستخدم.
 - **تاريخ البداية:** يبدأ حقل تاريخ الدراسة من التاريخ المختار الحالي إذا كان ISO صالحاً؛ لا يُستبدل تلقائياً بتاريخ الجهاز. عند غياب قيمة صالحة فقط، يعود افتراضياً إلى تاريخ اليوم.
@@ -481,9 +481,9 @@
 - **التعريب:** تمت إضافة مفاتيح العنوان والوصف والاختيار واليوم والتأكيد والإلغاء إلى `values/strings.xml` و`values-en/strings.xml`؛ XML صالح ولا توجد مفاتيح مكررة.
 - **الاختبارات المحلية:** 22 اختباراً في 7 ملفات، صفر فشل/أخطاء/تخطي؛ تشمل حالتي الحفاظ على تاريخ سابق صالح والرجوع لليوم عند غياب قيمة أو عدم صلاحيتها.
 - **البناء المحلي:** `:app:assembleStagingDebug` نجح. APK `app/build/outputs/apk/staging/debug/app-staging-debug.apk` بحجم 33,590,705 بايت وSHA-256 `4945E734A6C2E67E83A6F5E7ED4DA22CED96B560AD82D5711598B77B2279F8C0`. تم البناء فقط؛ لم يتم تثبيته أو تشغيله.
-- **التحقق الباقي:** exact-SHA Android + Server CI بعد دفع commit التنفيذ. لا يُعلن اكتمال P2-09 قبل مراجعة نتائج التشغيل على SHA نفسه.
+- **التحقق exact-SHA:** commit التنفيذ 07ccb85c55d92e8c3963c5bb523f0f8833fde5ac اجتاز Android run 45048086662: اختبارات الوحدة، assembleStagingDebug (BUILD SUCCESSFUL)، ورفع Debug APK. Artifact ID 14763848718، الاسم Tanweer-debug-79d852147c9027ff98be1d9ba2a5eb0da0363bb8، الحجم 31,121,214 بايت، ZIP SHA-256 a45fa419bee786c79430570aad3084846bf5c1a158d934a3a63c64d363c13ac0. Server run 45048086552 اجتاز npm audit وTypeScript و43 ملف Vitest / 295 اختباراً، وWrangler dry-run لـProduction وStaging. لم يحدث نشر.
 - **Phase 5:** ما زال اختبار فتح النموذج واختيار التاريخ والحفظ/إعادة الفتح ومقارنة Room على الأجهزة الفعلية مؤجلاً للمرحلة الخامسة؛ لم تُستخدم أجهزة أو محاكيات.
-- **النطاق:** Android/UI + ViewModel + موارد واختبارات فقط. لا API أو Server أو schema أو migration أو قاعدة بيانات بعيدة أو نشر أو أسرار أو release أو تعديل `main` أو دمج PR.
+- **النطاق:** Android/UI + ViewModel + موارد واختبارات فقط. لا API أو Server أو schema أو migration أو قاعدة بيانات بعيدة أو نشر أو أسرار أو release أو تعديل main أو دمج PR. التنفيذ 07ccb85c55d92e8c3963c5bb523f0f8833fde5ac؛ CI Android 45048086662 وServer 45048086552 ناجحان على SHA نفسه.
 ## P2-10 — مرشح المكتبة يطابق المادة الفرعية بسبب contains
 
 **مرجع التقرير:** TNW-LIBRARY-SUBJECT-FILTER-001.
@@ -1076,7 +1076,7 @@
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
 | Phase 1 — P1 trust / persistence / stability | IMPLEMENTATION + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | f98371e10aa3ad303f28815e73ad90416f50c799 | Android Ubuntu: testStagingDebugUnitTest PASS; assembleStagingDebug PASS. Server: TypeScript, dependency security baseline, Wrangler bundle validation PASS; 42 files / 293 tests PASS. Local Windows/Robolectric AtomicFile issue is host-specific and the unchanged API34 test passed on Ubuntu. Migration 0034 remains memory-SQLite-only; P1-02 explicitly deferred and P1-03 remains a text-quality guard pending real PDF extraction work/verification in Phase 5. Device acceptance Phase 5. |
-| Phase 2 - P2 data correctness / sync truth | P2-01 through P2-08 implementation and exact-SHA Android/Server CI verified; P2-09 implementation + local tests/build passed, exact-SHA CI pending; Phase 5 device acceptance open | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03: 35763ee8b6e8faa217df51798fcb2ec7274841b9; P2-04: 9e090054dfd2d0f9277a4ea9e4d6a208d40eb968; P2-05: e217ff83ca8f3bb2c2b6fd5d6b05df891985f149; P2-06: a42983cf0c1a1ef8010b323b5f119746623ddfde; P2-07 implementation: 50c05318cb3f9248edf73cf41a27f72661a69beb; P2-07 correction: bbeb3e95130cf099cd4dae34b2ea78c3f71ca745; P2-08: cf310f0dae231260e63eb8951db9f81cc76036e3 | P2-07 Android 45041331045 PASS (unit tests, Staging Debug assemble, Debug artifact upload 14760929667); first Android run 45040453269 failed only due duplicate R import and was corrected. P2-07 Server 45041331041 PASS (audit, typecheck, 43 Vitest files / 295 tests, Wrangler Production + Staging dry-runs). No deployment or database apply/write. Physical acceptance remains Phase 5. |
+| Phase 2 - P2 data correctness / sync truth | P2-01 through P2-09 implementations and exact-SHA Android/Server CI verified; Phase 5 device acceptance open | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03: 35763ee8b6e8faa217df51798fcb2ec7274841b9; P2-04: 9e090054dfd2d0f9277a4ea9e4d6a208d40eb968; P2-05: e217ff83ca8f3bb2c2b6fd5d6b05df891985f149; P2-06: a42983cf0c1a1ef8010b323b5f119746623ddfde; P2-07: bbeb3e95130cf099cd4dae34b2ea78c3f71ca745; P2-08: cf310f0dae231260e63eb8951db9f81cc76036e3; P2-09: 07ccb85c55d92e8c3963c5bb523f0f8833fde5ac | P2-09 Android 45048086662 PASS (unit tests, Staging Debug assemble, Debug APK artifact 14763848718); Server 45048086552 PASS (npm audit, TypeScript, 43 Vitest files / 295 tests, Wrangler Production + Staging dry-runs). No deployment or database apply/write. Physical acceptance remains Phase 5. |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |
 | Phase 5 — final acceptance | NOT STARTED | — | — |
