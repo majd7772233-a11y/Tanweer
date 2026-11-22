@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -33,6 +34,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.ContentItem
 import com.magd.tanweer.data.model.ScheduleSlot
 import com.magd.tanweer.data.model.SyncState
+import com.magd.tanweer.R
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.ui.NavigationTab
 import com.magd.tanweer.ui.SubScreen
@@ -40,6 +42,8 @@ import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.HomeworkTaskKind
+import com.magd.tanweer.util.HomeworkTaskTypePolicy
 import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.*
@@ -128,7 +132,15 @@ fun HomeScreen(
     val docCount = documentedSubjectsMap.size
     val progressPercent = if (totalSubjectsCount == 0) 0f else (docCount.toFloat() / totalSubjectsCount.toFloat())
 
-    val upcomingHwCount = homeworks.count { !it.isCompleted }
+    val pendingHomeworkCount = homeworks.count {
+        !it.isCompleted && HomeworkTaskTypePolicy.isHomework(it.taskType)
+    }
+    val pendingProjectCount = homeworks.count {
+        !it.isCompleted && HomeworkTaskTypePolicy.isTask(it.taskType)
+    }
+    val pendingOtherAssignmentCount = homeworks.count {
+        !it.isCompleted && HomeworkTaskTypePolicy.classify(it.taskType) == HomeworkTaskKind.UNKNOWN
+    }
     val upcomingExamsCount = remember(exams, todayDate) {
         exams.count { it.examDate >= todayDate }
     }
@@ -401,12 +413,26 @@ fun HomeScreen(
                         Text("📝", fontSize = tanweerTextSize(20f))
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = when { !hasHomeworkSnapshot -> "—"; homeworks.isEmpty() -> "لا توجد واجبات"; upcomingHwCount > 0 -> "$upcomingHwCount متبقية"; else -> "منجزة ✓" },
-                            fontSize = tanweerTextSize(12f),
+                            text = when {
+                                !hasHomeworkSnapshot -> "—"
+                                pendingHomeworkCount + pendingProjectCount + pendingOtherAssignmentCount == 0 ->
+                                    stringResource(R.string.home_tasks_none_pending)
+                                else -> stringResource(
+                                    R.string.home_tasks_pending_summary,
+                                    pendingHomeworkCount,
+                                    pendingProjectCount,
+                                    pendingOtherAssignmentCount
+                                )
+                            },
+                            fontSize = tanweerTextSize(11f),
                             fontWeight = FontWeight.Bold,
-                            color = if (!hasHomeworkSnapshot) TextSecondary else if (upcomingHwCount > 0) WarmAmber else EmeraldGreen
+                            color = if (!hasHomeworkSnapshot) TextSecondary
+                                else if (pendingHomeworkCount + pendingProjectCount + pendingOtherAssignmentCount > 0) WarmAmber
+                                else EmeraldGreen,
+                            maxLines = 2,
+                            textAlign = TextAlign.Center
                         )
-                        Text(text = "الواجبات", fontSize = tanweerTextSize(10f), color = TextMuted)
+                        Text(text = stringResource(R.string.home_tasks_card_label), fontSize = tanweerTextSize(10f), color = TextMuted)
                     }
                 }
 

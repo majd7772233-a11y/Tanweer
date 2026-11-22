@@ -60,7 +60,11 @@ class TanweerAlarmReceiver : BroadcastReceiver() {
                 )
                 if (shouldNotify && homework != null) {
                     TanweerNotificationManager.showIndividualHomeworkNotification(
-                        context, homework.id, homework.title, homework.subjectName
+                        context,
+                        homework.id,
+                        homework.title,
+                        homework.subjectName,
+                        homework.taskType
                     )
                 } else {
                     TanweerNotificationManager.cancelReminder(context, homeworkId, ACTION_HOMEWORK_REMINDER)

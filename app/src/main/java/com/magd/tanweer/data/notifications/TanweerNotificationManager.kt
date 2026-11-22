@@ -14,6 +14,8 @@ import androidx.core.app.NotificationManagerCompat
 import com.magd.tanweer.MainActivity
 import com.magd.tanweer.R
 import com.magd.tanweer.data.local.TanweerDatabase
+import com.magd.tanweer.util.HomeworkTaskKind
+import com.magd.tanweer.util.HomeworkTaskTypePolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -203,14 +205,24 @@ object TanweerNotificationManager {
                         val completions = db.homeworkDao().getCompletionsForUser(user.id).first()
                         val completedIds = completions.map { it.homeworkId }.toSet()
                         val pending = homeworks.filter {
-                            it.id !in completedIds && it.syncStatus != "DELETE_PENDING"
+                            it.id !in completedIds &&
+                                it.syncStatus != "DELETE_PENDING" &&
+                                HomeworkTaskTypePolicy.isHomework(it.taskType)
                         }
                         if (pending.isNotEmpty()) {
                             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                                 .setSmallIcon(R.mipmap.ic_launcher)
-                                .setContentTitle("📝 تذكير الواجبات المدرسية")
-                                .setContentText("لديك ${pending.size} واجبات مدرسية قيد الإنجاز للشعبة.")
-                                .setStyle(NotificationCompat.BigTextStyle().bigText("لديك ${pending.size} واجبات غير مكتملة، منها: ${pending.first().title}."))
+                                .setContentTitle(context.getString(R.string.homework_notification_title))
+                                .setContentText(context.getString(R.string.homework_notification_content, pending.size))
+                                .setStyle(
+                                    NotificationCompat.BigTextStyle().bigText(
+                                        context.getString(
+                                            R.string.homework_notification_big_text,
+                                            pending.size,
+                                            pending.first().title
+                                        )
+                                    )
+                                )
                                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                                 .setContentIntent(pendingHwIntent)
                                 .setAutoCancel(true)
@@ -412,9 +424,26 @@ object TanweerNotificationManager {
         context: Context,
         homeworkId: String,
         title: String,
-        subjectName: String
+        subjectName: String,
+        taskType: String = "HOMEWORK"
     ) {
         initChannel(context)
+        val kind = HomeworkTaskTypePolicy.classify(taskType)
+        val titleResource = when (kind) {
+            HomeworkTaskKind.HOMEWORK -> R.string.homework_individual_notification_title
+            HomeworkTaskKind.TASK -> R.string.project_individual_notification_title
+            HomeworkTaskKind.UNKNOWN -> R.string.other_individual_notification_title
+        }
+        val contentResource = when (kind) {
+            HomeworkTaskKind.HOMEWORK -> R.string.homework_individual_notification_content
+            HomeworkTaskKind.TASK -> R.string.project_individual_notification_content
+            HomeworkTaskKind.UNKNOWN -> R.string.other_individual_notification_content
+        }
+        val bigTextResource = when (kind) {
+            HomeworkTaskKind.HOMEWORK -> R.string.homework_individual_notification_big_text
+            HomeworkTaskKind.TASK -> R.string.project_individual_notification_big_text
+            HomeworkTaskKind.UNKNOWN -> R.string.other_individual_notification_big_text
+        }
         val openIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             putExtra(EXTRA_NAVIGATE_TO, "HOMEWORK")
@@ -428,11 +457,11 @@ object TanweerNotificationManager {
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("⏰ تذكير بموعد تسليم واجب: $subjectName")
-            .setContentText("تذكير: $title")
+            .setContentTitle(context.getString(titleResource, subjectName))
+            .setContentText(context.getString(contentResource, title))
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
-                    "تذكير الواجب المدرسي لمادة $subjectName:\n$title\nيرجى إنجاز الواجب ورفعه للشعبة قبل انتهاء المهلة."
+                    context.getString(bigTextResource, subjectName, title)
                 )
             )
             .setPriority(NotificationCompat.PRIORITY_HIGH)

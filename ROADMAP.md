@@ -276,6 +276,16 @@
 
 **الأدلة:** %TEMP%\tanweer-sync-round-20261118، %TEMP%\tanweer-homework-round-20261119، %TEMP%\tanweer-calendar-batch-20261119\evidence، %TEMP%\tanweer-notifications-round-20261119\evidence.
 
+**حالة التنفيذ — 2026-11-22:** IMPLEMENTED / AUTOMATED REGRESSION TESTS ADDED / CI PENDING / PHASE 5 ACCEPTANCE OPEN.
+
+- أُضيف `HomeworkTaskTypePolicy` كمصدر تصنيف واحد: `HOMEWORK` والقيم القديمة null/blank تُعامل كواجب، و`TASK` كمشروع، والقيم غير المعروفة تبقى ظاهرة في «الكل» لكنها لا تدخل عداد الواجبات أو المشاريع.
+- شاشة التكليفات تفصل إجمالي الواجبات والمشاريع والأنواع الأخرى، وتفصل ما يستحق اليوم، كما أصبحت فلاتر HOMEWORK وTASK والعدادات الزمنية تستخدم التصنيف الموحد. شارات العناصر وحالة عدم وجود نتائج تذكر نوع العنصر الصحيح.
+- التقويم يفصل أعداد الواجبات والمشاريع والتكليفات غير المصنفة، ومؤشرات الأيام، وبطاقات تفاصيل اليوم والنافذة المنبثقة. لا تظهر TASK بعنوان أو لون واجب.
+- بطاقة اليوم الرئيسية تفصل الواجبات والمشاريع والتكليفات الأخرى غير المنجزة. «ماذا فاتني» تحتفظ بقسم تكليفات موحد مع شارة نوع لكل عنصر ونص إكمال مناسب.
+- إشعار ID 2001 يجمع HOMEWORK فقط. التذكير الفردي يحافظ على إمكانية تذكير المشروع لكنه يسميه مشروعاً، ويستخدم موارد عربية/إنجليزية.
+- أُضيفت `HomeworkTaskTypePolicyTest` لتغطية القيم القديمة والتطبيع وTASK والأنواع غير المعروفة. نتيجة CI لم تُسجل بعد عند إنشاء هذا التغيير.
+- **المتبقي لمرحلة 5:** مراجعة بصرية فعلية لفلاتر HOMEWORK/TASK والقائمة والتقويم واليوم و«ماذا فاتني»، والتحقق من إشعار ID 2001 وتذكير مشروع فردي على Android 10 و15. لا تُجرَ هذه الاختبارات الآن ولا تُسجل PASS قبل مرحلة 5.
+
 ## P2-03 — إيقاف مفتاح الإشعار لا يلغي الإشعار النشط فوراً
 
 **مراجع التقرير:** عيوب دفعة الإشعارات المؤكدة 19 نوفمبر، وتأكيد الإعادة على Galaxy S9 وAndroid 15 بتاريخ 20 نوفمبر.
@@ -964,7 +974,7 @@
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
 | Phase 1 — P1 trust / persistence / stability | IMPLEMENTATION + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | f98371e10aa3ad303f28815e73ad90416f50c799 | Android Ubuntu: testStagingDebugUnitTest PASS; assembleStagingDebug PASS. Server: TypeScript, dependency security baseline, Wrangler bundle validation PASS; 42 files / 293 tests PASS. Local Windows/Robolectric AtomicFile issue is host-specific and the unchanged API34 test passed on Ubuntu. Migration 0034 remains memory-SQLite-only; P1-02 explicitly deferred and P1-03 remains a text-quality guard pending real PDF extraction work/verification in Phase 5. Device acceptance Phase 5. |
-| Phase 2 — P2 data correctness / sync truth | P2-01 CODE + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | 412bba30859426a891ba860a92aa201446007537 | Android CI 44948329141 PASS (Ubuntu unit tests, Staging Debug assemble, Debug artifact upload); Server CI 44948329112 PASS (typecheck, audit baseline, 42 files / 293 tests, Wrangler production + staging dry-run). Local Windows suite 128/129 with the known AtomicFile host issue; focused P2-01 17/17. P2-02 onward not started. |
+| Phase 2 — P2 data correctness / sync truth | P2-01 IMPLEMENTATION + CI VERIFIED; P2-02 IMPLEMENTED / CI PENDING; PHASE 5 ACCEPTANCE OPEN | 412bba30859426a891ba860a92aa201446007537; P2-02 SHA recorded after creation | P2-01 Android + Server exact-SHA CI PASS. P2-02 source/tests/docs committed; exact-SHA Android CI pending. P2-03 onward not started. |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |
 | Phase 5 — final acceptance | NOT STARTED | — | — |

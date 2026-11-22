@@ -22,10 +22,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.R
 import com.magd.tanweer.data.local.HomeworkToggleResult
 import com.magd.tanweer.data.model.*
 import com.magd.tanweer.ui.GroupSyncSource
@@ -34,6 +36,8 @@ import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.HomeworkTaskKind
+import com.magd.tanweer.util.HomeworkTaskTypePolicy
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -48,9 +52,29 @@ enum class MissedTimeRange(val label: String, val daysBack: Int) {
 enum class CatchupCategoryFilter(val label: String, val icon: String) {
     ALL("الكل", "✨"),
     LESSONS("الدروس", "📝"),
-    HOMEWORK("الواجبات", "📋"),
+    HOMEWORK("التكليفات", "📋"),
     EXAMS("الاختبارات", "🔴"),
     EVENTS("الفعاليات", "🎪")
+}
+
+@Composable
+private fun AssignmentTypePill(homework: HomeworkItem) {
+    val kind = HomeworkTaskTypePolicy.classify(homework.taskType)
+    val labelRes = when (kind) {
+        HomeworkTaskKind.HOMEWORK -> R.string.homework_type_label_homework
+        HomeworkTaskKind.TASK -> R.string.homework_type_label_project
+        HomeworkTaskKind.UNKNOWN -> R.string.homework_type_label_other
+    }
+    val color = when (kind) {
+        HomeworkTaskKind.HOMEWORK -> WarmAmber
+        HomeworkTaskKind.TASK -> PurpleAccent
+        HomeworkTaskKind.UNKNOWN -> TextMuted
+    }
+    GlassPill(
+        text = stringResource(labelRes),
+        color = color,
+        bgColor = color.copy(alpha = 0.15f)
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -245,7 +269,7 @@ fun WhatDidIMissScreen(
                 StatPillCard(
                     icon = "📋",
                     count = missedHomeworks.size,
-                    label = "واجبات",
+                    label = stringResource(R.string.homework_and_projects_label),
                     color = WarmAmber,
                     modifier = Modifier.weight(1f),
                     isSelected = selectedCategoryFilter == CatchupCategoryFilter.HOMEWORK,
@@ -436,6 +460,7 @@ fun WhatDidIMissScreen(
                                     color = WarmAmber,
                                     bgColor = WarmAmber.copy(alpha = 0.15f)
                                 )
+                                AssignmentTypePill(hw)
                                 val isDueInWindow = hw.dueDate in startDateStr..endDateStr
                                 val isAssignedInWindow = hw.studyDate in startDateStr..endDateStr
                                 if (isDueInWindow && !isAssignedInWindow) {
@@ -512,7 +537,13 @@ fun WhatDidIMissScreen(
                         ) {
                             Icon(
                                 imageVector = if (hw.isCompleted) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                contentDescription = "إكمال الواجب",
+                                contentDescription = stringResource(
+                                    when (HomeworkTaskTypePolicy.classify(hw.taskType)) {
+                                        HomeworkTaskKind.HOMEWORK -> R.string.homework_complete_homework
+                                        HomeworkTaskKind.TASK -> R.string.homework_complete_project
+                                        HomeworkTaskKind.UNKNOWN -> R.string.homework_complete_other
+                                    }
+                                ),
                                 tint = if (hw.isCompleted) EmeraldGreen else TextMuted
                             )
                         }
@@ -567,6 +598,7 @@ fun WhatDidIMissScreen(
                                     color = CyanAccent,
                                     bgColor = CyanGlow
                                 )
+                                AssignmentTypePill(hw)
                                 GlassPill(
                                     text = "قادم ⏳",
                                     color = EmeraldGreen,
@@ -627,7 +659,13 @@ fun WhatDidIMissScreen(
                         ) {
                             Icon(
                                 imageVector = if (hw.isCompleted) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                contentDescription = "إكمال الواجب",
+                                contentDescription = stringResource(
+                                    when (HomeworkTaskTypePolicy.classify(hw.taskType)) {
+                                        HomeworkTaskKind.HOMEWORK -> R.string.homework_complete_homework
+                                        HomeworkTaskKind.TASK -> R.string.homework_complete_project
+                                        HomeworkTaskKind.UNKNOWN -> R.string.homework_complete_other
+                                    }
+                                ),
                                 tint = if (hw.isCompleted) EmeraldGreen else TextMuted
                             )
                         }

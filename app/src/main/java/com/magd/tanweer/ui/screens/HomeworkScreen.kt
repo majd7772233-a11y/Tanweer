@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +59,8 @@ import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.HomeworkTaskKind
+import com.magd.tanweer.util.HomeworkTaskTypePolicy
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
 import kotlinx.coroutines.Dispatchers
@@ -175,28 +178,45 @@ fun HomeworkScreen(
         sdf.format(cal.time)
     }
 
-    val filteredHomeworks = remember(homeworks, selectedFilter, selectedTaskTypeFilter) {
-        val typeFiltered = if (selectedTaskTypeFilter == null) {
-            homeworks
-        } else {
-            homeworks.filter { it.taskType == selectedTaskTypeFilter }
+    val typeFilteredHomeworks = remember(homeworks, selectedTaskTypeFilter) {
+        when (selectedTaskTypeFilter) {
+            "HOMEWORK" -> homeworks.filter { HomeworkTaskTypePolicy.isHomework(it.taskType) }
+            "TASK" -> homeworks.filter { HomeworkTaskTypePolicy.isTask(it.taskType) }
+            else -> homeworks
         }
+    }
 
+    val filteredHomeworks = remember(typeFilteredHomeworks, selectedFilter) {
         when (selectedFilter) {
-            HomeworkFilter.ALL -> typeFiltered
-            HomeworkFilter.TODAY -> typeFiltered.filter { it.dueDate == todayDate }
-            HomeworkFilter.TOMORROW -> typeFiltered.filter { it.dueDate == tomorrowDate }
-            HomeworkFilter.THIS_WEEK -> typeFiltered.filter { it.dueDate in todayDate..endOfWeekDate }
-            HomeworkFilter.OVERDUE -> typeFiltered.filter { !it.isCompleted && it.dueDate < todayDate }
-            HomeworkFilter.COMPLETED -> typeFiltered.filter { it.isCompleted }
+            HomeworkFilter.ALL -> typeFilteredHomeworks
+            HomeworkFilter.TODAY -> typeFilteredHomeworks.filter { it.dueDate == todayDate }
+            HomeworkFilter.TOMORROW -> typeFilteredHomeworks.filter { it.dueDate == tomorrowDate }
+            HomeworkFilter.THIS_WEEK -> typeFilteredHomeworks.filter { it.dueDate in todayDate..endOfWeekDate }
+            HomeworkFilter.OVERDUE -> typeFilteredHomeworks.filter { !it.isCompleted && it.dueDate < todayDate }
+            HomeworkFilter.COMPLETED -> typeFilteredHomeworks.filter { it.isCompleted }
         }
     }
 
-    val overdueCount = remember(homeworks, todayDate) {
-        homeworks.count { !it.isCompleted && it.dueDate < todayDate }
+    val homeworkCount = remember(homeworks) {
+        homeworks.count { HomeworkTaskTypePolicy.isHomework(it.taskType) }
     }
-    val todayCount = remember(homeworks, todayDate) {
-        homeworks.count { it.dueDate == todayDate }
+    val projectCount = remember(homeworks) {
+        homeworks.count { HomeworkTaskTypePolicy.isTask(it.taskType) }
+    }
+    val otherAssignmentCount = remember(homeworks) {
+        homeworks.count { HomeworkTaskTypePolicy.classify(it.taskType) == HomeworkTaskKind.UNKNOWN }
+    }
+    val todayHomeworkCount = remember(homeworks, todayDate) {
+        homeworks.count { HomeworkTaskTypePolicy.isHomework(it.taskType) && it.dueDate == todayDate }
+    }
+    val todayProjectCount = remember(homeworks, todayDate) {
+        homeworks.count { HomeworkTaskTypePolicy.isTask(it.taskType) && it.dueDate == todayDate }
+    }
+    val overdueCount = remember(typeFilteredHomeworks, todayDate) {
+        typeFilteredHomeworks.count { !it.isCompleted && it.dueDate < todayDate }
+    }
+    val todayCount = remember(typeFilteredHomeworks, todayDate) {
+        typeFilteredHomeworks.count { it.dueDate == todayDate }
     }
 
     Box(
@@ -224,9 +244,19 @@ fun HomeworkScreen(
                             style = AppTypography.SectionHeader.copy(color = CyanAccent)
                         )
                         Text(
-                            text = if (hasHomeworkSnapshot) "${homeworks.size} واجب • $todayCount مستحق اليوم" else "جارٍ التحقق من بيانات الواجبات...",
+                            text = if (hasHomeworkSnapshot) {
+                                stringResource(R.string.homework_screen_summary, homeworkCount, projectCount, otherAssignmentCount)
+                            } else {
+                                stringResource(R.string.homework_screen_summary_loading)
+                            },
                             style = AppTypography.Body.copy(color = TextSecondary)
                         )
+                        if (hasHomeworkSnapshot) {
+                            Text(
+                                text = stringResource(R.string.homework_screen_due_today, todayHomeworkCount, todayProjectCount),
+                                style = AppTypography.Meta.copy(color = TextMuted)
+                            )
+                        }
                     }
                     GlassButton(
                         text = "إضافة واجب",
@@ -246,7 +276,7 @@ fun HomeworkScreen(
                     FilterChip(
                         selected = selectedTaskTypeFilter == null,
                         onClick = { selectedTaskTypeFilter = null },
-                        label = { Text(if (hasHomeworkSnapshot) "الكل (${homeworks.size})" else "الكل") },
+                        label = { Text(if (hasHomeworkSnapshot) stringResource(R.string.homework_type_filter_all, homeworks.size) else stringResource(R.string.homework_type_filter_all_loading)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyanAccent,
                             selectedLabelColor = TextOnAccent
@@ -255,7 +285,12 @@ fun HomeworkScreen(
                     FilterChip(
                         selected = selectedTaskTypeFilter == "HOMEWORK",
                         onClick = { selectedTaskTypeFilter = if (selectedTaskTypeFilter == "HOMEWORK") null else "HOMEWORK" },
-                        label = { Text("واجبات 📝") },
+                        label = {
+                            Text(
+                                if (hasHomeworkSnapshot) stringResource(R.string.homework_type_filter_homework, homeworkCount)
+                                else stringResource(R.string.homework_type_filter_homework_loading)
+                            )
+                        },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyanAccent,
                             selectedLabelColor = TextOnAccent
@@ -264,7 +299,12 @@ fun HomeworkScreen(
                     FilterChip(
                         selected = selectedTaskTypeFilter == "TASK",
                         onClick = { selectedTaskTypeFilter = if (selectedTaskTypeFilter == "TASK") null else "TASK" },
-                        label = { Text("مشاريع 🎯") },
+                        label = {
+                            Text(
+                                if (hasHomeworkSnapshot) stringResource(R.string.homework_type_filter_projects, projectCount)
+                                else stringResource(R.string.homework_type_filter_projects_loading)
+                            )
+                        },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyanAccent,
                             selectedLabelColor = TextOnAccent
@@ -287,10 +327,10 @@ fun HomeworkScreen(
                     items(HomeworkFilter.values()) { filter ->
                         val isSelected = selectedFilter == filter
                         val badgeCount = if (!hasHomeworkSnapshot) null else when (filter) {
-                            HomeworkFilter.ALL -> homeworks.size
+                            HomeworkFilter.ALL -> typeFilteredHomeworks.size
                             HomeworkFilter.TODAY -> todayCount
                             HomeworkFilter.OVERDUE -> overdueCount
-                            HomeworkFilter.COMPLETED -> homeworks.count { it.isCompleted }
+                            HomeworkFilter.COMPLETED -> typeFilteredHomeworks.count { it.isCompleted }
                             else -> null
                         }
                         Box(
@@ -338,10 +378,16 @@ fun HomeworkScreen(
                 item {
                     if (hasHomeworkSnapshot) {
                         EmptyStateGlass(
-                            title = if (homeworks.isEmpty()) "لا توجد واجبات في هذا القسم" else "لا توجد واجبات تطابق التصفية الحالية",
-                            subtitle = if (homeworks.isEmpty()) "يمكنك إضافة واجب جديد وتضمين صور الحلول" else "غيّر نوع الواجب أو فترة الاستحقاق لعرض نتائج أخرى.",
+                            title = when (selectedTaskTypeFilter) {
+                                "HOMEWORK" -> stringResource(R.string.homework_empty_homeworks_title)
+                                "TASK" -> stringResource(R.string.homework_empty_projects_title)
+                                else -> if (homeworks.isEmpty()) stringResource(R.string.homework_empty_all_title)
+                                    else stringResource(R.string.homework_empty_filtered_title)
+                            },
+                            subtitle = stringResource(R.string.homework_empty_description),
                             icon = "📝",
-                            actionButtonText = if (homeworks.isEmpty()) "إضافة واجب جديد" else "عرض جميع الواجبات",
+                            actionButtonText = if (homeworks.isEmpty()) stringResource(R.string.homework_empty_add_action)
+                                else stringResource(R.string.homework_empty_show_all_action),
                             onActionClick = {
                                 if (homeworks.isEmpty()) isLocalAddModalOpen = true
                                 else {
@@ -730,14 +776,25 @@ fun HomeworkCard(
                                 text = "${homework.subjectName}: ${homework.title}",
                                 style = AppTypography.Title.copy(color = TextPrimary)
                             )
-                            if (homework.taskType == "TASK") {
+                            val taskKind = HomeworkTaskTypePolicy.classify(homework.taskType)
+                            val taskKindLabel = when (taskKind) {
+                                HomeworkTaskKind.HOMEWORK -> R.string.homework_type_label_homework
+                                HomeworkTaskKind.TASK -> R.string.homework_type_label_project
+                                HomeworkTaskKind.UNKNOWN -> R.string.homework_type_label_other
+                            }
+                            val taskKindColor = when (taskKind) {
+                                HomeworkTaskKind.HOMEWORK -> WarmAmber
+                                HomeworkTaskKind.TASK -> PurpleAccent
+                                HomeworkTaskKind.UNKNOWN -> TextMuted
+                            }
+                            if (taskKind != HomeworkTaskKind.HOMEWORK) {
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(WarmAmber.copy(alpha = 0.15f))
+                                        .background(taskKindColor.copy(alpha = 0.15f))
                                         .padding(horizontal = 5.dp, vertical = 2.dp)
                                 ) {
-                                    Text("مشروع 🎯", style = AppTypography.Badge.copy(color = WarmAmber))
+                                    Text(stringResource(taskKindLabel), style = AppTypography.Badge.copy(color = taskKindColor))
                                 }
                             }
                             if (homework.isOfficial) {
