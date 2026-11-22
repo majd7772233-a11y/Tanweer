@@ -523,40 +523,57 @@ class UnifiedMutationQueue private constructor(
                     }
                 }
                 "ISSUE_COMMENT", "ISSUE_COMMENT_CREATE" -> {
-                    val comment = db.issueDao().getCommentById(item.entityId)
-                    if (comment != null) {
-                        val res = api.addIssueComment(
-                            issueId = comment.issueId,
-                            req = com.magd.tanweer.data.remote.AddCommentRequest(id = comment.id, comment = comment.comment)
-                        )
-                        if (res.isSuccessful && res.body()?.success == true) {
-                            db.issueDao().updateCommentSyncStatus(comment.id, "SYNCED")
+                    IssueDataSyncCoordinator.mutex.withLock {
+                        val comment = db.issueDao().getCommentById(item.entityId)
+                        val issueId: String
+                        val request: com.magd.tanweer.data.remote.AddCommentRequest
+                        if (comment != null) {
+                            issueId = comment.issueId
+                            request = com.magd.tanweer.data.remote.AddCommentRequest(
+                                id = comment.id,
+                                comment = comment.comment
+                            )
+                        } else {
+                            val payload = JSONObject(item.payloadJson)
+                            issueId = payload.optString("issueId", "")
+                            val commentText = payload.optString("comment", "")
+                            if (issueId.isBlank() || commentText.isBlank()) {
+                                handleMutationFailure(item, "تعذر قراءة بيانات التعليق للمزامنة")
+                                return@withLock false
+                            }
+                            request = com.magd.tanweer.data.remote.AddCommentRequest(
+                                id = item.entityId,
+                                comment = commentText
+                            )
+                        }
+
+                        val response = api.addIssueComment(issueId, request)
+                        val body = response.body()
+                        if (response.isSuccessful && body?.success == true) {
+                            db.withTransaction {
+                                if (comment != null) {
+                                    db.issueDao().confirmCommentSync(
+                                        comment.id,
+                                        body.isTeacherAnswer == true
+                                    )
+                                }
+                                db.issueDao().markIssueInDiscussion(issueId)
+                            }
+                            // The ACK owns the write. Details refresh is best effort, but it
+                            // shares the lock and reconciler so it cannot race a screen refresh.
+                            IssueDataSyncCoordinator.refreshIssueDetailsLocked(db, api, issueId)
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, "فشل إرسال التعليق (${res.code()})")
-                            false
-                        }
-                    } else {
-                        try {
-                            val obj = JSONObject(item.payloadJson)
-                            val issueId = obj.optString("issueId", "")
-                            val commentText = obj.optString("comment", "")
-                            if (issueId.isNotBlank() && commentText.isNotBlank()) {
-                                val res = api.addIssueComment(issueId, com.magd.tanweer.data.remote.AddCommentRequest(id = item.entityId, comment = commentText))
-                                if (res.isSuccessful && res.body()?.success == true) {
-                                    outboxDao.deleteOutbox(item.id)
-                                    true
-                                } else {
-                                    handleMutationFailure(item, res.body()?.error?.message ?: res.body()?.message ?: if (res.isSuccessful) "الخادم لم يؤكد إرسال التعليق (success=false)" else "فشل إرسال التعليق (${res.code()})")
-                                    false
-                                }
-                            } else {
-                                handleMutationFailure(item, "تعذر قراءة بيانات التعليق للمزامنة")
-                                false
-                            }
-                        } catch (_: Exception) {
-                            handleMutationFailure(item, "صيغة بيانات التعليق غير صالحة")
+                            handleMutationFailure(
+                                item,
+                                body?.error?.message ?: body?.message
+                                    ?: if (response.isSuccessful) {
+                                        "الخادم لم يؤكد إرسال التعليق (success=false)"
+                                    } else {
+                                        "فشل إرسال التعليق (HTTP " + response.code() + ")"
+                                    }
+                            )
                             false
                         }
                     }

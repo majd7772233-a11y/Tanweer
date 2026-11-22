@@ -42,6 +42,7 @@ class DatabaseMigrationTest {
                     db.execSQL("CREATE TABLE `cached_events` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `eventDate` TEXT NOT NULL, `timeStr` TEXT, `title` TEXT NOT NULL, `description` TEXT, `category` TEXT NOT NULL, `location` TEXT, `createdAt` INTEGER NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))")
                     db.execSQL("CREATE TABLE `cached_issues` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `subjectId` TEXT, `homeworkId` TEXT, `examId` TEXT, `title` TEXT NOT NULL, `description` TEXT, `status` TEXT NOT NULL, `bestCommentId` TEXT, `authorName` TEXT NOT NULL, `subjectName` TEXT, `subjectIcon` TEXT, `commentsCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))")
                     db.execSQL("CREATE TABLE `cached_issue_comments` (`id` TEXT NOT NULL, `issueId` TEXT NOT NULL, `userId` TEXT NOT NULL, `authorName` TEXT NOT NULL, `comment` TEXT NOT NULL, `isBestAnswer` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))")
+                    db.execSQL("INSERT INTO cached_issue_comments VALUES ('legacy_comment_1', 'legacy_issue_1', 'user_1', 'معلم', 'إجابة محفوظة', 0, 1600000000, 'SYNCED')")
                     db.execSQL("CREATE TABLE `cached_books` (`id` TEXT NOT NULL, `gradeId` INTEGER NOT NULL, `subjectId` TEXT NOT NULL, `title` TEXT NOT NULL, `edition` TEXT, `fileSizeMb` REAL NOT NULL, `fileUrl` TEXT NOT NULL, `thumbnailUrl` TEXT, `subjectName` TEXT NOT NULL, `subjectIcon` TEXT NOT NULL, PRIMARY KEY(`id`))")
                     db.execSQL("CREATE TABLE `cached_chat_messages` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `senderId` TEXT NOT NULL, `senderName` TEXT NOT NULL, `senderGradeSection` TEXT NOT NULL, `text` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `status` TEXT NOT NULL, PRIMARY KEY(`id`))")
                     db.execSQL("CREATE TABLE `book_reading_state` (`bookId` TEXT NOT NULL, `lastPage` INTEGER NOT NULL, `zoom` REAL NOT NULL, `theme` TEXT NOT NULL, `totalStudySeconds` INTEGER NOT NULL, `uniquePagesCount` INTEGER NOT NULL, `lastReadAt` INTEGER NOT NULL, PRIMARY KEY(`bookId`))")
@@ -85,7 +86,8 @@ class DatabaseMigrationTest {
                 TanweerDatabase.MIGRATION_12_13,
                 TanweerDatabase.MIGRATION_13_14,
                 TanweerDatabase.MIGRATION_14_15,
-                TanweerDatabase.MIGRATION_15_16
+                TanweerDatabase.MIGRATION_15_16,
+                TanweerDatabase.MIGRATION_16_17
             )
             .build()
 
@@ -123,6 +125,10 @@ class DatabaseMigrationTest {
         assertEquals(2, migratedItem.attempts)
         assertEquals("Network timeout", migratedItem.error)
         assertEquals("CREATE", migratedItem.operation)
+
+        val migratedIssueComment = roomDb.issueDao().getCommentById("legacy_comment_1")
+        assertNotNull(migratedIssueComment)
+        assertFalse(migratedIssueComment!!.isTeacherAnswer)
 
         // 4. Verify that legacy daily_plans data was migrated to cached_daily_plan
         val planItems = dailyPlanDao.getPlanForDateSync("user_1", "2026-10-19")

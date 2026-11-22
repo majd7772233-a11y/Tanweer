@@ -172,6 +172,7 @@ data class IssueCommentEntity(
     val authorName: String,
     val comment: String,
     val isBestAnswer: Boolean = false,
+    val isTeacherAnswer: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val syncStatus: String = "SYNCED"
 )

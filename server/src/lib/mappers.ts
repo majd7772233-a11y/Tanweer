@@ -160,6 +160,7 @@ export function mapIssueComment(r: any) {
     authorName: r.author_name ?? r.authorName ?? '',
     comment: r.comment,
     isBestAnswer: Boolean(r.is_best_answer ?? r.isBestAnswer ?? false),
+    isTeacherAnswer: Boolean(r.is_teacher_answer ?? r.isTeacherAnswer ?? false),
     createdAt: Number(r.created_at ?? r.createdAt ?? Date.now()),
   };
 }

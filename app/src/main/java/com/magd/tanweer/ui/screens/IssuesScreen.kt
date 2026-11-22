@@ -1,5 +1,7 @@
 package com.magd.tanweer.ui.screens
 
+import com.magd.tanweer.R
+
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
@@ -22,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,17 +32,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.IssueCommentItem
 import com.magd.tanweer.data.model.IssueItem
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.R
 import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
-
-enum class IssueFilter(val label: String) {
-    ALL("الكل"),
-    OPEN("قيد الانتظار ⏳"),
-    SOLVED("تم حلها ✅"),
-    DISCUSSING("قيد النقاش 💬")
-}
+import com.magd.tanweer.util.IssueFilter
+import com.magd.tanweer.util.IssueStatus
+import com.magd.tanweer.util.IssueStatusPolicy
 
 @Composable
 fun IssuesScreen(
@@ -82,12 +82,7 @@ fun IssuesScreen(
     }
 
     val filteredIssues = remember(issues, selectedFilter) {
-        when (selectedFilter) {
-            IssueFilter.ALL -> issues
-            IssueFilter.OPEN -> issues.filter { it.status == "OPEN" }
-            IssueFilter.SOLVED -> issues.filter { it.status == "SOLVED" }
-            IssueFilter.DISCUSSING -> issues.filter { it.status == "IN_DISCUSSION" }
-        }
+        issues.filter { IssueStatusPolicy.matches(selectedFilter, it.status) }
     }
 
     Box(
@@ -148,7 +143,7 @@ fun IssuesScreen(
                                 .padding(horizontal = 14.dp, vertical = 8.dp)
                         ) {
                             Text(
-                                text = filter.label,
+                                text = stringResource(filter.labelRes),
                                 fontSize = tanweerTextSize(12f),
                                 color = if (isSelected) CyanAccent else TextPrimary,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
@@ -214,8 +209,8 @@ fun IssueListItemCard(
     issue: IssueItem,
     onClick: () -> Unit
 ) {
-    val isSolved = issue.status == "SOLVED"
-    val borderColor = if (isSolved) EmeraldGreen.copy(alpha = 0.5f) else GlassBorderSubtle
+    val status = IssueStatusPolicy.fromApiValue(issue.status)
+    val borderColor = if (status.isResolved) EmeraldGreen.copy(alpha = 0.5f) else GlassBorderSubtle
 
     GlassCard(
         modifier = Modifier
@@ -234,16 +229,14 @@ fun IssueListItemCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    val statusColor = when (issue.status) {
-                        "SOLVED" -> EmeraldGreen
-                        "IN_DISCUSSION" -> WarmAmber
-                        else -> CyanAccent
+                    val statusColor = when (status) {
+                        IssueStatus.OPEN -> CyanAccent
+                        IssueStatus.IN_DISCUSSION -> WarmAmber
+                        IssueStatus.SOLVED, IssueStatus.VERIFIED -> EmeraldGreen
+                        IssueStatus.CLOSED -> TextMuted
+                        IssueStatus.UNKNOWN -> TextSecondary
                     }
-                    val statusText = when (issue.status) {
-                        "SOLVED" -> "تم الحل بنموذجية ✓"
-                        "IN_DISCUSSION" -> "قيد النقاش 💬"
-                        else -> "مفتوح للنقاش ⏳"
-                    }
+                    val statusText = stringResource(status.labelRes)
 
                     GlassPill(
                         text = statusText,
@@ -429,9 +422,19 @@ fun IssueDetailView(
                 }
 
                 issue?.let { iss ->
-                    val statusColor = if (iss.status == "SOLVED") EmeraldGreen else CyanAccent
-                    val statusText = if (iss.status == "SOLVED") "تم الحل بنجاح" else "قيد النقاش"
-                    GlassPill(text = statusText, color = statusColor, bgColor = statusColor.copy(alpha = 0.15f))
+                    val status = IssueStatusPolicy.fromApiValue(iss.status)
+                    val statusColor = when (status) {
+                        IssueStatus.OPEN -> CyanAccent
+                        IssueStatus.IN_DISCUSSION -> WarmAmber
+                        IssueStatus.SOLVED, IssueStatus.VERIFIED -> EmeraldGreen
+                        IssueStatus.CLOSED -> TextMuted
+                        IssueStatus.UNKNOWN -> TextSecondary
+                    }
+                    GlassPill(
+                        text = stringResource(status.labelRes),
+                        color = statusColor,
+                        bgColor = statusColor.copy(alpha = 0.15f)
+                    )
                 }
             }
 
@@ -552,6 +555,14 @@ fun IssueDetailView(
                                             bgColor = EmeraldGreen.copy(alpha = 0.15f)
                                         )
                                     }
+                                    if (bestComment.isTeacherAnswer) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        GlassPill(
+                                            text = stringResource(R.string.issue_teacher_answer_badge),
+                                            color = CyanAccent,
+                                            bgColor = CyanAccent.copy(alpha = 0.12f)
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
                                         text = bestComment.comment,
@@ -627,6 +638,15 @@ fun IssueDetailView(
                                             Text("اعتماد كحل ⭐", fontSize = tanweerTextSize(10f), fontWeight = FontWeight.Bold)
                                         }
                                     }
+                                }
+
+                                if (comment.isTeacherAnswer) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    GlassPill(
+                                        text = stringResource(R.string.issue_teacher_answer_badge),
+                                        color = CyanAccent,
+                                        bgColor = CyanAccent.copy(alpha = 0.12f)
+                                    )
                                 }
 
                                 Spacer(modifier = Modifier.height(6.dp))

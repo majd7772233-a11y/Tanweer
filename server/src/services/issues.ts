@@ -57,7 +57,7 @@ export async function handleGetIssueDetails(issueId: string, user: UserContext, 
   if (memberCheck) return memberCheck;
 
   const comments = await env.DB.prepare(
-    `SELECT id, issue_id, user_id, author_name, comment, is_best_answer, created_at
+    `SELECT id, issue_id, user_id, author_name, comment, is_best_answer, is_teacher_answer, created_at
      FROM issue_comments
      WHERE issue_id = ?
      ORDER BY is_best_answer DESC, created_at ASC`

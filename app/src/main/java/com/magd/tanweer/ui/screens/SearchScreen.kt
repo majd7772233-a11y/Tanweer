@@ -40,6 +40,8 @@ import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.IssueStatus
+import com.magd.tanweer.util.IssueStatusPolicy
 import com.magd.tanweer.util.ArabicSearchEngine
 import java.text.SimpleDateFormat
 import java.util.*
@@ -604,10 +606,18 @@ fun SearchScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                val issueStatus = IssueStatusPolicy.fromApiValue(issue.status)
+                                val issueStatusColor = when (issueStatus) {
+                                    IssueStatus.OPEN -> CyanAccent
+                                    IssueStatus.IN_DISCUSSION -> WarmAmber
+                                    IssueStatus.SOLVED, IssueStatus.VERIFIED -> EmeraldGreen
+                                    IssueStatus.CLOSED -> TextMuted
+                                    IssueStatus.UNKNOWN -> TextSecondary
+                                }
                                 GlassPill(
-                                    text = if (issue.status == "SOLVED") "تم الحل ✅" else "قيد النقاش 💬",
-                                    color = if (issue.status == "SOLVED") EmeraldGreen else PurpleAccent,
-                                    bgColor = if (issue.status == "SOLVED") EmeraldGreen.copy(alpha = 0.15f) else PurpleAccent.copy(alpha = 0.15f)
+                                    text = stringResource(issueStatus.labelRes),
+                                    color = issueStatusColor,
+                                    bgColor = issueStatusColor.copy(alpha = 0.15f)
                                 )
                                 Text(text = "${issue.commentsCount} ردود", fontSize = tanweerTextSize(11f), color = TextMuted)
                             }

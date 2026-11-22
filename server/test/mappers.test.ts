@@ -149,6 +149,33 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
     expect((mapped as any).author_grade_section).toBeUndefined();
   });
 
+  it('preserves the verified-teacher-answer marker in the issue comment contract', () => {
+    const teacherAnswer = mapIssueComment({
+      id: 'comment_teacher',
+      issue_id: 'issue_1',
+      user_id: 'teacher_1',
+      author_name: 'معلم المادة',
+      comment: 'هذا هو الحل الصحيح',
+      is_best_answer: 0,
+      is_teacher_answer: 1,
+      created_at: 1700000000000,
+    });
+    const studentComment = mapIssueComment({
+      id: 'comment_student',
+      issue_id: 'issue_1',
+      user_id: 'student_1',
+      author_name: 'طالب',
+      comment: 'هل يمكن التوضيح؟',
+      is_best_answer: 0,
+      is_teacher_answer: 0,
+      created_at: 1700000001000,
+    });
+
+    expect(teacherAnswer.isTeacherAnswer).toBe(true);
+    expect(studentComment.isTeacherAnswer).toBe(false);
+    expect((teacherAnswer as any).is_teacher_answer).toBeUndefined();
+  });
+
   it('maps Chat message correctly', () => {
     const raw = {
       id: 'msg_1',

@@ -346,6 +346,21 @@ interface IssueDao {
 
     @Query("SELECT * FROM cached_issue_comments WHERE id = :id LIMIT 1")
     suspend fun getCommentById(id: String): IssueCommentEntity?
+    @Query("SELECT * FROM cached_issue_comments WHERE issueId = :issueId AND syncStatus IN ('PENDING', 'SYNCING', 'FAILED', 'LOCAL', 'DELETE_PENDING')")
+    suspend fun getPendingComments(issueId: String): List<IssueCommentEntity>
+
+    @Query("DELETE FROM cached_issue_comments WHERE issueId = :issueId AND syncStatus NOT IN ('PENDING', 'SYNCING', 'FAILED', 'LOCAL', 'DELETE_PENDING')")
+    suspend fun clearSyncedComments(issueId: String)
+
+    @Transaction
+    suspend fun replaceSyncedComments(issueId: String, serverComments: List<IssueCommentEntity>) {
+        val pending = getPendingComments(issueId)
+        clearSyncedComments(issueId)
+        val serverIds = serverComments.mapTo(mutableSetOf()) { it.id }
+        val retainedPending = pending.filterNot { it.id in serverIds }
+        val reconciled = serverComments + retainedPending
+        if (reconciled.isNotEmpty()) insertComments(reconciled)
+    }
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertIssues(issues: List<IssueEntity>)
@@ -370,15 +385,20 @@ interface IssueDao {
 
     @Query("UPDATE cached_issue_comments SET syncStatus = :status WHERE id = :id")
     suspend fun updateCommentSyncStatus(id: String, status: String)
+    @Query("UPDATE cached_issue_comments SET syncStatus = 'SYNCED', isTeacherAnswer = :isTeacherAnswer WHERE id = :id")
+    suspend fun confirmCommentSync(id: String, isTeacherAnswer: Boolean)
 
     @Query("UPDATE cached_issue_comments SET isBestAnswer = (id = :commentId) WHERE issueId = :issueId")
     suspend fun setBestAnswer(issueId: String, commentId: String)
 
-    @Query("UPDATE cached_issues SET bestCommentId = :commentId, status = 'SOLVED' WHERE id = :issueId")
+    @Query("UPDATE cached_issues SET bestCommentId = :commentId, status = 'SOLVED', syncStatus = 'SYNCING' WHERE id = :issueId")
     suspend fun markIssueSolved(issueId: String, commentId: String)
 
-    @Query("UPDATE cached_issues SET bestCommentId = :bestCommentId, status = :status WHERE id = :issueId")
-    suspend fun revertIssueStatus(issueId: String, bestCommentId: String?, status: String)
+    @Query("UPDATE cached_issues SET status = 'IN_DISCUSSION' WHERE id = :issueId AND status = 'OPEN'")
+    suspend fun markIssueInDiscussion(issueId: String)
+
+    @Query("UPDATE cached_issues SET bestCommentId = :bestCommentId, status = :status, syncStatus = :syncStatus WHERE id = :issueId")
+    suspend fun revertIssueStatus(issueId: String, bestCommentId: String?, status: String, syncStatus: String)
 
     @Query("UPDATE cached_issue_comments SET isBestAnswer = (id = :bestCommentId) WHERE issueId = :issueId")
     suspend fun revertCommentBestAnswer(issueId: String, bestCommentId: String?)

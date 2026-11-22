@@ -345,6 +345,7 @@ data class GenericResponse(
     val eventId: String? = null,
     val issueId: String? = null,
     val commentId: String? = null,
+    val isTeacherAnswer: Boolean? = null,
     val id: String? = null,
     val error: ApiError? = null
 )

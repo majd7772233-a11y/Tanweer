@@ -5,6 +5,8 @@ import androidx.room.withTransaction
 import com.magd.tanweer.data.local.*
 import com.magd.tanweer.data.model.*
 import com.magd.tanweer.data.remote.*
+import com.magd.tanweer.data.sync.IssueDataSyncCoordinator
+import com.magd.tanweer.data.sync.IssueDetailsRefreshResult
 import com.magd.tanweer.data.sync.UnifiedMutationQueue
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
@@ -76,6 +78,7 @@ class TanweerRepository(
 ) {
     val mutationQueue = UnifiedMutationQueue.getInstance(db, api)
     private val examMutationMutex = Mutex()
+    private val issueDataMutex = IssueDataSyncCoordinator.mutex
 
     init {
         mutationQueue.start()
@@ -1331,51 +1334,53 @@ class TanweerRepository(
     }
 
     suspend fun syncIssues(groupId: String): SyncResult = withContext(Dispatchers.IO) {
-        if (groupId.isBlank()) return@withContext SyncResult.Offline()
-        try {
-            val res = api.getIssues(groupId)
-            val body = res.body()
-            if (res.isSuccessful && body?.success == true) {
-                if (!ServerSnapshotValidation.hasOptionalMatchingCount(body.totalCount, body.issues.size) ||
-                    !ServerSnapshotValidation.hasUniqueNonBlankIds(body.issues.map { it.id }) ||
-                    !ServerSnapshotValidation.allBelongToGroup(body.issues.map { it.groupId }, groupId)
-                ) {
-                    return@withContext SyncResult.Error(
-                        "لقطة الاستفسارات تحتوي معرفات فارغة/مكررة أو لا تطابق المجموعة؛ احتُفظت البيانات المحلية"
-                    )
+        issueDataMutex.withLock {
+            if (groupId.isBlank()) return@withLock SyncResult.Offline()
+            try {
+                val res = api.getIssues(groupId)
+                val body = res.body()
+                if (res.isSuccessful && body?.success == true) {
+                    if (!ServerSnapshotValidation.hasOptionalMatchingCount(body.totalCount, body.issues.size) ||
+                        !ServerSnapshotValidation.hasUniqueNonBlankIds(body.issues.map { it.id }) ||
+                        !ServerSnapshotValidation.allBelongToGroup(body.issues.map { it.groupId }, groupId)
+                    ) {
+                        return@withLock SyncResult.Error(
+                            "لقطة الاستفسارات تحتوي معرفات فارغة/مكررة أو لا تطابق المجموعة؛ احتُفظت البيانات المحلية"
+                        )
+                    }
+                    val issues = body.issues.map {
+                        IssueEntity(
+                            id = it.id,
+                            groupId = it.groupId,
+                            subjectId = it.subjectId,
+                            homeworkId = it.homeworkId,
+                            examId = it.examId,
+                            title = it.title,
+                            description = it.description,
+                            status = it.status,
+                            bestCommentId = it.bestCommentId,
+                            authorName = it.authorName,
+                            subjectName = it.subjectName,
+                            subjectIcon = it.subjectIcon,
+                            commentsCount = it.commentsCount,
+                            createdAt = it.createdAt
+                        )
+                    }
+                    db.withTransaction {
+                        val reconciledIssues = ServerSnapshotReconciliation.preservePending(
+                            serverRows = issues,
+                            localPendingRows = db.issueDao().getPendingIssues(groupId)
+                        ) { it.id }
+                        db.issueDao().clearSyncedIssues(groupId)
+                        if (reconciledIssues.isNotEmpty()) db.issueDao().insertIssues(reconciledIssues)
+                    }
+                    SyncResult.Success(issues.size)
+                } else {
+                    resolveHttpError(res, "أوفلاين: الاستفسارات")
                 }
-                val issues = body.issues.map {
-                    IssueEntity(
-                        id = it.id,
-                        groupId = it.groupId,
-                        subjectId = it.subjectId,
-                        homeworkId = it.homeworkId,
-                        examId = it.examId,
-                        title = it.title,
-                        description = it.description,
-                        status = it.status,
-                        bestCommentId = it.bestCommentId,
-                        authorName = it.authorName,
-                        subjectName = it.subjectName,
-                        subjectIcon = it.subjectIcon,
-                        commentsCount = it.commentsCount,
-                        createdAt = it.createdAt
-                    )
-                }
-                db.withTransaction {
-                    val reconciledIssues = ServerSnapshotReconciliation.preservePending(
-                        serverRows = issues,
-                        localPendingRows = db.issueDao().getPendingIssues(groupId)
-                    ) { it.id }
-                    db.issueDao().clearSyncedIssues(groupId)
-                    if (reconciledIssues.isNotEmpty()) db.issueDao().insertIssues(reconciledIssues)
-                }
-                SyncResult.Success(issues.size)
-            } else {
-                resolveHttpError(res, "أوفلاين: الاستفسارات")
+            } catch (e: Exception) {
+                resolveException(e, "أوفلاين: الاستفسارات")
             }
-        } catch (e: Exception) {
-            resolveException(e, "أوفلاين: الاستفسارات")
         }
     }
 
@@ -2553,6 +2558,7 @@ class TanweerRepository(
                     authorName = it.authorName,
                     comment = it.comment,
                     isBestAnswer = it.isBestAnswer,
+                    isTeacherAnswer = it.isTeacherAnswer,
                     createdAt = it.createdAt,
                     syncStatus = it.syncStatus
                 )
@@ -4188,159 +4194,173 @@ class TanweerRepository(
     }
 
     suspend fun syncIssueDetails(issueId: String): SyncResult = withContext(Dispatchers.IO) {
-        try {
-            val res = api.getIssueDetails(issueId)
-            if (res.isSuccessful && res.body()?.success == true) {
-                val detail = res.body()!!
-                val comments = detail.comments.map {
-                    IssueCommentEntity(
-                        id = it.id,
-                        issueId = it.issueId,
-                        userId = it.userId,
-                        authorName = it.authorName,
-                        comment = it.comment,
-                        isBestAnswer = it.isBestAnswer || (detail.issue.bestCommentId == it.id),
-                        createdAt = it.createdAt
+        issueDataMutex.withLock { syncIssueDetailsLocked(issueId) }
+    }
+
+    /**
+     * Must only be called while IssueDataSyncCoordinator.mutex is held.
+     */
+    private suspend fun syncIssueDetailsLocked(issueId: String): SyncResult {
+        return when (val refresh = IssueDataSyncCoordinator.refreshIssueDetailsLocked(db, api, issueId)) {
+            is IssueDetailsRefreshResult.Success -> SyncResult.Success(refresh.commentsCount)
+            is IssueDetailsRefreshResult.InvalidSnapshot -> SyncResult.Error(refresh.message)
+            IssueDetailsRefreshResult.Offline -> SyncResult.Offline("أوفلاين: تفاصيل الاستفسار")
+        }
+    }
+
+    suspend fun addIssueComment(issueId: String, comment: String): Result<CommentAddResult> =
+        withContext(Dispatchers.IO) {
+            issueDataMutex.withLock {
+                val user = db.userDao().getUserSync()
+                    ?: return@withLock Result.failure(Exception("غير مسجل"))
+                val commentId = "cmt_" + System.currentTimeMillis()
+                val entity = IssueCommentEntity(
+                    id = commentId,
+                    issueId = issueId,
+                    userId = user.id,
+                    authorName = user.fullName,
+                    comment = comment,
+                    isBestAnswer = false,
+                    createdAt = System.currentTimeMillis(),
+                    syncStatus = "SYNCING"
+                )
+                db.issueDao().insertComment(entity)
+
+                try {
+                    val res = api.addIssueComment(issueId, AddCommentRequest(id = commentId, comment = comment))
+                    val responseBody = res.body()
+                    if (res.isSuccessful && responseBody?.success == true) {
+                        db.withTransaction {
+                            db.issueDao().confirmCommentSync(
+                                commentId,
+                                responseBody.isTeacherAnswer == true
+                            )
+                            db.issueDao().markIssueInDiscussion(issueId)
+                        }
+                        // The POST ACK is authoritative. A follow-up GET refreshes all
+                        // details when available but cannot turn a confirmed write into failure.
+                        syncIssueDetailsLocked(issueId)
+                        Result.success(CommentAddResult.Synced())
+                    } else if (res.isSuccessful) {
+                        db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
+                        Result.failure(
+                            Exception(responseBody?.message
+                                ?: "الخادم لم يؤكد حفظ التعليق (success=false)")
+                        )
+                    } else if (res.code() in listOf(400, 401, 403, 404, 409, 422)) {
+                        db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
+                        Result.failure(Exception(responseBody?.message
+                            ?: "رفض الخادم حفظ التعليق (HTTP " + res.code() + ")"))
+                    } else {
+                        val outboxItem = OutboxEntity(
+                            id = "ob_com_" + commentId + "_" + java.util.UUID.randomUUID(),
+                            entityType = "ISSUE_COMMENT_CREATE",
+                            entityId = commentId,
+                            operation = "CREATE",
+                            payloadJson = JSONObject().put("issueId", issueId).put("comment", comment).toString()
+                        )
+                        db.outboxDao().insertOutbox(outboxItem)
+                        db.issueDao().updateCommentSyncStatus(commentId, "PENDING")
+                        Result.success(CommentAddResult.QueuedOffline())
+                    }
+                } catch (e: Exception) {
+                    val outboxItem = OutboxEntity(
+                        id = "ob_com_" + commentId + "_" + java.util.UUID.randomUUID(),
+                        entityType = "ISSUE_COMMENT_CREATE",
+                        entityId = commentId,
+                        operation = "CREATE",
+                        payloadJson = JSONObject().put("issueId", issueId).put("comment", comment).toString()
+                    )
+                    db.outboxDao().insertOutbox(outboxItem)
+                    db.issueDao().updateCommentSyncStatus(commentId, "PENDING")
+                    Result.success(CommentAddResult.QueuedOffline())
+                }
+            }
+        }
+
+    suspend fun retrySyncIssueComment(
+        issueId: String,
+        commentId: String,
+        commentText: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        issueDataMutex.withLock {
+            db.issueDao().updateCommentSyncStatus(commentId, "SYNCING")
+            try {
+                val res = api.addIssueComment(issueId, AddCommentRequest(id = commentId, comment = commentText))
+                val body = res.body()
+                if (res.isSuccessful && body?.success == true) {
+                    db.withTransaction {
+                        db.issueDao().confirmCommentSync(commentId, body.isTeacherAnswer == true)
+                        db.issueDao().markIssueInDiscussion(issueId)
+                    }
+                    syncIssueDetailsLocked(issueId)
+                    Result.success(Unit)
+                } else {
+                    db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
+                    Result.failure(
+                        Exception(body?.error?.message ?: body?.message
+                            ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ التعليق (success=false)"
+                            else "فشل إرسال التعليق (HTTP " + res.code() + ")")
                     )
                 }
-                if (comments.isNotEmpty()) {
-                    db.issueDao().insertComments(comments)
+            } catch (e: Exception) {
+                db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun markBestAnswer(issueId: String, commentId: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            issueDataMutex.withLock {
+                val existingIssue = db.issueDao().getIssueSync(issueId)
+                val prevBestCommentId = existingIssue?.bestCommentId
+                val prevStatus = existingIssue?.status ?: "OPEN"
+                val prevSyncStatus = existingIssue?.syncStatus ?: "SYNCED"
+
+                db.withTransaction {
+                    db.issueDao().setBestAnswer(issueId, commentId)
+                    db.issueDao().markIssueSolved(issueId, commentId)
                 }
-                val issue = detail.issue
-                db.issueDao().insertIssue(
-                    IssueEntity(
-                        id = issue.id,
-                        groupId = issue.groupId,
-                        subjectId = issue.subjectId,
-                        homeworkId = issue.homeworkId,
-                        examId = issue.examId,
-                        title = issue.title,
-                        description = issue.description,
-                        status = issue.status,
-                        bestCommentId = issue.bestCommentId,
-                        authorName = issue.authorName,
-                        subjectName = issue.subjectName,
-                        subjectIcon = issue.subjectIcon,
-                        commentsCount = comments.size,
-                        createdAt = issue.createdAt
-                    )
-                )
-                SyncResult.Success(comments.size)
-            } else {
-                SyncResult.Offline()
-            }
-        } catch (e: Exception) {
-            SyncResult.Offline("أوفلاين: تفاصيل الاستفسار")
-        }
-    }
-
-    suspend fun addIssueComment(issueId: String, comment: String): Result<CommentAddResult> = withContext(Dispatchers.IO) {
-        val user = db.userDao().getUserSync() ?: return@withContext Result.failure(Exception("غير مسجل"))
-        val commentId = "cmt_${System.currentTimeMillis()}"
-        val entity = IssueCommentEntity(
-            id = commentId,
-            issueId = issueId,
-            userId = user.id,
-            authorName = user.fullName,
-            comment = comment,
-            isBestAnswer = false,
-            createdAt = System.currentTimeMillis(),
-            syncStatus = "SYNCING"
-        )
-        db.issueDao().insertComment(entity)
-
-        try {
-            val res = api.addIssueComment(issueId, AddCommentRequest(id = commentId, comment = comment))
-            val responseBody = res.body()
-            if (res.isSuccessful && responseBody?.success == true) {
-                db.issueDao().updateCommentSyncStatus(commentId, "SYNCED")
-                Result.success(CommentAddResult.Synced())
-            } else if (res.isSuccessful) {
-                db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
-                Result.failure(
-                    Exception(responseBody?.message
-                        ?: "الخادم لم يؤكد حفظ التعليق (success=false)")
-                )
-            } else if (res.code() in listOf(400, 401, 403, 404, 409, 422)) {
-                db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
-                Result.failure(Exception(responseBody?.message
-                    ?: "رفض الخادم حفظ التعليق (HTTP ${res.code()})"))
-            } else {
-                val outboxItem = OutboxEntity(
-                    id = "ob_com_${commentId}_${java.util.UUID.randomUUID()}",
-                    entityType = "ISSUE_COMMENT_CREATE",
-                    entityId = commentId,
-                    operation = "CREATE",
-                    payloadJson = "{\"issueId\":\"$issueId\",\"comment\":\"$comment\"}"
-                )
-                db.outboxDao().insertOutbox(outboxItem)
-                db.issueDao().updateCommentSyncStatus(commentId, "PENDING")
-                Result.success(CommentAddResult.QueuedOffline())
-            }
-        } catch (e: Exception) {
-            val outboxItem = OutboxEntity(
-                id = "ob_com_${commentId}_${java.util.UUID.randomUUID()}",
-                entityType = "ISSUE_COMMENT_CREATE",
-                entityId = commentId,
-                operation = "CREATE",
-                payloadJson = "{\"issueId\":\"$issueId\",\"comment\":\"$comment\"}"
-            )
-            db.outboxDao().insertOutbox(outboxItem)
-            db.issueDao().updateCommentSyncStatus(commentId, "PENDING")
-            Result.success(CommentAddResult.QueuedOffline())
-        }
-    }
-
-    suspend fun retrySyncIssueComment(issueId: String, commentId: String, commentText: String): Result<Unit> = withContext(Dispatchers.IO) {
-        db.issueDao().updateCommentSyncStatus(commentId, "SYNCING")
-        try {
-            val res = api.addIssueComment(issueId, AddCommentRequest(id = commentId, comment = commentText))
-            val body = res.body()
-            if (res.isSuccessful && body?.success == true) {
-                db.issueDao().updateCommentSyncStatus(commentId, "SYNCED")
-                Result.success(Unit)
-            } else {
-                db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
-                Result.failure(
-                    Exception(body?.error?.message ?: body?.message
-                        ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ التعليق (success=false)"
-                        else "فشل إرسال التعليق (HTTP ${res.code()})")
-                )
-            }
-        } catch (e: Exception) {
-            db.issueDao().updateCommentSyncStatus(commentId, "FAILED")
-            Result.failure(e)
-        }
-    }
-
-    suspend fun markBestAnswer(issueId: String, commentId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        val existingIssue = db.issueDao().getIssueSync(issueId)
-        val prevBestCommentId = existingIssue?.bestCommentId
-        val prevStatus = existingIssue?.status ?: "OPEN"
-
-        db.issueDao().setBestAnswer(issueId, commentId)
-        db.issueDao().markIssueSolved(issueId, commentId)
-        try {
-            val res = api.markBestAnswer(issueId, commentId)
-            val body = res.body()
-            if (res.isSuccessful && body?.success == true) {
-                Result.success(Unit)
-            } else {
-                db.issueDao().revertIssueStatus(issueId, prevBestCommentId, prevStatus)
-                db.issueDao().revertCommentBestAnswer(issueId, prevBestCommentId)
-                val errMsg = body?.error?.message ?: body?.message ?: when {
-                    res.isSuccessful -> "الخادم لم يؤكد اعتماد أفضل إجابة (success=false)"
-                    res.code() == 403 -> "عذرًا، فقط صاحب السؤال أو المعلم يمكنه اعتماد أفضل إجابة"
-                    else -> res.message()?.ifBlank { null } ?: "فشل اعتماد أفضل إجابة في السيرفر (${res.code()})"
+                try {
+                    val res = api.markBestAnswer(issueId, commentId)
+                    val body = res.body()
+                    if (res.isSuccessful && body?.success == true) {
+                        db.issueDao().updateSyncStatus(issueId, "SYNCED")
+                        syncIssueDetailsLocked(issueId)
+                        Result.success(Unit)
+                    } else {
+                        db.withTransaction {
+                            db.issueDao().revertIssueStatus(
+                                issueId,
+                                prevBestCommentId,
+                                prevStatus,
+                                prevSyncStatus
+                            )
+                            db.issueDao().revertCommentBestAnswer(issueId, prevBestCommentId)
+                        }
+                        val errMsg = body?.error?.message ?: body?.message ?: when {
+                            res.isSuccessful -> "الخادم لم يؤكد اعتماد أفضل إجابة (success=false)"
+                            res.code() == 403 -> "عذرًا، فقط صاحب السؤال أو المعلم يمكنه اعتماد أفضل إجابة"
+                            else -> res.message()?.ifBlank { null }
+                                ?: ("فشل اعتماد أفضل إجابة في السيرفر (" + res.code() + ")")
+                        }
+                        Result.failure(Exception(errMsg))
+                    }
+                } catch (e: Exception) {
+                    db.withTransaction {
+                        db.issueDao().revertIssueStatus(
+                            issueId,
+                            prevBestCommentId,
+                            prevStatus,
+                            prevSyncStatus
+                        )
+                        db.issueDao().revertCommentBestAnswer(issueId, prevBestCommentId)
+                    }
+                    Result.failure(e)
                 }
-                Result.failure(Exception(errMsg))
             }
-        } catch (e: Exception) {
-            db.issueDao().revertIssueStatus(issueId, prevBestCommentId, prevStatus)
-            db.issueDao().revertCommentBestAnswer(issueId, prevBestCommentId)
-            Result.failure(e)
         }
-    }
 
     suspend fun createIssue(
         groupId: String,

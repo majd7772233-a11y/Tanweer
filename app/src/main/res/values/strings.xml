@@ -111,4 +111,15 @@
     <string name="calendar_day_add_description">يمكنك توثيق الدروس والتكليفات لهذا التاريخ في أي وقت</string>
     <string name="calendar_empty_day_message">لا توجد منشورات أو تكليفات أو فعاليات مسجلة لهذا اليوم في آخر لقطة شهرية مؤكدة. يمكنك إضافة وتوثيق الحصة بالضغط على زر الإضافة أعلاه.</string>
     <string name="notification_reminders_disabled">التذكيرات متوقفة من الإعدادات. فعّل إشعارات هذا النوع أولاً.</string>
+    <string name="issues_filter_all">الكل</string>
+    <string name="issues_filter_discussing">قيد النقاش</string>
+    <string name="issues_filter_solved">الحلول المعتمدة</string>
+    <string name="issues_filter_closed">المغلقة</string>
+    <string name="issue_status_open">مفتوح للنقاش</string>
+    <string name="issue_status_in_discussion">قيد النقاش</string>
+    <string name="issue_status_solved">تم الحل بنموذجية</string>
+    <string name="issue_status_verified">حل موثّق</string>
+    <string name="issue_status_closed">مغلق</string>
+    <string name="issue_status_unknown">حالة غير معروفة</string>
+    <string name="issue_teacher_answer_badge">إجابة معلم معتمد</string>
 </resources>

@@ -109,4 +109,15 @@
     <string name="calendar_day_add_description">You can document lessons and assignments for this date at any time.</string>
     <string name="calendar_empty_day_message">No lessons, assignments or events are recorded for this day in the last confirmed monthly snapshot. You can add and document the lesson using the button above.</string>
     <string name="notification_reminders_disabled">Reminders are disabled in Settings. Enable this notification type first.</string>
+    <string name="issues_filter_all">All</string>
+    <string name="issues_filter_discussing">In discussion</string>
+    <string name="issues_filter_solved">Resolved</string>
+    <string name="issues_filter_closed">Closed</string>
+    <string name="issue_status_open">Open for discussion</string>
+    <string name="issue_status_in_discussion">In discussion</string>
+    <string name="issue_status_solved">Solved with an accepted answer</string>
+    <string name="issue_status_verified">Verified solution</string>
+    <string name="issue_status_closed">Closed</string>
+    <string name="issue_status_unknown">Unknown status</string>
+    <string name="issue_teacher_answer_badge">Verified teacher answer</string>
 </resources>
