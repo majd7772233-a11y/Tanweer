@@ -353,13 +353,29 @@ interface IssueDao {
     suspend fun clearSyncedComments(issueId: String)
 
     @Transaction
-    suspend fun replaceSyncedComments(issueId: String, serverComments: List<IssueCommentEntity>) {
+    suspend fun replaceSyncedComments(issueId: String, serverComments: List<IssueCommentEntity>): Int {
         val pending = getPendingComments(issueId)
         clearSyncedComments(issueId)
         val serverIds = serverComments.mapTo(mutableSetOf()) { it.id }
         val retainedPending = pending.filterNot { it.id in serverIds }
         val reconciled = serverComments + retainedPending
         if (reconciled.isNotEmpty()) insertComments(reconciled)
+        val commentsCount = countSyncedIssueComments(issueId)
+        updateIssueCommentsCount(issueId, commentsCount)
+        return commentsCount
+    }
+
+    @Query("SELECT COUNT(*) FROM cached_issue_comments WHERE issueId = :issueId AND syncStatus = 'SYNCED'")
+    suspend fun countSyncedIssueComments(issueId: String): Int
+
+    @Query("UPDATE cached_issues SET commentsCount = :commentsCount WHERE id = :issueId")
+    suspend fun updateIssueCommentsCount(issueId: String, commentsCount: Int)
+
+    @Transaction
+    suspend fun reconcileIssueCommentsCount(issueId: String): Int {
+        val commentsCount = countSyncedIssueComments(issueId)
+        updateIssueCommentsCount(issueId, commentsCount)
+        return commentsCount
     }
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

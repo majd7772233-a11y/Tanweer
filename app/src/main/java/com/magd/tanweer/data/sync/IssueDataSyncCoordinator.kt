@@ -59,8 +59,8 @@ internal object IssueDataSyncCoordinator {
                 )
             }
 
-            db.withTransaction {
-                db.issueDao().replaceSyncedComments(issueId, comments)
+            val reconciledCommentsCount = db.withTransaction {
+                val syncedCommentsCount = db.issueDao().replaceSyncedComments(issueId, comments)
                 val current = db.issueDao().getIssueSync(issueId)
                 val hasLocalMutation = current?.syncStatus in
                     setOf("PENDING", "SYNCING", "FAILED", "DELETE_PENDING")
@@ -79,14 +79,15 @@ internal object IssueDataSyncCoordinator {
                             authorName = issue.authorName,
                             subjectName = issue.subjectName,
                             subjectIcon = issue.subjectIcon,
-                            commentsCount = comments.size,
+                            commentsCount = syncedCommentsCount,
                             createdAt = issue.createdAt,
                             syncStatus = "SYNCED"
                         )
                     )
                 }
+                syncedCommentsCount
             }
-            IssueDetailsRefreshResult.Success(comments.size)
+            IssueDetailsRefreshResult.Success(reconciledCommentsCount)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

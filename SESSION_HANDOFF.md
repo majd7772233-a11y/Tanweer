@@ -1,5 +1,35 @@
 # Tanweer — Session Handoff
 
+## Current verified state — 2026-11-22 (supersedes older handoff below)
+
+### Repository / PR
+- Repository: `majd7772233-a11y/Tanweer`; working branch only: `work/release-readiness`.
+- This update is based on pushed commit `995eeaf4bc35dac790a2020c01ca2390fc49d512`; `main` is untouched.
+- PR #6 is Open + Draft + unmerged, base `main`, head `work/release-readiness`. Keep it that way.
+- WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close it unless the user expressly asks.
+
+### P2-07 completed
+- Source fix commit `bbeb3e95130cf099cd4dae34b2ea78c3f71ca745`; documentation closeout commit `995eeaf4bc35dac790a2020c01ca2390fc49d512`.
+- Exact-SHA Android run `45041331045` and Server run `45041331041` both passed. Android covered unit tests, Staging Debug assembly and Debug artifact upload; Server covered audit, typecheck, 43 Vitest files / 295 tests and Wrangler Production + Staging dry-runs.
+- Phase 5 real-device acceptance remains OPEN; no install/launch was performed.
+
+### P2-08 implementation checkpoint in this branch update
+- Root cause: issue-card count comes from `cached_issues.commentsCount`; it was refreshed only by a successful details GET. The comment POST ACK marked the row `SYNCED` but did not refresh the parent count if the follow-up GET failed. The P2-07 detail reconciler also skipped the whole parent IssueEntity replacement while local mutation was pending, inadvertently leaving `commentsCount` stale.
+- `IssueDao` now counts only `cached_issue_comments` rows with `syncStatus = 'SYNCED'`, and updates only the parent's `commentsCount`. Pending/failed local comments remain visible but are not included in the server-confirmed count.
+- The same count reconciliation runs inside the direct add-comment ACK, retry ACK and Outbox ACK Room transactions. The shared detail snapshot reconciler recalculates count even when the issue's other fields are protected by a local-mutation guard.
+- Existing list cards observe the Room-backed `IssueItem.commentsCount`; no manual screen reopen is required.
+- Regression tests cover authoritative snapshot refresh, empty snapshot clearing confirmed count while preserving pending rows, and immediate ACK count refresh while parent issue state remains locally mutated.
+- Local validation: 21 Android unit tests passed (0 failures/errors/skips); `:app:assembleStagingDebug` passed. APK `app/build/outputs/apk/staging/debug/app-staging-debug.apk`, 33,583,629 bytes; built only, not installed/launched.
+- Exact-SHA CI for the P2-08 commit is pending. Context: Android run `45042763869` on the earlier docs-only SHA `995eeaf` reported 13/113 setup failures caused by `MavenArtifactFetcher` external artifact download `IOException` (`HttpURLConnection`), not source compilation/assertions; its Server run `45042763841` passed. P2-07 source SHA CI remained green.
+
+### Next action
+1. Verify exact-SHA Android and Server workflows on the P2-08 implementation commit.
+2. If Android CI fails only during external Maven artifact downloads, inspect the run logs and rerun the failed job without changing or excluding tests.
+3. Confirm local/remote parity and PR #6 Open + Draft + unmerged; keep the WebGPT task RUNNING.
+4. Continue with the next roadmap item only after the P2-08 exact-SHA CI result is recorded.
+5. Leave Phase 5 device acceptance open. Do not install/launch on emulator/phone, deploy, apply migrations, write D1, alter secrets, release or merge.
+--- Historical handoff snapshot (2026-11-17; superseded by the current section above) ---
+
 **آخر تحديث موثوق:** 2026-11-17  
 **مرجع الاستئناف الأساسي:** هذا القسم هو الحالة الحالية المعتمدة. الأقسام التاريخية التالية تسجل ما حدث في تواريخها، وقد تحتوي على رؤوس فروع أو نتائج CI قديمة تم تجاوزها بهذا التحديث.
 

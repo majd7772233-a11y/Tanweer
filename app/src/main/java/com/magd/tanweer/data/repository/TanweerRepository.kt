@@ -4236,6 +4236,7 @@ class TanweerRepository(
                                 responseBody.isTeacherAnswer == true
                             )
                             db.issueDao().markIssueInDiscussion(issueId)
+                            db.issueDao().reconcileIssueCommentsCount(issueId)
                         }
                         // The POST ACK is authoritative. A follow-up GET refreshes all
                         // details when available but cannot turn a confirmed write into failure.
@@ -4292,6 +4293,7 @@ class TanweerRepository(
                     db.withTransaction {
                         db.issueDao().confirmCommentSync(commentId, body.isTeacherAnswer == true)
                         db.issueDao().markIssueInDiscussion(issueId)
+                        db.issueDao().reconcileIssueCommentsCount(issueId)
                     }
                     syncIssueDetailsLocked(issueId)
                     Result.success(Unit)

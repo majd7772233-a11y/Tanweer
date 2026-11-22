@@ -558,6 +558,7 @@ class UnifiedMutationQueue private constructor(
                                     )
                                 }
                                 db.issueDao().markIssueInDiscussion(issueId)
+                                db.issueDao().reconcileIssueCommentsCount(issueId)
                             }
                             // The ACK owns the write. Details refresh is best effort, but it
                             // shares the lock and reconciler so it cannot race a screen refresh.
