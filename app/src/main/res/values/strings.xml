@@ -1,4 +1,10 @@
 <resources>
+    <string name="homework_study_date_title">تاريخ الدراسة / طرح الواجب</string>
+    <string name="homework_study_date_description">هذا التاريخ سيُحفظ كتاريخ الدراسة للواجب، وهو مستقل عن موعد التسليم. تغييره هنا يخص هذا الواجب فقط.</string>
+    <string name="homework_study_date_choose">اختيار تاريخ الدراسة</string>
+    <string name="homework_study_date_today">استخدام تاريخ اليوم لهذا الواجب</string>
+    <string name="homework_study_date_confirm">تأكيد</string>
+    <string name="homework_study_date_cancel">إلغاء</string>
     <string name="app_name">تنوير</string>
     <string name="app_tagline">كل يوم له محتواه، وكل مادة لها مكان، ولا يضيع درس</string>
     <string name="calendar_day_details_label">تفاصيل يوم %1$s</string>

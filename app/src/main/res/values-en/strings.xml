@@ -1,4 +1,10 @@
 <resources>
+    <string name="homework_study_date_title">Study / assignment date</string>
+    <string name="homework_study_date_description">This date is saved as the homework study date and is separate from the due date. Changing it here affects this homework only.</string>
+    <string name="homework_study_date_choose">Choose study date</string>
+    <string name="homework_study_date_today">Use today for this homework</string>
+    <string name="homework_study_date_confirm">Confirm</string>
+    <string name="homework_study_date_cancel">Cancel</string>
     <string name="calendar_day_details_label">Details for %1$s</string>
     <string name="calendar_retry_day_sync">Retry day verification</string>
     <string name="calendar_day_sync_failed">Unable to sync day details</string>

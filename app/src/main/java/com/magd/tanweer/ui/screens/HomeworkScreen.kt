@@ -61,6 +61,7 @@ import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.HomeworkTaskKind
 import com.magd.tanweer.util.HomeworkTaskTypePolicy
+import com.magd.tanweer.util.HomeworkStudyDatePolicy
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
 import kotlinx.coroutines.Dispatchers
@@ -120,6 +121,7 @@ fun HomeworkScreen(
     var selectedTaskTypeFilter by remember { mutableStateOf<String?>(null) }
     val isAddModalOpenFromVm by viewModel.isAddHomeworkModalOpen.collectAsStateWithLifecycle()
     val initialDueDateFromVm by viewModel.initialHomeworkDueDate.collectAsStateWithLifecycle()
+    val selectedStudyDate by viewModel.selectedDate.collectAsStateWithLifecycle()
     var isLocalAddModalOpen by rememberSaveable { mutableStateOf(false) }
     val isAddModalOpen = isLocalAddModalOpen || isAddModalOpenFromVm
     var fullScreenImagePreviewUrl by remember { mutableStateOf<String?>(null) }
@@ -536,11 +538,12 @@ fun HomeworkScreen(
             AddHomeworkDialog(
                 subjects = gradeSubjects,
                 initialDueDate = initialDueDateFromVm,
+                initialStudyDate = selectedStudyDate,
                 onDismiss = {
                     isLocalAddModalOpen = false
                     viewModel.closeAddHomeworkDialog()
                 },
-                onAddWithPages = { subjId, title, details, pages, questions, dueDate, taskType, scanPages, finishSubmission ->
+                onAddWithPages = { subjId, title, details, pages, questions, dueDate, studyDate, taskType, scanPages, finishSubmission ->
                     viewModel.addHomework(
                         subjectId = subjId,
                         title = title,
@@ -548,6 +551,7 @@ fun HomeworkScreen(
                         pageNumbers = pages,
                         questionNumbers = questions,
                         dueDate = dueDate,
+                        studyDate = studyDate,
                         taskType = taskType,
                         pages = scanPages.mapNotNull { it.processedResult },
                         isOfficial = false,
@@ -1064,9 +1068,10 @@ fun getRemainingTimeText(dueDateStr: String): String {
 fun AddHomeworkDialog(
     subjects: List<SubjectItem>,
     initialDueDate: String? = null,
+    initialStudyDate: String? = null,
     isOfficial: Boolean = false,
     onDismiss: () -> Unit,
-    onAddWithPages: (subjectId: String, title: String, details: String?, pages: String?, questions: String?, dueDate: String, taskType: String, scanPages: List<HomeworkScanPage>, onFinished: () -> Unit) -> Unit
+    onAddWithPages: (subjectId: String, title: String, details: String?, pages: String?, questions: String?, dueDate: String, studyDate: String, taskType: String, scanPages: List<HomeworkScanPage>, onFinished: () -> Unit) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1077,6 +1082,9 @@ fun AddHomeworkDialog(
     var pageNumbers by rememberSaveable { mutableStateOf("") }
     var questionNumbers by rememberSaveable { mutableStateOf("") }
     var dueDate by rememberSaveable(initialDueDate) { mutableStateOf(initialDueDate ?: TanweerViewModel.getTodayDateString()) }
+    var studyDate by rememberSaveable(initialStudyDate) {
+        mutableStateOf(HomeworkStudyDatePolicy.initial(initialStudyDate, TanweerViewModel.getTodayDateString()))
+    }
     var taskType by rememberSaveable { mutableStateOf("HOMEWORK") }
     val scannedPagesSaver = remember(context) {
         scanPageListSaver<HomeworkScanPage>(
@@ -1110,8 +1118,22 @@ fun AddHomeworkDialog(
     }
     val processingPageIds = remember { mutableSetOf<String>() }
     var showDatePicker by remember { mutableStateOf(false) }
+    var showStudyDatePicker by remember { mutableStateOf(false) }
     var isSubmitting by remember { mutableStateOf(false) }
 
+    val studyDatePickerState = key(studyDate) {
+        rememberDatePickerState(
+            initialSelectedDateMillis = remember(studyDate) {
+                try {
+                    SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }.parse(studyDate)?.time
+                } catch (_: Exception) {
+                    System.currentTimeMillis()
+                }
+            }
+        )
+    }
     val datePickerState = rememberDatePickerState(
         initialSelectedDateMillis = remember(dueDate) {
             try {
@@ -1124,6 +1146,41 @@ fun AddHomeworkDialog(
         }
     )
 
+    if (showStudyDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showStudyDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    studyDatePickerState.selectedDateMillis?.let { millis ->
+                        studyDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }.format(Date(millis))
+                    }
+                    showStudyDatePicker = false
+                }) {
+                    Text(stringResource(R.string.homework_study_date_confirm), color = CyanAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStudyDatePicker = false }) {
+                    Text(stringResource(R.string.homework_study_date_cancel), color = TextSecondary)
+                }
+            },
+            colors = DatePickerDefaults.colors(containerColor = MidnightSurface)
+        ) {
+            DatePicker(
+                state = studyDatePickerState,
+                colors = DatePickerDefaults.colors(
+                    containerColor = MidnightSurface,
+                    titleContentColor = CyanAccent,
+                    headlineContentColor = TextPrimary,
+                    selectedDayContainerColor = CyanAccent,
+                    selectedDayContentColor = TextOnAccent,
+                    todayDateBorderColor = CyanAccent
+                )
+            )
+        }
+    }
     if (showDatePicker) {
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
@@ -1360,6 +1417,7 @@ fun AddHomeworkDialog(
                                         pageNumbers,
                                         questionNumbers,
                                         dueDate,
+                                        studyDate,
                                         taskType,
                                         scannedPages
                                     ) {
@@ -1482,6 +1540,55 @@ fun AddHomeworkDialog(
                     placeholder = "ملاحظات المعلم أو شروط ومواصفات الحل..."
                 )
 
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MidnightSurface,
+                    borderColor = CyanGlow
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.homework_study_date_title),
+                            style = AppTypography.FieldLabel,
+                            color = CyanAccent
+                        )
+                        Text(
+                            text = TanweerViewModel.getFormattedArabicDate(studyDate),
+                            style = AppTypography.Button,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = studyDate,
+                            style = AppTypography.Hint,
+                            color = TextSecondary
+                        )
+                        Text(
+                            text = stringResource(R.string.homework_study_date_description),
+                            style = AppTypography.Hint,
+                            color = TextMuted
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(
+                                onClick = { showStudyDatePicker = true },
+                                colors = ButtonDefaults.textButtonColors(contentColor = CyanAccent)
+                            ) {
+                                Text(stringResource(R.string.homework_study_date_choose))
+                            }
+                            TextButton(
+                                onClick = { studyDate = TanweerViewModel.getTodayDateString() },
+                                colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary)
+                            ) {
+                                Text(stringResource(R.string.homework_study_date_today))
+                            }
+                        }
+                    }
+                }
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "موعد التسليم (تاريخ تقويمي معتمد) *",

@@ -2703,6 +2703,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         pageNumbers: String?,
         questionNumbers: String?,
         dueDate: String,
+        studyDate: String = _selectedDate.value,
         taskType: String = "HOMEWORK",
         pages: List<com.magd.tanweer.util.ProcessedPageResult> = emptyList(),
         isOfficial: Boolean = false,
@@ -2715,7 +2716,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             val result = if (pages.isNotEmpty()) {
                 repository.addHomeworkWithImages(
                     groupId = groupId,
-                    studyDate = _selectedDate.value,
+                    studyDate = studyDate,
                     dueDate = dueDate,
                     subjectId = subjectId,
                     title = title,
@@ -2729,7 +2730,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 repository.addHomework(
                     groupId = groupId,
-                    studyDate = _selectedDate.value,
+                    studyDate = studyDate,
                     dueDate = dueDate,
                     subjectId = subjectId,
                     title = title,

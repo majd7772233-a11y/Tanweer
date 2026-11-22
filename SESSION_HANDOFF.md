@@ -4,7 +4,7 @@
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; working branch only: `work/release-readiness`.
-- P2-08 source commit `cf310f0dae231260e63eb8951db9f81cc76036e3` is pushed to `work/release-readiness`; `main` is untouched.
+- Latest pushed checkpoint before P2-09: `bd54fa88f1f0c6e45907f2588480d9a3340ae0ee`; local P2-09 implementation is being prepared on `work/release-readiness`; `main` is untouched.
 - PR #6 is Open + Draft + unmerged, base `main`, head `work/release-readiness`. Keep it that way.
 - WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close it unless the user expressly asks.
 
@@ -22,11 +22,20 @@
 - Local validation: 21 Android unit tests passed (0 failures/errors/skips); `:app:assembleStagingDebug` passed. APK `app/build/outputs/apk/staging/debug/app-staging-debug.apk`, 33,583,629 bytes; built only, not installed/launched.
 - Exact-SHA CI: Android run `45045181237` passed unit tests, Staging Debug assembly and Debug APK upload. Artifact ID `14763174129`, name `Tanweer-debug-24cf6f16ebc9f3519c1a92272df6c351fa457706`, size 31,112,584 bytes, ZIP SHA-256 `4282ba97f6758c3706d21a7cc4de75abfac88d15d73459cf9d7543f1e9e8464f`. Server run `45045181236` passed dependency audit, TypeScript, 43 Vitest files / 295 tests and Wrangler Production + Staging dry-runs. An earlier docs-only SHA had transient MavenArtifactFetcher network setup failures, but the P2-08 exact-SHA run passed without source changes or test exclusions.
 
+
+### P2-09 local implementation checkpoint — exact-SHA CI pending
+- The homework creation form now displays the study/assignment date separately from the due date. It initializes from the valid selected study date (including an intentional earlier date), and falls back to today only if no valid value exists.
+- The date picker updates the form-local study date. “Use today for this homework” also changes only the form-local value; it does not overwrite the app-wide `selected_study_date` preference.
+- Both normal homework and official teacher homework flows pass the explicit study date from the dialog to `TanweerViewModel.addHomework()`. Both repository paths (`addHomework` and `addHomeworkWithImages`) receive that value. Existing ViewModel callers remain compatible through a default parameter.
+- Arabic and English strings added; resource XML validated and no duplicate keys found.
+- Local verification: 22 Android unit tests across 7 test classes passed (0 failures/errors/skips); `:app:assembleStagingDebug` passed. APK `app/build/outputs/apk/staging/debug/app-staging-debug.apk`, 33,590,705 bytes, SHA-256 `4945E734A6C2E67E83A6F5E7ED4DA22CED96B560AD82D5711598B77B2279F8C0`; built only, not installed/launched.
+- Exact-SHA Android/Server CI remains pending on the P2-09 implementation commit. This item is not complete until those workflows are checked on the exact pushed SHA.
+- Phase 5 device acceptance remains open: verify the selected date in the form, manual date selection, form-local today reset, normal/official creation with and without images, and persisted Room/API values on real devices. None of those device checks was performed here.
 ### Next action
-1. P2-08 implementation and exact-SHA Android/Server CI are verified; continue with P2-09 after reviewing its roadmap scope.
-2. Keep PR #6 Open + Draft + unmerged and verify the remote branch remains synchronized.
+1. Complete the P2-09 source+documentation commit on `work/release-readiness`, push it, then verify Android and Server CI on that exact SHA.
+2. Record exact-SHA CI results in `ROADMAP.md` and `SESSION_HANDOFF.md` after the workflows finish; rerun an Android job only for transient external Maven download failures, without skipping tests.
 3. Keep the WebGPT task RUNNING; do not submit/close it unless explicitly requested.
-4. Continue with the next roadmap item only after the P2-08 exact-SHA CI result is recorded.
+4. Recheck local/remote parity and PR #6 Open + Draft + unmerged; keep only the approved branch and do not merge.
 5. Leave Phase 5 device acceptance open. Do not install/launch on emulator/phone, deploy, apply migrations, write D1, alter secrets, release or merge.
 --- Historical handoff snapshot (2026-11-17; superseded by the current section above) ---
 

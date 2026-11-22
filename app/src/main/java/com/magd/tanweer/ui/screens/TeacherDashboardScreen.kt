@@ -554,6 +554,7 @@ fun CreateOfficialHomeworkSheet(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val selectedStudyDate by viewModel.selectedDate.collectAsStateWithLifecycle()
     val gradeSubjects = remember(currentUser?.gradeId) {
         com.magd.tanweer.data.model.SchoolHierarchy.getSubjectsForGrade(currentUser?.gradeId ?: 11)
     }
@@ -561,9 +562,10 @@ fun CreateOfficialHomeworkSheet(
     AddHomeworkDialog(
         subjects = gradeSubjects,
         initialDueDate = TanweerViewModel.getTodayDateString(),
+        initialStudyDate = selectedStudyDate,
         isOfficial = true,
         onDismiss = onDismiss,
-        onAddWithPages = { subjectId, title, details, pages, questions, dueDate, taskType, scanPages, finishSubmission ->
+        onAddWithPages = { subjectId, title, details, pages, questions, dueDate, studyDate, taskType, scanPages, finishSubmission ->
             viewModel.addHomework(
                 subjectId = subjectId,
                 title = title,
@@ -571,6 +573,7 @@ fun CreateOfficialHomeworkSheet(
                 pageNumbers = pages,
                 questionNumbers = questions,
                 dueDate = dueDate,
+                studyDate = studyDate,
                 taskType = taskType,
                 pages = scanPages.mapNotNull { it.processedResult },
                 isOfficial = true,
