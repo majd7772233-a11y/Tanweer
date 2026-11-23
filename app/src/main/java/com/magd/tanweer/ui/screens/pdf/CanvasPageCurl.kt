@@ -88,6 +88,10 @@ fun CanvasPageCurlViewer(
     val latestZoomScale by rememberUpdatedState(zoomScale)
     val latestPanOffset by rememberUpdatedState(panOffset)
     val latestFocusRulerY by rememberUpdatedState(focusRulerY)
+    // Read the latest toolbar selection without cancelling an active drawing gesture.
+    val latestPenColor by rememberUpdatedState(currentPenColor)
+    val latestPenWidth by rememberUpdatedState(currentPenWidth)
+    val latestIsHighlighter by rememberUpdatedState(isHighlighter)
 
     // Live drawing points for active stroke
     val activeStrokePoints = remember { mutableStateListOf<Offset>() }
@@ -102,8 +106,14 @@ fun CanvasPageCurlViewer(
             // Gesture Layer 1: Drawing Mode Handler (Active when user taps Pen)
             .pointerInput(isDrawingMode) {
                 if (isDrawingMode) {
+                    var activeStrokeStyle: DrawingStrokeStyle? = null
                     detectDragGestures(
                         onDragStart = { startOffset ->
+                            activeStrokeStyle = DrawingStrokeStylePolicy.capture(
+                                currentPenColor = latestPenColor,
+                                currentPenWidth = latestPenWidth,
+                                isHighlighter = latestIsHighlighter
+                            )
                             activeStrokePoints.clear()
                             activeStrokePoints.add(startOffset)
                         },
@@ -113,19 +123,27 @@ fun CanvasPageCurlViewer(
                         },
                         onDragEnd = {
                             if (activeStrokePoints.isNotEmpty()) {
+                                val strokeStyle = activeStrokeStyle
+                                    ?: DrawingStrokeStylePolicy.capture(
+                                        currentPenColor = latestPenColor,
+                                        currentPenWidth = latestPenWidth,
+                                        isHighlighter = latestIsHighlighter
+                                    )
                                 onStrokeAdded(
                                     DrawnStroke(
                                         points = activeStrokePoints.toList(),
-                                        color = if (isHighlighter) currentPenColor.copy(alpha = 0.38f) else currentPenColor,
-                                        strokeWidth = if (isHighlighter) currentPenWidth * 2.6f else currentPenWidth,
-                                        isHighlighter = isHighlighter
+                                        color = strokeStyle.color,
+                                        strokeWidth = strokeStyle.strokeWidth,
+                                        isHighlighter = strokeStyle.isHighlighter
                                     )
                                 )
-                                activeStrokePoints.clear()
                             }
+                            activeStrokePoints.clear()
+                            activeStrokeStyle = null
                         },
                         onDragCancel = {
                             activeStrokePoints.clear()
+                            activeStrokeStyle = null
                         }
                     )
                 }
