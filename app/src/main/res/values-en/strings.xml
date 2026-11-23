@@ -127,4 +127,9 @@
     <string name="issue_status_closed">Closed</string>
     <string name="issue_status_unknown">Unknown status</string>
     <string name="issue_teacher_answer_badge">Verified teacher answer</string>
+    <string name="pdf_stats_daily_progress">Completed %1$d of %2$d pages today</string>
+    <string name="pdf_stats_session_pages">Pages read in this session: %1$d</string>
+    <string name="pdf_stats_auto_pages">Pages browsed automatically this session: %1$d</string>
+    <string name="pdf_stats_lifetime_pages">Unique pages recorded in this book history (all time): %1$d</string>
+    <string name="pdf_stats_reading_speed">Human reading speed: %1$d pages/hour</string>
 </resources>

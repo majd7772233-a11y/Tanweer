@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,6 +69,9 @@ import com.magd.tanweer.util.FocusNoisePlayer
 import com.magd.tanweer.util.PdfSpeechTextQuality
 import com.magd.tanweer.util.ReadingStateCheckpoint
 import com.magd.tanweer.util.ReadingStateCheckpointPolicy
+import com.magd.tanweer.util.ReadingPageActivity
+import com.magd.tanweer.util.ReadingPageActivityPolicy
+import com.magd.tanweer.util.ReadingPageVisitSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.first
@@ -138,7 +142,8 @@ fun PdfReaderScreen(
     var activeSpeechFinalUtteranceId by remember { mutableStateOf<String?>(null) }
 
     // Study Stopwatch & Real Reading Time (Point 47.5)
-    var sessionReadingSeconds by remember { mutableLongStateOf(0L) }
+    var sessionReadingSeconds by remember(book.id) { mutableLongStateOf(0L) }
+    var sessionHumanReadingSeconds by remember(book.id) { mutableLongStateOf(0L) }
     var lifetimeStudySeconds by remember { mutableLongStateOf(0L) }
     var isTimerRunning by remember { mutableStateOf(false) }
 
@@ -253,6 +258,8 @@ fun PdfReaderScreen(
     var downloadState by remember { mutableStateOf<PdfDownloadState>(PdfDownloadState.Idle) }
     var totalPages by remember { mutableIntStateOf(0) }
     var currentPageIndex by remember { mutableIntStateOf(0) }
+    var pageVisitSource by remember(book.id) { mutableStateOf(ReadingPageVisitSource.HUMAN) }
+    val latestPageVisitSource by rememberUpdatedState(pageVisitSource)
 
     // Rendered Bitmaps
     var currentPageBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -314,18 +321,55 @@ fun PdfReaderScreen(
     val notesList = remember { mutableStateListOf<PageStudyNote>() }
     val vocabList = remember { mutableStateListOf<PageVocabulary>() }
 
-    // Unique Pages Read Counter (Persisted set of unique page indices to prevent duplicates across sessions)
+    // Lifetime pages retain the original storage key; daily and session activity use separate sets.
     val readingPrefs = remember { context.getSharedPreferences("tanweer_book_reading_stats", Context.MODE_PRIVATE) }
     val initialSavedPages = remember(book.id) {
-        val raw = readingPrefs.getString("unique_pages_${book.id}", "") ?: ""
-        if (raw.isNotBlank()) {
-            raw.split(",").mapNotNull { it.toIntOrNull() }.toSet()
-        } else {
-            emptySet()
+        ReadingPageActivityPolicy.parsePageIndices(readingPrefs.getString("unique_pages_${book.id}", null))
+    }
+    var persistedUniquePages by remember(book.id) { mutableStateOf(initialSavedPages) }
+
+    fun currentLocalStatsDate(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+    val initialDailyStatsDate = remember(book.id) { currentLocalStatsDate() }
+    val initialDailyPageKey = remember(book.id, initialDailyStatsDate) {
+        ReadingPageActivityPolicy.dailyStorageKey(book.id, initialDailyStatsDate)
+    }
+    val initialDailyPages = remember(book.id, initialDailyPageKey) {
+        ReadingPageActivityPolicy.parsePageIndices(readingPrefs.getString(initialDailyPageKey, null))
+    }
+    var dailyStatsDate by remember(book.id) { mutableStateOf(initialDailyStatsDate) }
+    var todayUniquePages by remember(book.id) { mutableStateOf(initialDailyPages) }
+    var sessionUniquePages by remember(book.id) { mutableStateOf(emptySet<Int>()) }
+    var autoScrolledPageIndices by remember(book.id) { mutableStateOf(emptySet<Int>()) }
+
+    fun navigateToPage(targetPageIndex: Int, source: ReadingPageVisitSource = ReadingPageVisitSource.HUMAN) {
+        if (totalPages <= 0) return
+        val safeTarget = targetPageIndex.coerceIn(0, totalPages - 1)
+        if (safeTarget == currentPageIndex) {
+            if (source == ReadingPageVisitSource.HUMAN && pageVisitSource != ReadingPageVisitSource.HUMAN) {
+                pageVisitSource = ReadingPageVisitSource.HUMAN
+            }
+            return
+        }
+        pageVisitSource = source
+        if (source == ReadingPageVisitSource.AUTO_SCROLL) {
+            autoScrolledPageIndices = ReadingPageActivityPolicy.recordAutoScrolledPage(
+                ReadingPageActivity(autoScrolledPages = autoScrolledPageIndices),
+                safeTarget
+            ).autoScrolledPages
+        }
+        currentPageIndex = safeTarget
+    }
+
+    fun toggleAutoScroll() {
+        val enabling = !isAutoScrollActive
+        isAutoScrollActive = enabling
+        if (!enabling && pageVisitSource == ReadingPageVisitSource.AUTO_SCROLL) {
+            pageVisitSource = ReadingPageVisitSource.HUMAN
         }
     }
-    var persistedUniquePages by remember { mutableStateOf(initialSavedPages) }
-    val pagesReadCount = persistedUniquePages.size
+
+    val pagesReadCount = todayUniquePages.size
     val targetPagesGoal = 15
 
     // Helper functions for strokes serialization
@@ -683,6 +727,7 @@ fun PdfReaderScreen(
         while (isTimerRunning && downloadState is PdfDownloadState.Ready) {
             delay(1000)
             sessionReadingSeconds++
+            if (latestPageVisitSource == ReadingPageVisitSource.HUMAN) sessionHumanReadingSeconds++
         }
     }
 
@@ -711,7 +756,7 @@ fun PdfReaderScreen(
             while (isAutoScrollActive && currentPageIndex < totalPages - 1) {
                 delay(autoScrollSpeedSeconds * 1000L)
                 if (isAutoScrollActive && currentPageIndex < totalPages - 1) {
-                    currentPageIndex++
+                    navigateToPage(currentPageIndex + 1, ReadingPageVisitSource.AUTO_SCROLL)
                 }
             }
         }
@@ -742,6 +787,7 @@ fun PdfReaderScreen(
             zoomScale = savedState.zoom
             lifetimeStudySeconds = savedState.totalStudySeconds
             sessionReadingSeconds = 0L
+            sessionHumanReadingSeconds = 0L
             readingTheme = try { ReadingTheme.valueOf(savedState.theme) } catch (_: Exception) { ReadingTheme.DAY }
         }
 
@@ -794,24 +840,66 @@ fun PdfReaderScreen(
         }
     }
 
-    // Persist the reading position on every page transition, even for a page seen before.
-    // Unique-page dwell accounting remains independent from position persistence.
-    LaunchedEffect(currentPageIndex, downloadState) {
+    // Every page transition checkpoints position; human analytics require a manual four-second dwell.
+    LaunchedEffect(currentPageIndex, downloadState, pageVisitSource) {
         if (downloadState is PdfDownloadState.Ready) {
+            val pageAtVisit = currentPageIndex
+            val sourceAtVisit = pageVisitSource
             persistReadingState(saveDrawings = false)
             if (isAudioPlaying) {
                 speakCurrentPage()
             }
-            kotlinx.coroutines.delay(4000L)
-            val updated = persistedUniquePages + currentPageIndex
-            if (updated.size != persistedUniquePages.size) {
-                persistedUniquePages = updated
-                readingPrefs.edit().putString("unique_pages_${book.id}", updated.joinToString(",")).apply()
-                persistReadingState(saveDrawings = false)
+
+            if (sourceAtVisit == ReadingPageVisitSource.HUMAN) {
+                delay(4000L)
+                if (currentPageIndex == pageAtVisit && pageVisitSource == ReadingPageVisitSource.HUMAN) {
+                    val activityDate = currentLocalStatsDate()
+                    val dailyBase = if (activityDate == dailyStatsDate) {
+                        todayUniquePages
+                    } else {
+                        val dateKey = ReadingPageActivityPolicy.dailyStorageKey(book.id, activityDate)
+                        ReadingPageActivityPolicy.parsePageIndices(readingPrefs.getString(dateKey, null))
+                    }
+                    val activity = ReadingPageActivityPolicy.recordHumanPage(
+                        ReadingPageActivity(
+                            sessionHumanPages = sessionUniquePages,
+                            dailyHumanPages = dailyBase,
+                            lifetimeUniquePages = persistedUniquePages,
+                            autoScrolledPages = autoScrolledPageIndices
+                        ),
+                        pageAtVisit
+                    )
+                    val lifetimeChanged = activity.lifetimeUniquePages != persistedUniquePages
+                    sessionUniquePages = activity.sessionHumanPages
+                    dailyStatsDate = activityDate
+                    todayUniquePages = activity.dailyHumanPages
+                    persistedUniquePages = activity.lifetimeUniquePages
+
+                    val dailyKey = ReadingPageActivityPolicy.dailyStorageKey(book.id, activityDate)
+                    readingPrefs.edit()
+                        .putString("unique_pages_${book.id}", ReadingPageActivityPolicy.serializePageIndices(activity.lifetimeUniquePages))
+                        .putString(dailyKey, ReadingPageActivityPolicy.serializePageIndices(activity.dailyHumanPages))
+                        .apply()
+                    if (lifetimeChanged) {
+                        persistReadingState(saveDrawings = false)
+                    }
+                }
             }
         }
     }
-
+    LaunchedEffect(book.id) {
+        while (true) {
+            delay(60_000L)
+            val activityDate = currentLocalStatsDate()
+            if (activityDate != dailyStatsDate) {
+                val dailyKey = ReadingPageActivityPolicy.dailyStorageKey(book.id, activityDate)
+                dailyStatsDate = activityDate
+                todayUniquePages = ReadingPageActivityPolicy.parsePageIndices(
+                    readingPrefs.getString(dailyKey, null)
+                )
+            }
+        }
+    }
     // Persist reading state on dispose
     DisposableEffect(book.id) {
         onDispose {
@@ -1007,13 +1095,13 @@ fun PdfReaderScreen(
                     onNextPage = {
                         if (currentPageIndex < totalPages - 1) {
                             nextPageBitmap?.let { currentPageBitmap = it }
-                            currentPageIndex++
+                            navigateToPage(currentPageIndex + 1)
                         }
                     },
                     onPrevPage = {
                         if (currentPageIndex > 0) {
                             prevPageBitmap?.let { currentPageBitmap = it }
-                            currentPageIndex--
+                            navigateToPage(currentPageIndex - 1)
                         }
                     },
                     onStrokeAdded = { stroke ->
@@ -1259,13 +1347,13 @@ fun PdfReaderScreen(
                         isAutoScrollActive = isAutoScrollActive,
                         isFocusRulerActive = isFocusRulerActive,
                         onPageChange = { targetPage ->
-                            currentPageIndex = (targetPage - 1).coerceIn(0, totalPages - 1)
+                            navigateToPage((targetPage - 1).coerceIn(0, totalPages - 1))
                         },
                         onPrevPage = {
-                            if (currentPageIndex > 0) currentPageIndex--
+                            if (currentPageIndex > 0) navigateToPage(currentPageIndex - 1)
                         },
                         onNextPage = {
-                            if (currentPageIndex < totalPages - 1) currentPageIndex++
+                            if (currentPageIndex < totalPages - 1) navigateToPage(currentPageIndex + 1)
                         },
                         onOpenJumpDialog = { isJumpPageDialogOpen = true },
                         onResetZoom = {
@@ -1276,7 +1364,7 @@ fun PdfReaderScreen(
                             rotationAngle = (rotationAngle + 90f) % 360f
                         },
                         onToggleAutoScroll = {
-                            isAutoScrollActive = !isAutoScrollActive
+                            toggleAutoScroll()
                             Toast.makeText(
                                 context,
                                 if (isAutoScrollActive) "تم تفعيل التمرير التلقائي ⏩" else "تم إيقاف التمرير التلقائي",
@@ -1333,7 +1421,7 @@ fun PdfReaderScreen(
                             totalPages = totalPages,
                             currentPageIndex = currentPageIndex,
                             onSelectPage = { selectedPage ->
-                                currentPageIndex = selectedPage
+                                navigateToPage(selectedPage)
                                 isThumbnailsDrawerOpen = false
                             }
                         )
@@ -1378,8 +1466,12 @@ fun PdfReaderScreen(
                             pomodoroSecondsLeft = pomodoroSecondsLeft,
                             isAudioPlaying = isAudioPlaying,
                             pagesRead = pagesReadCount,
+                            sessionPagesRead = sessionUniquePages.size,
+                            lifetimeUniquePages = persistedUniquePages.size,
+                            autoScrolledPages = autoScrolledPageIndices.size,
                             targetGoal = targetPagesGoal,
                             sessionSeconds = sessionReadingSeconds,
+                            humanReadingSeconds = sessionHumanReadingSeconds,
                             totalStudySeconds = lifetimeStudySeconds + sessionReadingSeconds,
                             currentPageIndex = currentPageIndex,
                             totalPages = totalPages,
@@ -1441,7 +1533,7 @@ fun PdfReaderScreen(
                                 isFocusRulerActive = !isFocusRulerActive
                             },
                             onToggleAutoScroll = {
-                                isAutoScrollActive = !isAutoScrollActive
+                                toggleAutoScroll()
                             },
                             onToggleWhiteNoise = {
                                 if (isWhiteNoiseActive) {
@@ -1493,7 +1585,7 @@ fun PdfReaderScreen(
                         BookmarksSheet(
                             bookmarks = bookmarksList,
                             onSelectBookmark = { page ->
-                                currentPageIndex = page
+                                navigateToPage(page)
                                 isBookmarksSheetOpen = false
                             },
                             onDeleteBookmark = { id ->
@@ -1565,7 +1657,7 @@ fun PdfReaderScreen(
                         totalPages = totalPages,
                         currentPage = currentPageIndex + 1,
                         onJump = { targetPage ->
-                            currentPageIndex = (targetPage - 1).coerceIn(0, totalPages - 1)
+                            navigateToPage((targetPage - 1).coerceIn(0, totalPages - 1))
                             isJumpPageDialogOpen = false
                         },
                         onDismiss = { isJumpPageDialogOpen = false }
@@ -1940,8 +2032,12 @@ fun StudyToolsHubSheet(
     pomodoroSecondsLeft: Int,
     isAudioPlaying: Boolean,
     pagesRead: Int,
+    sessionPagesRead: Int,
+    lifetimeUniquePages: Int,
+    autoScrolledPages: Int,
     targetGoal: Int,
     sessionSeconds: Long,
+    humanReadingSeconds: Long,
     totalStudySeconds: Long,
     currentPageIndex: Int,
     totalPages: Int,
@@ -2006,7 +2102,7 @@ fun StudyToolsHubSheet(
                 ) {
                     Column {
                         Text(text = "🎯 هدف القراءة اليومي وسرعة التحصيل", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text(text = "أنجزت $pagesRead من أصل $targetGoal صفحة اليوم", fontSize = tanweerTextSize(11f), color = TextSecondary)
+                        Text(text = stringResource(R.string.pdf_stats_daily_progress, pagesRead, targetGoal), fontSize = tanweerTextSize(11f), color = TextSecondary)
                     }
                     Text(
                         text = "${((pagesRead.toFloat() / targetGoal.coerceAtLeast(1)) * 100).toInt()}%",
@@ -2021,13 +2117,13 @@ fun StudyToolsHubSheet(
                 )
 
                 // Reading velocity analytics
-                val velocityPerHour = if (sessionSeconds > 60) ((pagesRead.toFloat() / (sessionSeconds / 3600f))).toInt() else 0
+                val velocityPerHour = ReadingPageActivityPolicy.pagesPerHour(sessionPagesRead, humanReadingSeconds)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "⚡ سرعة القراءة: $velocityPerHour ص/ساعة",
+                        text = stringResource(R.string.pdf_stats_reading_speed, velocityPerHour),
                         fontSize = tanweerTextSize(10f),
                         color = CyanAccent,
                         fontWeight = FontWeight.Medium
@@ -2039,8 +2135,25 @@ fun StudyToolsHubSheet(
                         fontWeight = FontWeight.Medium
                     )
                 }
+                Text(
+                    text = stringResource(R.string.pdf_stats_session_pages, sessionPagesRead),
+                    fontSize = tanweerTextSize(10f),
+                    color = TextSecondary
+                )
+                Text(
+                    text = stringResource(R.string.pdf_stats_auto_pages, autoScrolledPages),
+                    fontSize = tanweerTextSize(10f),
+                    color = WarmAmber
+                )
+                Text(
+                    text = stringResource(R.string.pdf_stats_lifetime_pages, lifetimeUniquePages),
+                    fontSize = tanweerTextSize(10f),
+                    color = TextSecondary
+                )
             }
         }
+
+
 
         // SECTION 1: Focus & Flow (Tools 3, 4, 5, 6)
         Text(text = "⏳ التركيز والانسيابية الذهنية", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = WarmAmber)

@@ -129,4 +129,9 @@
     <string name="issue_status_closed">مغلق</string>
     <string name="issue_status_unknown">حالة غير معروفة</string>
     <string name="issue_teacher_answer_badge">إجابة معلم معتمد</string>
+    <string name="pdf_stats_daily_progress">أنجزت %1$d من أصل %2$d صفحة اليوم</string>
+    <string name="pdf_stats_session_pages">صفحات الجلسة المقروءة: %1$d</string>
+    <string name="pdf_stats_auto_pages">صفحات تم تصفحها تلقائياً في هذه الجلسة: %1$d</string>
+    <string name="pdf_stats_lifetime_pages">صفحات فريدة مسجلة في سجل هذا الكتاب (تراكمي): %1$d</string>
+    <string name="pdf_stats_reading_speed">سرعة القراءة البشرية: %1$d صفحة/ساعة</string>
 </resources>
