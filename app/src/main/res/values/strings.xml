@@ -1,4 +1,5 @@
 <resources>
+    <string name="library_include_subsubjects">يشمل المواد الفرعية (%1$d)</string>
     <string name="homework_study_date_title">تاريخ الدراسة / طرح الواجب</string>
     <string name="homework_study_date_description">هذا التاريخ سيُحفظ كتاريخ الدراسة للواجب، وهو مستقل عن موعد التسليم. تغييره هنا يخص هذا الواجب فقط.</string>
     <string name="homework_study_date_choose">اختيار تاريخ الدراسة</string>

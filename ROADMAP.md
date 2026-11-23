@@ -495,6 +495,21 @@
 
 **الأدلة:** %TEMP%\tanweer-core-round-20261118.
 
+### P2-10 implementation checkpoint (2026-11-22)
+
+**الحالة:** IMPLEMENTED LOCALLY / FOCUSED ANDROID TESTS PASS (32/32) / STAGING DEBUG BUILD PASS / EXACT-SHA CI PENDING / PHASE 5 DEVICE ACCEPTANCE OPEN.
+
+- **سبب الخلل:** LibraryScreen.kt كان يستخدم book.subjectId.contains(selectedSubjectFilter)، لذلك مرشح biology كان يلتقط biology_act أيضاً. هذا احتواء جزئي لمعرف معياري وليس علاقة مادة/مادة فرعية مقصودة.
+- **المطابقة المعيارية:** أضيفت LibrarySubjectFilterPolicy. تطبيع المعرفات يقبل المعرفات المعيارية والمرادفات الكاملة المعروفة فقط؛ لا يغيّر السلاسل الأطول أو المتشابهة بالاحتواء النصي.
+- **علاقات الأب/الفرع الصريحة:** biology -> biology_act، chemistry -> chemistry_act، physics -> physics_act، english -> english_work. الوضع الافتراضي يطابق المادة المحددة فقط. خيار «يشمل المواد الفرعية» يظهر فقط عند وجود كتب فرعية متاحة، وتفعيله يضم الفروع المسجلة صراحةً فقط.
+- **واجهة المكتبة:** تجميع شرائح المواد وعداداتها يستخدم المعرف المعياري. عداد الشريحة يعرض كتب المادة المباشرة؛ اختيار إدراج الفروع منفصل وواضح، ويُلغى عند تغيير الصف أو المادة أو اختيار جميع المواد.
+- **الموارد:** أضيفت تسمية الشريحة بالعربية والإنجليزية، وتم التحقق من XML ومن وجود المفتاح مرة واحدة في كل لغة.
+- **اختبارات السياسة:** 5 اختبارات جديدة تغطي التطابق الدقيق، إدراج الفرع عند الطلب فقط، عدم إدراج الأب عند اختيار الفرع، المرادفات الكاملة، وعداد الفروع المتاحة. مجموعة Android المركزة اجتازت 32/32 عبر 9 ملفات، بلا failures/errors/skips.
+- **البناء المحلي:** :app:assembleStagingDebug نجح. APK app/build/outputs/apk/staging/debug/app-staging-debug.apk، الحجم 33,593,426 بايت، SHA-256 2C24E82251CD84C95EF4C7E8B95589E8DB9567065F2532644B3DCC2F42849E0B. بُني فقط؛ لم يُثبت أو يُشغّل.
+- **CI:** exact-SHA Android + Server CI مطلوب بعد دفع commit P2-10. على commit التوثيق السابق a667deb، Server run 45050588860 نجح؛ Android run 45050588857 تعطل أولاً بسبب MavenArtifactFetcher / HttpURLConnection عند تنزيل اعتماد Robolectric، ثم نجحت إعادة تشغيل الوظيفة دون تغيير المصدر أو تخطي اختبارات.
+- **Phase 5:** القبول المرئي على جهاز حقيقي ما زال مفتوحاً: مرشح الأحياء وحده، ظهور خيار الفرع عند توفره، تفعيل/إلغاء الخيار، أعداد الشرائح، وبقاء البحث النصي مستقلاً. لم يُستخدم محاكي أو هاتف.
+- **النطاق:** Android/UI + سياسة واختبارات وموارد فقط. لا تغييرات Server/API أو قاعدة بيانات أو migration أو نشر أو أسرار أو Release أو main أو دمج PR.
+
 ## P2-11 — البحث عن المعرّفات متعددة المقاطع يعيد سجلات لا تطابق المعرّف كاملاً
 
 **مرجع التقرير:** جولة TNW-SEARCH-COMPREHENSIVE-ROUND-20261120، قسم P2.
@@ -1076,7 +1091,7 @@
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
 | Phase 1 — P1 trust / persistence / stability | IMPLEMENTATION + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | f98371e10aa3ad303f28815e73ad90416f50c799 | Android Ubuntu: testStagingDebugUnitTest PASS; assembleStagingDebug PASS. Server: TypeScript, dependency security baseline, Wrangler bundle validation PASS; 42 files / 293 tests PASS. Local Windows/Robolectric AtomicFile issue is host-specific and the unchanged API34 test passed on Ubuntu. Migration 0034 remains memory-SQLite-only; P1-02 explicitly deferred and P1-03 remains a text-quality guard pending real PDF extraction work/verification in Phase 5. Device acceptance Phase 5. |
-| Phase 2 - P2 data correctness / sync truth | P2-01 through P2-09 implementations and exact-SHA Android/Server CI verified; Phase 5 device acceptance open | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03: 35763ee8b6e8faa217df51798fcb2ec7274841b9; P2-04: 9e090054dfd2d0f9277a4ea9e4d6a208d40eb968; P2-05: e217ff83ca8f3bb2c2b6fd5d6b05df891985f149; P2-06: a42983cf0c1a1ef8010b323b5f119746623ddfde; P2-07: bbeb3e95130cf099cd4dae34b2ea78c3f71ca745; P2-08: cf310f0dae231260e63eb8951db9f81cc76036e3; P2-09: 07ccb85c55d92e8c3963c5bb523f0f8833fde5ac | P2-09 Android 45048086662 PASS (unit tests, Staging Debug assemble, Debug APK artifact 14763848718); Server 45048086552 PASS (npm audit, TypeScript, 43 Vitest files / 295 tests, Wrangler Production + Staging dry-runs). No deployment or database apply/write. Physical acceptance remains Phase 5. |
+| Phase 2 - P2 data correctness / sync truth | P2-01 through P2-09 implementation and exact-SHA Android/Server CI verified; P2-10 implementation and focused local Android verification passed, exact-SHA CI pending; Phase 5 device acceptance open | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03: 35763ee8b6e8faa217df51798fcb2ec7274841b9; P2-04: 9e090054dfd2d0f9277a4ea9e4d6a208d40eb968; P2-05: e217ff83ca8f3bb2c2b6fd5d6b05df891985f149; P2-06: a42983cf0c1a1ef8010b323b5f119746623ddfde; P2-07: bbeb3e95130cf099cd4dae34b2ea78c3f71ca745; P2-08: cf310f0dae231260e63eb8951db9f81cc76036e3; P2-09: 07ccb85c55d92e8c3963c5bb523f0f8833fde5ac; P2-10: implementation commit pending | P2-10 Android local 32/32 focused tests + Staging Debug assemble PASS. Exact-SHA Android/Server CI pending. No deployment or database apply/write. Physical acceptance remains Phase 5. |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |
 | Phase 5 — final acceptance | NOT STARTED | — | — |

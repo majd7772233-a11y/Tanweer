@@ -4,7 +4,7 @@
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; working branch only: `work/release-readiness`.
-- Latest pushed implementation: 07ccb85c55d92e8c3963c5bb523f0f8833fde5ac (fix: expose homework study date in assignment form) on work/release-readiness; docs-only CI closeout commit follows; main is untouched.
+- Latest pushed commit: a667deb2976e1fe2070aab9aabd313a90bfbce3f (docs: record P2-09 exact-SHA CI verification) on work/release-readiness; P2-10 source/tests/resources are local and uncommitted; main is untouched.
 - PR #6 is Open + Draft + unmerged, base `main`, head `work/release-readiness`. Keep it that way.
 - WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close it unless the user expressly asks.
 
@@ -31,13 +31,23 @@
 - Local verification: 22 Android unit tests across 7 test classes passed (0 failures/errors/skips); `:app:assembleStagingDebug` passed. APK `app/build/outputs/apk/staging/debug/app-staging-debug.apk`, 33,590,705 bytes, SHA-256 `4945E734A6C2E67E83A6F5E7ED4DA22CED96B560AD82D5711598B77B2279F8C0`; built only, not installed/launched.
 - Exact-SHA Android CI 45048086662 passed unit tests, Staging Debug assembly (BUILD SUCCESSFUL in 2m 44s for tests and 49s for APK assembly), and Debug APK upload. Artifact ID 14763848718, name Tanweer-debug-79d852147c9027ff98be1d9ba2a5eb0da0363bb8, size 31,121,214 bytes, ZIP SHA-256 a45fa419bee786c79430570aad3084846bf5c1a158d934a3a63c64d363c13ac0.
 - Exact-SHA Server CI 45048086552 passed dependency audit, TypeScript, 43 Vitest files / 295 tests, and Wrangler Production + Staging dry-runs. No deployment occurred.
+- Documentation-only closeout SHA a667deb2976e1fe2070aab9aabd313a90bfbce3f also has green CI after retry: Server run 45050588860 passed; Android run 45050588857 initially hit 13/115 external MavenArtifactFetcher download setup failures, then its failed job was rerun unchanged and the full workflow passed.
 - Phase 5 device acceptance remains open: verify the selected date in the form, manual date selection, form-local today reset, normal/official creation with and without images, and persisted Room/API values on real devices. None of those device checks was performed here.
+### P2-10 implementation checkpoint — local verification passed; exact-SHA CI pending
+- Root cause: LibraryScreen used book.subjectId.contains(selectedSubjectFilter), so biology also matched biology_act. The parent filter was using partial substring matching against canonical IDs.
+- Added LibrarySubjectFilterPolicy with exact known-alias normalization and explicit parent/child relations: biology -> biology_act, chemistry -> chemistry_act, physics -> physics_act, english -> english_work. Exact match is the default; an opt-in Include sub-subjects chip appears only when related child books exist.
+- LibraryScreen groups subject chips and computes direct counts using canonical identifiers. The child toggle resets when the grade, selected subject, or All chip changes. Arabic and English label resources were added.
+- Five new policy tests cover exact matching, explicit child inclusion only, child-to-parent exclusion, full aliases, and available-child counts. Combined focused Android run: 32/32 across 9 report files, zero failures/errors/skips. Staging Debug build passed.
+- Local APK app/build/outputs/apk/staging/debug/app-staging-debug.apk: 33,593,426 bytes; SHA-256 2C24E82251CD84C95EF4C7E8B95589E8DB9567065F2532644B3DCC2F42849E0B. Built only; not installed or launched.
+- Exact-SHA Android/Server CI for P2-10 is pending its source+docs commit. The previous docs-only SHA a667deb has since passed both workflows after one unchanged Android Maven-download retry.
+- Phase 5 acceptance remains open: visually verify the exact parent filter, opt-in child inclusion, reset behavior, counts and independent search on a real device. No emulator or phone was used.
+
 ### Next action
-1. P2-09 source commit 07ccb85c55d92e8c3963c5bb523f0f8833fde5ac and exact-SHA Android/Server CI are verified; only this documentation closeout remains.
-2. Keep the WebGPT task RUNNING; do not submit/close it unless explicitly requested.
-3. Continue with P2-10 only after reviewing its roadmap entry; Phase 5 real-device acceptance remains open.
-4. Keep PR #6 Open + Draft + unmerged on work/release-readiness; do not merge or update main.
-5. Leave Phase 5 device acceptance open; do not install/launch, deploy, apply migrations, write D1, alter secrets or create a release.
+1. Review the current P2-10 diff and run git diff --check; local 32/32 tests and Staging Debug build have passed.
+2. Commit LibraryScreen, the policy, tests, Arabic/English resources, ROADMAP and SESSION_HANDOFF together on work/release-readiness; push.
+3. Verify Android and Server CI on the exact P2-10 SHA. If Android fails only during external Maven artifact downloads, inspect and rerun the failed job without modifying or excluding tests.
+4. Keep PR #6 Open + Draft + unmerged; main remains untouched.
+5. Keep the WebGPT task RUNNING; do not submit/close it unless expressly requested. Leave Phase 5 device acceptance open; do not install/launch, deploy, migrate, write D1, change secrets or release.
 --- Historical handoff snapshot (2026-11-17; superseded by the current section above) ---
 
 **آخر تحديث موثوق:** 2026-11-17  

@@ -1,6 +1,7 @@
 package com.magd.tanweer.ui.screens
 
 import android.widget.Toast
+import com.magd.tanweer.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -24,6 +25,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -35,6 +37,7 @@ import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.data.pdf.PdfBookManager
 import com.magd.tanweer.ui.TanweerViewModel
+import com.magd.tanweer.util.LibrarySubjectFilterPolicy
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +72,7 @@ fun LibraryScreen(
     }
     var searchQuery by remember { mutableStateOf("") }
     var selectedSubjectFilter by remember { mutableStateOf<String?>(null) }
+    var includeSubSubjects by remember { mutableStateOf(false) }
     // DEFAULT VIEW MODE IS WOODEN BOOKSHELF AS REQUESTED
     var currentViewMode by remember { mutableStateOf(LibraryViewMode.WOODEN_SHELF) }
     var isViewModeSheetOpen by remember { mutableStateOf(false) }
@@ -125,18 +129,32 @@ fun LibraryScreen(
         allBooks.filter { it.gradeId == selectedGradeId }.distinctBy { it.id }
     }
 
-    val filteredBooks = remember(gradeBooks, searchQuery, selectedSubjectFilter) {
+    val filteredBooks = remember(gradeBooks, searchQuery, selectedSubjectFilter, includeSubSubjects) {
         gradeBooks.filter { book ->
             val matchesSearch = searchQuery.isBlank() ||
                     book.title.contains(searchQuery, ignoreCase = true) ||
                     book.subjectName.contains(searchQuery, ignoreCase = true)
-            val matchesSubject = selectedSubjectFilter == null || book.subjectId.contains(selectedSubjectFilter!!, ignoreCase = true)
+            val matchesSubject = selectedSubjectFilter?.let { selectedId ->
+                LibrarySubjectFilterPolicy.matches(
+                    bookSubjectId = book.subjectId,
+                    selectedSubjectId = selectedId,
+                    includeSubSubjects = includeSubSubjects
+                )
+            } ?: true
             matchesSearch && matchesSubject
         }
     }
 
     val distinctSubjects = remember(gradeBooks) {
-        gradeBooks.map { it.subjectId to it.subjectName }.distinctBy { it.first }
+        gradeBooks
+            .groupBy { LibrarySubjectFilterPolicy.canonicalSubjectId(it.subjectId) }
+            .map { (subjectId, books) -> subjectId to books.first().subjectName }
+    }
+    val availableSubjectIds = remember(gradeBooks) { gradeBooks.map { it.subjectId } }
+    val availableSubSubjectBookCount = remember(gradeBooks, selectedSubjectFilter) {
+        selectedSubjectFilter?.let {
+            LibrarySubjectFilterPolicy.countAvailableSubSubjectBooks(it, availableSubjectIds)
+        } ?: 0
     }
 
     val currentGradeName = SchoolHierarchy.getGradeName(selectedGradeId)
@@ -281,6 +299,7 @@ fun LibraryScreen(
                                         if (selectedGradeId != gid) {
                                             selectedGradeId = gid
                                             selectedSubjectFilter = null
+                                            includeSubSubjects = false
                                             viewModel.syncBooks(
                                                 gradeId = gid,
                                                 onResult = { success, message ->
@@ -342,7 +361,10 @@ fun LibraryScreen(
                             item {
                                 FilterChip(
                                     selected = selectedSubjectFilter == null,
-                                    onClick = { selectedSubjectFilter = null },
+                                    onClick = {
+                                        selectedSubjectFilter = null
+                                        includeSubSubjects = false
+                                    },
                                     label = { Text("جميع المواد (${gradeBooks.size})") },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = CyanAccent,
@@ -351,11 +373,14 @@ fun LibraryScreen(
                                 )
                             }
                             items(distinctSubjects) { (subId, subName) ->
-                                val count = gradeBooks.count { it.subjectId == subId }
+                                val count = gradeBooks.count {
+                                    LibrarySubjectFilterPolicy.matches(it.subjectId, subId)
+                                }
                                 FilterChip(
                                     selected = selectedSubjectFilter == subId,
                                     onClick = {
                                         selectedSubjectFilter = if (selectedSubjectFilter == subId) null else subId
+                                        includeSubSubjects = false
                                     },
                                     label = { Text("$subName ($count)") },
                                     colors = FilterChipDefaults.filterChipColors(
@@ -365,6 +390,27 @@ fun LibraryScreen(
                                 )
                             }
                         }
+                    }
+                }
+
+                if (selectedSubjectFilter != null && availableSubSubjectBookCount > 0) {
+                    item {
+                        FilterChip(
+                            selected = includeSubSubjects,
+                            onClick = { includeSubSubjects = !includeSubSubjects },
+                            label = {
+                                Text(
+                                    stringResource(
+                                        R.string.library_include_subsubjects,
+                                        availableSubSubjectBookCount
+                                    )
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = CyanAccent,
+                                selectedLabelColor = TextOnAccent
+                            )
+                        )
                     }
                 }
             }

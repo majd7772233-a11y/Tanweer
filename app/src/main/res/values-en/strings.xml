@@ -1,4 +1,5 @@
 <resources>
+    <string name="library_include_subsubjects">Include sub-subjects (%1$d)</string>
     <string name="homework_study_date_title">Study / assignment date</string>
     <string name="homework_study_date_description">This date is saved as the homework study date and is separate from the due date. Changing it here affects this homework only.</string>
     <string name="homework_study_date_choose">Choose study date</string>
