@@ -21,19 +21,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.R
 import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
+import com.magd.tanweer.ui.components.AcademicArchiveScopeInfo
 import com.magd.tanweer.ui.components.GlassCard
-import com.magd.tanweer.ui.components.localizedExamTypeLabel
 import com.magd.tanweer.ui.components.GlassPill
 import com.magd.tanweer.ui.components.PendingSyncEmptyState
 import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
+import com.magd.tanweer.ui.components.localizedExamTypeLabel
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.AcademicArchiveEngine
 import com.magd.tanweer.util.AcademicYearManager
@@ -339,6 +342,10 @@ fun AcademicHistoryScreen(
             }
         }
 
+        AcademicArchiveScopeInfo(
+            isPersonalView = viewMode == 0,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+        )
         // Content
         LazyColumn(
             modifier = Modifier
@@ -373,8 +380,8 @@ fun AcademicHistoryScreen(
                         }
                         GlassPill(
                             text = if (!hasArchiveSnapshot && totalYearItemsCount == 0) "جارٍ التحقق من الأرشيف"
-                                   else if (viewMode == 0) "${myCompletedHomeworks.size} منجز / ${myPersonalLessons.size} موثق"
-                                   else "$totalYearItemsCount عنصر مسجل",
+                                   else if (viewMode == 0) stringResource(R.string.academic_archive_personal_summary, myCompletedHomeworks.size, myPersonalLessons.size)
+                                   else stringResource(R.string.academic_archive_group_summary, totalYearItemsCount),
                             color = if (viewMode == 0) PurpleAccent else EmeraldGreen,
                             bgColor = if (viewMode == 0) PurpleAccent.copy(alpha = 0.15f) else EmeraldGreen.copy(alpha = 0.15f)
                         )
@@ -518,7 +525,7 @@ fun AcademicHistoryScreen(
                                 }
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text("${yearHomeworks.size}", fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Bold, color = WarmAmber)
-                                    Text("إجمالي الواجبات", fontSize = tanweerTextSize(11f), color = TextSecondary)
+                                    Text(stringResource(R.string.academic_archive_total_homeworks_across_groups), fontSize = tanweerTextSize(11f), color = TextSecondary)
                                 }
                             }
                         }

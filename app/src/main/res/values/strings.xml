@@ -152,4 +152,11 @@
     <string name="exam_chapter_list_separator">، </string>
     <string name="exam_full_syllabus">المقرر كامل</string>
     <string name="homework_official_badge">رسمي • من الأستاذ 🎓</string>
+    <string name="academic_archive_personal_scope_title">الأرشيف الشخصي • جميع شعب حسابك</string>
+    <string name="academic_archive_personal_scope_description">يعرض مساهمات حسابك عبر الشعب: الدروس التي وثّقتها والواجبات التي أنجزتها. إجمالي السجلات السنوي يجمع السجلات المتاحة في أرشيف حسابك عبر هذه الشعب، وقد يشمل سجلات أضافها أعضاء آخرون؛ أما إنجاز الواجبات فيخص حسابك.</string>
+    <string name="academic_archive_group_scope_title">أرشيف الشعبة المحددة</string>
+    <string name="academic_archive_group_scope_description">يعرض الدروس والواجبات والاختبارات المتاحة في أرشيف الشعبة المحددة، بما في ذلك ما أضافه جميع أعضائها. ولا يضم سجلات من شعب أخرى.</string>
+    <string name="academic_archive_personal_summary">%1$d منجز • %2$d موثق</string>
+    <string name="academic_archive_group_summary">إجمالي سجلات الشعبة: %1$d</string>
+    <string name="academic_archive_total_homeworks_across_groups">إجمالي الواجبات عبر الشعب</string>
 </resources>

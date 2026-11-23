@@ -150,4 +150,11 @@
     <string name="exam_chapter_list_separator">, </string>
     <string name="exam_full_syllabus">Full syllabus</string>
     <string name="homework_official_badge">Official • From the teacher 🎓</string>
+    <string name="academic_archive_personal_scope_title">Personal archive • All your groups</string>
+    <string name="academic_archive_personal_scope_description">Shows your account contributions across groups: lessons you documented and homework you completed. The annual total combines records available in your account archive across those groups and may include records added by other members; homework completion remains specific to your account.</string>
+    <string name="academic_archive_group_scope_title">Selected group archive</string>
+    <string name="academic_archive_group_scope_description">Shows lessons, homework and exams available in the selected group archive, including records added by all its members. Records from other groups are excluded.</string>
+    <string name="academic_archive_personal_summary">%1$d completed • %2$d documented</string>
+    <string name="academic_archive_group_summary">Total group records: %1$d</string>
+    <string name="academic_archive_total_homeworks_across_groups">Total homework tasks across groups</string>
 </resources>
