@@ -11,6 +11,9 @@ import android.speech.tts.TextToSpeech
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -63,8 +66,12 @@ import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.FocusNoisePlayer
 import com.magd.tanweer.util.PdfSpeechTextQuality
+import com.magd.tanweer.util.ReadingStateCheckpoint
+import com.magd.tanweer.util.ReadingStateCheckpointPolicy
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -106,6 +113,8 @@ fun PdfReaderScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val readingStateSaveMutex = remember(book.id) { Mutex() }
     val pdfManager = remember { PdfBookManager(context) }
     val db = remember { TanweerDatabase.getInstance(context) }
     val repository = remember { TanweerRepository(db) }
@@ -529,19 +538,51 @@ fun PdfReaderScreen(
         }
     }
 
-    // Save Reading State on exit or state changes
-    fun persistReadingState() {
-        persistAllPendingDrawings()
-        coroutineScope.launch {
-            val totalUniquePages = persistedUniquePages.size
+    fun captureReadingStateCheckpoint(): ReadingStateCheckpoint =
+        ReadingStateCheckpointPolicy.capture(
+            currentPageIndex = currentPageIndex,
+            uniquePageIndices = persistedUniquePages,
+            zoom = zoomScale,
+            theme = readingTheme.name,
+            totalStudySeconds = lifetimeStudySeconds + sessionReadingSeconds
+        )
+
+    suspend fun persistReadingStateCheckpoint(checkpoint: ReadingStateCheckpoint) {
+        readingStateSaveMutex.withLock {
             repository.saveBookReadingState(
                 bookId = book.id,
-                lastPage = currentPageIndex,
-                zoom = zoomScale,
-                theme = readingTheme.name,
-                totalStudySeconds = lifetimeStudySeconds + sessionReadingSeconds,
-                uniquePagesCount = totalUniquePages
+                lastPage = checkpoint.lastPageIndex,
+                zoom = checkpoint.zoom,
+                theme = checkpoint.theme,
+                totalStudySeconds = checkpoint.totalStudySeconds,
+                uniquePagesCount = checkpoint.uniquePagesCount
             )
+        }
+    }
+
+    // Save the current position independently of whether the page was visited before.
+    fun persistReadingState(saveDrawings: Boolean = true) {
+        if (saveDrawings) persistAllPendingDrawings()
+        val checkpoint = captureReadingStateCheckpoint()
+        coroutineScope.launch { persistReadingStateCheckpoint(checkpoint) }
+    }
+
+    // Finish the Room write before launching an external chooser or closing the reader.
+    fun persistReadingStateBeforeLeaving(afterSaved: () -> Unit) {
+        persistAllPendingDrawings()
+        val checkpoint = captureReadingStateCheckpoint()
+        coroutineScope.launch {
+            persistReadingStateCheckpoint(checkpoint)
+            afterSaved()
+        }
+    }
+
+    fun closeReaderAfterSaving() {
+        saveCurrentPageStrokes()
+        stopAudioPlayback()
+        persistReadingStateBeforeLeaving {
+            pdfManager.closeRenderer()
+            onBack()
         }
     }
 
@@ -576,8 +617,10 @@ fun PdfReaderScreen(
             putExtra(Intent.EXTRA_SUBJECT, "ملاحظات دراسية - ${book.title}")
             putExtra(Intent.EXTRA_TEXT, markdownText)
         }
-        context.startActivity(Intent.createChooser(shareIntent, "مشاركة الملاحظات الدراسية"))
-        Toast.makeText(context, "تم نسخ الملاحظات كـ Markdown ومشاركتها بنجاح 📋", Toast.LENGTH_SHORT).show()
+        persistReadingStateBeforeLeaving {
+            context.startActivity(Intent.createChooser(shareIntent, "مشاركة الملاحظات الدراسية"))
+            Toast.makeText(context, "تم نسخ الملاحظات كـ Markdown ومشاركتها بنجاح 📋", Toast.LENGTH_SHORT).show()
+        }
     }
 
     fun tagExamQuestion(tag: String) {
@@ -595,21 +638,25 @@ fun PdfReaderScreen(
         Toast.makeText(context, "تم وسم الصفحة كـ $tag وحفظها في الملاحظات 📌", Toast.LENGTH_SHORT).show()
     }
 
-    // Handle back button cleanly and persist state safely
+    // Handle back button cleanly and wait for the latest Room checkpoint before exit.
     BackHandler {
         if (isDrawingMode) {
             saveCurrentPageStrokes()
             isDrawingMode = false
         } else {
-            saveCurrentPageStrokes()
-            persistAllPendingDrawings()
-            stopAudioPlayback()
-            persistReadingState()
-            pdfManager.closeRenderer()
-            onBack()
+            closeReaderAfterSaving()
         }
     }
 
+    DisposableEffect(lifecycleOwner, book.id) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                persistReadingState(saveDrawings = false)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     // Keep screen awake effect
     DisposableEffect(isKeepScreenAwake) {
         val activity = context as? Activity
@@ -738,19 +785,20 @@ fun PdfReaderScreen(
         }
     }
 
-    // Track unique visited pages accurately after active reading dwell time (4s)
+    // Persist the reading position on every page transition, even for a page seen before.
+    // Unique-page dwell accounting remains independent from position persistence.
     LaunchedEffect(currentPageIndex, downloadState) {
         if (downloadState is PdfDownloadState.Ready) {
+            persistReadingState(saveDrawings = false)
             if (isAudioPlaying) {
                 speakCurrentPage()
             }
-            // Require active reading dwell time to avoid counting quickly flicked or immediately closed pages
             kotlinx.coroutines.delay(4000L)
             val updated = persistedUniquePages + currentPageIndex
             if (updated.size != persistedUniquePages.size) {
                 persistedUniquePages = updated
                 readingPrefs.edit().putString("unique_pages_${book.id}", updated.joinToString(",")).apply()
-                persistReadingState()
+                persistReadingState(saveDrawings = false)
             }
         }
     }
@@ -1175,10 +1223,7 @@ fun PdfReaderScreen(
                         totalPages = totalPages,
                         sessionReadingSeconds = sessionReadingSeconds,
                         isDrawingMode = isDrawingMode,
-                        onBack = {
-                            pdfManager.closeRenderer()
-                            onBack()
-                        },
+                        onBack = { closeReaderAfterSaving() },
                         onToggleDrawing = { isDrawingMode = !isDrawingMode },
                         onOpenSettings = { isSettingsSheetOpen = true },
                         onOpenBookmarks = { isBookmarksSheetOpen = true },
@@ -1350,7 +1395,11 @@ fun PdfReaderScreen(
                             },
                             onSharePage = {
                                 if (currentPageBitmap != null) {
-                                    sharePageSnapshot(context, currentPageBitmap!!, currentPageIndex, book.title)
+                                    val bitmapToShare = currentPageBitmap!!
+                                    val pageToShare = currentPageIndex
+                                    persistReadingStateBeforeLeaving {
+                                        sharePageSnapshot(context, bitmapToShare, pageToShare, book.title)
+                                    }
                                 } else {
                                     Toast.makeText(context, "جاري تجهيز الصورة للمشاركة...", Toast.LENGTH_SHORT).show()
                                 }

@@ -4,7 +4,7 @@
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; working branch only: `work/release-readiness`.
-- Latest pushed code commit: 881a532902dcd7d89383d453823ecafbd41692b6 (fix: preserve homework page range references) on work/release-readiness; P2-10 through P2-12 are complete with exact-SHA CI green; P2-13 implementation is local/uncommitted; main is untouched.
+- Latest pushed code commit: f9808b27a42ee46e0f02a916d8486e2e1f06b78b (fix: restore PDF reader origin route) on work/release-readiness; P2-10 through P2-13 are complete with exact-SHA CI green; P2-14 implementation is local/uncommitted; main is untouched.
 - PR #6 is Open + Draft + unmerged, base `main`, head `work/release-readiness`. Keep it that way.
 - WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close it unless the user expressly asks.
 
@@ -57,14 +57,21 @@
 - P2-12 was committed and pushed as `881a532902dcd7d89383d453823ecafbd41692b6`. Exact-SHA Android run `45150149560` passed tests, Staging Debug build and artifact upload after two unchanged attempts failed due transient `MavenArtifactFetcher`/Robolectric HTTP download errors in `NotificationToggleBehaviorTest`; the third unchanged retry passed. Server run `45150150093` passed dependency audit, TypeScript, unit/integration tests, Wrangler Production bundle and migration file listing. Artifact `14806154824`: 31,128,739 bytes, ZIP SHA-256 `9ac7749df06d3c1ebf339b5b0ea072a313af01228c3513d316bb425f874e2d42`. No deployment.
 - P2-11 exact-SHA CI is green on commit `5c661e85cf352eb869eff64e2d27208419e69aa7` (Android `45148258115`, Server `45148258094`). PR #6 remains Open + Draft + unmerged; `main` is untouched. WebGPT task must remain RUNNING.
 - Phase 5 real-device PDF validation remains open. The report's 52.9 MB Quran PDF was not fully downloaded during evidence capture; no claim is made that it was opened. No emulator/phone, deployment, migration, D1 write, secret change or release.
-### P2-13 in progress — local implementation and regression verification passed; exact-SHA CI pending
+### P2-13 completed — local verification and exact-SHA Android + Server CI passed
 - Root cause: `TanweerViewModel.closePdfReader()` always returned to `SubScreen.LIBRARY`, discarding the route from which the PDF was opened.
 - Added `PdfReaderReturnDestination` and `PdfReaderNavigationPolicy` to capture/resolve source sub-screen, active tab, and selected Knowledge Base subject. `openBookInPdfReader()` captures only on the first entry; closing restores the exact route and triggers the corresponding tab/sub-screen refresh. User-scope reset discards any pending origin.
 - General Library remains the return destination when the reader originated there; Knowledge Base returns to the same subject; Search/other sub-screens and root tabs are also retained. Missing/invalid origin safely falls back to Library.
 - Added `PdfReaderNavigationPolicyTest` (5 tests). Combined P2-10/P2-11/P2-12/P2-13 regression run passed 74/74 tests across 13 XML reports, zero failures/errors/skips. `:app:assembleStagingDebug` passed; APK 33,593,388 bytes; SHA-256 `11C04F8396BB14E558B8B4C8515611C356433CA4C0A3B44E0A8A3B9F3AD7B8D8`. Built only; not installed/launched.
-- P2-13 source is local/uncommitted. Next: complete review, keep the policy/test/ViewModel/docs together in one commit on `work/release-readiness`, push, then verify exact-SHA Android and Server CI.
-- P2-12 exact-SHA CI is green on `881a532902dcd7d89383d453823ecafbd41692b6` (Android `45150149560`, Server `45150150093`). The unchanged Android third retry passed after two transient Maven/Robolectric download failures; no tests were skipped.
+- P2-13 was committed and pushed as `f9808b27a42ee46e0f02a916d8486e2e1f06b78b`. Exact-SHA Android run `45152437101` passed unit tests, Staging Debug assembly and artifact upload (signed Release steps skipped); Server run `45152437077` passed dependency audit, TypeScript, tests, Wrangler bundle validation and migration listing. Android artifact `14806578590`: 31,130,609 bytes, ZIP SHA-256 `dc8b7fbfca631e8700e1871368849c26769ce47e43dba0538e7e7957ff50e0c6`. Android first attempt failed on transient Maven/Robolectric HTTP download; unchanged retry passed. No deployment.
+- P2-12 exact-SHA CI is green on `881a532902dcd7d89383d453823ecafbd41692b6` (Android `45150149560`, Server `45150150093`). P2-13 exact-SHA CI is green on `f9808b27a42ee46e0f02a916d8486e2e1f06b78b` (Android `45152437101`, Server `45152437077`). The unchanged Android third retry passed after two transient Maven/Robolectric download failures; no tests were skipped.
 - PR #6 remains Open + Draft + unmerged, base `main`; `main` is untouched. WebGPT task must remain RUNNING. Phase 5 real-device acceptance remains open; no emulator/phone, deployment, migration, D1 write, secret change, or release.
+### P2-14 in progress — local implementation and combined regression verification passed; exact-SHA CI pending
+- Root cause: `LaunchedEffect(currentPageIndex, downloadState)` saved the reader state only when the four-second dwell added a new unique page. Revisiting an already-counted page left Room `lastPage` stale; share/external Activity paths lacked an awaited checkpoint.
+- `PdfReaderScreen.kt` now captures an immutable `ReadingStateCheckpoint` on each page transition once the PDF is Ready, independently of the unique-page dwell counter. A per-book `Mutex` serializes writes to Room.
+- `ON_PAUSE` adds a backup save. Markdown-share and page-snapshot Sharesheet launch only after the Room write completes; system Back and the top-bar Back both save before closing/returning.
+- `ReadingStateCheckpointPolicyTest`: 4/4 passed. Combined P2-10 through P2-14 regression run: 78/78 tests across 14 XML reports, zero failures/errors/skips. Staging Debug passed; APK 33,593,388 bytes, SHA-256 `D29B11914470A829DBEAB93E453860F16685F4986936A37DADEF3AB31D17622F`. Built only; not installed or launched.
+- P2-14 implementation is local/uncommitted. Next: stage `PdfReaderScreen.kt`, `ReadingStateCheckpointPolicy.kt`, its test, ROADMAP.md and SESSION_HANDOFF.md together, commit/push only to `work/release-readiness`, then verify exact-SHA Android and Server CI.
+- PR #6 remains Open + Draft + unmerged, base `main`; `main` untouched. WebGPT task must remain RUNNING. Phase 5 device acceptance remains open; no emulator/phone, deployment, migration, D1 write, secret change or release.
 --- Historical handoff snapshot (2026-11-17; superseded by the current section above) ---
 
 **آخر تحديث موثوق:** 2026-11-17  
