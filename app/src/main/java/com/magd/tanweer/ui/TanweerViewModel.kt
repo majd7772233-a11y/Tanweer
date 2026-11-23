@@ -289,6 +289,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     private val _activeReadingInitialPage = MutableStateFlow<Int?>(null)
     val activeReadingInitialPage: StateFlow<Int?> = _activeReadingInitialPage.asStateFlow()
 
+    private var pdfReaderReturnDestination: PdfReaderReturnDestination? = null
+
     private val _selectedGroupId = MutableStateFlow("")
     val selectedGroupId: StateFlow<String> = _selectedGroupId.asStateFlow()
 
@@ -593,6 +595,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _subScreen.value = SubScreen.NONE
         _activeReadingBook.value = null
         _activeReadingInitialPage.value = null
+        pdfReaderReturnDestination = null
         _isUploadModalOpen.value = false
         _uploadInitialSubjectId.value = null
         _isAddHomeworkModalOpen.value = false
@@ -1051,18 +1054,36 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openBookInPdfReader(book: BookItem, targetPage: Int? = null) {
+        if (pdfReaderReturnDestination == null) {
+            pdfReaderReturnDestination = PdfReaderReturnDestination(
+                subScreen = _subScreen.value,
+                currentTab = _currentTab.value,
+                knowledgeBaseSubjectId = _selectedKnowledgeBaseSubjectId.value
+            )
+        }
         _activeReadingBook.value = book
         _activeReadingInitialPage.value = targetPage
         _subScreen.value = SubScreen.PDF_VIEWER
     }
 
     fun closePdfReader() {
+        val returnDestination = PdfReaderNavigationPolicy.resolve(
+            origin = pdfReaderReturnDestination,
+            fallbackTab = _currentTab.value
+        )
         _activeReadingBook.value = null
         _activeReadingInitialPage.value = null
-        _subScreen.value = SubScreen.LIBRARY
-        syncSubScreenOnEntry(SubScreen.LIBRARY)
-    }
+        pdfReaderReturnDestination = null
+        _currentTab.value = returnDestination.currentTab
+        _selectedKnowledgeBaseSubjectId.value = returnDestination.knowledgeBaseSubjectId
+        _subScreen.value = returnDestination.subScreen
 
+        if (returnDestination.subScreen == SubScreen.NONE) {
+            syncTabOnEntry(returnDestination.currentTab)
+        } else {
+            syncSubScreenOnEntry(returnDestination.subScreen)
+        }
+    }
     fun setSelectedGroup(groupId: String) {
         if (groupId.isBlank()) return
         _selectedGroupId.value = groupId
