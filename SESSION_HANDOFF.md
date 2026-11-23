@@ -1,10 +1,10 @@
 # Tanweer — Session Handoff
 
-## Current verified state — 2026-11-22 (supersedes older handoff below)
+## Current verified state — 2026-11-23 (supersedes older handoff below)
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; working branch only: `work/release-readiness`.
-- Latest pushed commit: a667deb2976e1fe2070aab9aabd313a90bfbce3f (docs: record P2-09 exact-SHA CI verification) on work/release-readiness; P2-10 source/tests/resources are local and uncommitted; main is untouched.
+- Verified P2-10 source commit: 65ee0bf19d6735ca3a76e59cc21df215795ef2e8 (fix: match library subject filters by canonical id) on work/release-readiness; P2-10 is complete and P2-11 is the current stage on this branch; main is untouched.
 - PR #6 is Open + Draft + unmerged, base `main`, head `work/release-readiness`. Keep it that way.
 - WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close it unless the user expressly asks.
 
@@ -33,21 +33,22 @@
 - Exact-SHA Server CI 45048086552 passed dependency audit, TypeScript, 43 Vitest files / 295 tests, and Wrangler Production + Staging dry-runs. No deployment occurred.
 - Documentation-only closeout SHA a667deb2976e1fe2070aab9aabd313a90bfbce3f also has green CI after retry: Server run 45050588860 passed; Android run 45050588857 initially hit 13/115 external MavenArtifactFetcher download setup failures, then its failed job was rerun unchanged and the full workflow passed.
 - Phase 5 device acceptance remains open: verify the selected date in the form, manual date selection, form-local today reset, normal/official creation with and without images, and persisted Room/API values on real devices. None of those device checks was performed here.
-### P2-10 implementation checkpoint — local verification passed; exact-SHA CI pending
+### P2-10 completed — local verification and exact-SHA CI passed
 - Root cause: LibraryScreen used book.subjectId.contains(selectedSubjectFilter), so biology also matched biology_act. The parent filter was using partial substring matching against canonical IDs.
 - Added LibrarySubjectFilterPolicy with exact known-alias normalization and explicit parent/child relations: biology -> biology_act, chemistry -> chemistry_act, physics -> physics_act, english -> english_work. Exact match is the default; an opt-in Include sub-subjects chip appears only when related child books exist.
 - LibraryScreen groups subject chips and computes direct counts using canonical identifiers. The child toggle resets when the grade, selected subject, or All chip changes. Arabic and English label resources were added.
 - Five new policy tests cover exact matching, explicit child inclusion only, child-to-parent exclusion, full aliases, and available-child counts. Combined focused Android run: 32/32 across 9 report files, zero failures/errors/skips. Staging Debug build passed.
 - Local APK app/build/outputs/apk/staging/debug/app-staging-debug.apk: 33,593,426 bytes; SHA-256 2C24E82251CD84C95EF4C7E8B95589E8DB9567065F2532644B3DCC2F42849E0B. Built only; not installed or launched.
-- Exact-SHA Android/Server CI for P2-10 is pending its source+docs commit. The previous docs-only SHA a667deb has since passed both workflows after one unchanged Android Maven-download retry.
+- Exact-SHA CI is green for P2-10 commit 65ee0bf19d6735ca3a76e59cc21df215795ef2e8: Android run 45146557597 passed unit tests, Staging Debug APK assembly and artifact upload (signed Release steps skipped); Server run 45146557390 passed dependency audit, TypeScript, 43 Vitest files / 295 tests, and Wrangler Production + Staging dry-runs. Android artifact 14803404358: 31,125,572 bytes; ZIP SHA-256 507e246e0535011648739eb509ef51068ee1c3048066bfa9bd97312e43cac2f9. No deployment occurred.
 - Phase 5 acceptance remains open: visually verify the exact parent filter, opt-in child inclusion, reset behavior, counts and independent search on a real device. No emulator or phone was used.
 
-### Next action
-1. Review the current P2-10 diff and run git diff --check; local 32/32 tests and Staging Debug build have passed.
-2. Commit LibraryScreen, the policy, tests, Arabic/English resources, ROADMAP and SESSION_HANDOFF together on work/release-readiness; push.
-3. Verify Android and Server CI on the exact P2-10 SHA. If Android fails only during external Maven artifact downloads, inspect and rerun the failed job without modifying or excluding tests.
-4. Keep PR #6 Open + Draft + unmerged; main remains untouched.
-5. Keep the WebGPT task RUNNING; do not submit/close it unless expressly requested. Leave Phase 5 device acceptance open; do not install/launch, deploy, migrate, write D1, change secrets or release.
+### P2-11 in progress — local implementation and focused verification passed; exact-SHA CI pending
+- Root cause and scope are recorded in ROADMAP.md under P2-11: structured identifier queries such as `QA_HW_20261119_A` previously matched any substring token, including `QA` embedded inside unrelated identifiers.
+- `ArabicSearchEngine.kt` now recognizes compact 3+ segment alphanumeric IDs separated by `_` or `-` when at least one segment contains a digit. Every normalized segment, including one-character tokens, must exist as a complete candidate token; contiguous full ID receives highest ranking. Natural-language queries retain previous partial-token behavior.
+- Added `ArabicSearchEngineIdentifierQueryTest`: 5 regression tests for complete IDs, false positives (`QATEST2`, `SYNCQA_ISSUE_20261118_A1`), distributed exact segments, all-single-character IDs (`A_B_C_1`), and natural-language compatibility. Together with `PhaseFourUiPolicyTest`, 29 tests across 2 XML reports passed with zero failures/errors.
+- `:app:assembleStagingDebug` passed. APK: 33,593,426 bytes; SHA-256 `0765538BEE3FD3EEE3F957335594384B8E40B977CCC0FD5350EACCEBD25E167C`. It was built only, not installed or launched.
+- P2-11 source and test are local/uncommitted. Next: finish review, stage `ArabicSearchEngine.kt`, its regression test, ROADMAP.md and SESSION_HANDOFF.md together, commit and push to `work/release-readiness`, then verify exact-SHA Android and Server CI.
+- PR #6 remains Open + Draft + unmerged; `main` is untouched. The WebGPT task token must stay RUNNING. Phase 5 real-device acceptance remains open; no emulator/phone, deployment, migration, D1 write, secret change, or release.
 --- Historical handoff snapshot (2026-11-17; superseded by the current section above) ---
 
 **آخر تحديث موثوق:** 2026-11-17  

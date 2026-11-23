@@ -495,9 +495,9 @@
 
 **الأدلة:** %TEMP%\tanweer-core-round-20261118.
 
-### P2-10 implementation checkpoint (2026-11-22)
+### P2-10 completed (2026-11-22)
 
-**الحالة:** IMPLEMENTED LOCALLY / FOCUSED ANDROID TESTS PASS (32/32) / STAGING DEBUG BUILD PASS / EXACT-SHA CI PENDING / PHASE 5 DEVICE ACCEPTANCE OPEN.
+**الحالة:** IMPLEMENTED + COMMITTED / FOCUSED ANDROID TESTS PASS (32/32) / STAGING DEBUG BUILD PASS / EXACT-SHA ANDROID + SERVER CI PASS / PHASE 5 DEVICE ACCEPTANCE OPEN.
 
 - **سبب الخلل:** LibraryScreen.kt كان يستخدم book.subjectId.contains(selectedSubjectFilter)، لذلك مرشح biology كان يلتقط biology_act أيضاً. هذا احتواء جزئي لمعرف معياري وليس علاقة مادة/مادة فرعية مقصودة.
 - **المطابقة المعيارية:** أضيفت LibrarySubjectFilterPolicy. تطبيع المعرفات يقبل المعرفات المعيارية والمرادفات الكاملة المعروفة فقط؛ لا يغيّر السلاسل الأطول أو المتشابهة بالاحتواء النصي.
@@ -506,7 +506,8 @@
 - **الموارد:** أضيفت تسمية الشريحة بالعربية والإنجليزية، وتم التحقق من XML ومن وجود المفتاح مرة واحدة في كل لغة.
 - **اختبارات السياسة:** 5 اختبارات جديدة تغطي التطابق الدقيق، إدراج الفرع عند الطلب فقط، عدم إدراج الأب عند اختيار الفرع، المرادفات الكاملة، وعداد الفروع المتاحة. مجموعة Android المركزة اجتازت 32/32 عبر 9 ملفات، بلا failures/errors/skips.
 - **البناء المحلي:** :app:assembleStagingDebug نجح. APK app/build/outputs/apk/staging/debug/app-staging-debug.apk، الحجم 33,593,426 بايت، SHA-256 2C24E82251CD84C95EF4C7E8B95589E8DB9567065F2532644B3DCC2F42849E0B. بُني فقط؛ لم يُثبت أو يُشغّل.
-- **CI:** exact-SHA Android + Server CI مطلوب بعد دفع commit P2-10. على commit التوثيق السابق a667deb، Server run 45050588860 نجح؛ Android run 45050588857 تعطل أولاً بسبب MavenArtifactFetcher / HttpURLConnection عند تنزيل اعتماد Robolectric، ثم نجحت إعادة تشغيل الوظيفة دون تغيير المصدر أو تخطي اختبارات.
+- **CI:** Exact-SHA Android + Server CI passed for P2-10 code+docs commit `65ee0bf19d6735ca3a76e59cc21df215795ef2e8`. على commit التوثيق السابق a667deb، Server run 45050588860 نجح؛ Android run 45050588857 تعطل أولاً بسبب MavenArtifactFetcher / HttpURLConnection عند تنزيل اعتماد Robolectric، ثم نجحت إعادة تشغيل الوظيفة دون تغيير المصدر أو تخطي اختبارات.
+- **Exact-SHA CI closeout:** Android run `45146557597` passed unit tests, Staging Debug APK assembly, and artifact upload (signed Release steps skipped); Server run `45146557390` passed dependency audit, TypeScript, 43 Vitest files / 295 tests, and Wrangler Production + Staging dry-runs. Android artifact `14803404358`: 31,125,572 bytes; ZIP SHA-256 `507e246e0535011648739eb509ef51068ee1c3048066bfa9bd97312e43cac2f9`. No deployment occurred.
 - **Phase 5:** القبول المرئي على جهاز حقيقي ما زال مفتوحاً: مرشح الأحياء وحده، ظهور خيار الفرع عند توفره، تفعيل/إلغاء الخيار، أعداد الشرائح، وبقاء البحث النصي مستقلاً. لم يُستخدم محاكي أو هاتف.
 - **النطاق:** Android/UI + سياسة واختبارات وموارد فقط. لا تغييرات Server/API أو قاعدة بيانات أو migration أو نشر أو أسرار أو Release أو main أو دمج PR.
 
@@ -527,6 +528,16 @@
 
 
 
+### P2-11 implementation checkpoint (2026-11-23)
+
+**الحالة:** IMPLEMENTED LOCALLY / FOCUSED ANDROID TESTS PASS (29/29 across 2 XML reports) / STAGING DEBUG BUILD PASS / EXACT-SHA CI PENDING / PHASE 5 DEVICE ACCEPTANCE OPEN.
+
+- **Root cause:** `ArabicSearchEngine.calculateRelevance` rewarded any query token found as a substring, so a segment such as `QA` matched inside `QATEST2` or `SYNCQA` even when the rest of `QA_HW_20261119_A` was absent.
+- **Fix:** compact identifier queries with at least three alphanumeric segments separated by `_` or `-`, and at least one numeric segment, now use identifier mode. Every normalized segment is retained (including one-character `A`) and must exist as a complete token across the searchable record fields. A contiguous full-ID occurrence receives the highest ranking; natural-language and non-structured queries keep the previous partial-token behavior.
+- **Regression coverage:** five new tests verify exact ID match, reject `QATEST2` and `SYNCQA_ISSUE_20261118_A1`, allow all exact segments across searchable fields, and preserve natural-language / non-structured partial search, including all-single-character ID `A_B_C_1`. Combined run with `PhaseFourUiPolicyTest`: 29 tests across 2 reports, zero failures/errors.
+- **Build:** `:app:assembleStagingDebug` passed. APK `app/build/outputs/apk/staging/debug/app-staging-debug.apk`: 33,593,426 bytes; SHA-256 `0765538BEE3FD3EEE3F957335594384B8E40B977CCC0FD5350EACCEBD25E167C`. Built only; not installed or launched.
+- **CI:** exact-SHA Android + Server CI is pending the P2-11 source+docs commit. P2-10 exact-SHA CI is green on `65ee0bf19d6735ca3a76e59cc21df215795ef2e8` (Android `45146557597`, Server `45146557390`).
+- **Phase 5:** real-device validation of exact ID search, false-positive rejection, and ordinary natural-language search remains open. No emulator or phone was used.
 ## P2-12 — نطاق صفحات الواجب يتحول من 10-12 إلى 1012
 
 **مرجع التقرير:** TNW-ACADEMIC-ARCHIVE-KNOWLEDGE-BASE-COMPREHENSIVE-ROUND-20261120. **الأولوية:** P2.
@@ -1091,7 +1102,7 @@
 | المرحلة/البند | الحالة | Commit الإصلاح | CI / دليل القبول |
 |---|---|---|---|
 | Phase 1 — P1 trust / persistence / stability | IMPLEMENTATION + AUTOMATED CI VERIFIED / PHASE 5 ACCEPTANCE OPEN | f98371e10aa3ad303f28815e73ad90416f50c799 | Android Ubuntu: testStagingDebugUnitTest PASS; assembleStagingDebug PASS. Server: TypeScript, dependency security baseline, Wrangler bundle validation PASS; 42 files / 293 tests PASS. Local Windows/Robolectric AtomicFile issue is host-specific and the unchanged API34 test passed on Ubuntu. Migration 0034 remains memory-SQLite-only; P1-02 explicitly deferred and P1-03 remains a text-quality guard pending real PDF extraction work/verification in Phase 5. Device acceptance Phase 5. |
-| Phase 2 - P2 data correctness / sync truth | P2-01 through P2-09 implementation and exact-SHA Android/Server CI verified; P2-10 implementation and focused local Android verification passed, exact-SHA CI pending; Phase 5 device acceptance open | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03: 35763ee8b6e8faa217df51798fcb2ec7274841b9; P2-04: 9e090054dfd2d0f9277a4ea9e4d6a208d40eb968; P2-05: e217ff83ca8f3bb2c2b6fd5d6b05df891985f149; P2-06: a42983cf0c1a1ef8010b323b5f119746623ddfde; P2-07: bbeb3e95130cf099cd4dae34b2ea78c3f71ca745; P2-08: cf310f0dae231260e63eb8951db9f81cc76036e3; P2-09: 07ccb85c55d92e8c3963c5bb523f0f8833fde5ac; P2-10: implementation commit pending | P2-10 Android local 32/32 focused tests + Staging Debug assemble PASS. Exact-SHA Android/Server CI pending. No deployment or database apply/write. Physical acceptance remains Phase 5. |
+| Phase 2 - P2 data correctness / sync truth | P2-01 through P2-10 implementation and exact-SHA Android/Server CI verified; P2-11 local implementation and focused Android verification passed, exact-SHA CI pending; Phase 5 device acceptance open | P2-01: 412bba30859426a891ba860a92aa201446007537; P2-02: 89e16d4ab99b7068ce13a4b7704acd196e501172; P2-03: 35763ee8b6e8faa217df51798fcb2ec7274841b9; P2-04: 9e090054dfd2d0f9277a4ea9e4d6a208d40eb968; P2-05: e217ff83ca8f3bb2c2b6fd5d6b05df891985f149; P2-06: a42983cf0c1a1ef8010b323b5f119746623ddfde; P2-07: bbeb3e95130cf099cd4dae34b2ea78c3f71ca745; P2-08: cf310f0dae231260e63eb8951db9f81cc76036e3; P2-09: 07ccb85c55d92e8c3963c5bb523f0f8833fde5ac; P2-10: 65ee0bf19d6735ca3a76e59cc21df215795ef2e8; P2-11: implementation commit pending | P2-10: local 32/32 tests + Staging Debug; exact-SHA Android run 45146557597 and Server run 45146557390 passed. P2-11: 28 focused tests across 2 reports / zero failures and Staging Debug build passed; exact-SHA CI pending. No deployment or database apply/write. Physical acceptance remains Phase 5. |
 | Phase 3 — P2 CRUD / collaboration / navigation | NOT STARTED | — | — |
 | Phase 4 — P2/P3 UX / accessibility | NOT STARTED | — | — |
 | Phase 5 — final acceptance | NOT STARTED | — | — |
