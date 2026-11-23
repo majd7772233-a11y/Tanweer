@@ -4,7 +4,7 @@
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; working branch only: `work/release-readiness`.
-- Verified P2-10 source commit: 65ee0bf19d6735ca3a76e59cc21df215795ef2e8 (fix: match library subject filters by canonical id) on work/release-readiness; P2-10 is complete and P2-11 is the current stage on this branch; main is untouched.
+- Latest pushed code commit: 5c661e85cf352eb869eff64e2d27208419e69aa7 (fix: require full identifier tokens in search) on work/release-readiness; P2-10 and P2-11 are complete with exact-SHA CI green; P2-12 implementation is local/uncommitted; main is untouched.
 - PR #6 is Open + Draft + unmerged, base `main`, head `work/release-readiness`. Keep it that way.
 - WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close it unless the user expressly asks.
 
@@ -42,13 +42,21 @@
 - Exact-SHA CI is green for P2-10 commit 65ee0bf19d6735ca3a76e59cc21df215795ef2e8: Android run 45146557597 passed unit tests, Staging Debug APK assembly and artifact upload (signed Release steps skipped); Server run 45146557390 passed dependency audit, TypeScript, 43 Vitest files / 295 tests, and Wrangler Production + Staging dry-runs. Android artifact 14803404358: 31,125,572 bytes; ZIP SHA-256 507e246e0535011648739eb509ef51068ee1c3048066bfa9bd97312e43cac2f9. No deployment occurred.
 - Phase 5 acceptance remains open: visually verify the exact parent filter, opt-in child inclusion, reset behavior, counts and independent search on a real device. No emulator or phone was used.
 
-### P2-11 in progress — local implementation and focused verification passed; exact-SHA CI pending
+### P2-11 completed — local verification and exact-SHA Android + Server CI passed
 - Root cause and scope are recorded in ROADMAP.md under P2-11: structured identifier queries such as `QA_HW_20261119_A` previously matched any substring token, including `QA` embedded inside unrelated identifiers.
 - `ArabicSearchEngine.kt` now recognizes compact 3+ segment alphanumeric IDs separated by `_` or `-` when at least one segment contains a digit. Every normalized segment, including one-character tokens, must exist as a complete candidate token; contiguous full ID receives highest ranking. Natural-language queries retain previous partial-token behavior.
 - Added `ArabicSearchEngineIdentifierQueryTest`: 5 regression tests for complete IDs, false positives (`QATEST2`, `SYNCQA_ISSUE_20261118_A1`), distributed exact segments, all-single-character IDs (`A_B_C_1`), and natural-language compatibility. Together with `PhaseFourUiPolicyTest`, 29 tests across 2 XML reports passed with zero failures/errors.
 - `:app:assembleStagingDebug` passed. APK: 33,593,426 bytes; SHA-256 `0765538BEE3FD3EEE3F957335594384B8E40B977CCC0FD5350EACCEBD25E167C`. It was built only, not installed or launched.
-- P2-11 source and test are local/uncommitted. Next: finish review, stage `ArabicSearchEngine.kt`, its regression test, ROADMAP.md and SESSION_HANDOFF.md together, commit and push to `work/release-readiness`, then verify exact-SHA Android and Server CI.
+- P2-11 was committed and pushed as `5c661e85cf352eb869eff64e2d27208419e69aa7`. Exact-SHA Android run `45148258115` passed unit tests, Staging Debug assembly and Debug artifact upload (signed Release steps skipped); Server run `45148258094` passed dependency audit, TypeScript, 43 Vitest files / 295 tests and Wrangler Production + Staging dry-runs. Android artifact `14804897617`: 31,126,813 bytes, ZIP SHA-256 `8943bb0e357e72904a6530c42a4e6c2698042c912b75d8d058b0b9add62125d2`. No deployment occurred.
 - PR #6 remains Open + Draft + unmerged; `main` is untouched. The WebGPT task token must stay RUNNING. Phase 5 real-device acceptance remains open; no emulator/phone, deployment, migration, D1 write, secret change, or release.
+### P2-12 in progress — local implementation and focused verification passed; exact-SHA CI pending
+- Root cause: `KnowledgeHomeworkCard` stripped all non-digit characters from `pageNumbers`, turning `10-12` into `1012` and selecting PDF page index 1011.
+- Added `HomeworkPageReferencePolicy` / `HomeworkPageReference`. Supports single pages, ordered ranges with hyphen/en dash/em dash and whitespace, Arabic-Indic/Persian digits, and explicit Arabic/English labels. Details fallback is allowed only with an explicit page label; malformed, reversed, zero, overflow and ambiguous values produce no page action.
+- `KnowledgeHomeworkCard` now displays a range such as `الصفحات: 10–12`; its explicit action opens the first page of the range (10), using zero-based index 9. Single pages remain direct navigation.
+- Added `HomeworkPageReferencePolicyTest`: 8/8 passed; combined P2-10/P2-11/P2-12 regression run: 69/69 tests across 12 XML reports, zero failures/errors/skips. `:app:assembleStagingDebug` passed; APK 33,593,388 bytes, SHA-256 `3DAEF25143B1BC0A1415242C666AA0030BD7B7FB8A19F016BB5033DF00143F1B`. Built only; not installed/launched.
+- P2-12 source and tests are local/uncommitted. Next: review exact diff and tests, then commit/push code plus ROADMAP.md and SESSION_HANDOFF.md together on `work/release-readiness`; verify exact-SHA Android and Server CI.
+- P2-11 exact-SHA CI is green on commit `5c661e85cf352eb869eff64e2d27208419e69aa7` (Android `45148258115`, Server `45148258094`). PR #6 remains Open + Draft + unmerged; `main` is untouched. WebGPT task must remain RUNNING.
+- Phase 5 real-device PDF validation remains open. The report's 52.9 MB Quran PDF was not fully downloaded during evidence capture; no claim is made that it was opened. No emulator/phone, deployment, migration, D1 write, secret change or release.
 --- Historical handoff snapshot (2026-11-17; superseded by the current section above) ---
 
 **آخر تحديث موثوق:** 2026-11-17  

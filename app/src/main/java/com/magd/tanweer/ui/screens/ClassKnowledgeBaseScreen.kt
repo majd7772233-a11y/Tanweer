@@ -33,6 +33,7 @@ import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.HomeworkPageReferencePolicy
 
 @Composable
 fun ClassKnowledgeBaseScreen(
@@ -540,10 +541,8 @@ fun KnowledgeHomeworkCard(
     homework: HomeworkItem,
     onOpenPdfPage: (Int) -> Unit
 ) {
-    val pageNum = remember(homework.pageNumbers, homework.details) {
-        val src = homework.pageNumbers ?: homework.details ?: ""
-        val digits = src.filter { it.isDigit() }
-        digits.toIntOrNull()
+    val pageReference = remember(homework.pageNumbers, homework.details) {
+        HomeworkPageReferencePolicy.parse(homework.pageNumbers, homework.details)
     }
 
     GlassCard(
@@ -578,15 +577,30 @@ fun KnowledgeHomeworkCard(
                 )
             }
 
-            if (pageNum != null) {
+            if (pageReference != null) {
                 Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = if (pageReference.isRange) {
+                        "📖 الصفحات: ${pageReference.firstPage}–${pageReference.lastPage}"
+                    } else {
+                        "📖 الصفحة: ${pageReference.firstPage}"
+                    },
+                    fontSize = tanweerTextSize(11f),
+                    color = CyanAccent,
+                    fontWeight = FontWeight.Bold
+                )
                 Button(
-                    onClick = { onOpenPdfPage((pageNum - 1).coerceAtLeast(0)) },
+                    onClick = { onOpenPdfPage(pageReference.firstPageIndex) },
                     colors = ButtonDefaults.buttonColors(containerColor = CyanAccent.copy(alpha = 0.2f)),
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                 ) {
-                    Text("📖 فتح صفحة $pageNum مباشرة في الكتاب", fontSize = tanweerTextSize(11f), color = CyanAccent, fontWeight = FontWeight.Bold)
+                    val actionLabel = if (pageReference.isRange) {
+                        "فتح بداية النطاق (صفحة ${pageReference.firstPage}) في الكتاب"
+                    } else {
+                        "فتح صفحة ${pageReference.firstPage} مباشرة في الكتاب"
+                    }
+                    Text(actionLabel, fontSize = tanweerTextSize(11f), color = CyanAccent, fontWeight = FontWeight.Bold)
                 }
             }
         }
