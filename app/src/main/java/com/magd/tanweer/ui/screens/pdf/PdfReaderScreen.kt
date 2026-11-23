@@ -69,6 +69,11 @@ import com.magd.tanweer.util.PdfSpeechTextQuality
 import com.magd.tanweer.util.ReadingStateCheckpoint
 import com.magd.tanweer.util.ReadingStateCheckpointPolicy
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CancellationException
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -624,18 +629,21 @@ fun PdfReaderScreen(
     }
 
     fun tagExamQuestion(tag: String) {
-        val noteText = "[$tag] صفحة ${currentPageIndex + 1}"
-        val newNote = PageStudyNote(
-            id = System.currentTimeMillis().toString(),
-            pageIndex = currentPageIndex,
-            noteText = noteText,
-            timestamp = System.currentTimeMillis()
-        )
-        notesList.add(newNote)
+        val pageIndexToTag = currentPageIndex
+        val noteText = "[$tag] صفحة ${pageIndexToTag + 1}"
         coroutineScope.launch {
-            repository.addNote(book.id, currentPageIndex, noteText)
+            try {
+                val noteId = "note_${java.util.UUID.randomUUID()}"
+                val savedNote = repository.addNote(book.id, pageIndexToTag, noteText, noteId)
+                withTimeout(5_000L) {
+                    snapshotFlow { notesList.any { it.id == savedNote.id } }.first { it }
+                }
+                Toast.makeText(context, "تم وسم الصفحة كـ $tag وحفظها في الملاحظات 📌", Toast.LENGTH_SHORT).show()
+            } catch (error: Exception) {
+                if (error is CancellationException && error !is TimeoutCancellationException) throw error
+                Toast.makeText(context, "تعذر تأكيد حفظ الملاحظة؛ حاول مجدداً.", Toast.LENGTH_LONG).show()
+            }
         }
-        Toast.makeText(context, "تم وسم الصفحة كـ $tag وحفظها في الملاحظات 📌", Toast.LENGTH_SHORT).show()
     }
 
     // Handle back button cleanly and wait for the latest Room checkpoint before exit.
@@ -748,8 +756,9 @@ fun PdfReaderScreen(
         // 3. Observe notes from Room
         launch {
             repository.getBookNotes(book.id).collect { list ->
+                val orderedNotes = list.distinctBy { it.id }
                 notesList.clear()
-                notesList.addAll(list.map { PageStudyNote(it.id, it.pageIndex, it.noteText, it.createdAt) })
+                notesList.addAll(orderedNotes.map { PageStudyNote(it.id, it.pageIndex, it.noteText, it.createdAt) })
             }
         }
 
@@ -1504,13 +1513,16 @@ fun PdfReaderScreen(
                         StudyNotesSheet(
                             currentPage = currentPageIndex,
                             notes = notesList,
-                            onAddNote = { noteText ->
-                                coroutineScope.launch {
-                                    repository.addNote(
-                                        bookId = book.id,
-                                        pageIndex = currentPageIndex,
-                                        noteText = noteText
-                                    )
+                            onAddNote = { noteId, noteText ->
+                                val pageIndexToSave = currentPageIndex
+                                val savedNote = repository.addNote(
+                                    bookId = book.id,
+                                    pageIndex = pageIndexToSave,
+                                    noteText = noteText,
+                                    noteId = noteId
+                                )
+                                withTimeout(5_000L) {
+                                    snapshotFlow { notesList.any { it.id == savedNote.id } }.first { it }
                                 }
                             },
                             onDeleteNote = { id ->
@@ -2843,11 +2855,15 @@ fun BookmarksSheet(
 fun StudyNotesSheet(
     currentPage: Int,
     notes: List<PageStudyNote>,
-    onAddNote: (String) -> Unit,
+    onAddNote: suspend (String, String) -> Unit,
     onDeleteNote: (String) -> Unit
 ) {
     var newNoteText by remember { mutableStateOf("") }
-    val currentPageNotes = remember(notes, currentPage) { notes.filter { it.pageIndex == currentPage } }
+    var pendingNoteId by remember { mutableStateOf<String?>(null) }
+    var isSavingNote by remember { mutableStateOf(false) }
+    var saveError by remember { mutableStateOf<String?>(null) }
+    val saveScope = rememberCoroutineScope()
+    val currentPageNotes = notes.filter { it.pageIndex == currentPage }.distinctBy { it.id }
 
     Column(
         modifier = Modifier
@@ -2868,18 +2884,44 @@ fun StudyNotesSheet(
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             GlassTextField(
                 value = newNoteText,
-                onValueChange = { newNoteText = it },
+                onValueChange = { updatedText ->
+                    if (!isSavingNote) {
+                        if (updatedText != newNoteText) pendingNoteId = null
+                        newNoteText = updatedText
+                        saveError = null
+                    }
+                },
                 label = "",
                 placeholder = "اكتب ملاحظتك أو تلخيصك لهذه الصفحة...",
+                isError = saveError != null,
+                errorMessage = saveError,
                 modifier = Modifier.weight(1f)
             )
             Spacer(modifier = Modifier.width(8.dp))
             GlassButton(
-                text = "حفظ 💾",
-                enabled = newNoteText.isNotBlank(),
+                text = if (isSavingNote) "جارٍ الحفظ..." else "حفظ 💾",
+                enabled = newNoteText.isNotBlank() && !isSavingNote,
                 onClick = {
-                    onAddNote(newNoteText.trim())
-                    newNoteText = ""
+                    val noteToSave = newNoteText.trim()
+                    if (noteToSave.isNotEmpty() && !isSavingNote) {
+                        val requestId = pendingNoteId ?: "note_${java.util.UUID.randomUUID()}".also {
+                            pendingNoteId = it
+                        }
+                        saveScope.launch {
+                            isSavingNote = true
+                            saveError = null
+                            try {
+                                onAddNote(requestId, noteToSave)
+                                newNoteText = ""
+                                pendingNoteId = null
+                            } catch (error: Exception) {
+                                if (error is CancellationException && error !is TimeoutCancellationException) throw error
+                                saveError = "تعذر تأكيد حفظ الملاحظة؛ بقي النص في الحقل. أعد المحاولة دون تغيير النص."
+                            } finally {
+                                isSavingNote = false
+                            }
+                        }
+                    }
                 },
                 modifier = Modifier.height(48.dp)
             )

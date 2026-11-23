@@ -1576,14 +1576,52 @@ class TanweerRepository(
         return db.bookReadingDao().getNotes(bookId)
     }
 
-    suspend fun addNote(bookId: String, pageIndex: Int, noteText: String) = withContext(Dispatchers.IO) {
-        val entity = BookNoteEntity(
-            id = "note_${bookId}_${pageIndex}_${System.currentTimeMillis()}",
-            bookId = bookId,
-            pageIndex = pageIndex,
-            noteText = noteText
+    suspend fun addNote(
+        bookId: String,
+        pageIndex: Int,
+        noteText: String,
+        noteId: String
+    ): BookNoteEntity = withContext(Dispatchers.IO) {
+        val normalizedText = noteText.trim()
+        val stableNoteId = noteId.trim()
+        require(normalizedText.isNotEmpty()) { "Note text must not be blank" }
+        require(stableNoteId.isNotEmpty()) { "Note ID must not be blank" }
+
+        val normalizedPageIndex = pageIndex.coerceAtLeast(0)
+        val notesDao = db.bookReadingDao()
+        val existing = notesDao.getNoteById(stableNoteId)
+        if (existing != null) {
+            BookNoteFlowConfirmation.requireMatchingRequest(
+                existing = existing,
+                bookId = bookId,
+                pageIndex = normalizedPageIndex,
+                noteText = normalizedText
+            )
+        } else {
+            val entity = BookNoteEntity(
+                id = stableNoteId,
+                bookId = bookId,
+                pageIndex = normalizedPageIndex,
+                noteText = normalizedText
+            )
+            try {
+                notesDao.insertNote(entity)
+            } catch (conflict: android.database.sqlite.SQLiteConstraintException) {
+                // A concurrent retry may have inserted this ID after our initial lookup.
+                val concurrentInsert = notesDao.getNoteById(stableNoteId) ?: throw conflict
+                BookNoteFlowConfirmation.requireMatchingRequest(
+                    existing = concurrentInsert,
+                    bookId = bookId,
+                    pageIndex = normalizedPageIndex,
+                    noteText = normalizedText
+                )
+            }
+        }
+
+        BookNoteFlowConfirmation.awaitPersistedNote(
+            notes = notesDao.getNotes(bookId),
+            expectedNoteId = stableNoteId
         )
-        db.bookReadingDao().insertNote(entity)
     }
 
     suspend fun deleteNote(id: String) = withContext(Dispatchers.IO) {

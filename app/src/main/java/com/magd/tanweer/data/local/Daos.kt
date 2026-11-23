@@ -497,10 +497,13 @@ interface BookReadingDao {
     @Query("DELETE FROM book_bookmarks WHERE id = :id")
     suspend fun deleteBookmark(id: String)
 
-    @Query("SELECT * FROM book_notes WHERE bookId = :bookId ORDER BY pageIndex ASC")
+    @Query("SELECT * FROM book_notes WHERE bookId = :bookId ORDER BY pageIndex ASC, createdAt ASC, id ASC")
     fun getNotes(bookId: String): Flow<List<BookNoteEntity>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Query("SELECT * FROM book_notes WHERE id = :id LIMIT 1")
+    suspend fun getNoteById(id: String): BookNoteEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertNote(note: BookNoteEntity)
 
     @Query("DELETE FROM book_notes WHERE id = :id")
