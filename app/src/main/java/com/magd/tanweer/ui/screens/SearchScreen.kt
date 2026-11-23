@@ -547,7 +547,7 @@ fun SearchScreen(
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(text = exam.title, fontSize = tanweerTextSize(15f), fontWeight = FontWeight.Bold, color = TextPrimary)
                             if (!exam.requiredChapters.isNullOrBlank()) {
-                                Text(text = "المقرر: ${exam.requiredChapters}", fontSize = tanweerTextSize(12f), color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(text = "المقرر: ${localizedChapterListLabel(exam.requiredChapters)}", fontSize = tanweerTextSize(12f), color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -572,7 +572,7 @@ fun SearchScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                GlassPill(text = event.category, color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
+                                GlassPill(text = localizedEventCategoryLabel(event.category), color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
                                 Text(text = event.eventDate, fontSize = tanweerTextSize(11f), color = TextMuted)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
@@ -887,7 +887,7 @@ fun SearchScreen(
                         Text(text = "📅 موعد الاختبار: ${exam.examDate}", fontSize = tanweerTextSize(12f), color = WarmAmber, fontWeight = FontWeight.Bold)
 
                         if (!exam.requiredChapters.isNullOrBlank()) {
-                            Text(text = "المقرر والفصول: ${exam.requiredChapters}", fontSize = tanweerTextSize(13f), color = CyanAccent)
+                            Text(text = "المقرر والفصول: ${localizedChapterListLabel(exam.requiredChapters)}", fontSize = tanweerTextSize(13f), color = CyanAccent)
                         }
                         if (!exam.notes.isNullOrBlank()) {
                             Text(text = "ملاحظات: ${exam.notes}", fontSize = tanweerTextSize(12f), color = TextSecondary)
@@ -939,7 +939,7 @@ fun SearchScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            GlassPill(text = event.category, color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
+                            GlassPill(text = localizedEventCategoryLabel(event.category), color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
                             IconButton(onClick = { selectedEventForDetail = null }) {
                                 Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextSecondary)
                             }

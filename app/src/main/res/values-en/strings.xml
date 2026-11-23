@@ -132,4 +132,21 @@
     <string name="pdf_stats_auto_pages">Pages browsed automatically this session: %1$d</string>
     <string name="pdf_stats_lifetime_pages">Unique pages recorded in this book history (all time): %1$d</string>
     <string name="pdf_stats_reading_speed">Human reading speed: %1$d pages/hour</string>
+    <string name="api_event_category_activity">Activity 🏆</string>
+    <string name="api_event_category_competition">Competition 🥇</string>
+    <string name="api_event_category_trip">Trip 🚌</string>
+    <string name="api_event_category_announcement">Official announcement 📢</string>
+    <string name="api_event_category_holiday">Holiday 🏖️</string>
+    <string name="api_event_category_celebration">Celebration 🎉</string>
+    <string name="api_event_category_workshop">Workshop 💡</string>
+    <string name="api_exam_type_monthly">Monthly exam 📝</string>
+    <string name="api_exam_type_oral">Oral exam 🗣️</string>
+    <string name="api_exam_type_midterm">Midterm exam 📑</string>
+    <string name="api_exam_type_final">Final exam 🏆</string>
+    <string name="api_value_unknown">Unrecognized value: %1$s</string>
+    <string name="api_value_not_available">Not available</string>
+    <string name="exam_chapter_number">Chapter %1$d</string>
+    <string name="exam_chapter_final_review">Final review</string>
+    <string name="exam_chapter_list_separator">, </string>
+    <string name="exam_full_syllabus">Full syllabus</string>
 </resources>

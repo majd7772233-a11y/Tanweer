@@ -134,4 +134,21 @@
     <string name="pdf_stats_auto_pages">صفحات تم تصفحها تلقائياً في هذه الجلسة: %1$d</string>
     <string name="pdf_stats_lifetime_pages">صفحات فريدة مسجلة في سجل هذا الكتاب (تراكمي): %1$d</string>
     <string name="pdf_stats_reading_speed">سرعة القراءة البشرية: %1$d صفحة/ساعة</string>
+    <string name="api_event_category_activity">نشاط 🏆</string>
+    <string name="api_event_category_competition">مسابقة 🥇</string>
+    <string name="api_event_category_trip">رحلة 🚌</string>
+    <string name="api_event_category_announcement">تعميم رسمي 📢</string>
+    <string name="api_event_category_holiday">إجازة 🏖️</string>
+    <string name="api_event_category_celebration">مناسبة 🎉</string>
+    <string name="api_event_category_workshop">ورشة 💡</string>
+    <string name="api_exam_type_monthly">اختبار شهري 📝</string>
+    <string name="api_exam_type_oral">اختبار شفهي 🗣️</string>
+    <string name="api_exam_type_midterm">اختبار نصفي 📑</string>
+    <string name="api_exam_type_final">اختبار نهائي 🏆</string>
+    <string name="api_value_unknown">قيمة غير معروفة: %1$s</string>
+    <string name="api_value_not_available">غير متاح</string>
+    <string name="exam_chapter_number">الفصل %1$d</string>
+    <string name="exam_chapter_final_review">مراجعة نهائية</string>
+    <string name="exam_chapter_list_separator">، </string>
+    <string name="exam_full_syllabus">المقرر كامل</string>
 </resources>

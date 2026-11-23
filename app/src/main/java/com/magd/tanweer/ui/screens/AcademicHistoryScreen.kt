@@ -30,6 +30,7 @@ import com.magd.tanweer.data.model.SchoolHierarchy
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.GlassCard
+import com.magd.tanweer.ui.components.localizedExamTypeLabel
 import com.magd.tanweer.ui.components.GlassPill
 import com.magd.tanweer.ui.components.PendingSyncEmptyState
 import com.magd.tanweer.ui.components.hasAuthoritativeSnapshot
@@ -984,14 +985,7 @@ fun AcademicExamPreviewDialog(
     exam: com.magd.tanweer.data.model.ExamItem,
     onDismiss: () -> Unit
 ) {
-    val examTypeAr = when (exam.examType.uppercase()) {
-        "MONTHLY" -> "اختبار شهري"
-        "QUIZ" -> "كويز قصير"
-        "ORAL" -> "اختبار شفهي 🗣️"
-        "MIDTERM" -> "نصف العام"
-        "FINAL" -> "نهاية العام"
-        else -> exam.examType
-    }
+    val examTypeAr = localizedExamTypeLabel(exam.examType)
 
     AlertDialog(
         onDismissRequest = onDismiss,

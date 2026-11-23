@@ -622,7 +622,7 @@ fun CalendarScreen(
                             }
                             if (!exam.requiredChapters.isNullOrBlank()) {
                                 Text(
-                                    text = "الفصول المقررة: ${exam.requiredChapters}",
+                                    text = "الفصول المقررة: ${localizedChapterListLabel(exam.requiredChapters)}",
                                     fontSize = tanweerTextSize(12f),
                                     color = RubyRed,
                                     modifier = Modifier.padding(top = 4.dp)
@@ -1254,7 +1254,7 @@ fun CalendarScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             GlassPill(text = exam.subjectName, color = RubyRed, bgColor = RubyRed.copy(alpha = 0.15f))
-                            GlassPill(text = exam.examType, color = CyanAccent, bgColor = CyanAccent.copy(alpha = 0.15f))
+                            GlassPill(text = localizedExamTypeLabel(exam.examType), color = CyanAccent, bgColor = CyanAccent.copy(alpha = 0.15f))
                         }
                         IconButton(onClick = { activeViewingExam = null }) {
                             Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextSecondary)
@@ -1265,7 +1265,7 @@ fun CalendarScreen(
                     Text(text = "📅 موعد الاختبار: ${exam.examDate}", fontSize = tanweerTextSize(12f), color = WarmAmber, fontWeight = FontWeight.Bold)
 
                     if (!exam.requiredChapters.isNullOrBlank()) {
-                        Text(text = "الفصول والمقرر: ${exam.requiredChapters}", fontSize = tanweerTextSize(13f), color = CyanAccent)
+                        Text(text = "الفصول والمقرر: ${localizedChapterListLabel(exam.requiredChapters)}", fontSize = tanweerTextSize(13f), color = CyanAccent)
                     }
                     if (!exam.notes.isNullOrBlank()) {
                         Text(text = "ملاحظات: ${exam.notes}", fontSize = tanweerTextSize(12f), color = TextSecondary)
@@ -1318,7 +1318,7 @@ fun CalendarScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            GlassPill(text = event.category, color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
+                            GlassPill(text = localizedEventCategoryLabel(event.category), color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
                             if (event.groupId == "all") {
                                 GlassPill(text = "كامل المدرسة 🏫", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
                             }

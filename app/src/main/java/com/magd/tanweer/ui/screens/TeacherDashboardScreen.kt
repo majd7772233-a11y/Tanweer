@@ -530,7 +530,7 @@ fun OfficialExamCard(exam: ExamItem) {
 
             if (!exam.requiredChapters.isNullOrBlank()) {
                 Text(
-                    text = "📚 الفصول المطلوبة: ${exam.requiredChapters}",
+                    text = "📚 الفصول المطلوبة: ${localizedChapterListLabel(exam.requiredChapters)}",
                     fontSize = tanweerTextSize(11f),
                     color = TextSecondary,
                     lineHeight = tanweerLineHeight(15f)

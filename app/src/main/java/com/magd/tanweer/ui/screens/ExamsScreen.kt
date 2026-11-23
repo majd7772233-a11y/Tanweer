@@ -40,6 +40,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.R
 import com.magd.tanweer.data.model.ExamItem
+import com.magd.tanweer.util.ApiDisplayValuePolicy
 import com.magd.tanweer.data.model.Permission
 import com.magd.tanweer.data.model.SubjectItem
 import com.magd.tanweer.data.model.hasPermission
@@ -1064,9 +1065,7 @@ fun CanvasExamsTableBoard(
                 val teacherOrHall = remember(exam.notes) {
                     if (!exam.notes.isNullOrBlank()) exam.notes.take(18) else "أستاذ المادة"
                 }
-                val chapters = remember(exam.requiredChapters) {
-                    if (!exam.requiredChapters.isNullOrBlank()) exam.requiredChapters.take(22) else "المقرر كامل"
-                }
+                val chapters = localizedChapterListLabel(exam.requiredChapters).take(22)
 
                 val rowColor = when {
                     isReviewed -> Color(0x1800E676)
@@ -1257,11 +1256,12 @@ fun CanvasExamsTableBoard(
 
 @Composable
 fun ExamTypePill(examType: String) {
-    val (label, color) = when (examType) {
-        "ORAL" -> "شفهي 🗣️" to CyanAccent
-        "MIDTERM" -> "نصفي 📑" to EmeraldGreen
-        "FINAL" -> "نهائي 🏆" to Color(0xFFFFB74D)
-        else -> "شهري 📝" to RubyRed
+    val color = when (ApiDisplayValuePolicy.examTypeKey(examType)) {
+        "ORAL" -> CyanAccent
+        "MIDTERM" -> EmeraldGreen
+        "FINAL" -> Color(0xFFFFB74D)
+        "MONTHLY" -> RubyRed
+        else -> TextMuted
     }
     Box(
         modifier = Modifier
@@ -1270,7 +1270,7 @@ fun ExamTypePill(examType: String) {
             .border(0.5.dp, color.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
             .padding(horizontal = 4.dp, vertical = 1.dp)
     ) {
-        Text(text = label, fontSize = tanweerTextSize(8f), fontWeight = FontWeight.Bold, color = color)
+        Text(text = localizedExamTypeLabel(examType), fontSize = tanweerTextSize(8f), fontWeight = FontWeight.Bold, color = color)
     }
 }
 
@@ -1727,7 +1727,7 @@ fun ExamDetailModal(
                 GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(text = "الفصول والموضوعات المقررة:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
-                        Text(text = exam.requiredChapters, fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
+                        Text(text = localizedChapterListLabel(exam.requiredChapters), fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }

@@ -715,7 +715,7 @@ fun WhatDidIMissScreen(
                             )
                             if (!exam.requiredChapters.isNullOrBlank()) {
                                 Text(
-                                    text = "المقرر: ${exam.requiredChapters}",
+                                    text = "المقرر: ${localizedChapterListLabel(exam.requiredChapters)}",
                                     fontSize = tanweerTextSize(12f),
                                     color = TextSecondary,
                                     maxLines = 2
@@ -778,7 +778,7 @@ fun WhatDidIMissScreen(
                             )
                             if (!exam.requiredChapters.isNullOrBlank()) {
                                 Text(
-                                    text = "المقرر: ${exam.requiredChapters}",
+                                    text = "المقرر: ${localizedChapterListLabel(exam.requiredChapters)}",
                                     fontSize = tanweerTextSize(12f),
                                     color = TextSecondary,
                                     maxLines = 2
@@ -826,7 +826,7 @@ fun WhatDidIMissScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 GlassPill(
-                                    text = event.category,
+                                    text = localizedEventCategoryLabel(event.category),
                                     color = EmeraldGreen,
                                     bgColor = EmeraldGreen.copy(alpha = 0.15f)
                                 )
@@ -883,7 +883,7 @@ fun WhatDidIMissScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 GlassPill(
-                                    text = event.category,
+                                    text = localizedEventCategoryLabel(event.category),
                                     color = CyanAccent,
                                     bgColor = CyanGlow
                                 )

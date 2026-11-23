@@ -624,7 +624,7 @@ fun KnowledgeExamCard(exam: ExamItem) {
                 Text("الموعد: ${exam.examDate}", fontSize = tanweerTextSize(12f), color = TextMuted)
             }
             if (!exam.requiredChapters.isNull_or_empty()) {
-                Text("📚 المطلوب: ${exam.requiredChapters!!}", fontSize = tanweerTextSize(12f), color = TextSecondary, modifier = Modifier.padding(top = 4.dp))
+                Text("📚 المطلوب: ${localizedChapterListLabel(exam.requiredChapters)}", fontSize = tanweerTextSize(12f), color = TextSecondary, modifier = Modifier.padding(top = 4.dp))
             }
         }
     }

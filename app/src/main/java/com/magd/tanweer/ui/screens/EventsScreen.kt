@@ -306,14 +306,7 @@ fun EventsScreen(
                                 }
 
                                 GlassPill(
-                                    text = if (isToday) "اليوم! 🔥" else when (event.category.uppercase()) {
-                                        "ACTIVITY" -> "نشاط 🏆"
-                                        "CELEBRATION" -> "مناسبة 🎉"
-                                        "HOLIDAY" -> "إجازة 🏖️"
-                                        "WORKSHOP" -> "ورشة 💡"
-                                        "ANNOUNCEMENT" -> "تعميم رسمي 📢"
-                                        else -> "فعالية 📌"
-                                    },
+                                    text = if (isToday) "اليوم! 🔥" else localizedEventCategoryLabel(event.category),
                                     color = if (isToday) EmeraldGreen else PurpleAccent,
                                     bgColor = if (isToday) EmeraldGreen.copy(alpha = 0.15f) else PurpleAccent.copy(alpha = 0.15f)
                                 )
