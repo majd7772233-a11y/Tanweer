@@ -99,6 +99,7 @@ export function mapSchoolEvent(r: any) {
     category: r.category ?? 'ACTIVITY',
     location: r.location ?? null,
     sourceName: r.source_name ?? r.created_by_name ?? (groupId === 'all' ? 'إدارة المدرسة' : null),
+    createdBy: r.created_by ?? r.createdBy ?? '',
     isOfficial: Boolean(r.is_official ?? r.isOfficial ?? false),
     createdAt: Number(r.created_at ?? r.createdAt ?? Date.now()),
   };

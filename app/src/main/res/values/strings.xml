@@ -159,4 +159,31 @@
     <string name="academic_archive_personal_summary">%1$d منجز • %2$d موثق</string>
     <string name="academic_archive_group_summary">إجمالي سجلات الشعبة: %1$d</string>
     <string name="academic_archive_total_homeworks_across_groups">إجمالي الواجبات عبر الشعب</string>
-</resources>
+    <string name="event_details_title">تفاصيل الفعالية</string>
+    <string name="event_details_date">التاريخ</string>
+    <string name="event_details_time">الوقت</string>
+    <string name="event_details_location">المكان</string>
+    <string name="event_details_description">التفاصيل</string>
+    <string name="event_details_category">التصنيف</string>
+    <string name="event_open_details_hint">اضغط لعرض التفاصيل</string>
+    <string name="event_edit">تعديل</string>
+    <string name="event_delete">حذف</string>
+    <string name="event_close">إغلاق</string>
+    <string name="event_delete_confirm_title">تأكيد حذف الفعالية</string>
+    <string name="event_delete_confirm_message">هل أنت متأكد من حذف هذه الفعالية؟ لن تظهر بعد تأكيد الخادم.</string>
+    <string name="event_delete_confirm">حذف الفعالية</string>
+    <string name="event_edit_title">تعديل الفعالية</string>
+    <string name="event_title_label">عنوان الفعالية *</string>
+    <string name="event_date_label">التاريخ (YYYY-MM-DD) *</string>
+    <string name="event_time_label">الوقت (اختياري)</string>
+    <string name="event_location_label">المكان (اختياري)</string>
+    <string name="event_description_label">التفاصيل (اختياري)</string>
+    <string name="event_save_changes">حفظ التعديلات</string>
+    <string name="event_required_fields">يرجى كتابة عنوان الفعالية وتاريخها.</string>
+    <string name="event_updated_success">تم تحديث الفعالية بنجاح.</string>
+    <string name="event_deleted_success">تم حذف الفعالية بنجاح.</string>
+    <string name="event_update_failed">تعذر تحديث الفعالية</string>
+    <string name="event_delete_failed">تعذر حذف الفعالية</string>
+        <string name="event_school_admin_name">إدارة المدرسة</string>
+    <string name="event_official_mark">رسمي ✓</string>
+    </resources>

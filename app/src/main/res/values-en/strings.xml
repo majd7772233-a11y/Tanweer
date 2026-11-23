@@ -157,4 +157,31 @@
     <string name="academic_archive_personal_summary">%1$d completed • %2$d documented</string>
     <string name="academic_archive_group_summary">Total group records: %1$d</string>
     <string name="academic_archive_total_homeworks_across_groups">Total homework tasks across groups</string>
-</resources>
+    <string name="event_details_title">Event details</string>
+    <string name="event_details_date">Date</string>
+    <string name="event_details_time">Time</string>
+    <string name="event_details_location">Location</string>
+    <string name="event_details_description">Details</string>
+    <string name="event_details_category">Category</string>
+    <string name="event_open_details_hint">Tap to view details</string>
+    <string name="event_edit">Edit</string>
+    <string name="event_delete">Delete</string>
+    <string name="event_close">Close</string>
+    <string name="event_delete_confirm_title">Confirm event deletion</string>
+    <string name="event_delete_confirm_message">Are you sure you want to delete this event? It will disappear after the server confirms the deletion.</string>
+    <string name="event_delete_confirm">Delete event</string>
+    <string name="event_edit_title">Edit event</string>
+    <string name="event_title_label">Event title *</string>
+    <string name="event_date_label">Date (YYYY-MM-DD) *</string>
+    <string name="event_time_label">Time (optional)</string>
+    <string name="event_location_label">Location (optional)</string>
+    <string name="event_description_label">Details (optional)</string>
+    <string name="event_save_changes">Save changes</string>
+    <string name="event_required_fields">Enter an event title and date.</string>
+    <string name="event_updated_success">Event updated successfully.</string>
+    <string name="event_deleted_success">Event deleted successfully.</string>
+    <string name="event_update_failed">Could not update the event</string>
+    <string name="event_delete_failed">Could not delete the event</string>
+        <string name="event_school_admin_name">School administration</string>
+    <string name="event_official_mark">Official ✓</string>
+    </resources>

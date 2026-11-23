@@ -55,14 +55,14 @@ class EventCrudMockDb {
       },
       async run(): Promise<{ success: boolean; meta: { changes: number } }> {
         if (/^UPDATE events SET/i.test(normalized)) {
-          const [eventDate, timeStr, title, description, category, location, official, eventId] = params;
+          const [eventDate, timeProvided, timeStr, title, descriptionProvided, description, category, locationProvided, location, official, eventId] = params;
           if (eventId !== db.event.id) return { success: true, meta: { changes: 0 } };
           if (eventDate !== null && eventDate !== undefined) db.event.event_date = String(eventDate);
-          if (timeStr !== null && timeStr !== undefined) db.event.time_str = String(timeStr);
+          if (timeProvided === 1) db.event.time_str = timeStr == null || timeStr === '' ? null : String(timeStr);
           if (title !== null && title !== undefined) db.event.title = String(title);
-          if (description !== null && description !== undefined) db.event.description = String(description);
+          if (descriptionProvided === 1) db.event.description = description == null || description === '' ? null : String(description);
           if (category !== null && category !== undefined) db.event.category = String(category);
-          if (location !== null && location !== undefined) db.event.location = String(location);
+          if (locationProvided === 1) db.event.location = location == null || location === '' ? null : String(location);
           if (official !== null && official !== undefined) db.event.is_official = Number(official);
           return { success: true, meta: { changes: 1 } };
         }
@@ -205,5 +205,23 @@ describe('Event CRUD authorization and holiday invariants', () => {
 
     expect(response.status).toBe(200);
     expect(db.event.title).toBe('تعميم محدث');
+  });
+  it('clears optional event fields only when the update explicitly sends empty values', async () => {
+    const db = new EventCrudMockDb('STUDENT');
+    db.event.time_str = '09:30';
+    db.event.description = 'وصف سابق';
+    db.event.location = 'قاعة العلوم';
+
+    const response = await handleUpdateEvent(
+      'evt_existing',
+      makeUser('STUDENT'),
+      makeRequest({ timeStr: '', description: '', location: '' }),
+      makeEnv(db)
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.event.time_str).toBeNull();
+    expect(db.event.description).toBeNull();
+    expect(db.event.location).toBeNull();
   });
 });

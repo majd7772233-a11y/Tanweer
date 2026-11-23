@@ -984,6 +984,7 @@ class TanweerRepository(
                                 category = it.category,
                                 location = it.location,
                                 createdAt = it.createdAt,
+                                createdBy = it.createdBy,
                                 sourceName = it.sourceName,
                                 isOfficial = it.isOfficial
                             )
@@ -1158,6 +1159,7 @@ class TanweerRepository(
                         category = it.category,
                         location = it.location,
                         createdAt = it.createdAt,
+                        createdBy = it.createdBy,
                         sourceName = it.sourceName,
                         isOfficial = it.isOfficial
                     )
@@ -1272,7 +1274,8 @@ class TanweerRepository(
                                 description = it.description,
                                 category = it.category,
                                 location = it.location,
-                                createdAt = it.createdAt
+                                createdAt = it.createdAt,
+                                createdBy = it.createdBy
                             )
                         }
                         val reconciledMonthEvents = ServerSnapshotReconciliation.preservePending(
@@ -2530,6 +2533,7 @@ class TanweerRepository(
                     category = it.category,
                     location = it.location,
                     createdAt = it.createdAt,
+                    createdBy = it.createdBy,
                     syncStatus = it.syncStatus,
                     sourceName = it.sourceName,
                     isOfficial = it.isOfficial
@@ -4074,6 +4078,8 @@ class TanweerRepository(
         location: String? = null
     ): Result<EventAddResult> = withContext(Dispatchers.IO) {
         val id = "evt_${System.currentTimeMillis()}"
+        val creatorId = db.userDao().getUserSync()?.id?.takeIf { it.isNotBlank() }
+            ?: return@withContext Result.failure(IllegalStateException("تعذر تحديد حساب منشئ الفعالية"))
         val entity = EventEntity(
             id = id,
             groupId = groupId,
@@ -4084,6 +4090,7 @@ class TanweerRepository(
             category = category,
             location = location,
             createdAt = System.currentTimeMillis(),
+            createdBy = creatorId,
             syncStatus = "SYNCING",
             sourceName = if (groupId == "all") "إدارة المدرسة" else null,
             isOfficial = groupId == "all" && category.equals("ANNOUNCEMENT", ignoreCase = true)
@@ -4164,6 +4171,93 @@ class TanweerRepository(
         }
     }
 
+    suspend fun updateEvent(
+        eventId: String,
+        eventDate: String,
+        timeStr: String?,
+        title: String,
+        description: String?,
+        location: String?
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val currentUserId = db.userDao().getUserSync()?.id.orEmpty()
+        val existing = db.eventDao().getEventById(eventId)
+            ?: return@withContext Result.failure(IllegalArgumentException("الفعالية غير موجودة في الأرشيف المحلي"))
+
+        if (currentUserId.isBlank() || existing.createdBy.isBlank() || existing.createdBy != currentUserId) {
+            return@withContext Result.failure(SecurityException("لا تملك صلاحية تعديل هذه الفعالية"))
+        }
+        if (!existing.syncStatus.equals("SYNCED", ignoreCase = true)) {
+            return@withContext Result.failure(IllegalStateException("لا يمكن تعديل فعالية لم يؤكد الخادم حفظها بعد"))
+        }
+        if (eventDate.isBlank() || title.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("عنوان الفعالية وتاريخها مطلوبان"))
+        }
+
+        if (existing.category.equals("HOLIDAY", ignoreCase = true) && description.isNullOrBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("سبب الإجازة مطلوب ولا يمكن مسحه"))
+        }
+
+        try {
+            val response = api.updateEvent(
+                eventId,
+                UpdateEventRequest(
+                    eventDate = eventDate.trim(),
+                    timeStr = timeStr?.trim().orEmpty(),
+                    title = title.trim(),
+                    description = description?.trim().orEmpty(),
+                    location = location?.trim().orEmpty()
+                )
+            )
+            val body = response.body()
+            if (isConfirmedServerWrite(response.isSuccessful, body?.success)) {
+                db.eventDao().insertEvent(
+                    existing.copy(
+                        eventDate = eventDate.trim(),
+                        timeStr = timeStr?.trim()?.takeIf { it.isNotEmpty() },
+                        title = title.trim(),
+                        description = description?.trim()?.takeIf { it.isNotEmpty() },
+                        location = location?.trim()?.takeIf { it.isNotEmpty() },
+                        syncStatus = "SYNCED"
+                    )
+                )
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(body?.error?.message ?: body?.message ?: "رفض الخادم تحديث الفعالية (HTTP ${response.code()})"))
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(Exception(error.localizedMessage ?: "تعذر الاتصال بالخادم لتحديث الفعالية"))
+        }
+    }
+
+    suspend fun deleteEvent(eventId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val currentUserId = db.userDao().getUserSync()?.id.orEmpty()
+        val existing = db.eventDao().getEventById(eventId)
+            ?: return@withContext Result.failure(IllegalArgumentException("الفعالية غير موجودة في الأرشيف المحلي"))
+
+        if (currentUserId.isBlank() || existing.createdBy.isBlank() || existing.createdBy != currentUserId) {
+            return@withContext Result.failure(SecurityException("لا تملك صلاحية حذف هذه الفعالية"))
+        }
+        if (!existing.syncStatus.equals("SYNCED", ignoreCase = true)) {
+            return@withContext Result.failure(IllegalStateException("لا يمكن حذف فعالية لم يؤكد الخادم حفظها بعد"))
+        }
+
+        try {
+            val response = api.deleteEvent(eventId)
+            val body = response.body()
+            if (isConfirmedServerWrite(response.isSuccessful, body?.success)) {
+                db.eventDao().deleteEventById(eventId)
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(body?.error?.message ?: body?.message ?: "رفض الخادم حذف الفعالية (HTTP ${response.code()})"))
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(Exception(error.localizedMessage ?: "تعذر الاتصال بالخادم لحذف الفعالية"))
+        }
+    }
     suspend fun dismissSchoolAnnouncement(eventId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val response = api.dismissSchoolAnnouncement(eventId)

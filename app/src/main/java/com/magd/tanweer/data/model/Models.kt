@@ -543,6 +543,7 @@ data class SchoolEventItem(
     val category: String = "ACTIVITY", // 'ACTIVITY', 'COMPETITION', 'TRIP', 'ANNOUNCEMENT', 'HOLIDAY'
     val location: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
+    val createdBy: String = "",
     val syncStatus: String = "SYNCED", // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
     val sourceName: String? = null,
     val isOfficial: Boolean = false

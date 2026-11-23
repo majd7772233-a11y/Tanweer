@@ -261,20 +261,23 @@ export async function handleUpdateEvent(
   await env.DB.prepare(
     `UPDATE events
      SET event_date = COALESCE(?, event_date),
-         time_str = COALESCE(?, time_str),
+         time_str = CASE WHEN ? = 1 THEN NULLIF(?, '') ELSE time_str END,
          title = COALESCE(?, title),
-         description = COALESCE(?, description),
+         description = CASE WHEN ? = 1 THEN NULLIF(?, '') ELSE description END,
          category = COALESCE(?, category),
-         location = COALESCE(?, location),
+         location = CASE WHEN ? = 1 THEN NULLIF(?, '') ELSE location END,
          is_official = COALESCE(?, is_official)
      WHERE id = ?`
   ).bind(
     body.eventDate || null,
-    body.timeStr || null,
+    body.timeStr === undefined ? 0 : 1,
+    body.timeStr?.trim() ?? null,
     body.title?.trim() || null,
-    body.description?.trim() || null,
+    body.description === undefined ? 0 : 1,
+    body.description?.trim() ?? null,
     body.category?.trim().toUpperCase() || null,
-    body.location?.trim() || null,
+    body.location === undefined ? 0 : 1,
+    body.location?.trim() ?? null,
     officialVal,
     eventId
   ).run();

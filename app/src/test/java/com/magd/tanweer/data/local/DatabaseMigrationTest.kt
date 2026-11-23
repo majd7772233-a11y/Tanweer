@@ -40,6 +40,7 @@ class DatabaseMigrationTest {
                     db.execSQL("CREATE TABLE `cached_homework_completions` (`homeworkId` TEXT NOT NULL, `userId` TEXT NOT NULL, `completedAt` INTEGER NOT NULL, PRIMARY KEY(`homeworkId`, `userId`))")
                     // The legacy cached_exams table is created above with the full pre-upgrade schema.
                     db.execSQL("CREATE TABLE `cached_events` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `eventDate` TEXT NOT NULL, `timeStr` TEXT, `title` TEXT NOT NULL, `description` TEXT, `category` TEXT NOT NULL, `location` TEXT, `createdAt` INTEGER NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))")
+                    db.execSQL("INSERT INTO `cached_events` VALUES ('legacy_event_1', 'class_10_A', '2026-11-19', '09:00', 'فعالية قديمة محفوظة', NULL, 'ACTIVITY', NULL, 1700000000000, 'SYNCED')")
                     db.execSQL("CREATE TABLE `cached_issues` (`id` TEXT NOT NULL, `groupId` TEXT NOT NULL, `subjectId` TEXT, `homeworkId` TEXT, `examId` TEXT, `title` TEXT NOT NULL, `description` TEXT, `status` TEXT NOT NULL, `bestCommentId` TEXT, `authorName` TEXT NOT NULL, `subjectName` TEXT, `subjectIcon` TEXT, `commentsCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))")
                     db.execSQL("CREATE TABLE `cached_issue_comments` (`id` TEXT NOT NULL, `issueId` TEXT NOT NULL, `userId` TEXT NOT NULL, `authorName` TEXT NOT NULL, `comment` TEXT NOT NULL, `isBestAnswer` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `syncStatus` TEXT NOT NULL, PRIMARY KEY(`id`))")
                     db.execSQL("INSERT INTO cached_issue_comments VALUES ('legacy_comment_1', 'legacy_issue_1', 'user_1', 'معلم', 'إجابة محفوظة', 0, 1600000000, 'SYNCED')")
@@ -87,7 +88,8 @@ class DatabaseMigrationTest {
                 TanweerDatabase.MIGRATION_13_14,
                 TanweerDatabase.MIGRATION_14_15,
                 TanweerDatabase.MIGRATION_15_16,
-                TanweerDatabase.MIGRATION_16_17
+                TanweerDatabase.MIGRATION_16_17,
+                TanweerDatabase.MIGRATION_17_18
             )
             .build()
 
@@ -95,6 +97,14 @@ class DatabaseMigrationTest {
         val outboxDao = roomDb.outboxDao()
         val dailyPlanDao = roomDb.dailyPlanDao()
         val examDao = roomDb.examDao()
+        val legacyEventCursor = roomDb.openHelper.readableDatabase.query(
+            "SELECT title, createdBy, syncStatus FROM cached_events WHERE id = 'legacy_event_1'"
+        )
+        assertTrue(legacyEventCursor.moveToFirst())
+        assertEquals("فعالية قديمة محفوظة", legacyEventCursor.getString(0))
+        assertEquals("", legacyEventCursor.getString(1))
+        assertEquals("SYNCED", legacyEventCursor.getString(2))
+        legacyEventCursor.close()
 
         // The new official flag must default to false while preserving pre-existing homework.
         val legacyHomeworkCursor = roomDb.openHelper.readableDatabase.query(

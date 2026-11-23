@@ -40,7 +40,7 @@ export async function handleGetCalendarOverview(
 
   // 3. Full Events for the calendar
   const events = await env.DB.prepare(
-    `SELECT id, group_id, event_date, time_str, title, description, category, location, created_at
+    `SELECT id, group_id, event_date, time_str, title, description, category, location, created_by, created_at
      FROM events
      WHERE (group_id = ? OR group_id = 'all') AND event_date LIKE ?
      ORDER BY event_date ASC`
@@ -119,7 +119,7 @@ export async function handleGetDayDetail(
   ).bind(user.userId, groupId, date).all();
 
   const events = await env.DB.prepare(
-    `SELECT id, group_id, event_date, time_str, title, description, category, location, created_at
+    `SELECT id, group_id, event_date, time_str, title, description, category, location, created_by, created_at
      FROM events
      WHERE (group_id = ? OR group_id = 'all') AND event_date = ?`
   ).bind(groupId, date).all();

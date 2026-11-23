@@ -6,6 +6,8 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -22,11 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.R
 import com.magd.tanweer.data.model.SchoolEventItem
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.GroupSyncSource
@@ -61,6 +65,10 @@ fun EventsScreen(
     val initialEventDateFromVm by viewModel.initialEventDate.collectAsStateWithLifecycle()
     var isLocalAddDialog by remember { mutableStateOf(false) }
     val showAddDialog = isLocalAddDialog || isAddEventModalOpenFromVm
+    var selectedEvent by remember { mutableStateOf<SchoolEventItem?>(null) }
+    var editingEvent by remember { mutableStateOf<SchoolEventItem?>(null) }
+    var deletingEvent by remember { mutableStateOf<SchoolEventItem?>(null) }
+    var isEventMutationInProgress by remember { mutableStateOf(false) }
     var activeTab by remember { mutableIntStateOf(0) } // 0 = قادمة, 1 = أرشيف سابقة
 
     val categories = listOf(
@@ -264,7 +272,7 @@ fun EventsScreen(
                     val isToday = event.eventDate == todayStr
 
                     GlassCard(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().clickable { selectedEvent = event },
                         borderColor = if (isToday) EmeraldGreen else PurpleAccent.copy(alpha = 0.4f),
                         backgroundColor = GlassSurface
                     ) {
@@ -359,6 +367,12 @@ fun EventsScreen(
                                     )
                                 }
                             }
+
+                            Text(
+                                text = stringResource(R.string.event_open_details_hint),
+                                fontSize = tanweerTextSize(10f),
+                                color = CyanAccent.copy(alpha = 0.75f)
+                            )
                         }
                     }
                 }
@@ -532,6 +546,276 @@ fun EventsScreen(
                         ) {
                             Text("نشر الفعالية ✨", color = TextOnAccent, fontWeight = FontWeight.Bold)
                         }
+                    }
+                }
+            }
+        }
+    }
+    selectedEvent?.let { event ->
+        EventDetailsDialog(
+            event = event,
+            canEdit = EventOwnershipPolicy.canEdit(event, currentUser?.id.orEmpty(), currentUser?.role.orEmpty()),
+            canDelete = EventOwnershipPolicy.canDelete(event, currentUser?.id.orEmpty(), currentUser?.role.orEmpty()),
+            onDismiss = { selectedEvent = null },
+            onEdit = {
+                selectedEvent = null
+                editingEvent = event
+            },
+            onDelete = {
+                selectedEvent = null
+                deletingEvent = event
+            }
+        )
+    }
+    editingEvent?.let { event ->
+        EventEditDialog(
+            event = event,
+            isSaving = isEventMutationInProgress,
+            onDismiss = { if (!isEventMutationInProgress) editingEvent = null },
+            onSave = { eventDate, timeStr, title, description, location ->
+                isEventMutationInProgress = true
+                viewModel.updateEvent(
+                    eventId = event.id,
+                    previousEventDate = event.eventDate,
+                    eventDate = eventDate,
+                    timeStr = timeStr,
+                    title = title,
+                    description = description,
+                    location = location
+                ) { result ->
+                    isEventMutationInProgress = false
+                    result.fold(
+                        onSuccess = {
+                            editingEvent = null
+                            Toast.makeText(context, context.getString(R.string.event_updated_success), Toast.LENGTH_SHORT).show()
+                        },
+                        onFailure = { error ->
+                            val detail = error.message ?: context.getString(R.string.event_update_failed)
+                            Toast.makeText(context, "${context.getString(R.string.event_update_failed)}: $detail", Toast.LENGTH_LONG).show()
+                        }
+                    )
+                }
+            }
+        )
+    }
+    deletingEvent?.let { event ->
+        AlertDialog(
+            onDismissRequest = { if (!isEventMutationInProgress) deletingEvent = null },
+            title = { Text(stringResource(R.string.event_delete_confirm_title)) },
+            text = { Text(stringResource(R.string.event_delete_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    enabled = !isEventMutationInProgress,
+                    onClick = {
+                        isEventMutationInProgress = true
+                        viewModel.deleteEvent(event.id, event.eventDate) { result ->
+                            isEventMutationInProgress = false
+                            result.fold(
+                                onSuccess = {
+                                    deletingEvent = null
+                                    Toast.makeText(context, context.getString(R.string.event_deleted_success), Toast.LENGTH_SHORT).show()
+                                },
+                                onFailure = { error ->
+                                    val detail = error.message ?: context.getString(R.string.event_delete_failed)
+                                    Toast.makeText(context, "${context.getString(R.string.event_delete_failed)}: $detail", Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        }
+                    }
+                ) {
+                    Text(stringResource(R.string.event_delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isEventMutationInProgress,
+                    onClick = { deletingEvent = null }
+                ) {
+                    Text(stringResource(R.string.event_close))
+                }
+            }
+        )
+    }
+}
+@Composable
+private fun EventDetailsDialog(
+    event: SchoolEventItem,
+    canEdit: Boolean,
+    canDelete: Boolean,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        GlassCard(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            borderColor = PurpleAccent,
+            backgroundColor = MidnightSurface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 580.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.event_details_title),
+                    fontSize = tanweerTextSize(16f),
+                    fontWeight = FontWeight.Bold,
+                    color = CyanAccent
+                )
+                Text(
+                    text = event.title,
+                    fontSize = tanweerTextSize(18f),
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                EventDetailLine(stringResource(R.string.event_details_category), localizedEventCategoryLabel(event.category))
+                EventDetailLine(stringResource(R.string.event_details_date), event.eventDate)
+                event.timeStr?.takeIf { it.isNotBlank() }?.let {
+                    EventDetailLine(stringResource(R.string.event_details_time), it)
+                }
+                event.location?.takeIf { it.isNotBlank() }?.let {
+                    EventDetailLine(stringResource(R.string.event_details_location), it)
+                }
+                event.description?.takeIf { it.isNotBlank() }?.let {
+                    EventDetailLine(stringResource(R.string.event_details_description), it)
+                }
+                if (event.isOfficial || event.category.equals("ANNOUNCEMENT", ignoreCase = true)) {
+                    GlassPill(
+                        text = "${event.sourceName ?: stringResource(R.string.event_school_admin_name)} • ${stringResource(R.string.event_official_mark)}",
+                        color = WarmAmber,
+                        bgColor = AmberGlow
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.event_close), color = TextSecondary)
+                    }
+                    if (canEdit) {
+                        TextButton(onClick = onEdit) {
+                            Text(stringResource(R.string.event_edit), color = CyanAccent)
+                        }
+                    }
+                    if (canDelete) {
+                        TextButton(onClick = onDelete) {
+                            Text(stringResource(R.string.event_delete), color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EventDetailLine(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(label, fontSize = tanweerTextSize(11f), color = CyanAccent, fontWeight = FontWeight.SemiBold)
+        Text(value, fontSize = tanweerTextSize(13f), color = TextPrimary, lineHeight = tanweerLineHeight(19f))
+    }
+}
+
+@Composable
+private fun EventEditDialog(
+    event: SchoolEventItem,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (eventDate: String, timeStr: String?, title: String, description: String?, location: String?) -> Unit
+) {
+    val context = LocalContext.current
+    var title by remember(event.id) { mutableStateOf(event.title) }
+    var eventDate by remember(event.id) { mutableStateOf(event.eventDate) }
+    var timeStr by remember(event.id) { mutableStateOf(event.timeStr.orEmpty()) }
+    var description by remember(event.id) { mutableStateOf(event.description.orEmpty()) }
+    var location by remember(event.id) { mutableStateOf(event.location.orEmpty()) }
+
+    Dialog(onDismissRequest = { if (!isSaving) onDismiss() }) {
+        GlassCard(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            borderColor = PurpleAccent,
+            backgroundColor = MidnightSurface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 620.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.event_edit_title),
+                    fontSize = tanweerTextSize(16f),
+                    fontWeight = FontWeight.Bold,
+                    color = CyanAccent
+                )
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text(stringResource(R.string.event_title_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = eventDate,
+                    onValueChange = { eventDate = it },
+                    label = { Text(stringResource(R.string.event_date_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = timeStr,
+                    onValueChange = { timeStr = it },
+                    label = { Text(stringResource(R.string.event_time_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = location,
+                    onValueChange = { location = it },
+                    label = { Text(stringResource(R.string.event_location_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text(stringResource(R.string.event_description_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 5
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(enabled = !isSaving, onClick = onDismiss) {
+                        Text(stringResource(R.string.event_close), color = TextSecondary)
+                    }
+                    Button(
+                        enabled = !isSaving,
+                        onClick = {
+                            if (title.isBlank() || eventDate.isBlank()) {
+                                Toast.makeText(context, context.getString(R.string.event_required_fields), Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            onSave(
+                                eventDate.trim(),
+                                timeStr.trim().ifBlank { null },
+                                title.trim(),
+                                description.trim().ifBlank { null },
+                                location.trim().ifBlank { null }
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(stringResource(R.string.event_save_changes), color = TextOnAccent, fontWeight = FontWeight.Bold)
                     }
                 }
             }

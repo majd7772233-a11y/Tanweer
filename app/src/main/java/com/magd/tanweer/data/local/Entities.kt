@@ -1,5 +1,6 @@
 package com.magd.tanweer.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -140,6 +141,8 @@ data class EventEntity(
     val category: String,
     val location: String?,
     val createdAt: Long,
+    @ColumnInfo(defaultValue = "''")
+    val createdBy: String = "",
     val syncStatus: String = "SYNCED",
     val sourceName: String? = null,
     val isOfficial: Boolean = false

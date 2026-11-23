@@ -2880,6 +2880,64 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun updateEvent(
+        eventId: String,
+        previousEventDate: String,
+        eventDate: String,
+        timeStr: String?,
+        title: String,
+        description: String?,
+        location: String?,
+        onResult: ((Result<Unit>) -> Unit)? = null
+    ) {
+        if (currentUser.value == null) {
+            onResult?.invoke(Result.failure(IllegalStateException("يلزم تسجيل الدخول لتعديل الفعالية")))
+            return
+        }
+        val syncScopeId = getActiveGroupId()
+        viewModelScope.launch {
+            val result = repository.updateEvent(
+                eventId = eventId,
+                eventDate = eventDate,
+                timeStr = timeStr,
+                title = title,
+                description = description,
+                location = location
+            )
+            if (result.isSuccess && syncScopeId.isNotBlank()) {
+                repository.syncEvents(syncScopeId)
+                val previousMonth = previousEventDate.take(7)
+                val updatedMonth = eventDate.take(7)
+                if (previousMonth.length == 7) repository.syncCalendarMonth(syncScopeId, previousMonth)
+                if (updatedMonth.length == 7 && updatedMonth != previousMonth) {
+                    repository.syncCalendarMonth(syncScopeId, updatedMonth)
+                }
+            }
+            onResult?.invoke(result)
+        }
+    }
+
+    fun deleteEvent(
+        eventId: String,
+        originalEventDate: String,
+        onResult: ((Result<Unit>) -> Unit)? = null
+    ) {
+        if (currentUser.value == null) {
+            onResult?.invoke(Result.failure(IllegalStateException("يلزم تسجيل الدخول لحذف الفعالية")))
+            return
+        }
+        val syncScopeId = getActiveGroupId()
+        viewModelScope.launch {
+            val result = repository.deleteEvent(eventId)
+            if (result.isSuccess && syncScopeId.isNotBlank()) {
+                repository.syncEvents(syncScopeId)
+                val affectedMonth = originalEventDate.take(7)
+                if (affectedMonth.length == 7) repository.syncCalendarMonth(syncScopeId, affectedMonth)
+            }
+            onResult?.invoke(result)
+        }
+    }
+
     fun addIssue(
         title: String,
         description: String?,

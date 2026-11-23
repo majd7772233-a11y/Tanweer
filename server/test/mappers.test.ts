@@ -107,6 +107,20 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
     expect(mapExam({ exam_type: 'FINAL' }).examType).toBe('FINAL');
   });
 
+  it('preserves the event creator ID for owner-only client actions', () => {
+    const mapped = mapSchoolEvent({
+      id: 'evt_owner_1',
+      group_id: 'class_10_A',
+      created_by: 'usr_event_owner_7',
+      event_date: '2026-11-19',
+      title: 'فعالية المنشئ',
+      category: 'ACTIVITY',
+      created_at: 1700000000000,
+    });
+
+    expect(mapped.createdBy).toBe('usr_event_owner_7');
+    expect((mapped as any).created_by).toBeUndefined();
+  });
   it('maps Content & Media items correctly', () => {
     const rawContent = {
       id: 'cnt_123',
