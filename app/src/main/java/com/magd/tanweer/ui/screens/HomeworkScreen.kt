@@ -780,44 +780,8 @@ fun HomeworkCard(
                         Text(text = homework.subjectIcon, fontSize = TanweerTypographyTokens.SizeHeader)
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "${homework.subjectName}: ${homework.title}",
-                                style = AppTypography.Title.copy(color = TextPrimary)
-                            )
-                            val taskKind = HomeworkTaskTypePolicy.classify(homework.taskType)
-                            val taskKindLabel = when (taskKind) {
-                                HomeworkTaskKind.HOMEWORK -> R.string.homework_type_label_homework
-                                HomeworkTaskKind.TASK -> R.string.homework_type_label_project
-                                HomeworkTaskKind.UNKNOWN -> R.string.homework_type_label_other
-                            }
-                            val taskKindColor = when (taskKind) {
-                                HomeworkTaskKind.HOMEWORK -> WarmAmber
-                                HomeworkTaskKind.TASK -> PurpleAccent
-                                HomeworkTaskKind.UNKNOWN -> TextMuted
-                            }
-                            if (taskKind != HomeworkTaskKind.HOMEWORK) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(taskKindColor.copy(alpha = 0.15f))
-                                        .padding(horizontal = 5.dp, vertical = 2.dp)
-                                ) {
-                                    Text(stringResource(taskKindLabel), style = AppTypography.Badge.copy(color = taskKindColor))
-                                }
-                            }
-                            if (homework.isOfficial) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(WarmAmber.copy(alpha = 0.15f))
-                                        .padding(horizontal = 5.dp, vertical = 2.dp)
-                                ) {
-                                    Text("رسمي • من الأستاذ 🎓", style = AppTypography.Badge.copy(color = WarmAmber))
-                                }
-                            }
-                        }
+                    Column(modifier = Modifier.weight(1f)) {
+                        HomeworkCardHeading(homework = homework)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),

@@ -149,4 +149,5 @@
     <string name="exam_chapter_final_review">Final review</string>
     <string name="exam_chapter_list_separator">, </string>
     <string name="exam_full_syllabus">Full syllabus</string>
+    <string name="homework_official_badge">Official • From the teacher 🎓</string>
 </resources>

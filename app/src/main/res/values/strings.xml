@@ -151,4 +151,5 @@
     <string name="exam_chapter_final_review">مراجعة نهائية</string>
     <string name="exam_chapter_list_separator">، </string>
     <string name="exam_full_syllabus">المقرر كامل</string>
+    <string name="homework_official_badge">رسمي • من الأستاذ 🎓</string>
 </resources>
