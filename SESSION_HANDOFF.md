@@ -4,7 +4,7 @@
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; working branch only: `work/release-readiness`.
-- Latest pushed code commit: c5222c697f0792c2350dede92d7fa137be3d892e (fix: separate daily and human PDF reading stats) on work/release-readiness; P2-10 through P2-17 are complete with exact-SHA Android + Server CI green; main is untouched.
+- Latest pushed code commit: 32a26bc8fdb5438a12b72bb0a431d2ea0d1a6907 (fix: localize API values and decode exam chapters) on work/release-readiness; P2-10 through P2-18 are complete with exact-SHA Android + Server CI green; main is untouched.
 - PR #6 is Open + Draft + unmerged, base `main`, head `work/release-readiness`. Keep it that way.
 - WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close it unless the user expressly asks.
 
@@ -96,15 +96,15 @@
 - `ReadingPageActivityPolicyTest`: 8/8 passed. Combined P2-10 through P2-17 regression run passed 96/96 tests across 17 XML reports, zero failures/errors/skips. `:app:assembleStagingDebug` passed; APK 33,593,388 bytes; SHA-256 `33FC90625C9F96E6676762F171A9741CD28084CA2C656C7B801BE3D5FFAC82CB`. Built only; not installed or launched.
 - P2-17 was committed and pushed as `c5222c697f0792c2350dede92d7fa137be3d892e`. Exact-SHA Android run `45179544460` passed unit tests, Staging Debug APK assembly and Debug artifact upload (signed Release steps skipped); Server run `45179544432` passed dependency audit, TypeScript, unit/integration tests, Wrangler Production bundle validation and migration listing. Android artifact `14821150635`: 31,159,967 bytes; ZIP SHA-256 `eae1c9aef9df3e95545d3ac1981316a62ab7d90c39b1e7f2cf98756727d663f2`. No deployment.
 - P2-17 exact-SHA CI is green on `c5222c697f0792c2350dede92d7fa137be3d892e` (Android `45179544460`, Server `45179544432`). PR #6 remains Open + Draft + unmerged; `main` untouched. WebGPT task must remain RUNNING. Phase 5 must verify manual dwell, repeated pages, auto-scroll isolation, stopping/reselecting an auto-visited page, speed denominator and date rollover while preserving the legacy cumulative history. No emulator/phone, history reset, deployment, migration, D1 write, secret change or release.
-### P2-18 in progress — local implementation and full regression/build verification passed; exact-SHA CI pending
-- Last pushed HEAD before this checkpoint: `20d120a9479f4180ffb5d0e42e41791b7213fbb3` (`docs: record P2-17 exact-SHA CI verification`). P2-18 changes are local/uncommitted at this checkpoint; `main` is untouched.
+### P2-18 completed — local verification and exact-SHA Android + Server CI passed
+- P2-18 code commit `32a26bc8fdb5438a12b72bb0a431d2ea0d1a6907` is pushed to `work/release-readiness`; working tree clean. `main` is untouched.
 - Replaced direct raw display of `event.category`, `exam.examType` and URI-encoded `requiredChapters` with centralized presentation-only formatters. Shared mappings cover Events, Calendar, Exams, Academic History, Class Knowledge Base, Teacher Dashboard, Search and What Did I Miss.
 - Event categories supported in display: ACTIVITY, COMPETITION, TRIP, ANNOUNCEMENT, HOLIDAY, and historical CELEBRATION/WORKSHOP. Supported exam labels: MONTHLY, ORAL, MIDTERM and FINAL. Retired QUIZ maps to MONTHLY for historical display only; no Quiz option or label was added.
 - Chapter formatter safely decodes encoded delimiters and presents CH1/CHAPTER_2 and Final_Review as localized labels. Unknown chapter names are humanized/preserved; literal plus signs and malformed URI sequences are handled safely.
 - Room/API source values and outbox/payload values remain unchanged. No model conversion, schema migration, D1 mutation or server change was made.
 - `ApiDisplayValuePolicyTest`: 8/8 passed. Combined Android regression run passed 104/104 tests across 18 XML reports, with zero failures/errors/skips. `:app:assembleStagingDebug` passed; APK 33,593,534 bytes; SHA-256 `1938BE5841C2B44138BC7908742E9F5C469BDD5EFC5866D432AEDC3C604CB4FC`. Built only; not installed or launched.
-- P2-18 exact-SHA Android + Server CI is pending the source+docs commit. After committing/pushing on `work/release-readiness`, verify exact SHA and both workflows; rerun only an unchanged failed job if its logs show transient dependency/network failure.
-- Phase 5 must verify Arabic/English enum labels, encoded chapter sample `CH1%2C_CH2%2C_Final_Review`, unknown/malformed values, legacy QUIZ-to-MONTHLY display, and unchanged Room/API payload values. PR #6 remains Open + Draft + unmerged; `main` untouched. WebGPT task must remain RUNNING. No emulator/phone, deployment, migration, D1 write, secret change or release.
+- Exact-SHA Android run `45197774477` passed unit tests, Staging Debug APK assembly and Debug artifact upload (signed Release steps skipped); Server run `45197774142` passed dependency audit, TypeScript, unit/integration tests, Wrangler Production bundle validation and migration listing. Artifact `14830490875` (`Tanweer-debug-be04c523d584df2edab2f6c347bd754113ab0247`): 31,168,375 bytes; ZIP SHA-256 `d8d9aed320fca892adf2254a7b10ae11e4d114837ef88db4cfc7daaf8be358db`. No deployment.
+- P2-18 exact-SHA CI is green on `32a26bc8fdb5438a12b72bb0a431d2ea0d1a6907` (Android `45197774477`, Server `45197774142`). Phase 5 must verify Arabic/English enum labels, encoded chapter sample `CH1%2C_CH2%2C_Final_Review`, unknown/malformed values, legacy QUIZ-to-MONTHLY display, and unchanged Room/API payload values. PR #6 remains Open + Draft + unmerged; `main` untouched. WebGPT task must remain RUNNING. No emulator/phone, deployment, migration, D1 write, secret change or release.
 --- Historical handoff snapshot (2026-11-17; superseded by the current section above) ---
 
 **آخر تحديث موثوق:** 2026-11-17  
