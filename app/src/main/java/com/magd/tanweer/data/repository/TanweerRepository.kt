@@ -2808,6 +2808,19 @@ class TanweerRepository(
             if (!isActiveChatConnection(groupId, generation)) return@connect
             try {
                 val type = json.optString("type", "")
+                if (type == "message_deleted") {
+                    val deletedGroupId = json.optString("groupId", "")
+                    val deletedMessageId = json.optString("messageId", "")
+                    if (deletedGroupId == groupId && deletedMessageId.isNotBlank()) {
+                        recentMessageIds.remove(deletedMessageId)
+                        CoroutineScope(Dispatchers.IO).launch {
+                            if (isActiveChatConnection(groupId, generation)) {
+                                db.chatDao().deleteMessage(groupId, deletedMessageId)
+                            }
+                        }
+                    }
+                    return@connect
+                }
                 if (type == "ack") {
                     val ackId = json.optString("id", "")
                     if (ackId.isNotBlank()) {
@@ -2988,6 +3001,46 @@ class TanweerRepository(
 
         db.chatDao().updateMessageStatus(messageId, if (confirmed) "SENT" else "FAILED")
         confirmed
+    }
+
+    /**
+     * Deletes a group message only after the Worker confirms the exact group/message pair.
+     * The Room row is deliberately retained on transport errors, denials, or invalid ACKs.
+     */
+    suspend fun deleteGroupChatMessage(groupId: String, messageId: String): Boolean = withContext(Dispatchers.IO) {
+        if (groupId.isBlank() || messageId.isBlank()) return@withContext false
+        try {
+            val response = api.deleteGroupMessage(groupId, messageId)
+            val acknowledgement = response.body()
+            if (!response.isSuccessful || acknowledgement?.confirmsDeletion(messageId, groupId) != true) {
+                Log.w(
+                    "TanweerRepository",
+                    "Group message deletion was not confirmed for group=$groupId message=$messageId (HTTP " + response.code() + ")"
+                )
+                return@withContext false
+            }
+
+            // The server has confirmed this precise deletion. Only now remove the local cache row.
+            db.chatDao().deleteMessage(groupId, messageId)
+
+            val activeGeneration = synchronized(chatConnectionLock) {
+                if (activeChatGroupId == groupId) chatConnectionGeneration else null
+            }
+            val reconciliation = if (activeGeneration != null) {
+                refreshActiveChatHistory(groupId, activeGeneration)
+            } else {
+                syncGroupChatHistory(groupId)
+            }
+            if (reconciliation !is SyncResult.Success) {
+                Log.w("TanweerRepository", "Chat history reconciliation after confirmed deletion was incomplete for $groupId")
+            }
+            true
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w("TanweerRepository", "Group message deletion request failed for group=$groupId message=$messageId", error)
+            false
+        }
     }
 
     suspend fun retryChatMessage(msg: ChatMessageItem) = withContext(Dispatchers.IO) {
