@@ -728,4 +728,23 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Governance:** no Worker deployment, D1 migration apply/write, staging/production write, secret change, Release signing, app install/launch, `main` update, PR merge or new branch. PR #6 remains Open + Draft + Unmerged. WebGPT task `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` remains RUNNING.
 - **Final source commit:** `e29eadcb0ee0616e49035d47cbc8a29e1c63cfd6` (`feat: allow owners to edit synced exams`) is on `origin/work/release-readiness`; Android and Server CI are green. PR #6 remains Open + Draft + Unmerged, based on `main`; head SHA matches the source commit.
 - **Artifact link:** `https://github.com/majd7772233-a11y/Tanweer/actions/runs/45411666582/artifacts/14927677080`.
-- **Next:** P2-22 implementation and exact-SHA CI are complete. Proceed to P2-23 (student-side assignment/homework Edit/Delete); do not conflate that item with exam editing. Keep Phase 5 acceptance open.
+- **Historical next at the P2-22 checkpoint:** proceed to P2-23. P2-23 is completed in the later checkpoint below; the next roadmap item is P2-24. Keep Phase 5 acceptance open.
+
+
+## 2026-11-24 — Phase 2 P2-23 final implementation checkpoint
+
+- **Source baseline:** 40c1ade732d33119a3fb305f9982c200de1f5cc3 on work/release-readiness. The implementation commits were pushed as 2a361eda (initial P2-23), 01af068 (mapper syntax correction), 540082c (Android creator mapping/date-picker corrections), and 1620eba (separate edit/delete permissions). The final source SHA is 1620eba5b3607deb3529ac63b900c5b03dd00413.
+- **PR:** #6 remains Open + Draft + Unmerged, base main, head work/release-readiness. No changes to main.
+- **Room identity:** server mapHomework now emits createdBy; HomeworkItem and HomeworkEntity carry it. All three server snapshot constructors and both local creation paths retain it. Database version 20 adds cached_homeworks.createdBy TEXT NOT NULL DEFAULT ''. Legacy rows with unknown owners remain non-editable/non-deletable.
+- **Edit:** owner-only student path supports title, details, page numbers, question numbers and due date. The form is prefilled. Explicitly clearing details/pages/questions is supported; omitted fields are preserved by the Worker PATCH.
+- **Delete:** a separate confirmation is required. Room is changed only after server acknowledgement. The local transaction removes the homework, its cached completion rows and active-account daily-plan reference; the screen cancels its reminder after success.
+- **Separate authorization:** MODERATE_HOMEWORK allows group-teacher editing/moderation; DELETE_HOMEWORK is a distinct permission. The creator may edit and delete their own record. A group teacher can edit another member's homework but cannot delete it solely via moderation permission; a group administrator or system administrator may delete. Android policy and menu model canEdit and canDelete independently.
+- **Tests:** HomeworkOwnershipPolicyTest has seven cases including independence of edit/delete grants and fail-closed legacy/unsynced rows. DatabaseMigrationTest covers v19 to v20. Server homework-ownership.test.ts verifies owner update/delete, optional clear/preserve, rejection of other students, teacher edit/no-delete and group-admin delete.
+- **Exact-SHA Server CI:** run 45419856761 PASS; TypeScript PASS; npm audit 0 vulnerabilities; 46 Vitest files / 313 tests PASS; Wrangler production and staging dry-runs PASS. No deployment or D1 write.
+- **Exact-SHA Android CI:** run 45419856793 PASS; full testStagingDebugUnitTest PASS; assembleStagingDebug PASS; Debug APK artifact upload PASS. PR release signing/build steps were skipped as configured. Artifact ID 14933139019, archive size 31,253,863 bytes, SHA-256 d7e540cd74532453cc895a92c5d57364c9268dcbc4890bfca2cbe6d06fc83bf7.
+- **Artifact:** https://github.com/majd7772233-a11y/Tanweer/actions/runs/45419856793/artifacts/14933139019
+- **Local verification limitation:** WebGPT terminal was unavailable during this continuation, so no local Gradle/npm commands were run in this session. Exact-SHA GitHub Actions provides the successful build/test evidence.
+- **Evidence limitation:** %TEMP%\tanweer-homework-round-20261119\evidence was absent in the active workstation session. Historical screenshots were not claimed as reviewed.
+- **Phase 5:** physical-device/account checks remain open for owner vs non-owner, teacher edit vs no-delete, group-admin delete, existing Room database migration, restart persistence, reminder cleanup and UI visual acceptance. No emulator or physical device was used.
+- **Governance:** no Worker deployment, D1 migration apply/write, production/staging data write, secret change, Release signing, app install/launch, main update, PR merge or new branch.
+- **Next roadmap item:** P2-24 — Android UI access to deleting a user's own group-chat message. P2-23 implementation and CI are complete; preserve Phase 5 acceptance as open.

@@ -806,13 +806,30 @@
 
 ## P2-23 — لا توجد أدوات تعديل/حذف لواجب الطالب المملوك له
 
+### P2-23 implementation result — 2026-11-24
+
+- **Status:** student-owned homework Edit/Delete implemented; exact-SHA Android and Server CI both pass on source commit 1620eba5b3607deb3529ac63b900c5b03dd00413.
+- **Ownership:** mapHomework exposes createdBy; HomeworkItem and Room HomeworkEntity persist it. Server snapshot and local create paths preserve the creator ID. Room version 20 adds cached_homeworks.createdBy with an empty default for legacy records; unknown owners fail closed.
+- **Edit/delete UI:** the homework card exposes a separate action menu. Edit and Delete are calculated by separate HomeworkOwnershipPolicy.canEdit/canDelete checks and shown independently. The student-owner path allows both actions only for SYNCED records with an exact creator-ID match.
+- **Edit flow:** supports title, details, page numbers, question numbers and due date. Empty optional text fields intentionally clear values; omitted PATCH fields retain their prior values. Repository writes Room only after HTTP success plus application success acknowledgement.
+- **Delete flow:** requires explicit confirmation; after server acknowledgement it removes the cached homework, associated completion rows and the active account's daily-plan reference, then cancels the reminder. A failed/denied request leaves local data intact.
+- **Permission split:** MODERATE_HOMEWORK is used for editing another member's work; DELETE_HOMEWORK is an independent permission for deleting another member's work. The creator can edit/delete their own homework. A group teacher may moderate/edit another student's homework but cannot delete it solely from that edit permission; active group administrators and the system administrator may delete.
+- **Worker validation:** update rejects blank titles and invalid due dates. The Worker differentiates an omitted optional field from an explicitly empty one. Delete continues its related completion/media cleanup. No D1 schema change was needed.
+- **Tests:** HomeworkOwnershipPolicyTest covers owner, other student, legacy/blank identities, unsynced states, and independent edit/delete grants. DatabaseMigrationTest covers the v19 to v20 default. Worker tests cover owner update/delete, optional clears, omitted-field preservation, teacher edit but no delete, admin delete, and non-owner denial.
+- **Android CI:** run 45419856793 passed the full testStagingDebugUnitTest task, assembleStagingDebug, and Debug artifact upload. Artifact ID 14933139019; archive size 31,253,863 bytes; ZIP SHA-256 d7e540cd74532453cc895a92c5d57364c9268dcbc4890bfca2cbe6d06fc83bf7.
+- **Server CI:** run 45419856761 passed TypeScript, dependency audit (0 vulnerabilities), 46 Vitest files / 313 tests, and Wrangler production/staging dry-runs.
+- **Phase 5:** real-device owner/non-owner and group-admin acceptance, Room upgrade on an actual existing installation, persistence after restart, and visual review remain open. No emulator or physical phone was used in this implementation.
+- **Evidence limitation:** the originally referenced TEMP evidence folder was not present on the current workstation session; this implementation is verified from source and exact-SHA CI, not by those historical screenshots.
+- **Governance:** no Worker deployment, D1 migration apply/write, staging/production data write, secret change, Release signing, app install/launch, main update or PR merge. PR #6 remains Open + Draft + Unmerged.
+
+
 **مرجع التقرير:** TNW-HW-QA-20261119-001 وملاحظة Student-side Edit/Delete. **الأولوية:** P2.
 
 **الدليل:** بطاقة الواجب/المشروع الذي أنشأه الطالب لا تعرض Edit أو Delete؛ long-press لا يظهر action menu. التقرير لم يختبر بعد تدفق المعلم/المدير في هذه الجولة، فلا نستنتج غيابه من نتيجة حساب الطالب.
 
 **الإصلاح المطلوب:** توفير Edit/Delete للمالك وفق ownership policy، مع فصل صلاحية delete عن edit، وتأكيد الحذف وحالة ACK، ومنع تعديل سجلات الآخرين.
 
-**الأدلة:** %TEMP%\tanweer-homework-round-20261119\evidence.
+**الأدلة:** المسار الأصلي %TEMP%\tanweer-homework-round-20261119\evidence لم يكن متاحاً في جلسة الجهاز الحالية؛ لذلك لا ندعي مراجعة لقطات التقرير التاريخية.
 
 
 ## P2-24 — حذف الرسالة غير متاح من واجهة Android
