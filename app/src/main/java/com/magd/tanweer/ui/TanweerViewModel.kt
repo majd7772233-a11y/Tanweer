@@ -45,6 +45,7 @@ enum class SubScreen {
     TIMELINE,
     PROFILE,
     SETTINGS,
+    NOTIFICATIONS,
     SEARCH,
     WHAT_DID_I_MISS,
     SUBJECT_KNOWLEDGE_BASE,
@@ -681,7 +682,12 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _isTeacherDashboardLoading.value = false
         _isModeratorDashboardLoading.value = false
         _isAdminDashboardLoading.value = false
+        activeNotificationsRequestGeneration++
+        archivedNotificationsRequestGeneration++
         _myNotifications.value = emptyList()
+        _myArchivedNotifications.value = emptyList()
+        _myNotificationsSyncState.value = SyncState.Idle
+        _myArchivedNotificationsSyncState.value = SyncState.Idle
         _groupCorrections.value = emptyList()
         _communityDecisions.value = emptyList()
         _communityDecisionsSnapshotGroupId.value = null
@@ -988,6 +994,11 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 repository.syncProfile()
             }
 
+            SubScreen.NOTIFICATIONS -> {
+                loadMyNotifications()
+                loadMyNotifications(archived = true)
+            }
+
             SubScreen.VERSION_CHECK -> viewModelScope.launch {
                 repository.getSystemVersion()
             }
@@ -1078,6 +1089,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             SubScreen.VERSION_CHECK,
             SubScreen.STORAGE_MANAGER -> {
                 _subScreen.value = SubScreen.EXTRA_SECTIONS_HUB
+            }
+            SubScreen.NOTIFICATIONS -> {
+                _subScreen.value = SubScreen.PROFILE
             }
             SubScreen.GROUPS -> {
                 val returnDestination = GroupsNavigationPolicy.resolve(
@@ -1790,6 +1804,14 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _myNotifications = MutableStateFlow<List<AppNotification>>(emptyList())
     val myNotifications: StateFlow<List<AppNotification>> = _myNotifications.asStateFlow()
+    private val _myArchivedNotifications = MutableStateFlow<List<AppNotification>>(emptyList())
+    val myArchivedNotifications: StateFlow<List<AppNotification>> = _myArchivedNotifications.asStateFlow()
+    private val _myNotificationsSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val myNotificationsSyncState: StateFlow<SyncState> = _myNotificationsSyncState.asStateFlow()
+    private val _myArchivedNotificationsSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val myArchivedNotificationsSyncState: StateFlow<SyncState> = _myArchivedNotificationsSyncState.asStateFlow()
+    @Volatile private var activeNotificationsRequestGeneration = 0L
+    @Volatile private var archivedNotificationsRequestGeneration = 0L
 
     @Volatile private var groupCorrectionsRequestGeneration = 0
     @Volatile private var groupCorrectionsSourceGroupId: String? = null
@@ -1990,11 +2012,160 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                 .onFailure { error -> onResult(false, error.message ?: "تعذر فصل الطالب من شعبته") }
         }
     }
-    fun loadMyNotifications() {
+    fun loadMyNotifications(archived: Boolean = false) {
+        val accountId = currentUser.value?.id ?: return
+        val requestId = if (archived) {
+            ++archivedNotificationsRequestGeneration
+        } else {
+            ++activeNotificationsRequestGeneration
+        }
+        val existing = if (archived) _myArchivedNotifications.value else _myNotifications.value
+        if (archived) {
+            _myArchivedNotificationsSyncState.value =
+                if (existing.isEmpty()) SyncState.Loading else SyncState.Refreshing
+        } else {
+            _myNotificationsSyncState.value =
+                if (existing.isEmpty()) SyncState.Loading else SyncState.Refreshing
+        }
+
         viewModelScope.launch {
-            repository.getMyNotifications().onSuccess { notifications ->
-                _myNotifications.value = notifications
-            }
+            repository.getMyNotifications(archived).fold(
+                onSuccess = { notifications ->
+                    val currentRequest = if (archived) {
+                        requestId == archivedNotificationsRequestGeneration
+                    } else {
+                        requestId == activeNotificationsRequestGeneration
+                    }
+                    if (currentUser.value?.id == accountId && currentRequest) {
+                        if (archived) {
+                            _myArchivedNotifications.value = notifications
+                            _myArchivedNotificationsSyncState.value = SyncState.Success()
+                        } else {
+                            _myNotifications.value = notifications
+                            _myNotificationsSyncState.value = SyncState.Success()
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    val currentRequest = if (archived) {
+                        requestId == archivedNotificationsRequestGeneration
+                    } else {
+                        requestId == activeNotificationsRequestGeneration
+                    }
+                    if (currentUser.value?.id == accountId && currentRequest) {
+                        val failure = SyncState.Error(
+                            error.message ?: "تعذر جلب الإشعارات الخاصة",
+                            isOffline = false
+                        )
+                        if (archived) _myArchivedNotificationsSyncState.value = failure
+                        else _myNotificationsSyncState.value = failure
+                    }
+                }
+            )
+        }
+    }
+
+    fun markMyNotificationRead(
+        notificationId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val accountId = currentUser.value?.id
+        if (accountId.isNullOrBlank()) {
+            onResult(false, "يجب تسجيل الدخول أولاً.")
+            return
+        }
+        viewModelScope.launch {
+            repository.markMyNotificationRead(notificationId)
+                .onSuccess { acknowledgement ->
+                    if (currentUser.value?.id != accountId || acknowledgement.notificationId != notificationId) return@onSuccess
+                    val readAt = acknowledgement.readAt ?: System.currentTimeMillis()
+                    _myNotifications.update { list ->
+                        list.map { if (it.id == notificationId) it.copy(readAt = readAt) else it }
+                    }
+                    _myArchivedNotifications.update { list ->
+                        list.map { if (it.id == notificationId) it.copy(readAt = readAt) else it }
+                    }
+                    onResult(true, "تم تحديد الإشعار كمقروء.")
+                }
+                .onFailure { error ->
+                    if (currentUser.value?.id == accountId) {
+                        onResult(false, error.message ?: "تعذر تحديث الإشعار.")
+                    }
+                }
+        }
+    }
+
+    fun archiveMyNotification(
+        notificationId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val accountId = currentUser.value?.id
+        if (accountId.isNullOrBlank()) {
+            onResult(false, "يجب تسجيل الدخول أولاً.")
+            return
+        }
+        viewModelScope.launch {
+            repository.archiveMyNotification(notificationId)
+                .onSuccess { acknowledgement ->
+                    if (currentUser.value?.id != accountId || acknowledgement.notificationId != notificationId) return@onSuccess
+                    val current = _myNotifications.value.firstOrNull { it.id == notificationId }
+                        ?: _myArchivedNotifications.value.firstOrNull { it.id == notificationId }
+                    val now = System.currentTimeMillis()
+                    val archived = current?.copy(
+                        readAt = acknowledgement.readAt ?: current.readAt ?: now,
+                        archivedAt = acknowledgement.archivedAt ?: now
+                    )
+                    _myNotifications.update { list -> list.filterNot { it.id == notificationId } }
+                    if (archived != null) {
+                        _myArchivedNotifications.update { list ->
+                            (list.filterNot { it.id == notificationId } + archived).sortedByDescending { it.createdAt }
+                        }
+                    } else {
+                        loadMyNotifications(archived = true)
+                    }
+                    onResult(true, "نُقل الإشعار إلى الأرشيف.")
+                }
+                .onFailure { error ->
+                    if (currentUser.value?.id == accountId) {
+                        onResult(false, error.message ?: "تعذرت أرشفة الإشعار.")
+                    }
+                }
+        }
+    }
+
+    fun restoreMyNotification(
+        notificationId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val accountId = currentUser.value?.id
+        if (accountId.isNullOrBlank()) {
+            onResult(false, "يجب تسجيل الدخول أولاً.")
+            return
+        }
+        viewModelScope.launch {
+            repository.restoreMyNotification(notificationId)
+                .onSuccess { acknowledgement ->
+                    if (currentUser.value?.id != accountId || acknowledgement.notificationId != notificationId) return@onSuccess
+                    val current = _myArchivedNotifications.value.firstOrNull { it.id == notificationId }
+                    val restored = current?.copy(
+                        readAt = acknowledgement.readAt ?: current.readAt,
+                        archivedAt = null
+                    )
+                    _myArchivedNotifications.update { list -> list.filterNot { it.id == notificationId } }
+                    if (restored != null) {
+                        _myNotifications.update { list ->
+                            (list.filterNot { it.id == notificationId } + restored).sortedByDescending { it.createdAt }
+                        }
+                    } else {
+                        loadMyNotifications()
+                    }
+                    onResult(true, "أُعيد الإشعار إلى الوارد.")
+                }
+                .onFailure { error ->
+                    if (currentUser.value?.id == accountId) {
+                        onResult(false, error.message ?: "تعذرت استعادة الإشعار.")
+                    }
+                }
         }
     }
 
