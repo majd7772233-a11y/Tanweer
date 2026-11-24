@@ -3280,6 +3280,12 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun deleteGroupChatMessage(message: ChatMessageItem, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            onComplete(repository.deleteGroupChatMessage(message.groupId, message.id))
+        }
+    }
+
     companion object {
         fun getTodayDateString(): String {
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
