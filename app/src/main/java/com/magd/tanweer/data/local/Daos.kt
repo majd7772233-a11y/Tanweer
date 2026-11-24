@@ -192,6 +192,9 @@ interface HomeworkDao {
     @Query("DELETE FROM cached_homework_completions WHERE homeworkId = :homeworkId AND userId = :userId")
     suspend fun deleteCompletion(homeworkId: String, userId: String)
 
+    @Query("DELETE FROM cached_homework_completions WHERE homeworkId = :homeworkId")
+    suspend fun deleteCompletionsForHomework(homeworkId: String)
+
     @Query("UPDATE cached_homework_completions SET homeworkId = :newId WHERE homeworkId = :oldId")
     suspend fun updateCompletionHomeworkId(oldId: String, newId: String)
 

@@ -32,7 +32,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DailyPlanEntity::class,
         BookExtractedPageEntity::class
     ],
-    version = 19,
+    version = 20,
     exportSchema = false
 )
 abstract class TanweerDatabase : RoomDatabase() {
@@ -296,6 +296,15 @@ abstract class TanweerDatabase : RoomDatabase() {
                 )
             }
         }
+
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE cached_homeworks " +
+                        "ADD COLUMN createdBy TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
         fun getInstance(context: Context): TanweerDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -315,7 +324,8 @@ abstract class TanweerDatabase : RoomDatabase() {
                         MIGRATION_15_16,
                         MIGRATION_16_17,
                         MIGRATION_17_18,
-                        MIGRATION_18_19
+                        MIGRATION_18_19,
+                        MIGRATION_19_20
                     )
                     // Never silently erase a user's academic cache on an app downgrade.
                     // Unsupported schema transitions must fail visibly until a preserving

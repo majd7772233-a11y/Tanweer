@@ -84,6 +84,7 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
     expect(mapped.pageNumbers).toBe('45');
     expect(mapped.isCompleted).toBe(true);
     expect(mapped.isOfficial).toBe(true);
+    expect(mapped.createdBy).toBe("exam_owner_1");
     expect((mapped as any).group_id).toBeUndefined();
   });
 

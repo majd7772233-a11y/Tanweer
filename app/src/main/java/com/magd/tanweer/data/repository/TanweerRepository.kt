@@ -79,6 +79,7 @@ class TanweerRepository(
 ) {
     val mutationQueue = UnifiedMutationQueue.getInstance(db, api)
     private val examMutationMutex = Mutex()
+    private val homeworkMutationMutex = Mutex()
     private val issueDataMutex = IssueDataSyncCoordinator.mutex
 
     init {
@@ -921,7 +922,8 @@ class TanweerRepository(
                                 colorHex = it.colorHex,
                                 mediaUrlsJson = serializeStringList(it.mediaUrls),
                                 createdAt = it.createdAt,
-                                isOfficial = it.isOfficial
+                                isOfficial = it.isOfficial,
+                                createdBy = it.createdBy
                             )
                         }
                         val reconciledDayHomeworks = ServerSnapshotReconciliation.preservePending(
@@ -988,7 +990,8 @@ class TanweerRepository(
                                 createdAt = it.createdAt,
                                 createdBy = it.createdBy,
                                 sourceName = it.sourceName,
-                                isOfficial = it.isOfficial
+                                isOfficial = it.isOfficial,
+                                createdBy = it.createdBy
                             )
                         }
                         val reconciledDayEvents = ServerSnapshotReconciliation.preservePending(
@@ -1318,7 +1321,8 @@ class TanweerRepository(
                                 colorHex = it.colorHex,
                                 mediaUrlsJson = org.json.JSONArray(it.mediaUrls).toString(),
                                 createdAt = it.createdAt,
-                                isOfficial = it.isOfficial
+                                isOfficial = it.isOfficial,
+                                createdBy = it.createdBy
                             )
                         }
                         val reconciledMonthHomeworks = ServerSnapshotReconciliation.preservePending(
@@ -2467,7 +2471,8 @@ class TanweerRepository(
                         isCompleted = completedIds.contains(it.id),
                         createdAt = it.createdAt,
                         syncStatus = it.syncStatus,
-                        isOfficial = it.isOfficial
+                        isOfficial = it.isOfficial,
+                        createdBy = it.createdBy
                     )
                 }
             }
@@ -2502,7 +2507,8 @@ class TanweerRepository(
                         isCompleted = completedIds.contains(it.id),
                         createdAt = it.createdAt,
                         syncStatus = it.syncStatus,
-                        isOfficial = it.isOfficial
+                        isOfficial = it.isOfficial,
+                        createdBy = it.createdBy
                     )
                 }
             }
@@ -3294,6 +3300,106 @@ class TanweerRepository(
         }
     }
 
+    suspend fun updateHomework(
+        homeworkId: String,
+        dueDate: String,
+        title: String,
+        details: String,
+        pageNumbers: String,
+        questionNumbers: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        homeworkMutationMutex.withLock {
+            val existing = db.homeworkDao().getHomeworkById(homeworkId)
+                ?: return@withLock Result.failure(IllegalArgumentException("الواجب غير موجود في البيانات المحلية"))
+
+            val currentUserId = db.userDao().getUserSync()?.id.orEmpty()
+            if (currentUserId.isBlank() || existing.createdBy.isBlank() || existing.createdBy != currentUserId) {
+                return@withLock Result.failure(SecurityException("لا تملك صلاحية تعديل هذا الواجب"))
+            }
+            if (!existing.syncStatus.equals("SYNCED", ignoreCase = true)) {
+                return@withLock Result.failure(IllegalStateException("لا يمكن تعديل واجب لم يؤكد الخادم حفظه بعد"))
+            }
+            if (title.isBlank() || dueDate.isBlank()) {
+                return@withLock Result.failure(IllegalArgumentException("عنوان الواجب وتاريخ التسليم مطلوبان"))
+            }
+
+            try {
+                val response = api.updateHomework(
+                    homeworkId,
+                    UpdateHomeworkRequest(
+                        dueDate = dueDate.trim(),
+                        title = title.trim(),
+                        details = details.trim(),
+                        pageNumbers = pageNumbers.trim(),
+                        questionNumbers = questionNumbers.trim()
+                    )
+                )
+                val body = response.body()
+                if (isConfirmedServerWrite(response.isSuccessful, body?.success)) {
+                    db.homeworkDao().insertHomework(
+                        existing.copy(
+                            dueDate = dueDate.trim(),
+                            title = title.trim(),
+                            details = details.trim().takeIf { it.isNotEmpty() },
+                            pageNumbers = pageNumbers.trim().takeIf { it.isNotEmpty() },
+                            questionNumbers = questionNumbers.trim().takeIf { it.isNotEmpty() },
+                            syncStatus = "SYNCED"
+                        )
+                    )
+                    Result.success(Unit)
+                } else {
+                    val message = body?.error?.message ?: body?.message ?: when (response.code()) {
+                        401, 403 -> "لا تملك صلاحية تعديل هذا الواجب"
+                        else -> "رفض الخادم تحديث الواجب (HTTP ${response.code()})"
+                    }
+                    Result.failure(Exception(message))
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Result.failure(Exception(error.localizedMessage ?: "تعذر الاتصال بالخادم لتحديث الواجب"))
+            }
+        }
+    }
+
+    suspend fun deleteHomework(homeworkId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        homeworkMutationMutex.withLock {
+            val existing = db.homeworkDao().getHomeworkById(homeworkId)
+                ?: return@withLock Result.failure(IllegalArgumentException("الواجب غير موجود في البيانات المحلية"))
+
+            val currentUserId = db.userDao().getUserSync()?.id.orEmpty()
+            if (currentUserId.isBlank() || existing.createdBy.isBlank() || existing.createdBy != currentUserId) {
+                return@withLock Result.failure(SecurityException("لا تملك صلاحية حذف هذا الواجب"))
+            }
+            if (!existing.syncStatus.equals("SYNCED", ignoreCase = true)) {
+                return@withLock Result.failure(IllegalStateException("لا يمكن حذف واجب لم يؤكد الخادم حفظه بعد"))
+            }
+
+            try {
+                val response = api.deleteHomework(homeworkId)
+                val body = response.body()
+                if (isConfirmedServerWrite(response.isSuccessful, body?.success)) {
+                    db.withTransaction {
+                        db.homeworkDao().deleteHomeworkById(homeworkId)
+                        db.homeworkDao().deleteCompletionsForHomework(homeworkId)
+                        db.dailyPlanDao().deleteByHomeworkId(homeworkId, currentUserId)
+                    }
+                    Result.success(Unit)
+                } else {
+                    val message = body?.error?.message ?: body?.message ?: when (response.code()) {
+                        401, 403 -> "لا تملك صلاحية حذف هذا الواجب"
+                        else -> "رفض الخادم حذف الواجب (HTTP ${response.code()})"
+                    }
+                    Result.failure(Exception(message))
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Result.failure(Exception(error.localizedMessage ?: "تعذر الاتصال بالخادم لحذف الواجب"))
+            }
+        }
+    }
+
     suspend fun addHomework(
         groupId: String,
         studyDate: String,
@@ -3329,7 +3435,8 @@ class TanweerRepository(
             mediaUrlsJson = serializeStringList(mediaUrls),
             createdAt = System.currentTimeMillis(),
             syncStatus = "SYNCING",
-            isOfficial = isOfficial
+            isOfficial = isOfficial,
+            createdBy = user?.id.orEmpty()
         )
         db.homeworkDao().insertHomework(entity)
 
@@ -3432,7 +3539,8 @@ class TanweerRepository(
             mediaUrlsJson = serializeStringList(localUrls),
             createdAt = System.currentTimeMillis(),
             syncStatus = "SYNCING",
-            isOfficial = isOfficial
+            isOfficial = isOfficial,
+            createdBy = user?.id.orEmpty()
         )
         db.homeworkDao().insertHomework(entity)
 

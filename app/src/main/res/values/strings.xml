@@ -193,4 +193,23 @@
     <string name="exam_edit_action">&#1578;&#1593;&#1583;&#1610;&#1604;</string>
     <string name="exam_edit_success">&#1578;&#1605; &#1578;&#1581;&#1583;&#1610;&#1579; &#1575;&#1604;&#1575;&#1582;&#1578;&#1576;&#1575;&#1585; &#1576;&#1606;&#1580;&#1575;&#1581;</string>
     <string name="exam_edit_failed">&#1578;&#1593;&#1584;&#1585; &#1578;&#1581;&#1583;&#1610;&#1579; &#1575;&#1604;&#1575;&#1582;&#1578;&#1576;&#1575;&#1585;</string>
+    <string name="homework_action_more">خيارات الواجب</string>
+    <string name="homework_action_edit">تعديل الواجب</string>
+    <string name="homework_action_delete">حذف الواجب</string>
+    <string name="homework_edit_title">تعديل الواجب</string>
+    <string name="homework_edit_title_label">عنوان الواجب</string>
+    <string name="homework_edit_details_label">التفاصيل (اختياري)</string>
+    <string name="homework_edit_pages_label">الصفحات (اختياري)</string>
+    <string name="homework_edit_questions_label">الأسئلة (اختياري)</string>
+    <string name="homework_edit_due_date_label">تاريخ التسليم</string>
+    <string name="homework_edit_date_confirm">تأكيد</string>
+    <string name="homework_edit_save">حفظ التعديلات</string>
+    <string name="homework_edit_cancel">إلغاء</string>
+    <string name="homework_edit_success">تم تحديث الواجب بنجاح.</string>
+    <string name="homework_edit_failed">تعذر تحديث الواجب.</string>
+    <string name="homework_delete_title">حذف الواجب</string>
+    <string name="homework_delete_message">هل أنت متأكد من حذف هذا الواجب؟ لا يمكن التراجع عن هذا الإجراء.</string>
+    <string name="homework_delete_confirm">حذف</string>
+    <string name="homework_delete_success">تم حذف الواجب بنجاح.</string>
+    <string name="homework_delete_failed">تعذر حذف الواجب.</string>
 </resources>

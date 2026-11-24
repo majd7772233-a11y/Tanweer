@@ -126,6 +126,10 @@ fun HomeworkScreen(
     val isAddModalOpen = isLocalAddModalOpen || isAddModalOpenFromVm
     var fullScreenImagePreviewUrl by remember { mutableStateOf<String?>(null) }
     var pendingReminderHw by remember { mutableStateOf<com.magd.tanweer.data.model.HomeworkItem?>(null) }
+    var homeworkToEdit by remember { mutableStateOf<HomeworkItem?>(null) }
+    var homeworkToDelete by remember { mutableStateOf<HomeworkItem?>(null) }
+    var isSavingHomeworkEdit by remember { mutableStateOf(false) }
+    var isDeletingHomework by remember { mutableStateOf(false) }
     var showExactAlarmDialog by remember { mutableStateOf(false) }
     var showNotificationSettingsDialog by remember { mutableStateOf(false) }
 
@@ -415,6 +419,13 @@ fun HomeworkScreen(
                         isOverdue = isOverdue,
                         isDueToday = isDueToday,
                         isPlanned = plannedHwIds.contains(hw.id),
+                        showOwnerActions = HomeworkOwnershipPolicy.canManage(
+                            createdBy = hw.createdBy,
+                            syncStatus = hw.syncStatus,
+                            currentUserId = currentUser?.id
+                        ),
+                        onEdit = { homeworkToEdit = hw },
+                        onDelete = { homeworkToDelete = hw },
                         onToggle = {
                             val willBeCompleted = !hw.isCompleted
                             if (willBeCompleted) {
@@ -579,6 +590,91 @@ fun HomeworkScreen(
             )
         }
 
+        homeworkToEdit?.let { homework ->
+            EditHomeworkDialog(
+                homework = homework,
+                isSaving = isSavingHomeworkEdit,
+                onDismiss = {
+                    if (!isSavingHomeworkEdit) homeworkToEdit = null
+                },
+                onSave = { title, details, pages, questions, dueDate ->
+                    if (!isSavingHomeworkEdit) {
+                        isSavingHomeworkEdit = true
+                        viewModel.updateHomework(
+                            homeworkId = homework.id,
+                            dueDate = dueDate,
+                            title = title,
+                            details = details,
+                            pageNumbers = pages,
+                            questionNumbers = questions
+                        ) { result ->
+                            isSavingHomeworkEdit = false
+                            result.fold(
+                                onSuccess = {
+                                    Toast.makeText(context, context.getString(R.string.homework_edit_success), Toast.LENGTH_SHORT).show()
+                                    homeworkToEdit = null
+                                },
+                                onFailure = { error ->
+                                    Toast.makeText(
+                                        context,
+                                        error.message?.takeIf { it.isNotBlank() }
+                                            ?: context.getString(R.string.homework_edit_failed),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            )
+                        }
+                    }
+                }
+            )
+        }
+
+        homeworkToDelete?.let { homework ->
+            AlertDialog(
+                onDismissRequest = { if (!isDeletingHomework) homeworkToDelete = null },
+                containerColor = MidnightSurface,
+                titleContentColor = TextPrimary,
+                textContentColor = TextSecondary,
+                title = { Text(stringResource(R.string.homework_delete_title), fontWeight = FontWeight.Bold) },
+                text = { Text(stringResource(R.string.homework_delete_message)) },
+                confirmButton = {
+                    TextButton(
+                        enabled = !isDeletingHomework,
+                        onClick = {
+                            if (!isDeletingHomework) {
+                                isDeletingHomework = true
+                                viewModel.deleteHomework(homework.id) { result ->
+                                    isDeletingHomework = false
+                                    result.fold(
+                                        onSuccess = {
+                                            TanweerNotificationManager.cancelReminder(context, homework.id)
+                                            Toast.makeText(context, context.getString(R.string.homework_delete_success), Toast.LENGTH_SHORT).show()
+                                            homeworkToDelete = null
+                                        },
+                                        onFailure = { error ->
+                                            Toast.makeText(
+                                                context,
+                                                error.message?.takeIf { it.isNotBlank() }
+                                                    ?: context.getString(R.string.homework_delete_failed),
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    ) {
+                        Text(stringResource(R.string.homework_delete_confirm), color = Color(0xFFFF6B6B))
+                    }
+                },
+                dismissButton = {
+                    TextButton(enabled = !isDeletingHomework, onClick = { homeworkToDelete = null }) {
+                        Text(stringResource(R.string.homework_edit_cancel), color = TextSecondary)
+                    }
+                }
+            )
+        }
+
         // Full Screen Image Preview Modal
         if (fullScreenImagePreviewUrl != null) {
             Dialog(
@@ -731,11 +827,138 @@ fun HomeworkScreen(
 }
 
 @Composable
+private fun EditHomeworkDialog(
+    homework: HomeworkItem,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (title: String, details: String, pages: String, questions: String, dueDate: String) -> Unit
+) {
+    var title by rememberSaveable(homework.id) { mutableStateOf(homework.title) }
+    var details by rememberSaveable(homework.id) { mutableStateOf(homework.details.orEmpty()) }
+    var pages by rememberSaveable(homework.id) { mutableStateOf(homework.pageNumbers.orEmpty()) }
+    var questions by rememberSaveable(homework.id) { mutableStateOf(homework.questionNumbers.orEmpty()) }
+    var dueDate by rememberSaveable(homework.id) { mutableStateOf(homework.dueDate) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val initialDateMillis = remember(homework.dueDate) {
+        runCatching {
+            SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(homework.dueDate)?.time
+        }.getOrNull() ?: System.currentTimeMillis()
+    }
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialDateMillis)
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        dueDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }.format(Date(millis))
+                    }
+                    showDatePicker = false
+                }) {
+                    Text(stringResource(R.string.homework_edit_date_confirm), color = CyanAccent)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text(stringResource(R.string.homework_edit_cancel), color = TextSecondary)
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        containerColor = MidnightSurface,
+        titleContentColor = TextPrimary,
+        textContentColor = TextSecondary,
+        title = { Text(stringResource(R.string.homework_edit_title), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    enabled = !isSaving,
+                    label = { Text(stringResource(R.string.homework_edit_title_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = details,
+                    onValueChange = { details = it },
+                    enabled = !isSaving,
+                    label = { Text(stringResource(R.string.homework_edit_details_label)) },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = pages,
+                    onValueChange = { pages = it },
+                    enabled = !isSaving,
+                    label = { Text(stringResource(R.string.homework_edit_pages_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = questions,
+                    onValueChange = { questions = it },
+                    enabled = !isSaving,
+                    label = { Text(stringResource(R.string.homework_edit_questions_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = dueDate,
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = !isSaving,
+                    label = { Text(stringResource(R.string.homework_edit_due_date_label)) },
+                    trailingIcon = {
+                        IconButton(onClick = { showDatePicker = true }, enabled = !isSaving) {
+                            Icon(Icons.Default.CalendarMonth, contentDescription = stringResource(R.string.homework_edit_due_date_label), tint = CyanAccent)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !isSaving && title.isNotBlank() && dueDate.isNotBlank(),
+                onClick = { onSave(title, details, pages, questions, dueDate) }
+            ) {
+                Text(stringResource(R.string.homework_edit_save), color = CyanAccent)
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = !isSaving, onClick = onDismiss) {
+                Text(stringResource(R.string.homework_edit_cancel), color = TextSecondary)
+            }
+        }
+    )
+}
+
+@Composable
 fun HomeworkCard(
     homework: HomeworkItem,
     isOverdue: Boolean = false,
     isDueToday: Boolean = false,
     isPlanned: Boolean = false,
+    showOwnerActions: Boolean = false,
+    onEdit: () -> Unit = {},
+    onDelete: () -> Unit = {},
     onToggle: () -> Unit,
     onRetrySync: (() -> Unit)? = null,
     onImageClick: (String) -> Unit,
@@ -754,6 +977,7 @@ fun HomeworkCard(
     val countdownText = remember(homework.dueDate) {
         getRemainingTimeText(homework.dueDate)
     }
+    var actionsExpanded by remember(homework.id) { mutableStateOf(false) }
 
     GlassCard(
         modifier = Modifier.fillMaxWidth(),
@@ -803,14 +1027,49 @@ fun HomeworkCard(
                     }
                 }
 
-                Checkbox(
-                    checked = homework.isCompleted,
-                    onCheckedChange = { onToggle() },
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = EmeraldGreen,
-                        uncheckedColor = TextSecondary
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = homework.isCompleted,
+                        onCheckedChange = { onToggle() },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = EmeraldGreen,
+                            uncheckedColor = TextSecondary
+                        )
                     )
-                )
+                    if (showOwnerActions) {
+                        Box {
+                            IconButton(onClick = { actionsExpanded = true }) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = stringResource(R.string.homework_action_more),
+                                    tint = TextSecondary
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = actionsExpanded,
+                                onDismissRequest = { actionsExpanded = false },
+                                containerColor = MidnightSurface
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.homework_action_edit), color = TextPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = CyanAccent) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        onEdit()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.homework_action_delete), color = Color(0xFFFF6B6B)) },
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFFF6B6B)) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        onDelete()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             if (!homework.details.isNullOrBlank() || !homework.pageNumbers.isNullOrBlank() || !homework.questionNumbers.isNullOrBlank()) {

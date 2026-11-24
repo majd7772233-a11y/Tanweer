@@ -191,4 +191,23 @@
     <string name="exam_edit_action">Edit</string>
     <string name="exam_edit_success">Exam updated successfully</string>
     <string name="exam_edit_failed">Unable to update exam</string>
+    <string name="homework_action_more">Homework actions</string>
+    <string name="homework_action_edit">Edit homework</string>
+    <string name="homework_action_delete">Delete homework</string>
+    <string name="homework_edit_title">Edit homework</string>
+    <string name="homework_edit_title_label">Homework title</string>
+    <string name="homework_edit_details_label">Details (optional)</string>
+    <string name="homework_edit_pages_label">Pages (optional)</string>
+    <string name="homework_edit_questions_label">Questions (optional)</string>
+    <string name="homework_edit_due_date_label">Due date</string>
+    <string name="homework_edit_date_confirm">Confirm</string>
+    <string name="homework_edit_save">Save changes</string>
+    <string name="homework_edit_cancel">Cancel</string>
+    <string name="homework_edit_success">Homework updated successfully.</string>
+    <string name="homework_edit_failed">Unable to update homework.</string>
+    <string name="homework_delete_title">Delete homework</string>
+    <string name="homework_delete_message">Are you sure you want to delete this homework? This action cannot be undone.</string>
+    <string name="homework_delete_confirm">Delete</string>
+    <string name="homework_delete_success">Homework deleted successfully.</string>
+    <string name="homework_delete_failed">Unable to delete homework.</string>
 </resources>

@@ -512,15 +512,35 @@ export async function handleUpdateHomework(
   const body = await request.json() as {
     dueDate?: string;
     title?: string;
-    details?: string;
-    pageNumbers?: string;
-    questionNumbers?: string;
+    details?: string | null;
+    pageNumbers?: string | null;
+    questionNumbers?: string | null;
     isOfficial?: boolean;
   };
 
-  if (body.dueDate !== undefined && !isValidIsoDate(body.dueDate)) {
+  if (body.dueDate !== undefined && (
+    typeof body.dueDate !== 'string' || !isValidIsoDate(body.dueDate)
+  )) {
     return errorResponse('INVALID_INPUT', 'تاريخ تسليم الواجب غير صالح، يرجى اختيار تاريخ تقويمي صحيح بصيغة YYYY-MM-DD');
   }
+
+  if (body.title !== undefined && (typeof body.title !== 'string' || !body.title.trim())) {
+    return errorResponse('INVALID_INPUT', 'عنوان الواجب مطلوب ولا يمكن أن يكون فارغاً');
+  }
+
+  const optionalTextInvalid = [body.details, body.pageNumbers, body.questionNumbers]
+    .some(value => value !== undefined && value !== null && typeof value !== 'string');
+  if (optionalTextInvalid) {
+    return errorResponse('INVALID_INPUT', 'تفاصيل الواجب أو أرقام الصفحات والأسئلة غير صالحة');
+  }
+
+  const detailsProvided = Object.prototype.hasOwnProperty.call(body, 'details');
+  const pagesProvided = Object.prototype.hasOwnProperty.call(body, 'pageNumbers');
+  const questionsProvided = Object.prototype.hasOwnProperty.call(body, 'questionNumbers');
+  const titleValue = body.title?.trim() || null;
+  const detailsValue = typeof body.details === 'string' ? body.details.trim() : null;
+  const pagesValue = typeof body.pageNumbers === 'string' ? body.pageNumbers.trim() : null;
+  const questionsValue = typeof body.questionNumbers === 'string' ? body.questionNumbers.trim() : null;
 
   const canPublishOfficial = await hasPermission(user, Permission.PUBLISH_OFFICIAL_HOMEWORK, {
     db: env.DB,
@@ -535,18 +555,21 @@ export async function handleUpdateHomework(
   await env.DB.prepare(
     `UPDATE homeworks
      SET title = COALESCE(?, title),
-         details = COALESCE(?, details),
+         details = CASE WHEN ? = 1 THEN NULLIF(?, '') ELSE details END,
          due_date = COALESCE(?, due_date),
-         page_numbers = COALESCE(?, page_numbers),
-         question_numbers = COALESCE(?, question_numbers),
+         page_numbers = CASE WHEN ? = 1 THEN NULLIF(?, '') ELSE page_numbers END,
+         question_numbers = CASE WHEN ? = 1 THEN NULLIF(?, '') ELSE question_numbers END,
          is_official = COALESCE(?, is_official)
      WHERE id = ?`
   ).bind(
-    body.title?.trim() || null,
-    body.details?.trim() || null,
+    titleValue,
+    detailsProvided ? 1 : 0,
+    detailsValue,
     body.dueDate || null,
-    body.pageNumbers?.trim() || null,
-    body.questionNumbers?.trim() || null,
+    pagesProvided ? 1 : 0,
+    pagesValue,
+    questionsProvided ? 1 : 0,
+    questionsValue,
     officialVal,
     homeworkId
   ).run();

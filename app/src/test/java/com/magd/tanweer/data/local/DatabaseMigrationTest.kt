@@ -90,7 +90,8 @@ class DatabaseMigrationTest {
                 TanweerDatabase.MIGRATION_15_16,
                 TanweerDatabase.MIGRATION_16_17,
                 TanweerDatabase.MIGRATION_17_18,
-                TanweerDatabase.MIGRATION_18_19
+                TanweerDatabase.MIGRATION_18_19,
+                TanweerDatabase.MIGRATION_19_20
             )
             .build()
 
@@ -109,11 +110,12 @@ class DatabaseMigrationTest {
 
         // The new official flag must default to false while preserving pre-existing homework.
         val legacyHomeworkCursor = roomDb.openHelper.readableDatabase.query(
-            "SELECT title, isOfficial FROM cached_homeworks WHERE id = 'legacy_hw_1'"
+            "SELECT title, isOfficial, createdBy FROM cached_homeworks WHERE id = 'legacy_hw_1'"
         )
         assertTrue(legacyHomeworkCursor.moveToFirst())
         assertEquals("واجب محفوظ قبل التحديث", legacyHomeworkCursor.getString(0))
         assertEquals(0, legacyHomeworkCursor.getInt(1))
+        assertEquals("", legacyHomeworkCursor.getString(2))
         legacyHomeworkCursor.close()
 
         val legacyExamCursor = roomDb.openHelper.readableDatabase.query(

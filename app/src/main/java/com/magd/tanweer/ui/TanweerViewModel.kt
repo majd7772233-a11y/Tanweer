@@ -2769,6 +2769,35 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun updateHomework(
+        homeworkId: String,
+        dueDate: String,
+        title: String,
+        details: String,
+        pageNumbers: String,
+        questionNumbers: String,
+        onResult: ((Result<Unit>) -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            onResult?.invoke(
+                repository.updateHomework(
+                    homeworkId = homeworkId,
+                    dueDate = dueDate,
+                    title = title,
+                    details = details,
+                    pageNumbers = pageNumbers,
+                    questionNumbers = questionNumbers
+                )
+            )
+        }
+    }
+
+    fun deleteHomework(homeworkId: String, onResult: ((Result<Unit>) -> Unit)? = null) {
+        viewModelScope.launch {
+            onResult?.invoke(repository.deleteHomework(homeworkId))
+        }
+    }
+
     fun toggleHomework(
         homeworkId: String,
         currentStatus: Boolean,

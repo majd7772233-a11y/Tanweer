@@ -511,7 +511,8 @@ data class HomeworkItem(
     val isCompleted: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val syncStatus: String = "SYNCED", // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
-    val isOfficial: Boolean = false
+    val isOfficial: Boolean = false,
+    val createdBy: String = ""
 )
 
 @JsonClass(generateAdapter = true)

@@ -90,7 +90,9 @@ data class HomeworkEntity(
     val mediaUrlsJson: String = "[]",
     val createdAt: Long,
     val syncStatus: String = "SYNCED",
-    val isOfficial: Boolean = false
+    val isOfficial: Boolean = false,
+    @ColumnInfo(defaultValue = "''")
+    val createdBy: String = ""
 )
 
 @Entity(tableName = "cached_homework_completions", primaryKeys = ["homeworkId", "userId"])
