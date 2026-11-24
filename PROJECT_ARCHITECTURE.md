@@ -70,6 +70,9 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - Realtime group chat: Durable Object class `GroupChatDO` under `server/src/realtime/GroupChatDO.ts`.
 - Business logic is organized under `server/src/services`; shared auth, permission, response and ID helpers under `server/src/lib` and `server/src/middleware`.
 - `server/src/services/notifications.ts`: owner-scoped private account inbox, read/archive/restore operations and encrypted recovery-code delivery.
+- `server/src/services/decisionQuorum.ts`: frozen eligible-voter snapshot parsing, persisted vote counting and shared quorum/strict-majority policy for schedule decisions.
+- `server/src/services/governance.ts`: unified community decisions, eligible vote recounting and the independent schedule-application quorum guard.
+- `server/src/services/schedule.ts`: schedule-proposal API with group-scoped decision joins, live vote counts and required-vote metadata.
 - D1 migrations: `server/src/db/migrations/*.sql`.
 - Backend tests: `server/test/*.test.ts`, using Vitest. `server/package.json` provides `npm test`, `npm run types`, and Wrangler commands.
 - Worker/D1 bindings and environments: `server/wrangler.jsonc`.
@@ -93,7 +96,7 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - **Academic year:** derive from the configured school-year boundary and valid stored record dates. Do not hardcode a rollover or manufacture empty years based solely on the device clock. `AcademicYearManager` uses date-derived records plus the current academic period.
 - **Timeline/archive detail:** Subject Timeline and Academic History already use typed detail previews for lesson/homework/exam items. Verify actual on-device interaction before adding a second overlapping navigation flow.
 - **Exams:** monthly exams are unique per group + subject + calendar month; oral exams are flexible and not constrained by the monthly calendar; legacy QUIZ rows must be considered in uniqueness checks.
-- **Schedule:** teacher/admin direct edits are immediate; student proposal flow remains separate. Successful writes should trigger fresh schedule reconciliation.
+- **Schedule:** teacher/admin direct edits are immediate; student proposals use the unified decision engine. Quorum is derived from persisted votes cast by the frozen eligible-voter snapshot (60% threshold, minimum two approvals for multi-member groups, strict majority). Cached vote counters are not authoritative. Historical imported approvals without verifiable quorum become `REVIEW_REQUIRED`; active timetable versions are preserved for human review.
 
 ## 5. Branches, environments and deployment
 
