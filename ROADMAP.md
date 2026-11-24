@@ -834,6 +834,23 @@
 
 ## P2-24 — حذف الرسالة غير متاح من واجهة Android
 
+### P2-24 implementation result — 2026-11-24
+
+- **Status:** Android group-message Delete implemented; exact-SHA Android and Server CI pass on source SHA `c599a66c265d901f897fc2cd09b3b4658bc44974`. Phase 5 device/account acceptance remains open.
+- **UI:** long-press on a persisted `SENT` message opens a Delete action only when the exact message belongs to the selected group and the current user is its sender or has chat-moderation permission. The action requires an explicit confirmation dialog. No edit/reply/pin/reaction/forward/attachment/search features were added.
+- **API contract:** Android now calls `DELETE /api/v1/groups/{groupId}/messages/{messageId}`. The app requires an HTTP success plus an application ACK whose `groupId` and `messageId` exactly match the requested deletion.
+- **Local consistency:** Room deletes only the exact group/message row after a valid ACK. HTTP errors, authorization denials, missing/wrong ACK fields, and transport failures leave the cached row intact. Connected clients process the server's `message_deleted` broadcast and remove the matching Room row.
+- **Server authorization correction:** the REST handler no longer treats permission to send new messages as a prerequisite to deleting one's own persisted message. An active member may delete their own message even in a `STAFF_ONLY` group; deleting another member's message still requires `DELETE_ANY_CHAT_MESSAGE` / `MODERATE_CHAT`. The SQL delete is constrained by both message ID and group ID, and the successful ACK returns both identifiers.
+- **Tests:** Android `GroupChatMessageDeletePolicyTest` covers owner, other student, group moderator, global teacher/admin/system owner, wrong group, pending/failed messages and missing identity. `DeleteGroupMessageResponseTest` verifies exact ACK matching and fail-closed responses. Server `group-chat-policy.test.ts` covers owner deletion in a staff-only group, non-owner denial, active group moderator deletion and missing-message rejection.
+- **Exact-SHA Android CI:** run [45429341310](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45429341310) PASS — full `testStagingDebugUnitTest`, `assembleStagingDebug`, and Debug artifact upload passed. Release signing/build/upload steps were skipped as expected for this PR run. Artifact ID `14938551917`, size `31,268,918` bytes, SHA-256 `cf951b2159bd7fead3b7635a824e5d546f35eec0f37f8dd11b2fa4e5bad3a4a0`.
+- **Exact-SHA Server CI:** run [45429340619](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45429340619) PASS — TypeScript, `npm audit` (0 vulnerabilities), 46 Vitest files / 316 tests, and Wrangler production/staging dry-runs passed. No deployment or D1 write.
+- **CI correction:** the first Android attempt exposed an AAPT invalid apostrophe escape in the new English string. The wording was corrected and the final Android run above passed on the final source SHA.
+- **Offline cache limitation:** active WebSocket peers receive the deletion event. The existing history endpoint returns only the latest 100 messages and deliberately preserves older local cache rows; therefore a device that was offline during deletion may retain an older cached copy until a future tombstone/full-history reconciliation contract is implemented. Do not claim offline-device cache invalidation is proven.
+- **Phase 5:** test long-press/menu on a real Android device in Arabic and English; verify owner/non-owner/group moderator/global admin permissions, server denials, simultaneous connected-device broadcast, app restart, and the offline-cache limitation. No emulator or physical phone was used for this implementation.
+- **Governance:** no Worker deployment, D1 migration/write, staging/production data write, secret change, Release signing, app install/launch, `main` update or PR merge. PR #6 remains Open + Draft + Unmerged.
+
+**مرجع التقرير:** TNW-GROUP-CHAT-MESSAGE-MENU-001. **الأولوية:** P2 لإجراء الحذف الذي يدعمه الخادم.
+
 **مرجع التقرير:** TNW-GROUP-CHAT-MESSAGE-MENU-001. **الأولوية:** P2 لإجراء الحذف الذي يدعمه الخادم.
 
 **الدليل:** long-press على رسالة مملوكة للمستخدم لا يعرض تحديداً أو قائمة. GroupsScreen.kt يعرض الاسم والنص وحالة التسليم فقط دون click/long-click. يوجد DELETE REST route مع owner/moderator authorization وDurable Object يفهم delete_message، لكن لا يوجد Android @DELETE أو Repository delete method أو UI action.
