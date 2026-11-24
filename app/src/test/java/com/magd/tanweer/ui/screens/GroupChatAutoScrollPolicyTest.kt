@@ -101,7 +101,7 @@ class GroupChatAutoScrollPolicyTest {
         )
 
         assertEquals(
-            setOf("m2", "m3"),
+            setOf("m1", "m2", "m3"),
             GroupChatAutoScrollPolicy.mergeUnreadMessageIds(
                 previousUnreadIds = setOf("m1"),
                 delta = delta,
