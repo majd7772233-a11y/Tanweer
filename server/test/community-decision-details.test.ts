@@ -22,6 +22,13 @@ class CommunityDecisionDetailsDb {
         return { success: true, meta: { changes: 0 } };
       },
       async all<T = unknown>() {
+        if (sql.includes('FROM community_votes cv')) {
+          return { results: [
+            { decision_id: 'decision-schedule-1', user_id: 'student-1', vote_choice: 1 },
+            { decision_id: 'decision-schedule-1', user_id: 'student-2', vote_choice: 1 },
+            { decision_id: 'decision-schedule-1', user_id: 'student-3', vote_choice: 0 },
+          ] as T[] };
+        }
         db.statements.push(sql.trim().replace(/\\s+/g, ' '));
         return {
           results: [{

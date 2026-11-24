@@ -1443,7 +1443,7 @@ fun ScheduleProposalsReviewDialog(
                                         "ACCEPTED", "APPLIED" -> EmeraldGreen
                                         "REJECTED" -> RubyRed
                                         "EXPIRED" -> TextMuted
-                                        "CONFLICTED" -> WarmAmber
+                                        "CONFLICTED", "REVIEW_REQUIRED" -> WarmAmber
                                         else -> WarmAmber
                                     }
                                     val statusText = when (prop.status) {
@@ -1451,9 +1451,18 @@ fun ScheduleProposalsReviewDialog(
                                         "REJECTED" -> "مرفوض ❌"
                                         "EXPIRED" -> "انتهت مهلة التصويت ⌛"
                                         "CONFLICTED" -> "تعارض مع نسخة الجدول ⚠️"
+                                        "REVIEW_REQUIRED" -> stringResource(R.string.schedule_proposal_status_review_required)
                                         else -> "قيد التصويت ⏳"
                                     }
                                     GlassPill(text = statusText, color = statusColor, bgColor = statusColor.copy(alpha = 0.15f))
+                                }
+                                if (prop.status == "REVIEW_REQUIRED") {
+                                    Text(
+                                        text = stringResource(R.string.schedule_proposal_review_required_detail),
+                                        fontSize = tanweerTextSize(10f),
+                                        color = WarmAmber,
+                                        lineHeight = tanweerLineHeight(14f)
+                                    )
                                 }
 
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1483,7 +1492,12 @@ fun ScheduleProposalsReviewDialog(
                                         color = TextMuted
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text("👍 ${prop.votesFor}", fontSize = tanweerTextSize(11f), color = EmeraldGreen, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            stringResource(R.string.schedule_proposal_votes_for_progress, prop.votesFor, prop.requiredVotes),
+                                            fontSize = tanweerTextSize(11f),
+                                            color = EmeraldGreen,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                         Text("👎 ${prop.votesAgainst}", fontSize = tanweerTextSize(11f), color = RubyRed, fontWeight = FontWeight.Bold)
                                     }
                                 }

@@ -78,12 +78,16 @@ class ScheduleDecisionDb {
     },
   ];
   decision = {
-    id: 'decision-1',
-    group_id: 'group-1',
-    status: 'PENDING',
-    applied_by: null as string | null,
-    applied_at: null as number | null,
+    id: 'decision-1', group_id: 'group-1', request_type: 'SCHEDULE_CHANGE',
+    target_id: 'proposal-1', status: 'PENDING',
+    total_eligible_voters: 2, threshold_percent: 60,
+    description: JSON.stringify({ voters: ['student-1', 'student-2'] }),
+    applied_by: null as string | null, applied_at: null as number | null,
   };
+  votes = [
+    { user_id: 'student-1', vote_choice: 1 },
+    { user_id: 'student-2', vote_choice: 1 },
+  ];
 
   prepare(sql: string) {
     const db = this;
@@ -119,6 +123,10 @@ class ScheduleDecisionDb {
     const normalized = sql.trim().replace(/\s+/g, ' ');
     this.statements.push(normalized);
 
+    if (normalized.includes('FROM community_decisions WHERE id = ? AND group_id = ?')) {
+      return this.decision.id === params[0] && this.decision.group_id === params[1] ? [this.decision] : [];
+    }
+    if (normalized.includes('FROM community_votes WHERE decision_id = ?')) return this.votes;
     if (normalized.includes('FROM schedule_proposals WHERE id = ? AND group_id = ?')) {
       return this.proposals.filter((row) => row.id === params[0] && row.group_id === params[1]);
     }
@@ -302,6 +310,22 @@ describe('Schedule community decision execution', () => {
 
     expect(db.statements.some((sql) => /reviewed_by|reviewed_at/.test(sql))).toBe(false);
     expect(db.statements.some((sql) => /UPDATE schedule_slots SET subject_id/.test(sql))).toBe(false);
+  });
+
+  it('refuses to apply a proposal when recorded votes do not prove quorum', async () => {
+    const db = new ScheduleDecisionDb();
+    db.decision.total_eligible_voters = 4;
+    db.decision.description = JSON.stringify({ voters: ['student-1', 'student-2', 'student-3', 'student-4'] });
+    db.votes = [{ user_id: 'student-1', vote_choice: 1 }];
+    const result = await applyDecisionExecution(
+      'decision-1', 'SCHEDULE_CHANGE', 'proposal-1', 'group-1', 'student-2', createEnv(db),
+    );
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('1/3');
+    expect(db.proposals[0].status).toBe('PENDING');
+    expect(db.decision.status).toBe('PENDING');
+    expect(db.versions).toHaveLength(1);
+    expect(db.slots[0].subject_id).toBe('math');
   });
 
   it('allows only one concurrent proposal to create the next active schedule version', async () => {

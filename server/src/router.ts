@@ -65,8 +65,10 @@ async function handleUnifiedScheduleProposalVote(
   voteChoice: number
 ): Promise<Response> {
   const decision = await env.DB.prepare(
-    `SELECT id FROM community_decisions
-     WHERE target_id = ? AND request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')
+    `SELECT cd.id FROM community_decisions cd
+     INNER JOIN schedule_proposals sp ON sp.id = cd.target_id AND sp.group_id = cd.group_id
+     WHERE sp.id = ? AND cd.request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')
+     ORDER BY CASE WHEN cd.status = 'PENDING' THEN 0 ELSE 1 END, cd.created_at DESC
      LIMIT 1`
   ).bind(proposalId).first<{ id: string }>();
   if (!decision) {

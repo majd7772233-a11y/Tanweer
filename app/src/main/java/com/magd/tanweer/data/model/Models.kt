@@ -218,9 +218,12 @@ data class ScheduleProposalItem(
     val newSubjectName: String? = null,
     val newSubjectIcon: String = "📚",
     val reason: String,
-    val status: String = "PENDING", // PENDING, ACCEPTED, REJECTED
+    val status: String = "PENDING", // PENDING, ACCEPTED, REJECTED, EXPIRED, CONFLICTED, REVIEW_REQUIRED
     val votesFor: Int = 0,
     val votesAgainst: Int = 0,
+    val totalEligibleVoters: Int = 1,
+    val thresholdPercent: Int = 60,
+    val requiredVotes: Int = 1,
     val myVote: String? = null, // "FOR", "AGAINST", null
     val createdAt: Long = 0L
 )
@@ -325,7 +328,7 @@ data class CommunityDecisionItem(
     val thresholdPercent: Int = 50,
     val votesFor: Int = 0,
     val votesAgainst: Int = 0,
-    val status: String = "PENDING", // PENDING, APPROVED, REJECTED, APPLIED, EXPIRED
+    val status: String = "PENDING", // PENDING, APPROVED, REJECTED, APPLIED, EXPIRED, REVIEW_REQUIRED
     val myVote: Int? = null, // 1 = For, 0 = Against
     val expiresAt: Long? = null,
     val createdAt: Long = 0L

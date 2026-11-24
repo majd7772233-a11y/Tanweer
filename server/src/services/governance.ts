@@ -8,6 +8,7 @@ import { Role, normalizeRole } from '../lib/roles';
 import { applyScheduleProposalToActiveSchedule } from './schedule';
 import { isValidIsoDate } from '../lib/validation';
 import { parseCommunityVoteChoice } from './scheduleValidation';
+import { countEligibleDecisionVotes, getRequiredDecisionVotes, hasDecisionQuorum, parseEligibleVoterSnapshot, DecisionVoteRow } from './decisionQuorum';
 
 type CorrectionField = 'TITLE' | 'DESCRIPTION' | 'STUDY_DATE' | 'PAGE_NUMBERS';
 
@@ -368,6 +369,31 @@ export async function applyDecisionExecution(
   }
 
   try {
+    const decisionState = await env.DB.prepare(
+      `SELECT group_id, request_type, target_id, status, total_eligible_voters,
+              threshold_percent, description
+       FROM community_decisions WHERE id = ? AND group_id = ?`
+    ).bind(decisionId, groupId).first<{
+      group_id: string; request_type: string; target_id: string; status: string;
+      total_eligible_voters: number; threshold_percent: number; description: string | null;
+    }>();
+    if (!decisionState || decisionState.request_type.toUpperCase() !== normType ||
+        decisionState.target_id !== targetId || decisionState.status !== 'PENDING') {
+      return { success: false, message: 'القرار لم يعد مفتوحاً للتطبيق أو لم يعد مرتبطاً بالهدف نفسه' };
+    }
+    const snapshotVoters = parseEligibleVoterSnapshot(decisionState.description);
+    const storedVotes = await env.DB.prepare(
+      `SELECT user_id, vote_choice FROM community_votes WHERE decision_id = ?`
+    ).bind(decisionId).all<DecisionVoteRow>();
+    const voteCounts = countEligibleDecisionVotes(storedVotes.results || [], snapshotVoters);
+    const eligibleCount = Math.max(1, snapshotVoters === null
+      ? decisionState.total_eligible_voters : snapshotVoters.length);
+    if (!hasDecisionQuorum(voteCounts, eligibleCount, decisionState.threshold_percent)) {
+      return {
+        success: false,
+        message: `لا يمكن تطبيق القرار قبل اكتمال النصاب: ${voteCounts.votesFor}/${getRequiredDecisionVotes(eligibleCount, decisionState.threshold_percent)} أصوات موافقة مؤهلة`,
+      };
+    }
     if (normType === 'DELETION' || normType === 'CONTENT_DELETION') {
       type DeletionTargetType = 'CONTENT' | 'HOMEWORK' | 'EXAM' | 'ISSUE';
       const decisionMeta = await env.DB.prepare(
@@ -755,9 +781,27 @@ export async function handleGetCommunityDecisions(
      ORDER BY CASE WHEN cd.status = 'PENDING' THEN 0 ELSE 1 END, cd.created_at DESC`
   ).bind(user.userId, groupId).all();
 
+  const voteRows = await env.DB.prepare(
+    `SELECT cv.decision_id, cv.user_id, cv.vote_choice
+     FROM community_votes cv
+     INNER JOIN community_decisions cd ON cd.id = cv.decision_id
+     WHERE cd.group_id = ?`
+  ).bind(groupId).all<DecisionVoteRow>();
+  const votesByDecision = new Map<string, DecisionVoteRow[]>();
+  for (const vote of voteRows.results || []) {
+    if (!vote.decision_id) continue;
+    const rows = votesByDecision.get(vote.decision_id) || [];
+    rows.push(vote);
+    votesByDecision.set(vote.decision_id, rows);
+  }
+
   return jsonResponse({
     success: true,
     decisions: (decisions.results || []).map((d: any) => {
+      const liveCounts = countEligibleDecisionVotes(
+        votesByDecision.get(d.id) || [],
+        parseEligibleVoterSnapshot(d.description)
+      );
       let reasonText = d.description || '';
       try {
         if (reasonText.startsWith('{')) {
@@ -795,8 +839,8 @@ export async function handleGetCommunityDecisions(
         requesterName: d.requester_name || 'عضو في الشعبة',
         totalEligibleVoters: d.total_eligible_voters,
         thresholdPercent: d.threshold_percent,
-        votesFor: d.votes_for,
-        votesAgainst: d.votes_against,
+        votesFor: liveCounts.votesFor,
+        votesAgainst: liveCounts.votesAgainst,
         status: d.status,
         myVote: d.my_vote,
         expiresAt: d.expires_at,
@@ -863,17 +907,9 @@ export async function handleVoteCommunityDecision(
   }
 
   // Strict voter eligibility check: user must belong to the exact snapshot list of eligible voters
-  let snapshotVoters: string[] = [];
-  try {
-    if (decision.description && decision.description.startsWith('{')) {
-      const parsed = JSON.parse(decision.description);
-      if (Array.isArray(parsed.voters)) {
-        snapshotVoters = parsed.voters;
-      }
-    }
-  } catch {}
+  const snapshotVoters = parseEligibleVoterSnapshot(decision.description);
 
-  if (snapshotVoters.length > 0 && !snapshotVoters.includes(user.userId)) {
+  if (snapshotVoters !== null && !snapshotVoters.includes(user.userId)) {
     return errorResponse(
       'NOT_ELIGIBLE_VOTER',
       'أنت غير مؤهل للتصويت على هذا القرار (لأنك لم تكن عضواً فعالاً في الشعبة لحظة إنشاء هذا القرار)',
@@ -893,19 +929,15 @@ export async function handleVoteCommunityDecision(
   ).bind(decisionId, user.userId, choice, Date.now()).run();
 
   // Recount
-  const counts = await env.DB.prepare(
-    `SELECT
-       SUM(CASE WHEN vote_choice = 1 THEN 1 ELSE 0 END) as v_for,
-       SUM(CASE WHEN vote_choice = 0 THEN 1 ELSE 0 END) as v_against
-     FROM community_votes WHERE decision_id = ?`
-  ).bind(decisionId).first<{ v_for: number; v_against: number }>();
-
-  const vFor = counts?.v_for || 0;
-  const vAgainst = counts?.v_against || 0;
-
-  // Threshold calculation (minimum 2 votes if group has 2+ members)
-  const rawThreshold = Math.ceil((decision.total_eligible_voters * decision.threshold_percent) / 100);
-  const requiredVotes = decision.total_eligible_voters > 1 ? Math.max(2, rawThreshold) : 1;
+  const storedVotes = await env.DB.prepare(
+    `SELECT user_id, vote_choice FROM community_votes WHERE decision_id = ?`
+  ).bind(decisionId).all<DecisionVoteRow>();
+  const voteCounts = countEligibleDecisionVotes(storedVotes.results || [], snapshotVoters);
+  const vFor = voteCounts.votesFor;
+  const vAgainst = voteCounts.votesAgainst;
+  const totalEligibleVoters = Math.max(1, snapshotVoters === null
+    ? decision.total_eligible_voters : snapshotVoters.length);
+  const requiredVotes = getRequiredDecisionVotes(totalEligibleVoters, decision.threshold_percent);
 
   let newStatus = 'PENDING';
   let appliedMsg = '';
@@ -937,7 +969,7 @@ export async function handleVoteCommunityDecision(
 
     newStatus = 'APPLIED';
     appliedMsg = ' — واكتمل النصاب وتم اعتماد وتطبيق القرار تلقائياً بنجاح ✨';
-  } else if (vAgainst > (decision.total_eligible_voters - requiredVotes) || (vFor + vAgainst >= decision.total_eligible_voters && vFor <= vAgainst)) {
+  } else if (vAgainst > (totalEligibleVoters - requiredVotes) || (vFor + vAgainst >= totalEligibleVoters && vFor <= vAgainst)) {
     // Rejection guaranteed mathematically or finished in a tie/against
     newStatus = 'REJECTED';
     await env.DB.prepare(

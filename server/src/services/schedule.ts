@@ -6,6 +6,7 @@ import { errorResponse, jsonResponse } from '../lib/response';
 import { Permission, hasPermission } from '../lib/permissions';
 import { sanitizePublicRole } from '../lib/roles';
 import { parseScheduleVoteType, validateScheduleProposalInput, validateScheduleSlotInput } from './scheduleValidation';
+import { countEligibleDecisionVotes, getRequiredDecisionVotes, parseEligibleVoterSnapshot, DecisionVoteRow } from './decisionQuorum';
 
 export interface ScheduleSlotInput {
   dayOfWeek: number;
@@ -553,6 +554,8 @@ export async function handleGetScheduleProposals(groupId: string, user: UserCont
   const proposals = await env.DB.prepare(
     `SELECT sp.id, sp.group_id, sp.proposed_by, sp.day_of_week, sp.slot_order,
             sp.old_subject_id, sp.new_subject_id, sp.reason,
+            cd.id AS linked_decision_id, cd.description AS linked_decision_description,
+            cd.total_eligible_voters, cd.threshold_percent,
             CASE WHEN cd.status = 'APPLIED' THEN 'ACCEPTED'
                  WHEN cd.status IS NOT NULL THEN cd.status ELSE sp.status END AS status,
             COALESCE(cd.votes_for, sp.votes_for, 0) AS votes_for,
@@ -570,11 +573,26 @@ export async function handleGetScheduleProposals(groupId: string, user: UserCont
      LEFT JOIN subjects s_old ON sp.old_subject_id = s_old.id
      LEFT JOIN subjects s_new ON sp.new_subject_id = s_new.id
      LEFT JOIN community_decisions cd
-       ON cd.target_id = sp.id AND cd.request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')
+       ON cd.target_id = sp.id AND cd.group_id = sp.group_id
+      AND cd.request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')
      LEFT JOIN community_votes cv ON cv.decision_id = cd.id AND cv.user_id = ?
      WHERE sp.group_id = ?
      ORDER BY CASE WHEN COALESCE(cd.status, sp.status) = 'PENDING' THEN 0 ELSE 1 END, sp.created_at DESC`
   ).bind(user.userId, groupId).all();
+
+  const voteRows = await env.DB.prepare(
+    `SELECT cv.decision_id, cv.user_id, cv.vote_choice
+     FROM community_votes cv
+     INNER JOIN community_decisions cd ON cd.id = cv.decision_id
+     WHERE cd.group_id = ? AND cd.request_type IN ('SCHEDULE', 'SCHEDULE_CHANGE')`
+  ).bind(groupId).all<DecisionVoteRow>();
+  const votesByDecision = new Map<string, DecisionVoteRow[]>();
+  for (const vote of voteRows.results || []) {
+    if (!vote.decision_id) continue;
+    const rows = votesByDecision.get(vote.decision_id) || [];
+    rows.push(vote);
+    votesByDecision.set(vote.decision_id, rows);
+  }
 
   const isScheduleManager = await hasPermission(user, Permission.MANAGE_SCHEDULE, {
     db: env.DB,
@@ -584,7 +602,15 @@ export async function handleGetScheduleProposals(groupId: string, user: UserCont
   return jsonResponse({
     success: true,
     canReviewProposals: isScheduleManager,
-    proposals: (proposals.results || []).map((p: any) => ({
+    proposals: (proposals.results || []).map((p: any) => {
+      const snapshot = parseEligibleVoterSnapshot(p.linked_decision_description);
+      const counts = p.linked_decision_id
+        ? countEligibleDecisionVotes(votesByDecision.get(p.linked_decision_id) || [], snapshot)
+        : { votesFor: p.votes_for || 0, votesAgainst: p.votes_against || 0 };
+      const totalEligible = Math.max(1, snapshot === null
+        ? Number(p.total_eligible_voters || 1) : snapshot.length);
+      const thresholdPercent = Number(p.threshold_percent || 60);
+      return {
       id: p.id,
       groupId: p.group_id,
       proposedBy: p.proposed_by,
@@ -599,11 +625,15 @@ export async function handleGetScheduleProposals(groupId: string, user: UserCont
       newSubjectIcon: p.new_subject_icon,
       reason: p.reason,
       status: p.status,
-      votesFor: p.votes_for || 0,
-      votesAgainst: p.votes_against || 0,
+      votesFor: counts.votesFor,
+      votesAgainst: counts.votesAgainst,
+      totalEligibleVoters: totalEligible,
+      thresholdPercent,
+      requiredVotes: getRequiredDecisionVotes(totalEligible, thresholdPercent),
       myVote: p.my_vote || null,
       createdAt: p.created_at,
-    })),
+      };
+    }),
   });
 }
 

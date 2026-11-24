@@ -126,8 +126,12 @@ class VotingMockDb {
 
       if (trimmed.includes('FROM community_votes WHERE decision_id = ?')) {
         const decisionId = params[0];
-        const vFor = this.tables.community_votes.filter((v) => v.decision_id === decisionId && v.vote_choice === 1).length;
-        const vAgainst = this.tables.community_votes.filter((v) => v.decision_id === decisionId && v.vote_choice === 0).length;
+        const matchingVotes = this.tables.community_votes.filter((v) => v.decision_id === decisionId);
+        if (/SELECT user_id, vote_choice/i.test(trimmed)) {
+          return matchingVotes.map(({ user_id, vote_choice }) => ({ user_id, vote_choice }));
+        }
+        const vFor = matchingVotes.filter((v) => v.vote_choice === 1).length;
+        const vAgainst = matchingVotes.filter((v) => v.vote_choice === 0).length;
         return [{ v_for: vFor, v_against: vAgainst }];
       }
 
@@ -256,6 +260,38 @@ describe('Unified Governance & Community Decisions Voting Engine', () => {
 
     // Automatic Execution: The spam lesson is wiped out from contents table!
     expect(mockDb.tables.contents).toHaveLength(0);
+  });
+
+  it('ignores stale counters and votes from outside the frozen eligible snapshot', async () => {
+    const eligible = [studentA.userId, studentB.userId, studentC.userId, 'usr_student_d'];
+    mockDb.tables.schedule_proposals.push({
+      id: 'prop_snapshot_1', group_id: 'class_10_A', status: 'PENDING', votes_for: 3, votes_against: 0,
+    });
+    mockDb.tables.community_decisions.push({
+      id: 'dec_snapshot_1', group_id: 'class_10_A', request_type: 'SCHEDULE',
+      target_id: 'prop_snapshot_1', title: 'تغيير مادة الحصة',
+      description: JSON.stringify({ voters: eligible }), requested_by: studentA.userId,
+      total_eligible_voters: 4, threshold_percent: 60, votes_for: 3, votes_against: 0,
+      status: 'PENDING', created_at: Date.now(),
+    });
+    mockDb.tables.community_votes.push(
+      { decision_id: 'dec_snapshot_1', user_id: studentA.userId, vote_choice: 1, created_at: 1 },
+      { decision_id: 'dec_snapshot_1', user_id: 'departed_member', vote_choice: 1, created_at: 2 }
+    );
+    const response = await handleVoteCommunityDecision(
+      'dec_snapshot_1', studentB,
+      new Request('http://localhost/api/v1/decisions/dec_snapshot_1/vote', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voteChoice: 1 }),
+      }), env,
+    );
+    expect(response.status).toBe(200);
+    const data = await response.json() as any;
+    expect(data.votesFor).toBe(2);
+    expect(data.votesAgainst).toBe(0);
+    expect(data.status).toBe('PENDING');
+    expect(mockDb.tables.community_decisions.find(d => d.id === 'dec_snapshot_1')?.votes_for).toBe(2);
+    expect(mockDb.tables.schedule_proposals.find(p => p.id === 'prop_snapshot_1')?.status).toBe('PENDING');
   });
 
   it('expires a linked schedule proposal together with its community decision', async () => {

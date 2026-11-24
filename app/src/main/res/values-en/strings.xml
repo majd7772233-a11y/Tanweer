@@ -16,6 +16,10 @@
     <string name="schedule_proposals_label">Schedule change proposals</string>
     <string name="schedule_proposals_verifying">Checking schedule proposals</string>
     <string name="schedule_proposals_last_snapshot">Count in last confirmed snapshot: %1$d</string>
+    <string name="schedule_proposal_status_review_required">Historical record needs review</string>
+    <string name="schedule_proposal_review_required_detail">The stored votes do not prove that the historical quorum was reached. The current timetable was not changed; review this record before treating it as approved.</string>
+    <string name="schedule_proposal_votes_for_progress">👍 %1$d of %2$d required votes</string>
+    <string name="community_decisions_review_required_summary">%1$d historical decision(s) cannot be verified against the stored voting quorum. The timetable version was not changed; review is required.</string>
     <string name="profile_stats_unverified">Profile statistics have not been verified yet.</string>
     <string name="search_local_results_count">%1$d local results</string>
     <string name="search_local_index_note">Search results come from the local index. Chat sync fetches the latest 100 server messages and retains older locally cached history.</string>

@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -51,6 +52,7 @@ fun CommunityDecisionsScreen(
         "COMPLETED" -> scopedDecisions.filter { it.status != "PENDING" }
         else -> scopedDecisions
     }
+    val reviewRequiredCount = scopedDecisions.count { it.status == "REVIEW_REQUIRED" }
 
     LazyColumn(
         modifier = Modifier
@@ -128,6 +130,23 @@ fun CommunityDecisionsScreen(
                             lineHeight = tanweerLineHeight(15f)
                         )
                     }
+                }
+            }
+        }
+
+        if (reviewRequiredCount > 0) {
+            item {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = WarmAmber.copy(alpha = 0.08f),
+                    borderColor = WarmAmber.copy(alpha = 0.55f)
+                ) {
+                    Text(
+                        text = stringResource(R.string.community_decisions_review_required_summary, reviewRequiredCount),
+                        color = WarmAmber,
+                        fontSize = tanweerTextSize(11f),
+                        lineHeight = tanweerLineHeight(16f)
+                    )
                 }
             }
         }
