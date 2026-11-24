@@ -213,7 +213,7 @@
 
     <string name="chat_message_delete_action">Delete message</string>
     <string name="chat_message_delete_title">Delete this group message?</string>
-    <string name="chat_message_delete_message">This message will be removed from the group's history for its members. This action cannot be undone.</string>
+    <string name="chat_message_delete_message">This message will be removed from the group conversation history for all members. This action cannot be undone.</string>
     <string name="chat_message_delete_confirm">Delete</string>
     <string name="chat_message_delete_cancel">Cancel</string>
     <string name="chat_message_delete_in_progress">Deleting…</string>
