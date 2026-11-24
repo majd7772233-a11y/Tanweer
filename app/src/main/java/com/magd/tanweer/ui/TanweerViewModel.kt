@@ -290,6 +290,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     val activeReadingInitialPage: StateFlow<Int?> = _activeReadingInitialPage.asStateFlow()
 
     private var pdfReaderReturnDestination: PdfReaderReturnDestination? = null
+    private var groupsReturnDestination: GroupsReturnDestination? = null
 
     private val _selectedGroupId = MutableStateFlow("")
     val selectedGroupId: StateFlow<String> = _selectedGroupId.asStateFlow()
@@ -596,6 +597,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         _activeReadingBook.value = null
         _activeReadingInitialPage.value = null
         pdfReaderReturnDestination = null
+        groupsReturnDestination = null
         _isUploadModalOpen.value = false
         _uploadInitialSubjectId.value = null
         _isAddHomeworkModalOpen.value = false
@@ -998,6 +1000,7 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setTab(tab: NavigationTab) {
+        groupsReturnDestination = null
         triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _currentTab.value = tab
         _subScreen.value = SubScreen.NONE
@@ -1005,6 +1008,22 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setSubScreen(screen: SubScreen) {
+        groupsReturnDestination = null
+        navigateToSubScreen(screen)
+    }
+
+    /** Opens the member-management group list while retaining the moderator dashboard as Back's source. */
+    fun openGroupsFromModeratorDashboard() {
+        val origin = _subScreen.value
+        groupsReturnDestination = if (origin == SubScreen.MODERATOR_DASHBOARD) {
+            GroupsReturnDestination(subScreen = origin, currentTab = _currentTab.value)
+        } else {
+            null
+        }
+        navigateToSubScreen(SubScreen.GROUPS)
+    }
+
+    private fun navigateToSubScreen(screen: SubScreen) {
         triggerHaptic(com.magd.tanweer.util.TanweerHapticManager.HapticType.CLICK)
         _subScreen.value = screen
         syncSubScreenOnEntry(screen)
@@ -1037,7 +1056,15 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
             SubScreen.STORAGE_MANAGER -> {
                 _subScreen.value = SubScreen.EXTRA_SECTIONS_HUB
             }
-            SubScreen.GROUPS,
+            SubScreen.GROUPS -> {
+                val returnDestination = GroupsNavigationPolicy.resolve(
+                    origin = groupsReturnDestination,
+                    fallbackTab = _currentTab.value
+                )
+                groupsReturnDestination = null
+                _currentTab.value = returnDestination.currentTab
+                _subScreen.value = returnDestination.subScreen
+            }
             SubScreen.LIBRARY,
             SubScreen.SCHEDULE,
             SubScreen.PROFILE,

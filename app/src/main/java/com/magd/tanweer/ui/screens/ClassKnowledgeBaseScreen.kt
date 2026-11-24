@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -115,7 +116,7 @@ fun ClassKnowledgeBaseScreen(
         allBooks.find { it.subjectId == currentSubject.id }
     }
 
-    var activeTab by remember { mutableIntStateOf(0) } // 0: الدروس, 1: الواجبات, 2: الاختبارات, 3: الأسئلة, 4: الكتاب
+    var activeTab by rememberSaveable { mutableIntStateOf(0) } // 0: الدروس, 1: الواجبات, 2: الاختبارات, 3: الأسئلة, 4: الكتاب
     var correctionDialogContent by remember { mutableStateOf<ContentItem?>(null) }
 
     val themeColor = try {

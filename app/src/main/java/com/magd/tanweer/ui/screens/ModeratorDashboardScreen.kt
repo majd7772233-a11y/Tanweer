@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,8 +63,8 @@ fun ModeratorDashboardScreen(
     val groupMembersError by viewModel.groupMembersError.collectAsStateWithLifecycle()
     val isGroupMembersLoading by viewModel.isGroupMembersLoading.collectAsStateWithLifecycle()
 
-    var selectedSection by remember { mutableIntStateOf(0) } // 0: Corrections, 1: Decisions & Schedule Proposals, 2: Members
-    var decisionFilter by remember { mutableStateOf("ALL") } // "ALL", "SCHEDULE", "COMMUNITY"
+    var selectedSection by rememberSaveable { mutableIntStateOf(0) } // 0: Corrections, 1: Decisions & Schedule Proposals, 2: Members
+    var decisionFilter by rememberSaveable { mutableStateOf("ALL") } // "ALL", "SCHEDULE", "COMMUNITY"
 
     LazyColumn(
         modifier = Modifier
@@ -489,7 +490,7 @@ fun ModeratorDashboardScreen(
                     GlassCard(
                         modifier = Modifier.fillMaxWidth(),
                         backgroundColor = MidnightSurface,
-                        onClick = { viewModel.setSubScreen(SubScreen.GROUPS) }
+                        onClick = { viewModel.openGroupsFromModeratorDashboard() }
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
