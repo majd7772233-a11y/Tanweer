@@ -221,4 +221,12 @@
     <string name="chat_message_delete_in_progress">جارٍ الحذف...</string>
     <string name="chat_message_delete_success">تم حذف الرسالة من المحادثة.</string>
     <string name="chat_message_delete_failed">لم يؤكد الخادم حذف الرسالة؛ بقيت ظاهرة في المحادثة.</string>
+    <plurals name="chat_new_messages_count">
+        <item quantity="zero">لا توجد رسائل جديدة</item>
+        <item quantity="one">رسالة جديدة واحدة</item>
+        <item quantity="two">رسالتان جديدتان</item>
+        <item quantity="few">%d رسائل جديدة</item>
+        <item quantity="many">%d رسالة جديدة</item>
+        <item quantity="other">%d رسالة جديدة</item>
+    </plurals>
 </resources>

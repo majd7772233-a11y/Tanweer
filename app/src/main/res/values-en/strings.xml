@@ -219,4 +219,8 @@
     <string name="chat_message_delete_in_progress">Deleting…</string>
     <string name="chat_message_delete_success">The message was deleted from the conversation.</string>
     <string name="chat_message_delete_failed">The server did not confirm deletion. The message remains in the conversation.</string>
+    <plurals name="chat_new_messages_count">
+        <item quantity="one">%d new message</item>
+        <item quantity="other">%d new messages</item>
+    </plurals>
 </resources>

@@ -12,7 +12,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,7 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,6 +40,7 @@ import com.magd.tanweer.data.remote.ConnectionStatus
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import kotlinx.coroutines.launch
 
 enum class GroupsTab(val label: String) {
     MY_GROUPS("مجموعاتي والشعبة"),
@@ -101,6 +104,15 @@ fun GroupsScreen(
     } ?: false
     val chatMessages by viewModel.repository.getChatMessages(activeChatGroup?.id ?: "")
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val activeChatGroupId = activeChatGroup?.id
+    // A previous group's last Room emission must never flash or affect the new group's scroll state.
+    val visibleChatMessages = remember(chatMessages, activeChatGroupId) {
+        chatMessages.filter { it.groupId == activeChatGroupId }
+    }
+    val chatMessageIds = remember(visibleChatMessages) { visibleChatMessages.map { it.id } }
+    var chatScrollInitialized by remember(activeChatGroupId) { mutableStateOf(false) }
+    var knownChatMessageIds by remember(activeChatGroupId) { mutableStateOf(emptyList<String>()) }
+    var unreadChatMessageIds by remember(activeChatGroupId) { mutableStateOf(emptySet<String>()) }
     var chatInputText by remember { mutableStateOf("") }
     var isSendingChat by remember { mutableStateOf(false) }
     var pendingDeleteMessage by remember { mutableStateOf<ChatMessageItem?>(null) }
@@ -108,7 +120,9 @@ fun GroupsScreen(
 
     val pendingChatGroupId by viewModel.pendingDeepLinkChatGroupId.collectAsStateWithLifecycle()
     val pendingMessageId by viewModel.pendingDeepLinkMessageId.collectAsStateWithLifecycle()
-    val chatListState = rememberLazyListState()
+    val chatListState = remember(activeChatGroupId) { LazyListState() }
+    val chatScrollScope = rememberCoroutineScope()
+    val chatBottomThresholdPx = with(LocalDensity.current) { 80.dp.roundToPx() }
 
     // Handle incoming deep link from Search
     LaunchedEffect(pendingChatGroupId, myGroups, discoverGroups) {
@@ -123,11 +137,11 @@ fun GroupsScreen(
 
     var highlightedMessageId by remember { mutableStateOf<String?>(null) }
 
-    // Scroll to message when deep linked
-    LaunchedEffect(pendingMessageId, chatMessages) {
+    // Scroll to a message reached through Search without letting initial auto-follow override it.
+    LaunchedEffect(pendingMessageId, visibleChatMessages) {
         val targetMsgId = pendingMessageId
-        if (!targetMsgId.isNullOrBlank() && chatMessages.isNotEmpty()) {
-            val index = chatMessages.indexOfFirst { it.id == targetMsgId }
+        if (!targetMsgId.isNullOrBlank() && visibleChatMessages.isNotEmpty()) {
+            val index = visibleChatMessages.indexOfFirst { it.id == targetMsgId }
             if (index != -1) {
                 highlightedMessageId = targetMsgId
                 chatListState.animateScrollToItem(index)
@@ -136,6 +150,82 @@ fun GroupsScreen(
                 highlightedMessageId = null
             }
         }
+    }
+
+    // Initialize at the latest message once Room has data (or the server confirms an empty history).
+    // Later additions follow only when the user was already at the previous end of the list.
+    LaunchedEffect(
+        activeChatGroupId,
+        chatMessageIds,
+        scopedChatHistorySyncState,
+        pendingMessageId,
+        highlightedMessageId
+    ) {
+        if (activeChatGroupId.isNullOrBlank()) return@LaunchedEffect
+
+        if (!chatScrollInitialized) {
+            val hasInitialHistory = chatMessageIds.isNotEmpty() ||
+                hasAuthoritativeSnapshot(scopedChatHistorySyncState)
+            if (!hasInitialHistory) return@LaunchedEffect
+
+            val deepLinkOwnsPosition = !highlightedMessageId.isNullOrBlank() ||
+                (!pendingMessageId.isNullOrBlank() && chatMessageIds.contains(pendingMessageId))
+            chatScrollInitialized = true
+            knownChatMessageIds = chatMessageIds
+            unreadChatMessageIds = emptySet()
+            if (!deepLinkOwnsPosition && chatMessageIds.isNotEmpty()) {
+                chatListState.scrollToItem(chatMessageIds.lastIndex)
+            }
+            return@LaunchedEffect
+        }
+
+        val delta = GroupChatAutoScrollPolicy.calculateDelta(
+            previousIds = knownChatMessageIds,
+            currentIds = chatMessageIds
+        )
+        val currentIds = chatMessageIds.toSet()
+        val previousLastIndex = knownChatMessageIds.lastOrNull()
+            ?.let(chatMessageIds::indexOf)
+            ?: -1
+        val layoutInfo = chatListState.layoutInfo
+        val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
+        val shouldFollowLatest = delta.addedIds.isNotEmpty() &&
+            GroupChatAutoScrollPolicy.shouldAutoFollow(
+                previousLastMessageIndex = previousLastIndex,
+                lastVisibleItemIndex = lastVisibleItem?.index,
+                lastVisibleItemEnd = lastVisibleItem?.let { it.offset + it.size },
+                viewportEndOffset = layoutInfo.viewportEndOffset,
+                thresholdPx = chatBottomThresholdPx
+            )
+
+        unreadChatMessageIds = GroupChatAutoScrollPolicy.mergeUnreadMessageIds(
+            previousUnreadIds = unreadChatMessageIds,
+            delta = delta,
+            currentMessageIds = currentIds,
+            shouldAutoFollow = shouldFollowLatest
+        )
+
+        if (shouldFollowLatest && chatMessageIds.isNotEmpty()) {
+            chatListState.animateScrollToItem(chatMessageIds.lastIndex)
+        }
+        knownChatMessageIds = chatMessageIds
+    }
+
+    // Reading to the latest item manually also clears the unread affordance.
+    val isLatestChatMessageVisible by remember(chatListState, chatMessageIds, chatBottomThresholdPx) {
+        derivedStateOf {
+            if (chatMessageIds.isEmpty()) {
+                true
+            } else {
+                val layoutInfo = chatListState.layoutInfo
+                val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
+                lastVisibleItem?.index == chatMessageIds.lastIndex &&
+                    layoutInfo.viewportEndOffset - (lastVisibleItem.offset + lastVisibleItem.size) <= chatBottomThresholdPx
+            }
+        }
+    }
+    LaunchedEffect(isLatestChatMessageVisible) {
+        if (isLatestChatMessageVisible) unreadChatMessageIds = emptySet()
     }
 
     // Connect WebSocket when inside chat, disconnect cleanly when activeChatGroup becomes null
@@ -252,7 +342,7 @@ fun GroupsScreen(
                     contentPadding = PaddingValues(vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (chatMessages.isEmpty() && hasAuthoritativeSnapshot(scopedChatHistorySyncState)) {
+                    if (visibleChatMessages.isEmpty() && hasAuthoritativeSnapshot(scopedChatHistorySyncState)) {
                         item {
                             EmptyStateGlass(
                                 title = stringResource(com.magd.tanweer.R.string.chat_empty_title),
@@ -260,7 +350,7 @@ fun GroupsScreen(
                                 icon = "💬"
                             )
                         }
-                    } else if (chatMessages.isEmpty()) {
+                    } else if (visibleChatMessages.isEmpty()) {
                         item {
                             PendingSyncEmptyState(
                                 dataLabel = stringResource(com.magd.tanweer.R.string.chat_history_label),
@@ -268,7 +358,7 @@ fun GroupsScreen(
                             )
                         }
                     } else {
-                        items(chatMessages, key = { it.id }) { msg ->
+                        items(visibleChatMessages, key = { it.id }) { msg ->
                             val isMe = msg.senderId == currentUser?.id || msg.isMe
                             val isHighlighted = msg.id == highlightedMessageId
                             var isMessageMenuExpanded by remember(msg.id) { mutableStateOf(false) }
@@ -441,6 +531,46 @@ fun GroupsScreen(
                         color = WarmAmber,
                         fontSize = tanweerTextSize(11f),
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                    )
+                }
+            }
+            AnimatedVisibility(
+                visible = unreadChatMessageIds.isNotEmpty(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = if (activeChatGroupCanSend) 72.dp else 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(CyanAccent)
+                        .clickable {
+                            val latestIndex = chatMessageIds.lastIndex
+                            if (latestIndex >= 0) {
+                                chatScrollScope.launch {
+                                    chatListState.animateScrollToItem(latestIndex)
+                                    unreadChatMessageIds = emptySet()
+                                }
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = pluralStringResource(
+                            com.magd.tanweer.R.plurals.chat_new_messages_count,
+                            unreadChatMessageIds.size,
+                            unreadChatMessageIds.size
+                        ),
+                        color = TextOnAccent,
+                        fontSize = tanweerTextSize(12f),
+                        fontWeight = FontWeight.Bold
+                    )
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = TextOnAccent
                     )
                 }
             }
