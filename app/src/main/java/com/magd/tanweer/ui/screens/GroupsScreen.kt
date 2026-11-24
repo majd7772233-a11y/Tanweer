@@ -7,6 +7,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -42,6 +44,7 @@ enum class GroupsTab(val label: String) {
     DISCOVER("اكتشف المجموعات 🔍")
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GroupsScreen(
     viewModel: TanweerViewModel
@@ -100,6 +103,8 @@ fun GroupsScreen(
         .collectAsStateWithLifecycle(initialValue = emptyList())
     var chatInputText by remember { mutableStateOf("") }
     var isSendingChat by remember { mutableStateOf(false) }
+    var pendingDeleteMessage by remember { mutableStateOf<ChatMessageItem?>(null) }
+    var deletingMessageId by remember { mutableStateOf<String?>(null) }
 
     val pendingChatGroupId by viewModel.pendingDeepLinkChatGroupId.collectAsStateWithLifecycle()
     val pendingMessageId by viewModel.pendingDeepLinkMessageId.collectAsStateWithLifecycle()
@@ -266,6 +271,12 @@ fun GroupsScreen(
                         items(chatMessages, key = { it.id }) { msg ->
                             val isMe = msg.senderId == currentUser?.id || msg.isMe
                             val isHighlighted = msg.id == highlightedMessageId
+                            var isMessageMenuExpanded by remember(msg.id) { mutableStateOf(false) }
+                            val canDeleteMessage = GroupChatMessageDeletePolicy.canDelete(
+                                message = msg,
+                                user = currentUser,
+                                group = activeChatGroup
+                            )
                             Box(
                                 modifier = Modifier.fillMaxWidth(),
                                 contentAlignment = if (isMe) Alignment.CenterEnd else Alignment.CenterStart
@@ -292,6 +303,11 @@ fun GroupsScreen(
                                             else if (isMe) CyanAccent.copy(alpha = 0.4f)
                                             else GlassBorderSubtle,
                                             RoundedCornerShape(16.dp)
+                                        )
+                                        .combinedClickable(
+                                            enabled = canDeleteMessage,
+                                            onClick = {},
+                                            onLongClick = { isMessageMenuExpanded = true }
                                         )
                                         .padding(10.dp)
                                 ) {
@@ -340,6 +356,28 @@ fun GroupsScreen(
                                                 }
                                             }
                                         }
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = isMessageMenuExpanded,
+                                        onDismissRequest = { isMessageMenuExpanded = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(com.magd.tanweer.R.string.chat_message_delete_action)) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    contentDescription = null,
+                                                    tint = RubyRed
+                                                )
+                                            },
+                                            onClick = {
+                                                isMessageMenuExpanded = false
+                                                if (canDeleteMessage && msg.status.equals("SENT", ignoreCase = true)) {
+                                                    pendingDeleteMessage = msg
+                                                }
+                                            }
+                                        )
                                     }
                                 }
                             }
@@ -407,6 +445,64 @@ fun GroupsScreen(
                 }
             }
         }
+        pendingDeleteMessage?.let { message ->
+            AlertDialog(
+                onDismissRequest = {
+                    if (deletingMessageId != message.id) pendingDeleteMessage = null
+                },
+                title = {
+                    Text(stringResource(com.magd.tanweer.R.string.chat_message_delete_title))
+                },
+                text = {
+                    Text(stringResource(com.magd.tanweer.R.string.chat_message_delete_message))
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = deletingMessageId != message.id,
+                        onClick = {
+                            if (deletingMessageId == null) {
+                                deletingMessageId = message.id
+                                viewModel.deleteGroupChatMessage(message) { success ->
+                                    deletingMessageId = null
+                                    if (success) {
+                                        if (pendingDeleteMessage?.id == message.id) pendingDeleteMessage = null
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(com.magd.tanweer.R.string.chat_message_delete_success),
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(com.magd.tanweer.R.string.chat_message_delete_failed),
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        Text(
+                            stringResource(
+                                if (deletingMessageId == message.id)
+                                    com.magd.tanweer.R.string.chat_message_delete_in_progress
+                                else
+                                    com.magd.tanweer.R.string.chat_message_delete_confirm
+                            )
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = deletingMessageId != message.id,
+                        onClick = { pendingDeleteMessage = null }
+                    ) {
+                        Text(stringResource(com.magd.tanweer.R.string.chat_message_delete_cancel))
+                    }
+                }
+            )
+        }
+
         return
     }
 
