@@ -61,6 +61,7 @@ fun LibraryScreen(
     val isSyncing by viewModel.isSyncingBooks.collectAsStateWithLifecycle()
     val librarySyncState by viewModel.librarySyncState.collectAsStateWithLifecycle()
     val librarySyncGradeId by viewModel.librarySyncGradeId.collectAsStateWithLifecycle()
+    val libraryNavigationRequest by viewModel.libraryNavigationRequest.collectAsStateWithLifecycle()
     val pdfManager = remember { PdfBookManager(context) }
 
     var selectedGradeId by remember(currentUser?.gradeId) { mutableIntStateOf(currentUser?.gradeId ?: 10) }
@@ -78,6 +79,18 @@ fun LibraryScreen(
     var isViewModeSheetOpen by remember { mutableStateOf(false) }
     var isStorageSheetOpen by remember { mutableStateOf(false) }
     var selectedBookForDetail by remember { mutableStateOf<BookItem?>(null) }
+
+    LaunchedEffect(libraryNavigationRequest?.requestId) {
+        val request = libraryNavigationRequest ?: return@LaunchedEffect
+        selectedGradeId = request.gradeId
+        searchQuery = ""
+        selectedSubjectFilter = request.subjectId?.let(LibrarySubjectFilterPolicy::canonicalSubjectId)
+        includeSubSubjects = false
+        if (request.gradeId != (currentUser?.gradeId ?: 10)) {
+            viewModel.syncBooks(request.gradeId, isRefresh = true)
+        }
+        viewModel.consumeLibraryNavigationRequest(request.requestId)
+    }
 
     // Fetch all books
     val allBooks by viewModel.repository.getAllBooks().collectAsStateWithLifecycle(initialValue = emptyList())
@@ -440,6 +453,32 @@ fun LibraryScreen(
             else if (gradeBooks.isEmpty() && !hasConfirmedEmptyGrade) {
                 item {
                     PendingSyncEmptyState(dataLabel = "كتب $currentGradeName", syncState = selectedGradeSyncState)
+                }
+            }
+            // A subject/search filter may be narrower than a non-empty grade catalogue.
+            else if (filteredBooks.isEmpty()) {
+                item {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.library_no_matching_books),
+                                color = TextSecondary,
+                                fontSize = tanweerTextSize(13f),
+                                textAlign = TextAlign.Center
+                            )
+                            TextButton(onClick = {
+                                selectedSubjectFilter = null
+                                includeSubSubjects = false
+                                searchQuery = ""
+                            }) {
+                                Text(stringResource(R.string.library_show_all_books), color = CyanAccent)
+                            }
+                        }
+                    }
                 }
             }
             // Confirmed empty state for the selected grade

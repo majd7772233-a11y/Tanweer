@@ -223,4 +223,9 @@
         <item quantity="one">%d new message</item>
         <item quantity="other">%d new messages</item>
     </plurals>
+    <string name="exam_open_subject_book">Open subject book 📖</string>
+    <string name="exam_view_subject_books">View subject books 📚</string>
+    <string name="exam_open_general_library">Open general library 📚</string>
+    <string name="library_no_matching_books">No books match the selected subject or search.</string>
+    <string name="library_show_all_books">Show all books for this grade</string>
 </resources>

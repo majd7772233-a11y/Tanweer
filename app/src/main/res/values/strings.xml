@@ -229,4 +229,9 @@
         <item quantity="many">%d رسالة جديدة</item>
         <item quantity="other">%d رسالة جديدة</item>
     </plurals>
+    <string name="exam_open_subject_book">فتح كتاب المادة 📖</string>
+    <string name="exam_view_subject_books">عرض كتب المادة 📚</string>
+    <string name="exam_open_general_library">فتح المكتبة العامة 📚</string>
+    <string name="library_no_matching_books">لا توجد كتب مطابقة للمادة أو البحث الحالي.</string>
+    <string name="library_show_all_books">عرض جميع كتب الصف</string>
 </resources>

@@ -43,6 +43,7 @@ import com.magd.tanweer.data.model.ExamItem
 import com.magd.tanweer.util.ApiDisplayValuePolicy
 import com.magd.tanweer.data.model.Permission
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.data.model.hasPermission
 import com.magd.tanweer.data.notifications.TanweerNotificationManager
 import com.magd.tanweer.ui.NavigationTab
@@ -52,6 +53,8 @@ import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.ExamReviewPolicy
+import com.magd.tanweer.util.ExamBookNavigationPolicy
+import com.magd.tanweer.util.ExamBookNavigationTarget
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -75,6 +78,11 @@ fun ExamsScreen(
     val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
     val scopedExamsSyncState = syncStateForScope(examsSyncState, groupSyncScopeIds[GroupSyncSource.EXAMS], activeGroupId)
     val hasExamSnapshot = exams.isNotEmpty() || hasAuthoritativeSnapshot(scopedExamsSyncState)
+    val allBooks by viewModel.repository.getAllBooks().collectAsStateWithLifecycle(initialValue = emptyList())
+    val librarySyncState by viewModel.librarySyncState.collectAsStateWithLifecycle()
+    val librarySyncGradeId by viewModel.librarySyncGradeId.collectAsStateWithLifecycle()
+    val examBookGradeId = currentUser?.gradeId ?: 10
+    val hasAuthoritativeBookCatalog = librarySyncGradeId == examBookGradeId && librarySyncState is SyncState.Success
 
     val gradeSubjects = remember(currentUser?.gradeId) {
         viewModel.getScheduleSubjectsForCurrentGrade()
@@ -785,6 +793,21 @@ fun ExamsScreen(
         }
         // Exam Detail Modal (Point 17 & 21: Full details, completion toggle, and reminder scheduling)
         selectedExamForDetail?.let { exam ->
+            val bookDestination = remember(exam, allBooks, examBookGradeId, hasAuthoritativeBookCatalog) {
+                ExamBookNavigationPolicy.resolve(
+                    examSubjectId = exam.subjectId,
+                    gradeId = examBookGradeId,
+                    books = allBooks,
+                    hasAuthoritativeCatalog = hasAuthoritativeBookCatalog
+                )
+            }
+            val bookActionLabel = stringResource(
+                when (bookDestination) {
+                    is ExamBookNavigationTarget.OpenBook -> R.string.exam_open_subject_book
+                    is ExamBookNavigationTarget.OpenSubjectLibrary -> R.string.exam_view_subject_books
+                    is ExamBookNavigationTarget.OpenGeneralLibrary -> R.string.exam_open_general_library
+                }
+            )
             ExamDetailModal(
                 exam = exam,
                 todayDateStr = todayDateStr,
@@ -845,9 +868,18 @@ fun ExamsScreen(
                 },
                 onOpenLibraryBook = {
                     selectedExamForDetail = null
-                    viewModel.setTab(NavigationTab.MORE)
-                    viewModel.setSubScreen(SubScreen.LIBRARY)
-                }
+                    when (val destination = bookDestination) {
+                        is ExamBookNavigationTarget.OpenBook -> viewModel.openBookInPdfReader(destination.book)
+                        is ExamBookNavigationTarget.OpenSubjectLibrary -> viewModel.openLibrary(
+                            gradeId = destination.gradeId,
+                            subjectId = destination.subjectId
+                        )
+                        is ExamBookNavigationTarget.OpenGeneralLibrary -> viewModel.openLibrary(
+                            gradeId = destination.gradeId
+                        )
+                    }
+                },
+                bookActionLabel = bookActionLabel
             )
         }
 
@@ -1706,6 +1738,7 @@ fun ExamDetailModal(
     onToggleDone: () -> Unit,
     onScheduleReminder: () -> Unit,
     onOpenLibraryBook: () -> Unit,
+    bookActionLabel: String,
     canEdit: Boolean,
     onEdit: () -> Unit
 ) {
@@ -1838,7 +1871,7 @@ fun ExamDetailModal(
                 )
 
                 GlassOutlinedButton(
-                    text = "كتاب المادة 📖",
+                    text = bookActionLabel,
                     onClick = onOpenLibraryBook,
                     modifier = Modifier.weight(1f).height(46.dp)
                 )

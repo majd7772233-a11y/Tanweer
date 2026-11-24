@@ -420,6 +420,9 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _librarySyncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val librarySyncState: StateFlow<SyncState> = _librarySyncState.asStateFlow()
+    private var libraryNavigationRequestSequence = 0L
+    private val _libraryNavigationRequest = MutableStateFlow<LibraryNavigationRequest?>(null)
+    val libraryNavigationRequest: StateFlow<LibraryNavigationRequest?> = _libraryNavigationRequest.asStateFlow()
     private val _librarySyncGradeId = MutableStateFlow<Int?>(null)
     val librarySyncGradeId: StateFlow<Int?> = _librarySyncGradeId.asStateFlow()
     @Volatile private var librarySyncRequestGeneration = 0
@@ -628,6 +631,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         librarySyncRequestGeneration++
         _librarySyncState.value = SyncState.Idle
         _librarySyncGradeId.value = null
+        libraryNavigationRequestSequence++
+        _libraryNavigationRequest.value = null
         _groupsSyncState.value = SyncState.Idle
         chatHistoryRequestGeneration++
         _chatHistorySyncState.value = SyncState.Idle
@@ -1010,6 +1015,24 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     fun setSubScreen(screen: SubScreen) {
         groupsReturnDestination = null
         navigateToSubScreen(screen)
+    }
+
+    /** Opens the Library with a one-shot grade/subject filter supplied by a contextual action. */
+    fun openLibrary(gradeId: Int, subjectId: String? = null) {
+        val resolvedGradeId = gradeId.takeIf { it > 0 } ?: currentUser.value?.gradeId ?: 10
+        _libraryNavigationRequest.value = LibraryNavigationRequest(
+            requestId = ++libraryNavigationRequestSequence,
+            gradeId = resolvedGradeId,
+            subjectId = subjectId?.trim()?.takeIf { it.isNotEmpty() }
+        )
+        _currentTab.value = NavigationTab.MORE
+        setSubScreen(SubScreen.LIBRARY)
+    }
+
+    fun consumeLibraryNavigationRequest(requestId: Long) {
+        if (_libraryNavigationRequest.value?.requestId == requestId) {
+            _libraryNavigationRequest.value = null
+        }
     }
 
     /** Opens the member-management group list while retaining the moderator dashboard as Back's source. */
