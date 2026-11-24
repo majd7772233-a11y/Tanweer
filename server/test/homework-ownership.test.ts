@@ -210,4 +210,28 @@ describe('Student-created homework ownership', () => {
     expect(db.completionDeleteCalls).toBe(0);
     expect(db.mediaDeleteCalls).toBe(0);
   });
+
+  it('does not let a group teacher delete another student homework without the separate delete permission', async () => {
+    const db = new HomeworkOwnershipDb('TEACHER');
+    const teacher: UserContext = { ...otherStudent, userId: 'teacher_1', role: 'STUDENT' };
+
+    const response = await handleDeleteHomework('hw_owner_1', teacher, makeEnv(db));
+
+    expect(response.status).toBe(403);
+    expect(db.homeworkDeleteCalls).toBe(0);
+    expect(db.completionDeleteCalls).toBe(0);
+    expect(db.mediaDeleteCalls).toBe(0);
+  });
+
+  it('allows an active group admin to delete another student homework', async () => {
+    const db = new HomeworkOwnershipDb('ADMIN');
+    const groupAdmin: UserContext = { ...otherStudent, userId: 'group_admin_1', role: 'STUDENT' };
+
+    const response = await handleDeleteHomework('hw_owner_1', groupAdmin, makeEnv(db));
+
+    expect(response.status).toBe(200);
+    expect(db.homeworkDeleteCalls).toBe(1);
+    expect(db.completionDeleteCalls).toBe(1);
+    expect(db.mediaDeleteCalls).toBe(1);
+  });
 });

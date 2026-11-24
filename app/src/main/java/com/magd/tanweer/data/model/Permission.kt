@@ -22,7 +22,8 @@ enum class Permission {
     MODERATE_CONTENT,       // Edit, verify, or review content created by others
     DELETE_ANY_CONTENT,     // Force delete content across group/platform
     PIN_CONTENT,            // Pin key lessons or announcements
-    MODERATE_HOMEWORK,      // Edit or remove homework of others
+    MODERATE_HOMEWORK,      // Edit homework created by others
+    DELETE_HOMEWORK,         // Delete homework created by others
     MODERATE_EXAM,          // Edit or remove exams of others
     MODERATE_EVENT,         // Edit or remove events of others
     MODERATE_ISSUES,        // Close, reopen, or moderate questions

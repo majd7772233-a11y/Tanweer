@@ -499,7 +499,7 @@ export async function handleUpdateHomework(
   if (memberCheck) return memberCheck;
 
   const isOwner = hw.created_by === user.userId;
-  const canManage = await hasPermission(user, Permission.MANAGE_HOMEWORK, {
+  const canManage = await hasPermission(user, Permission.MODERATE_HOMEWORK, {
     db: env.DB,
     groupId: hw.group_id,
     resourceOwnerId: hw.created_by,
@@ -600,7 +600,7 @@ export async function handleDeleteHomework(
   if (memberCheck) return memberCheck;
 
   const isOwner = hw.created_by === user.userId;
-  const canManage = await hasPermission(user, Permission.MANAGE_HOMEWORK, {
+  const canManage = await hasPermission(user, Permission.DELETE_HOMEWORK, {
     db: env.DB,
     groupId: hw.group_id,
     resourceOwnerId: hw.created_by,

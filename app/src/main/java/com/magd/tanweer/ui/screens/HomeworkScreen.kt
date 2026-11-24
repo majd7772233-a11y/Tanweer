@@ -419,7 +419,12 @@ fun HomeworkScreen(
                         isOverdue = isOverdue,
                         isDueToday = isDueToday,
                         isPlanned = plannedHwIds.contains(hw.id),
-                        showOwnerActions = HomeworkOwnershipPolicy.canManage(
+                        canEdit = HomeworkOwnershipPolicy.canEdit(
+                            createdBy = hw.createdBy,
+                            syncStatus = hw.syncStatus,
+                            currentUserId = currentUser?.id
+                        ),
+                        canDelete = HomeworkOwnershipPolicy.canDelete(
                             createdBy = hw.createdBy,
                             syncStatus = hw.syncStatus,
                             currentUserId = currentUser?.id
@@ -957,7 +962,8 @@ fun HomeworkCard(
     isOverdue: Boolean = false,
     isDueToday: Boolean = false,
     isPlanned: Boolean = false,
-    showOwnerActions: Boolean = false,
+    canEdit: Boolean = false,
+    canDelete: Boolean = false,
     onEdit: () -> Unit = {},
     onDelete: () -> Unit = {},
     onToggle: () -> Unit,
@@ -1037,7 +1043,7 @@ fun HomeworkCard(
                             uncheckedColor = TextSecondary
                         )
                     )
-                    if (showOwnerActions) {
+                    if (canEdit || canDelete) {
                         Box {
                             IconButton(onClick = { actionsExpanded = true }) {
                                 Icon(
@@ -1051,22 +1057,26 @@ fun HomeworkCard(
                                 onDismissRequest = { actionsExpanded = false },
                                 containerColor = MidnightSurface
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.homework_action_edit), color = TextPrimary) },
-                                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = CyanAccent) },
-                                    onClick = {
-                                        actionsExpanded = false
-                                        onEdit()
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.homework_action_delete), color = Color(0xFFFF6B6B)) },
-                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFFF6B6B)) },
-                                    onClick = {
-                                        actionsExpanded = false
-                                        onDelete()
-                                    }
-                                )
+                                if (canEdit) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.homework_action_edit), color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = CyanAccent) },
+                                        onClick = {
+                                            actionsExpanded = false
+                                            onEdit()
+                                        }
+                                    )
+                                }
+                                if (canDelete) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.homework_action_delete), color = Color(0xFFFF6B6B)) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFFF6B6B)) },
+                                        onClick = {
+                                            actionsExpanded = false
+                                            onDelete()
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
