@@ -557,6 +557,9 @@ interface ChatDao {
     @Query("UPDATE cached_chat_messages SET status = :status WHERE id = :id")
     suspend fun updateMessageStatus(id: String, status: String)
 
+    @Query("DELETE FROM cached_chat_messages WHERE groupId = :groupId AND id = :messageId")
+    suspend fun deleteMessage(groupId: String, messageId: String)
+
     @Query("SELECT * FROM cached_chat_messages WHERE status = 'SENDING' AND timestamp < :threshold")
     suspend fun getSendingMessagesSync(threshold: Long): List<ChatMessageEntity>
 
