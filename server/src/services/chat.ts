@@ -259,11 +259,12 @@ export async function handleDeleteGroupMessage(
   const memberCheck = await requireGroupMember(user, groupId, env.DB);
   if (memberCheck) return memberCheck;
 
-  const sendPermission = await getGroupChatSendPermission(groupId, user.userId, user.role, env);
-  if (!sendPermission.allowed) {
-    return errorResponse('READ_ONLY_GROUP', 'لا تملك صلاحية حذف الرسائل في مجموعة الهيئة التعليمية؛ يمكنك القراءة فقط.', 403);
+  if (!messageId.trim() || messageId.length > 128) {
+    return errorResponse('INVALID_MESSAGE_ID', 'معرّف الرسالة المطلوب حذفه غير صالح.', 400);
   }
 
+  // Deleting your own persisted message does not require permission to send new
+  // messages (e.g. a student may remove their own message in a staff-only group).
   const message = await env.DB.prepare(
     `SELECT sender_id FROM chat_messages WHERE id = ? AND group_id = ?`
   ).bind(messageId, groupId).first<{ sender_id: string }>();
@@ -283,7 +284,12 @@ export async function handleDeleteGroupMessage(
     return errorResponse('FORBIDDEN', 'لا تملك صلاحية حذف هذه الرسالة', 403);
   }
 
-  await env.DB.prepare(`DELETE FROM chat_messages WHERE id = ?`).bind(messageId).run();
+  const deletion = await env.DB.prepare(
+    `DELETE FROM chat_messages WHERE id = ? AND group_id = ?`
+  ).bind(messageId, groupId).run();
+  if (deletion.meta?.changes === 0) {
+    return errorResponse('MESSAGE_NOT_FOUND', 'الرسالة غير موجودة', 404);
+  }
 
   try {
     const doId = env.CHAT.idFromName(groupId);
@@ -301,6 +307,8 @@ export async function handleDeleteGroupMessage(
 
   return jsonResponse({
     success: true,
+    groupId,
+    messageId,
     message: 'تم حذف الرسالة بنجاح',
   });
 }
