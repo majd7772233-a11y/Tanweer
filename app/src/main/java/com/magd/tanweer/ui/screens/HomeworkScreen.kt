@@ -826,6 +826,7 @@ fun HomeworkScreen(
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun EditHomeworkDialog(
     homework: HomeworkItem,

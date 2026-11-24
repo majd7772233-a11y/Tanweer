@@ -990,8 +990,7 @@ class TanweerRepository(
                                 createdAt = it.createdAt,
                                 createdBy = it.createdBy,
                                 sourceName = it.sourceName,
-                                isOfficial = it.isOfficial,
-                                createdBy = it.createdBy
+                                isOfficial = it.isOfficial
                             )
                         }
                         val reconciledDayEvents = ServerSnapshotReconciliation.preservePending(
@@ -1051,7 +1050,8 @@ class TanweerRepository(
                         colorHex = item.colorHex,
                         mediaUrlsJson = serializeStringList(item.mediaUrls),
                         createdAt = item.createdAt,
-                        isOfficial = item.isOfficial
+                        isOfficial = item.isOfficial,
+                        createdBy = item.createdBy
                     )
                 }
                 db.withTransaction {
