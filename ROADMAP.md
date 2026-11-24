@@ -790,6 +790,19 @@
 
 **الأدلة:** مراجعة ExamsScreen.kt وTanweerViewModel.kt وTanweerRepository.kt وTanweerApiService.kt وserver/src/services/exams.ts.
 
+### P2-22 implementation result ? 2026-11-24
+
+- **Status:** implementation complete and locally verified; exact-SHA GitHub CI is pending the source push. Do not mark automated CI complete until Android and Server workflows pass on the final commit SHA.
+- **Ownership contract:** `ExamItem` and `ExamEntity` now retain `createdBy`. Android only offers Edit for a server-confirmed (`SYNCED`) exam when the current account is its creator or has the active group's `MODERATE_EXAM` permission. Pending/failed/legacy records without a trustworthy creator remain non-editable.
+- **Persistence:** Room schema version 19; `MIGRATION_18_19` adds `cached_exams.createdBy TEXT NOT NULL DEFAULT ''`. The migration test verifies existing exam columns/data survive and the creator defaults safely for legacy rows. Migration is code-only and has not been applied to a real user database.
+- **Edit flow:** ExamsScreen opens the existing exam form prefilled with subject, title, exam type, date, required chapters and notes. Repository PATCHes `api/v1/exams/{id}` and only updates Room after a confirmed success ACK; failed/unauthorized/duplicate responses leave the prior local row unchanged. A subject change also refreshes the local subject name/icon/color metadata.
+- **Worker authorization:** the Worker requires active group membership and permits only the record creator or a group member with `MANAGE_EXAMS` (the server permission alias for `MODERATE_EXAM`). Publishing an official exam remains separately gated by `PUBLISH_OFFICIAL_EXAM`. Monthly duplicate conflicts remain HTTP 409.
+- **Regression tests:** `ExamOwnershipPolicyTest` 7/7 and `DatabaseMigrationTest` 1/1 PASS locally. Server `exam-update-ownership.test.ts` 5/5 and mapper creator-field coverage PASS.
+- **Android verification:** focused P2-22 tests 8/8, zero failures/errors/skips; `:app:assembleStagingDebug` PASS. APK: `app/build/outputs/apk/staging/debug/app-staging-debug.apk`, 33,618,984 bytes; SHA-256 `6C60E32A32A45FCBBCF7969AFB7DB071851971159B98EC6AE40F0E8C66548937`. Full Windows suite: 243 tests, 242 passed, 1 known failure (`StudentNotebookManagerTest.valid notebook records round trip through atomic storage`, Windows/Robolectric `AtomicFile` behavior), zero errors/skips. The failure is unchanged and was not skipped.
+- **Server verification:** `npm audit --audit-level=moderate` reports 0 vulnerabilities; `npm run types` PASS; full Vitest suite 45 files / 304 tests PASS; Wrangler production and staging `deploy --dry-run` PASS. No deploy or D1 write occurred.
+- **Phase 5:** verify owner/non-owner edit visibility, teacher moderation, edit persistence after app restart, subject/date changes reflected in calendar, and rejection of unauthorized/duplicate changes on actual student/teacher accounts. No emulator or physical device was used for this implementation.
+- **Governance:** no Worker deployment, D1 migration apply/write, staging/production data write, secret change, Release signing, app install/launch, `main` update or PR merge. PR #6 remains Open + Draft + Unmerged. Keep WebGPT task `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` RUNNING.
+
 ## P2-23 — لا توجد أدوات تعديل/حذف لواجب الطالب المملوك له
 
 **مرجع التقرير:** TNW-HW-QA-20261119-001 وملاحظة Student-side Edit/Delete. **الأولوية:** P2.

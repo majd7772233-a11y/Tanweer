@@ -529,7 +529,8 @@ data class ExamItem(
     val isCompleted: Boolean = false,
     val examType: String = "MONTHLY",
     val syncStatus: String = "SYNCED", // 'SYNCED', 'SYNCING', 'LOCAL', 'FAILED'
-    val isOfficial: Boolean = false
+    val isOfficial: Boolean = false,
+    val createdBy: String = ""
 )
 
 @JsonClass(generateAdapter = true)

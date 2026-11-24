@@ -64,6 +64,8 @@ fun ExamsScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val myGroups by viewModel.repository.getMyGroups().collectAsStateWithLifecycle(initialValue = emptyList())
+    val activeGroupRole = remember(myGroups, activeGroupId) { myGroups.firstOrNull { it.id == activeGroupId }?.role }
     val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
 
     val exams by viewModel.repository.getExams(activeGroupId)
@@ -84,11 +86,13 @@ fun ExamsScreen(
     val isAddExamModalOpen = isLocalAddExamModalOpen || isAddExamModalOpenFromVm
     var selectedExamForDetail by remember { mutableStateOf<ExamItem?>(null) }
     var examToDelete by remember { mutableStateOf<ExamItem?>(null) }
+    var examToEdit by remember { mutableStateOf<ExamItem?>(null) }
+    var isUpdatingExam by remember { mutableStateOf(false) }
     var failedExamToDiscard by remember { mutableStateOf<ExamItem?>(null) }
 
     val todayDateStr = remember { TanweerViewModel.getTodayDateString() }
-    val canDeleteExams = remember(currentUser) {
-        currentUser?.hasPermission(Permission.MODERATE_EXAM) == true
+    val canDeleteExams = remember(currentUser, activeGroupRole) {
+        currentUser?.hasPermission(Permission.MODERATE_EXAM, groupRole = activeGroupRole) == true
     }
 
     var selectedTypeFilter by remember { mutableStateOf<String?>(null) }
@@ -741,12 +745,60 @@ fun ExamsScreen(
             )
         }
 
+        examToEdit?.let { exam ->
+            AddExamSheet(
+                gradeSubjects = gradeSubjects,
+                initialExamDate = exam.examDate,
+                onDismiss = {
+                    examToEdit = null
+                    isUpdatingExam = false
+                },
+                onAdd = { _, _, _, _, _, _ -> },
+                initialExam = exam,
+                isSaving = isUpdatingExam,
+                onUpdate = { examId, subjectId, title, chapters, notes, date, examType ->
+                    isUpdatingExam = true
+                    viewModel.updateExam(
+                        examId = examId,
+                        subjectId = subjectId,
+                        title = title,
+                        requiredChapters = chapters,
+                        notes = notes,
+                        examDate = date,
+                        examType = examType
+                    ) { result ->
+                        isUpdatingExam = false
+                        result.fold(
+                            onSuccess = {
+                                Toast.makeText(context, context.getString(R.string.exam_edit_success), Toast.LENGTH_SHORT).show()
+                                examToEdit = null
+                            },
+                            onFailure = { error ->
+                                val message = error.message?.takeIf { it.isNotBlank() }
+                                    ?: context.getString(R.string.exam_edit_failed)
+                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    }
+                }
+            )
+        }
         // Exam Detail Modal (Point 17 & 21: Full details, completion toggle, and reminder scheduling)
         selectedExamForDetail?.let { exam ->
             ExamDetailModal(
                 exam = exam,
                 todayDateStr = todayDateStr,
                 onDismiss = { selectedExamForDetail = null },
+                canEdit = ExamOwnershipPolicy.canEdit(
+                    createdBy = exam.createdBy,
+                    syncStatus = exam.syncStatus,
+                    currentUserId = currentUser?.id,
+                    canModerate = canDeleteExams
+                ),
+                onEdit = {
+                    examToEdit = exam
+                    selectedExamForDetail = null
+                },
                 onToggleDone = {
                     viewModel.toggleExamCompletion(exam.id, !exam.isCompleted)
                     selectedExamForDetail = exam.copy(isCompleted = !exam.isCompleted)
@@ -1375,14 +1427,31 @@ fun AddExamSheet(
     gradeSubjects: List<SubjectItem>,
     initialExamDate: String? = null,
     onDismiss: () -> Unit,
-    onAdd: (subjectId: String, title: String, chapters: String?, notes: String?, date: String, examType: String) -> Unit
+    onAdd: (subjectId: String, title: String, chapters: String?, notes: String?, date: String, examType: String) -> Unit,
+    initialExam: ExamItem? = null,
+    isSaving: Boolean = false,
+    onUpdate: ((String, String, String, String, String, String, String) -> Unit)? = null
 ) {
-    var selectedSubj by remember { mutableStateOf(gradeSubjects.firstOrNull()) }
-    var title by remember { mutableStateOf("") }
-    var examType by remember { mutableStateOf("MONTHLY") } // MONTHLY, ORAL, MIDTERM, FINAL
-    var chapters by remember { mutableStateOf("") }
-    var teacherNotes by remember { mutableStateOf("") }
-    var examDate by remember(initialExamDate) { mutableStateOf(initialExamDate ?: TanweerViewModel.getTodayDateString()) }
+    val availableSubjects = remember(gradeSubjects, initialExam?.id) {
+        if (initialExam != null && gradeSubjects.none { it.id == initialExam.subjectId }) {
+            gradeSubjects + SubjectItem(
+                id = initialExam.subjectId,
+                name = initialExam.subjectName,
+                icon = initialExam.subjectIcon,
+                colorHex = initialExam.colorHex
+            )
+        } else {
+            gradeSubjects
+        }
+    }
+    var selectedSubj by remember(initialExam?.id, availableSubjects) {
+        mutableStateOf(availableSubjects.firstOrNull { it.id == initialExam?.subjectId } ?: availableSubjects.firstOrNull())
+    }
+    var title by remember(initialExam?.id) { mutableStateOf(initialExam?.title.orEmpty()) }
+    var examType by remember(initialExam?.id) { mutableStateOf(initialExam?.examType ?: "MONTHLY") }
+    var chapters by remember(initialExam?.id) { mutableStateOf(initialExam?.requiredChapters.orEmpty()) }
+    var teacherNotes by remember(initialExam?.id) { mutableStateOf(initialExam?.notes.orEmpty()) }
+    var examDate by remember(initialExam?.id, initialExamDate) { mutableStateOf(initialExam?.examDate ?: initialExamDate ?: TanweerViewModel.getTodayDateString()) }
     var showDatePicker by remember { mutableStateOf(false) }
 
     val datePickerState = rememberDatePickerState(
@@ -1454,7 +1523,7 @@ fun AddExamSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "جدولة وتثبيت اختبار رسمي 🧪",
+                    text = stringResource(if (initialExam == null) R.string.exam_add_title else R.string.exam_edit_title),
                     fontSize = tanweerTextSize(18f),
                     fontWeight = FontWeight.Black,
                     color = RubyRed
@@ -1513,7 +1582,7 @@ fun AddExamSheet(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    gradeSubjects.forEach { subj ->
+                    availableSubjects.forEach { subj ->
                         val isSelected = selectedSubj?.id == subj.id
                         Box(
                             modifier = Modifier
@@ -1604,13 +1673,17 @@ fun AddExamSheet(
             )
 
             GlassButton(
-                text = "تثبيت الاختبار في الجدول",
+                text = stringResource(if (initialExam == null) R.string.exam_add_submit else R.string.exam_edit_save),
                 color = RubyRed,
                 textColor = Color.White,
-                enabled = title.isNotBlank() && selectedSubj != null,
+                enabled = title.isNotBlank() && selectedSubj != null && !isSaving && (initialExam == null || onUpdate != null),
                 onClick = {
                     selectedSubj?.let { s ->
-                        onAdd(s.id, title.trim(), chapters.trim().ifEmpty { null }, teacherNotes.trim().ifEmpty { null }, examDate.trim(), examType)
+                        if (initialExam == null) {
+                            onAdd(s.id, title.trim(), chapters.trim().ifEmpty { null }, teacherNotes.trim().ifEmpty { null }, examDate.trim(), examType)
+                        } else {
+                            onUpdate?.invoke(initialExam.id, s.id, title.trim(), chapters.trim(), teacherNotes.trim(), examDate.trim(), examType)
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(48.dp)
@@ -1632,7 +1705,9 @@ fun ExamDetailModal(
     onDismiss: () -> Unit,
     onToggleDone: () -> Unit,
     onScheduleReminder: () -> Unit,
-    onOpenLibraryBook: () -> Unit
+    onOpenLibraryBook: () -> Unit,
+    canEdit: Boolean,
+    onEdit: () -> Unit
 ) {
     val isDatePassed = isExamDatePassed(exam.examDate, todayDateStr)
     val isReviewed = ExamReviewPolicy.isReviewed(exam)
@@ -1739,6 +1814,14 @@ fun ExamDetailModal(
                         Text(text = exam.notes, fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
+            }
+
+            if (canEdit) {
+                GlassOutlinedButton(
+                    text = stringResource(R.string.exam_edit_action),
+                    onClick = onEdit,
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                )
             }
 
             // Actions Row: Set Reminder (Point 21) & Open Book

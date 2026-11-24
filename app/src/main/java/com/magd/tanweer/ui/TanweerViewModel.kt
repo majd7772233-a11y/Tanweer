@@ -2811,6 +2811,30 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun updateExam(
+        examId: String,
+        subjectId: String,
+        title: String,
+        requiredChapters: String,
+        notes: String,
+        examDate: String,
+        examType: String,
+        onResult: ((Result<Unit>) -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            onResult?.invoke(
+                repository.updateExam(
+                    examId = examId,
+                    examDate = examDate,
+                    subjectId = subjectId,
+                    title = title,
+                    requiredChapters = requiredChapters,
+                    notes = notes,
+                    examType = examType
+                )
+            )
+        }
+    }
     fun retryFailedExam(examId: String, onResult: ((Result<Unit>) -> Unit)? = null) {
         viewModelScope.launch {
             onResult?.invoke(repository.retryFailedExam(examId))

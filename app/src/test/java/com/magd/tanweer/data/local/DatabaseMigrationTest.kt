@@ -89,7 +89,8 @@ class DatabaseMigrationTest {
                 TanweerDatabase.MIGRATION_14_15,
                 TanweerDatabase.MIGRATION_15_16,
                 TanweerDatabase.MIGRATION_16_17,
-                TanweerDatabase.MIGRATION_17_18
+                TanweerDatabase.MIGRATION_17_18,
+                TanweerDatabase.MIGRATION_18_19
             )
             .build()
 
@@ -116,12 +117,13 @@ class DatabaseMigrationTest {
         legacyHomeworkCursor.close()
 
         val legacyExamCursor = roomDb.openHelper.readableDatabase.query(
-            "SELECT title, isOfficial, examType FROM cached_exams WHERE id = 'legacy_exam_1'"
+            "SELECT title, isOfficial, examType, createdBy FROM cached_exams WHERE id = 'legacy_exam_1'"
         )
         assertTrue(legacyExamCursor.moveToFirst())
         assertEquals("اختبار محفوظ قبل التحديث", legacyExamCursor.getString(0))
         assertEquals(0, legacyExamCursor.getInt(1))
         assertEquals("QUIZ", legacyExamCursor.getString(2))
+        assertEquals("", legacyExamCursor.getString(3))
         legacyExamCursor.close()
 
         // 3. Verify that legacy outbox data was non-destructively migrated to OutboxEntity schema

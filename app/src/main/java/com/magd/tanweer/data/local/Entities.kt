@@ -127,7 +127,9 @@ data class ExamEntity(
     val isCompleted: Boolean = false,
     val examType: String = "MONTHLY",
     val syncStatus: String = "SYNCED",
-    val isOfficial: Boolean = false
+    val isOfficial: Boolean = false,
+    @ColumnInfo(defaultValue = "''")
+    val createdBy: String = ""
 )
 
 @Entity(tableName = "cached_events")

@@ -49,7 +49,8 @@ private fun mapExamEntity(entity: ExamEntity): ExamItem = ExamItem(
     isCompleted = entity.isCompleted,
     examType = if (entity.examType == "QUIZ") "MONTHLY" else entity.examType,
     syncStatus = entity.syncStatus,
-    isOfficial = entity.isOfficial
+    isOfficial = entity.isOfficial,
+    createdBy = entity.createdBy
 )
 
 private fun buildExamCreatePayload(exam: ExamEntity): String =
@@ -960,7 +961,8 @@ class TanweerRepository(
                                 colorHex = it.colorHex,
                                 isCompleted = isDone,
                                 examType = finalExamType,
-                                isOfficial = it.isOfficial
+                                isOfficial = it.isOfficial,
+                                createdBy = it.createdBy
                             )
                         }
                         val reconciledDayExams = ServerSnapshotReconciliation.preservePending(
@@ -1110,7 +1112,8 @@ class TanweerRepository(
                         isCompleted = isDone,
                         examType = finalExamType,
                         syncStatus = "SYNCED",
-                        isOfficial = it.isOfficial
+                        isOfficial = it.isOfficial,
+                        createdBy = it.createdBy
                     )
                 }
                 db.withTransaction {
@@ -1251,7 +1254,8 @@ class TanweerRepository(
                                 colorHex = it.colorHex,
                                 isCompleted = isDone,
                                 examType = finalExamType,
-                                isOfficial = it.isOfficial
+                                isOfficial = it.isOfficial,
+                                createdBy = it.createdBy
                             )
                         }
                         val reconciledMonthExams = ServerSnapshotReconciliation.preservePending(
@@ -3793,7 +3797,8 @@ class TanweerRepository(
             colorHex = subject?.colorHex ?: "#FF3366",
             examType = examType,
             syncStatus = "SYNCING",
-            isOfficial = isOfficial
+            isOfficial = isOfficial,
+            createdBy = user?.id.orEmpty()
         )
         db.examDao().insertExam(entity)
 
@@ -3808,7 +3813,7 @@ class TanweerRepository(
                     requiredChapters = requiredChapters,
                     notes = notes,
                     examType = examType,
-                    isOfficial = isOfficial
+                    isOfficial = isOfficial,
                 )
             )
             if (isConfirmedServerWrite(res.isSuccessful, res.body()?.success)) {
@@ -4606,6 +4611,84 @@ class TanweerRepository(
         mutationQueue.triggerDrain()
     }
 
+    suspend fun updateExam(
+        examId: String,
+        examDate: String,
+        subjectId: String,
+        title: String,
+        requiredChapters: String,
+        notes: String,
+        examType: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        examMutationMutex.withLock {
+            val existing = db.examDao().getExamById(examId)
+                ?: return@withLock Result.failure(Exception("Exam not found"))
+            if (!existing.syncStatus.equals("SYNCED", ignoreCase = true)) {
+                return@withLock Result.failure(Exception("Only server-confirmed exams can be edited"))
+            }
+            if (subjectId.isBlank() || title.isBlank() || examDate.isBlank()) {
+                return@withLock Result.failure(Exception("Exam subject, title, and date are required"))
+            }
+
+            val currentUser = db.userDao().getUserSync()
+            val selectedSubject = SchoolHierarchy.getSubjectsForGrade(currentUser?.gradeId ?: 10)
+                .find { it.id == subjectId }
+                ?: DefaultSubjects.find { it.id == subjectId }
+            val keepExistingSubjectMetadata = subjectId == existing.subjectId
+            val updatedSubjectName = selectedSubject?.name
+                ?: if (keepExistingSubjectMetadata) existing.subjectName else subjectId
+            val updatedSubjectIcon = selectedSubject?.icon
+                ?: if (keepExistingSubjectMetadata) existing.subjectIcon else "??"
+            val updatedSubjectColor = selectedSubject?.colorHex
+                ?: if (keepExistingSubjectMetadata) existing.colorHex else "#FF3366"
+
+            // UI ownership/permission checks are hints only; the Worker is the final authority.
+
+            try {
+                val response = api.updateExam(
+                    examId,
+                    UpdateExamRequest(
+                        examDate = examDate,
+                        subjectId = subjectId,
+                        title = title.trim(),
+                        requiredChapters = requiredChapters.trim(),
+                        notes = notes.trim(),
+                        examType = examType
+                    )
+                )
+                if (isConfirmedServerWrite(response.isSuccessful, response.body()?.success)) {
+                    db.examDao().insertExam(
+                        existing.copy(
+                            examDate = examDate,
+                            subjectId = subjectId,
+                            title = title.trim(),
+                            requiredChapters = requiredChapters.trim().ifEmpty { null },
+                            notes = notes.trim().ifEmpty { null },
+                            examType = examType,
+                            subjectName = updatedSubjectName,
+                            subjectIcon = updatedSubjectIcon,
+                            colorHex = updatedSubjectColor,
+                            syncStatus = "SYNCED"
+                        )
+                    )
+                    Result.success(Unit)
+                } else {
+                    val message = response.body()?.error?.message
+                        ?: response.body()?.message
+                        ?: when (response.code()) {
+                            401, 403 -> "You are not allowed to edit this exam"
+                            409 -> "Another monthly exam already exists for this subject"
+                            else -> "Unable to update exam (HTTP ${response.code()})"
+                        }
+                    Result.failure(Exception(message))
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Result.failure(error)
+            }
+        }
+    }
     suspend fun deleteExamById(examId: String): Result<ExamDeleteResult> = withContext(Dispatchers.IO) {
         examMutationMutex.lock()
         try {

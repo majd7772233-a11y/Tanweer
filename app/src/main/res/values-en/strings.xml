@@ -184,4 +184,11 @@
     <string name="event_delete_failed">Could not delete the event</string>
         <string name="event_school_admin_name">School administration</string>
     <string name="event_official_mark">Official ✓</string>
-    </resources>
+        <string name="exam_add_title">Add exam</string>
+    <string name="exam_edit_title">Edit exam</string>
+    <string name="exam_add_submit">Add exam</string>
+    <string name="exam_edit_save">Save changes</string>
+    <string name="exam_edit_action">Edit</string>
+    <string name="exam_edit_success">Exam updated successfully</string>
+    <string name="exam_edit_failed">Unable to update exam</string>
+</resources>

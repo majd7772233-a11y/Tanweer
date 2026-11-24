@@ -219,6 +219,9 @@ export async function handleUpdateExam(
     officialVal = body.isOfficial ? 1 : 0;
   }
 
+  const requiredChaptersProvided = Object.prototype.hasOwnProperty.call(body, 'requiredChapters');
+  const notesProvided = Object.prototype.hasOwnProperty.call(body, 'notes');
+
   const rawType = body.examType ? body.examType.trim().toUpperCase() : null;
   const examTypeVal = rawType && SUPPORTED_EXAM_TYPES.includes(rawType as typeof SUPPORTED_EXAM_TYPES[number]) ? rawType : null;
   if (rawType && examTypeVal === null) {
@@ -252,8 +255,8 @@ export async function handleUpdateExam(
        SET exam_date = COALESCE(?, exam_date),
            subject_id = COALESCE(?, subject_id),
            title = COALESCE(?, title),
-           required_chapters = COALESCE(?, required_chapters),
-           notes = COALESCE(?, notes),
+           required_chapters = CASE WHEN ? = 1 THEN NULLIF(?, '') ELSE required_chapters END,
+           notes = CASE WHEN ? = 1 THEN NULLIF(?, '') ELSE notes END,
            is_official = COALESCE(?, is_official),
            exam_type = COALESCE(?, exam_type)
        WHERE id = ?`
@@ -261,8 +264,10 @@ export async function handleUpdateExam(
       body.examDate || null,
       body.subjectId?.trim() || null,
       body.title?.trim() || null,
-      body.requiredChapters?.trim() || null,
-      body.notes?.trim() || null,
+      requiredChaptersProvided ? 1 : 0,
+      requiredChaptersProvided ? (body.requiredChapters?.trim() ?? '') : null,
+      notesProvided ? 1 : 0,
+      notesProvided ? (body.notes?.trim() ?? '') : null,
       officialVal,
       examTypeVal,
       examId

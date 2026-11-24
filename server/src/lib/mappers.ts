@@ -82,6 +82,7 @@ export function mapExam(r: any) {
     // QUIZ was retired; keep legacy rows visible under the supported MONTHLY category.
     examType: rawExamType === 'QUIZ' ? 'MONTHLY' : rawExamType,
     isOfficial: Boolean(r.is_official ?? r.isOfficial ?? false),
+    createdBy: r.created_by ?? r.createdBy ?? '',
     isCompleted: Boolean(r.is_completed ?? r.isCompleted ?? false),
     createdAt: Number(r.created_at ?? r.createdAt ?? Date.now()),
   };

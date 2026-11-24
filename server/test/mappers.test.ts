@@ -74,6 +74,7 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
       color_hex: '#7C4DFF',
       is_completed: 1,
       is_official: 1,
+      created_by: 'exam_owner_1',
       created_at: 1700000000000,
     };
     const mapped = mapHomework(raw);
@@ -95,11 +96,13 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
       title: 'اختبار قديم',
       exam_type: 'QUIZ',
       is_official: 1,
+      created_by: 'exam_owner_1',
       created_at: 1700000000000,
     });
 
     expect(legacyQuiz.examType).toBe('MONTHLY');
     expect(legacyQuiz.isOfficial).toBe(true);
+    expect(legacyQuiz.createdBy).toBe('exam_owner_1');
     expect((legacyQuiz as any).exam_type).toBeUndefined();
 
     expect(mapExam({ exam_type: 'ORAL' }).examType).toBe('ORAL');

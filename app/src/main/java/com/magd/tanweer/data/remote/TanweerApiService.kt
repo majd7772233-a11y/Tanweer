@@ -198,6 +198,7 @@ data class UpdateHomeworkRequest(
 @JsonClass(generateAdapter = true)
 data class UpdateExamRequest(
     val examDate: String? = null,
+    val subjectId: String? = null,
     val title: String? = null,
     val requiredChapters: String? = null,
     val notes: String? = null,
