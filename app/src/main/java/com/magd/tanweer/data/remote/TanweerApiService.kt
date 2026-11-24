@@ -306,6 +306,18 @@ data class PostGroupMessageResponse(
 }
 
 @JsonClass(generateAdapter = true)
+data class DeleteGroupMessageResponse(
+    val success: Boolean = false,
+    val groupId: String? = null,
+    val messageId: String? = null,
+    val message: String? = null,
+    val error: ApiError? = null
+) {
+    fun confirmsDeletion(expectedMessageId: String, expectedGroupId: String): Boolean =
+        success && messageId == expectedMessageId && groupId == expectedGroupId
+}
+
+@JsonClass(generateAdapter = true)
 data class ContentsResponse(
     val success: Boolean = true,
     val contents: List<ContentItem> = emptyList(),
@@ -448,6 +460,12 @@ interface TanweerApiService {
         @Path("id") groupId: String,
         @Body req: PostMessageRequest
     ): Response<PostGroupMessageResponse>
+
+    @DELETE("api/v1/groups/{groupId}/messages/{messageId}")
+    suspend fun deleteGroupMessage(
+        @Path("groupId") groupId: String,
+        @Path("messageId") messageId: String
+    ): Response<DeleteGroupMessageResponse>
 
     @GET("api/v1/schedule/{groupId}")
     suspend fun getSchedule(@Path("groupId") groupId: String): Response<com.magd.tanweer.data.model.ScheduleResponse>
