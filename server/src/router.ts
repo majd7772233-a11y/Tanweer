@@ -568,7 +568,7 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
 
   // Private account notifications and self-service recovery-code rotation.
-  const notificationActionMatch = path.match(/^\\/api\\/v1\\/notifications\\/([^/]+)\\/(read|archive|restore)$/);
+  const notificationActionMatch = path.match(/^\/api\/v1\/notifications\/([^/]+)\/(read|archive|restore)$/);
   if (notificationActionMatch && method === 'POST') {
     const notificationId = decodeURIComponent(notificationActionMatch[1]);
     const action = notificationActionMatch[2];

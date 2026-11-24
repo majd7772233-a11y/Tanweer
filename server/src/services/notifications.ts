@@ -46,7 +46,7 @@ export async function handleGenerateMyRecoveryCode(user: UserContext, env: Env):
   if (typeof env.DB.batch !== 'function') return errorResponse('RECOVERY_ROTATION_UNAVAILABLE', 'قاعدة البيانات لا تدعم تحديث رمز الاسترداد بصورة ذرية حالياً', 503);
 
   const recoveryCode = generateRecoveryCode();
-  const tokenHash = await hashString(recoveryCode.replace(/[\\s\\-]/g, '').toUpperCase(), pepper);
+  const tokenHash = await hashString(recoveryCode.replace(/[\s-]/g, '').toUpperCase(), pepper);
   const encryptedPayload = await encryptSensitivePayload(JSON.stringify({ recoveryCode }), pepper);
   const tokenId = generateId('rec_tok');
   try {
