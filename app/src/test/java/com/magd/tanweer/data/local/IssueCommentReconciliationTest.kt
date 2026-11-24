@@ -162,4 +162,31 @@ class IssueCommentReconciliationTest {
         val visible = database.issueDao().getComments("issue_1").first().single()
         assertTrue(visible.isTeacherAnswer)
     }
+
+    @Test
+    fun teacherAnswerAndBestAnswerMarkersRemainIndependent() = runBlocking {
+        database.issueDao().insertIssue(issue())
+        database.issueDao().insertComments(
+            listOf(
+                comment("teacher_answer", isTeacherAnswer = true),
+                comment("student_answer", isTeacherAnswer = false)
+            )
+        )
+
+        // A teacher answer may also be selected as the accepted/best answer.
+        database.issueDao().setBestAnswer("issue_1", "teacher_answer")
+        val teacherApproved = database.issueDao().getComments("issue_1").first().associateBy { it.id }
+        assertTrue(teacherApproved.getValue("teacher_answer").isTeacherAnswer)
+        assertTrue(teacherApproved.getValue("teacher_answer").isBestAnswer)
+        assertFalse(teacherApproved.getValue("student_answer").isTeacherAnswer)
+        assertFalse(teacherApproved.getValue("student_answer").isBestAnswer)
+
+        // Choosing a different best answer must not erase the teacher-origin marker.
+        database.issueDao().setBestAnswer("issue_1", "student_answer")
+        val studentApproved = database.issueDao().getComments("issue_1").first().associateBy { it.id }
+        assertTrue(studentApproved.getValue("teacher_answer").isTeacherAnswer)
+        assertFalse(studentApproved.getValue("teacher_answer").isBestAnswer)
+        assertFalse(studentApproved.getValue("student_answer").isTeacherAnswer)
+        assertTrue(studentApproved.getValue("student_answer").isBestAnswer)
+    }
 }
