@@ -47,7 +47,7 @@ export function mapHomework(r: any) {
     questionNumbers: r.question_numbers ?? r.questionNumbers ?? null,
     taskType: r.task_type ?? r.taskType ?? 'HOMEWORK',
     createdBy: r.created_by ?? r.createdBy ?? '',
-    subjectName: r.subject_name ?? r.subjectName ?? ''
+    subjectName: r.subject_name ?? r.subjectName ?? '',
     subjectIcon: r.subject_icon ?? r.subjectIcon ?? '📝',
     colorHex: r.color_hex ?? r.colorHex ?? '#00E5FF',
     mediaUrls: (() => {
