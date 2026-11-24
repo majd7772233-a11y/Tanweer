@@ -42,8 +42,15 @@ class GroupChatPolicyDb {
             normalized.includes("FROM chat_messages WHERE id = ?")) {
           return (db.persistedRows.find(row => row.id === params[0]) || null) as T | null;
         }
+        if (normalized.includes("SELECT role FROM group_members")) {
+          if (!db.memberActive) return null;
+          return { role: db.memberRole } as T;
+        }
         if (normalized.includes("SELECT sender_id FROM chat_messages")) {
-          return { sender_id: 'student-1' } as T;
+          const row = db.persistedRows.find(
+            item => item.id === params[0] && item.group_id === params[1]
+          );
+          return row ? ({ sender_id: row.sender_id } as T) : null;
         }
         return null;
       },
@@ -67,8 +74,12 @@ class GroupChatPolicyDb {
           return { success: true, meta: { changes: 1 } };
         }
         if (normalized.includes("DELETE FROM chat_messages")) {
+          const before = db.persistedRows.length;
+          db.persistedRows = db.persistedRows.filter(
+            row => !(row.id === params[0] && row.group_id === params[1])
+          );
           db.messages = db.messages.filter(row => row.params[0] !== params[0]);
-          return { success: true, meta: { changes: 1 } };
+          return { success: true, meta: { changes: before - db.persistedRows.length } };
         }
         return { success: true, meta: { changes: 0 } };
       },
@@ -136,17 +147,69 @@ describe('Group chat policy is enforced by server routes', () => {
     expect(db.messages).toHaveLength(0);
   });
 
-  it('blocks student deletion of a staff-only group message at the REST endpoint', async () => {
+  it('allows a member to delete their own persisted message in a staff-only group', async () => {
     const db = new GroupChatPolicyDb('STAFF_ONLY', 'STUDENT', 'STUDENT');
+    db.persistedRows.push({
+      id: 'message-1', group_id: 'staff_official', sender_id: 'student-1', text: 'رسالة ذاتية', timestamp: 1,
+    });
     const response = await handleDeleteGroupMessage(
       'staff_official',
       'message-1',
       makeUser('STUDENT'),
       makeEnv(db),
     );
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.groupId).toBe('staff_official');
+    expect(body.messageId).toBe('message-1');
+    expect(db.persistedRows).toHaveLength(0);
+  });
+
+  it('blocks a student from deleting another member message', async () => {
+    const db = new GroupChatPolicyDb('MEMBERS', 'STUDENT', 'STUDENT');
+    db.persistedRows.push({
+      id: 'message-1', group_id: 'all', sender_id: 'teacher-1', text: 'رسالة عضو آخر', timestamp: 1,
+    });
+    const response = await handleDeleteGroupMessage(
+      'all',
+      'message-1',
+      makeUser('STUDENT'),
+      makeEnv(db),
+    );
     expect(response.status).toBe(403);
-    expect((await response.json() as any).error.code).toBe('READ_ONLY_GROUP');
-    expect(db.messages).toHaveLength(0);
+    expect((await response.json() as any).error.code).toBe('FORBIDDEN');
+    expect(db.persistedRows).toHaveLength(1);
+  });
+
+  it('allows an active group moderator to delete another member message', async () => {
+    const db = new GroupChatPolicyDb('STAFF_ONLY', 'MODERATOR', 'STUDENT');
+    db.persistedRows.push({
+      id: 'message-1', group_id: 'staff_official', sender_id: 'teacher-1', text: 'رسالة عضو آخر', timestamp: 1,
+    });
+    const response = await handleDeleteGroupMessage(
+      'staff_official',
+      'message-1',
+      makeUser('STUDENT', 'moderator-1'),
+      makeEnv(db),
+    );
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.messageId).toBe('message-1');
+    expect(db.persistedRows).toHaveLength(0);
+  });
+
+  it('does not acknowledge deletion when the target message is missing', async () => {
+    const db = new GroupChatPolicyDb('MEMBERS', 'STUDENT', 'STUDENT');
+    const response = await handleDeleteGroupMessage(
+      'all',
+      'missing-message',
+      makeUser('STUDENT'),
+      makeEnv(db),
+    );
+    expect(response.status).toBe(404);
+    expect((await response.json() as any).error.code).toBe('MESSAGE_NOT_FOUND');
+    expect(db.persistedRows).toHaveLength(0);
   });
 
   it('rejects overlong messages before persistence', async () => {
