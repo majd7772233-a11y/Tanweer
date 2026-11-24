@@ -893,18 +893,25 @@
 
 ## P2-27 — الرجوع من PDF والمجموعات يفقد سياق الشاشة المصدر
 
-**مراجع التقرير:** ملاحظة TNW-SEARCH-COMPREHENSIVE-ROUND-20261120، نتيجة بنك المعرفة في TNW-ACADEMIC-ARCHIVE-KNOWLEDGE-BASE-COMPREHENSIVE-ROUND-20261120، TNW-MOD-NAV-001. **الأولوية:** P2/P3.
+**الحالة بعد مراجعة HEAD:** أُصلح مسار لوحة المشرف، واستُكمل حفظ حالة تبويب بنك المعرفة. **P2-27: IMPLEMENTATION + EXACT-SHA CI PASS; DEVICE ACCEPTANCE OPEN.**
 
-**المشاهدات:**
-- فتح كتاب من البحث ثم الرجوع من PDF يعيد إلى المكتبة/علامة تبويب سابقة بدلاً من نتائج البحث. **الحالة:** ملاحظة تنقل غير محسومة؛ التقرير نفسه ينص على أنه لم يثبت أن حفظ قائمة نتائج البحث بعد الرجوع مطلب تصميم. لا تعاملها كعيب مؤكد قبل تأكيد السلوك المطلوب.
-- فتح كتاب من بنك المعرفة ثم الرجوع يعيد إلى المكتبة العامة، لا إلى المادة.
-- بطاقة الأعضاء في لوحة المشرف تنقل إلى GROUPS، لكن الرجوع يعيد إلى تبويب اليوم بدلاً من MODERATOR_DASHBOARD.
+**التحقق والإصلاح:**
+- **PDF ← بنك المعرفة:** كانت آلية حفظ وجهة PDF موجودة بالفعل على HEAD الأساسي عبر `PdfReaderReturnDestination` و`PdfReaderNavigationPolicy`: تحفظ الشاشة، وعلامة التبويب الرئيسية، و`selectedKnowledgeBaseSubjectId` وتعيدها عند الإغلاق. اختبارات `PdfReaderNavigationPolicyTest` الموجودة تغطي استعادة المادة، والمكتبة العامة، وبعض الشاشات الأخرى. الفجوة المتبقية كانت أن تبويب المادة الداخلي `activeTab` في `ClassKnowledgeBaseScreen` يستخدم `remember`؛ أصبح `rememberSaveable` كي يعود المستخدم إلى تبويب المادة نفسه بعد إزالة شاشة PDF وإعادة تركيبها. صفحة القراءة المطلوبة ما زالت تمر عبر `activeReadingInitialPage` إلى القارئ.
+- **لوحة المشرف → GROUPS → Back:** كان الاختصار يستدعي `setSubScreen(GROUPS)`، ثم يعامل `navigateBack()` المجموعات كوجهة جذرية `NONE`. أضيف `openGroupsFromModeratorDashboard()` لحفظ مصدر الدخول `MODERATOR_DASHBOARD` والتبويب الرئيسي فقط عند استعمال اختصار لوحة المشرف. `GroupsNavigationPolicy` يعيد هذا المصدر بعد الرجوع، ويرفض أي مصدر غير صالح منعاً لحلقة تنقل. الدخول المباشر إلى GROUPS من المسارات الأخرى يحافظ على وجهة الرجوع القديمة إلى التبويب الجذري. تُمحى علامة المصدر عند اختيار تبويب/وجهة أخرى أو إعادة تعيين حالة المستخدم.
+- **حالة لوحة المشرف:** أصبح `selectedSection` و`decisionFilter` في `ModeratorDashboardScreen` يستخدمان `rememberSaveable`، بالاستفادة من `SaveableStateHolder` وموفري الحالة الموجودين في `TanweerApp`. يعود الاختصار إلى قسم الأعضاء نفسه بدلاً من بدء لوحة المشرف من أول قسم.
+- **البحث:** وجود اختبار سياسة يعيد مسار PDF إلى `SEARCH` لا يثبت أن الاحتفاظ بنتائج/فلاتر البحث هو مطلب UX مؤكد. لم أغيّر سلوك البحث ولم أتعامل مع الملاحظة القديمة كعيب مؤكد.
 
-**السبب المؤكد للمسارين الآخرين:** closePdfReader() وsetSubScreen()/navigateBack() تستخدم وجهات ثابتة ولا تحفظ origin route/arguments في بعض المسارات. أعد إثبات كل مصدر على HEAD قبل التعديل.
+**الاختبارات والملفات:**
+- أضيف `GroupsNavigationPolicyTest` بثلاث حالات: استعادة لوحة المشرف والتبويب، الرجوع الافتراضي للمجموعات المفتوحة مباشرة، ورفض المصدر غير الصالح. واختبارات PDF السابقة باقية دون تغيير.
+- الملفات: `ui/GroupsNavigationPolicy.kt`, `ui/TanweerViewModel.kt`, `ui/screens/ModeratorDashboardScreen.kt`, `ui/screens/ClassKnowledgeBaseScreen.kt`، واختبارات `ui/GroupsNavigationPolicyTest.kt` و`ui/PdfReaderNavigationPolicyTest.kt`.
 
-**الإصلاح المطلوب:** Back stack/source token يحفظ الشاشة والمادة والصفحة والفلتر/الاستعلام والتبويب/لوحة الدور؛ اختبر الدخول من كل مصدر والعودة خطوة واحدة.
+**التحقق على SHA المصدر `01aeb35e5daf8752392e074fb37851815b7ddfb5`:**
+- Android workflow run `45440017812`: `testStagingDebugUnitTest` PASS، `assembleStagingDebug` PASS، ورفع Debug APK PASS. خطوات Release signing/build متخطاة لأنها Pull Request.
+- Server workflow run `45440018343`: TypeScript PASS، `npm audit` بلا ثغرات، 46 ملف Vitest / 316 اختبار PASS، وWrangler Production وStaging `--dry-run` PASS.
+- Debug artifact ID `14944025108`، الحجم `31,279,203` بايت، SHA-256 `929673ee99dc0112ab514ef27f16c6235b17d590d162079595945790000514a4`. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45440017812/artifacts/14944025108).
+- لم أشغّل محاكيًا أو هاتفًا أو اختبارات محلية في هذه المتابعة. قبول UX على جهاز حقيقي ما زال ضمن Phase 5.
 
-**الأدلة:** %TEMP%\tanweer-search-round-20261120\evidence، %TEMP%\tanweer-archive-knowledge-round-20261120\evidence، %TEMP%\tanweer-moderator-round-20261120\evidence.
+**الحوكمة:** لا نشر Worker، ولا D1 write/migration apply، ولا تغيير Secrets، ولا تحديث `main` أو دمج PR. PR #6 يبقى Open + Draft + Unmerged.
 
 ## P2-28 — زر «كتاب المادة» في تفاصيل الاختبار يفتح المكتبة العامة
 

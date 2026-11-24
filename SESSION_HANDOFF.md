@@ -798,4 +798,19 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Server CI:** run `45436415405` PASS: TypeScript; 46 files / 316 tests; npm audit 0 vulnerabilities; production and staging Wrangler dry-runs. No deployment.
 - **No local/device claims:** no local Gradle/npm commands or device acceptance performed. Retain Phase 5 checks.
 - **PR/governance:** PR #6 Open + Draft + Unmerged; no main update, deployment, D1 write or secret mutation.
-- **Next step:** P2-27 — inspect current navigation source/destination state for PDF return from knowledge base and Moderator Dashboard group-member drill-in. Preserve all route arguments and return state; do not treat search result restoration as a confirmed defect without validating desired behavior.
+- **Next step:** P2-28 — verify the subject-book action from Exam details and distinguish a true subject-book deep link from the explicitly labeled general-library destination. Keep Phase 5 acceptance open.
+
+
+## 2026-11-24 — Phase 2 P2-27 navigation-context checkpoint
+
+- **Branch/source:** `work/release-readiness`; implementation commit `01aeb35e5daf8752392e074fb37851815b7ddfb5`. Documentation follow-up is committed separately.
+- **PR:** #6 remains Open + Draft + Unmerged, base `main`; no changes to `main`.
+- **Confirmed moderator navigation repair:** the Moderator Dashboard member-management shortcut now records its source route and current root tab before opening `GROUPS`. Back resolves to `MODERATOR_DASHBOARD`; direct Groups entry and non-moderator navigation retain the prior root-tab fallback. A typed policy rejects invalid return sources. Source tokens are cleared on ordinary navigation, tab selection and user-state reset.
+- **Saved nested UI state:** Moderator dashboard section/filter and Knowledge Base subject tab now use `rememberSaveable` inside the existing `SaveableStateHolder` providers. The PDF origin policy already existed and preserved the Knowledge Base subject; the subject tab is now preserved too. The reader continues receiving the requested initial page.
+- **Tests:** new `GroupsNavigationPolicyTest` covers valid Moderator Dashboard return, default Groups fallback and invalid-origin rejection. Existing `PdfReaderNavigationPolicyTest` covers Knowledge Base subject, general library, Search route policy, and root/sub-screen returns. Search result/filter restoration remains an unconfirmed UX requirement and was not changed.
+- **Exact-SHA Android CI:** run `45440017812` PASS on source SHA `01aeb35e5daf8752392e074fb37851815b7ddfb5`: `testStagingDebugUnitTest`, `assembleStagingDebug`, Debug artifact upload. Release signing/build steps were skipped as expected for a PR.
+- **Android artifact:** ID `14944025108`; archive size `31,279,203` bytes; SHA-256 `929673ee99dc0112ab514ef27f16c6235b17d590d162079595945790000514a4`. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45440017812/artifacts/14944025108).
+- **Exact-SHA Server CI:** run `45440018343` PASS: TypeScript, npm audit (0 vulnerabilities), 46 Vitest files / 316 tests, Wrangler production/staging dry-runs. No Server code changed; no deploy or D1 write.
+- **No local/device claims:** no local Gradle/npm execution, emulator or phone acceptance was performed in this continuation. Phase 5 device acceptance remains open.
+- **Governance:** no Worker deployment, migration apply, D1 write, secret mutation, Release signing, `main` update or PR merge.
+- **Next roadmap item:** P2-28 — verify the subject-book action from Exam details, including whether a subject/book association is available or the action must explicitly open the general Library.

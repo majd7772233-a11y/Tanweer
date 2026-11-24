@@ -26,6 +26,7 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 ### Source map
 - `app/src/main/java/com/magd/tanweer/ui/TanweerApp.kt`: root navigation, tabs and sub-screens.
 - `app/src/main/java/com/magd/tanweer/ui/TanweerViewModel.kt`: navigation state, startup reconciliation, section-entry refreshes and UI actions.
+- `app/src/main/java/com/magd/tanweer/ui/GroupsNavigationPolicy.kt`: validated return destination for the Moderator Dashboard's group-management shortcut.
 - `app/src/main/java/com/magd/tanweer/data/repository/TanweerRepository.kt`: network/data coordination, remote-to-local reconciliation, mutations and media operations.
 - `app/src/main/java/com/magd/tanweer/data/remote/TanweerApiService.kt` and `NetworkModule.kt`: Retrofit API and authenticated network setup.
 - `app/src/main/java/com/magd/tanweer/data/local/TanweerDatabase.kt`: Room database. Current Room schema version is 16.
