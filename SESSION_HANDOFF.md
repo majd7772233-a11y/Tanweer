@@ -813,4 +813,20 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Exact-SHA Server CI:** run `45440018343` PASS: TypeScript, npm audit (0 vulnerabilities), 46 Vitest files / 316 tests, Wrangler production/staging dry-runs. No Server code changed; no deploy or D1 write.
 - **No local/device claims:** no local Gradle/npm execution, emulator or phone acceptance was performed in this continuation. Phase 5 device acceptance remains open.
 - **Governance:** no Worker deployment, migration apply, D1 write, secret mutation, Release signing, `main` update or PR merge.
-- **Next roadmap item:** P2-28 — verify the subject-book action from Exam details, including whether a subject/book association is available or the action must explicitly open the general Library.
+- **Next roadmap item:** P2-29 — decide and implement a general in-app notification inbox only after confirming its product scope against the existing `/api/v1/notifications` API. Keep Phase 5 acceptance open.
+
+
+## 2026-11-24 — Phase 2 P2-28 exam-to-book navigation checkpoint
+
+- **Branch/source:** `work/release-readiness`; source commits `6cc1562c42d8b56b318adfb3a302a31aff5f1e51` and `6f5cb191237d60143555d0bb59af05fd98bdb105`. The latter preserves confirmed empty-grade rendering before filtered-empty rendering and is the final CI-validated source SHA.
+- **PR:** #6 remains Open + Draft + Unmerged, base `main`; no main changes.
+- **Source mapping:** `ExamItem.subjectId` is matched to `BookItem.subjectId` with exact canonical subject equality and the active user's grade. No schema/API/backend change.
+- **Navigation:** one matching book opens directly in PDF; multiple matching books open Library with the exact subject filter; an authoritative catalog with no matching book opens the general Library with an explicit label. A not-yet-authoritative empty Room emission remains a subject-scoped Library route until synchronization confirms the catalog. Clearing filters restores the whole grade catalogue.
+- **State handoff:** `LibraryNavigationRequest` transfers grade/subject once from the exam CTA to `LibraryScreen`, which clears old search/filter state, applies the requested filter and consumes the request. Direct PDF open retains the Exams tab as PDF Back destination.
+- **Tests:** five new `ExamBookNavigationPolicyTest` cases cover exact grade/subject match, known aliases, multiple volumes, confirmed absence and unconfirmed catalogue. Arabic/English strings and a filtered-empty Library state are included.
+- **Exact-SHA Android CI:** run `45444352338` PASS on `6f5cb191237d60143555d0bb59af05fd98bdb105`: `testStagingDebugUnitTest`, `assembleStagingDebug`, Debug artifact upload. PR Release signing/build steps are skipped as configured.
+- **Android artifact:** ID `14946150985`, archive size `31,287,532` bytes, SHA-256 `e801c076cb4b53f67b01a8a8a3fa906e04b54a38efb47f101b6962bdc35d2591`. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45444352338/artifacts/14946150985).
+- **Exact-SHA Server CI:** run `45444352310` PASS: TypeScript, npm audit (0 vulnerabilities), 46 Vitest files / 316 tests, Wrangler production/staging dry-runs. No server files changed; no deployment or D1 write.
+- **No local/device claims:** no local Gradle/npm execution or emulator/phone acceptance was performed in this continuation. Phase 5 manual acceptance remains open.
+- **Governance:** no Worker deployment, migration apply, D1 write, secret mutation, Release signing, `main` update or PR merge.
+- **Next roadmap item:** P2-29 — confirm product scope for a general Android notification inbox using the existing notifications API; do not conflate remote notifications with Android-local alarms.

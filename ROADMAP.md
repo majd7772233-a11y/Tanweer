@@ -913,16 +913,36 @@
 
 **الحوكمة:** لا نشر Worker، ولا D1 write/migration apply، ولا تغيير Secrets، ولا تحديث `main` أو دمج PR. PR #6 يبقى Open + Draft + Unmerged.
 
-## P2-28 — زر «كتاب المادة» في تفاصيل الاختبار يفتح المكتبة العامة
+## P2-28 — زر «كتاب المادة» في تفاصيل الاختبار لا يحدد الكتاب المرتبط
 
 **مراجع التقرير:** TNW-EXAM-BOOK-NAV-001 وملحق الأستاذ. **الأولوية:** P2/P3.
 
-**الدليل:** من اختبار القرآن، ضغط «كتاب المادة» ونقل إلى مكتبة الأول الثانوي العامة (26 كتاباً) دون تحديد القرآن أو فتحه. ExamsScreen.kt فقط يضبط MORE وLIBRARY ولا يمرر subject/book ID. رابط الصفحات في واجب بنك المعرفة فتح سجل الكتاب الصحيح؛ المشكلة تخص CTA من تفاصيل الاختبار تحديداً.
+**الحالة بعد مراجعة HEAD:** كان CTA يغلق تفاصيل الاختبار وينقل إلى `MORE → LIBRARY` بلا تمرير المادة أو الكتاب. أصلح المسار اعتماداً على العلاقة الموجودة فعلياً في `ExamItem.subjectId` و`BookItem.subjectId/gradeId`. **P2-28: IMPLEMENTATION + REGRESSION TESTS + EXACT-SHA CI PASS; DEVICE ACCEPTANCE OPEN.**
 
-**الإصلاح المطلوب:** deep-link إلى الكتاب المناسب إن وجد association، وإلا سمّ الإجراء «فتح المكتبة العامة».
+**السلوك الجديد:**
+- سياسة `ExamBookNavigationPolicy` تطلب تطابق الصف والمادة بعد التطبيع الصريح للمعرّفات المعروفة عبر `LibrarySubjectFilterPolicy`؛ لا تستخدم بحثاً جزئياً في الاسم ولا تفتح كتاب صف آخر.
+- كتاب واحد مطابق للصف والمادة: يغلق تفاصيل الاختبار ويفتح ذلك الكتاب مباشرة في PDF. وجهة إغلاق PDF هي تبويب الاختبارات الذي انطلق منه المستخدم.
+- أكثر من كتاب/جزء مطابق: ينتقل إلى المكتبة مع مرشح المادة والصف محددين، ويترك اختيار الجزء للمستخدم بدلاً من اختيار أول نتيجة عشوائية.
+- لا يظهر كتاب مطابق بعد نجاح مزامنة فهرس الصف: يفتح المكتبة العامة، ويعرض الإجراء اسماً صريحاً «فتح المكتبة العامة».
+- إذا لم يكتمل فهرس الصف بعد، لا يفترض التطبيق أن الكتاب غير موجود لمجرد أن Room أصدر قائمة فارغة أولية؛ يفتح المكتبة على المادة المطلوبة مع استمرار حالة المزامنة. وعند عدم وجود نتائج للمرشح داخل فهرس صف غير فارغ، تعرض المكتبة رسالة واضحة وزر «عرض جميع كتب الصف».
+- أسماء الإجراءات والرسائل الجديدة مضافة إلى الموارد العربية والإنجليزية.
 
-**الأدلة:** %TEMP%\tanweer-exams-round-20261119\exam-book-destination.xml و%TEMP%\tanweer-teacher-round-20261120\evidence.
+**التنفيذ والاختبارات:**
+- `ExamsScreen` يقرأ قائمة الكتب من Room، يحدد الوجهة والاسم المحلي للزر، ويمرر إجراء مناسباً إلى `ExamDetailModal`.
+- أضيف طلب تنقل لمرة واحدة `LibraryNavigationRequest` يحفظ الصف والمادة، ويستهلكه `LibraryScreen` لتطبيق المرشح ومسح الاستعلام السابق. تبقى المزامنة عبر تدفق الكتب الحالي ولا يُضاف API أو جدول.
+- أضيف `ExamBookNavigationPolicyTest` بخمس حالات: كتاب واحد مطابق، alias معروف للمادة، عدة أجزاء، فهرس مؤكد بلا كتاب، وفهرس لم يؤكد اكتماله بعد.
+- ترتيب حالات Empty State في المكتبة يحافظ على حالة «الصف بلا كتب» بعد تأكيدها، ويفصلها عن حالة عدم تطابق الفلتر.
 
+**الملفات:** `ui/screens/ExamsScreen.kt`, `ui/screens/LibraryScreen.kt`, `ui/TanweerViewModel.kt`, `ui/LibraryNavigationRequest.kt`, `util/ExamBookNavigationPolicy.kt`, `util/ExamBookNavigationPolicyTest.kt`, `res/values/strings.xml`, `res/values-en/strings.xml`.
+
+**التحقق على SHA المصدر `6f5cb191237d60143555d0bb59af05fd98bdb105`:**
+- Android workflow run `45444352338`: `testStagingDebugUnitTest` PASS، `assembleStagingDebug` PASS، ورفع Staging Debug APK PASS. خطوات Release signing/build متخطاة لأنها Pull Request.
+- Server workflow run `45444352310`: TypeScript PASS، `npm audit` بلا ثغرات، 46 ملف Vitest / 316 اختبار PASS، وWrangler Production وStaging `--dry-run` PASS.
+- Debug artifact ID `14946150985`، الحجم `31,287,532` بايت، SHA-256 `e801c076cb4b53f67b01a8a8a3fa906e04b54a38efb47f101b6962bdc35d2591`. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45444352338/artifacts/14946150985).
+- إصلاح ترتيب حالات المكتبة بعد التنفيذ الأول محفوظ في commit `6f5cb19`، ونجح Android CI على هذا الرأس النهائي نفسه.
+- لم أشغّل محاكيًا أو هاتفًا أو اختباراً محلياً في هذه المتابعة؛ قبول الرحلة بصرياً وفعلياً ما زال ضمن Phase 5.
+
+**الحوكمة:** لا تغييرات Server أو Room schema أو D1، ولا Worker deployment أو D1 write، ولا تغيير Secrets أو Release signing أو تحديث `main` أو دمج PR. PR #6 يبقى Open + Draft + Unmerged.
 
 ## P2-29 — لا يوجد مركز إشعارات عام في واجهة Android
 
