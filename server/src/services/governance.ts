@@ -369,30 +369,34 @@ export async function applyDecisionExecution(
   }
 
   try {
-    const decisionState = await env.DB.prepare(
-      `SELECT group_id, request_type, target_id, status, total_eligible_voters,
-              threshold_percent, description
-       FROM community_decisions WHERE id = ? AND group_id = ?`
-    ).bind(decisionId, groupId).first<{
-      group_id: string; request_type: string; target_id: string; status: string;
-      total_eligible_voters: number; threshold_percent: number; description: string | null;
-    }>();
-    if (!decisionState || decisionState.request_type.toUpperCase() !== normType ||
-        decisionState.target_id !== targetId || decisionState.status !== 'PENDING') {
-      return { success: false, message: 'القرار لم يعد مفتوحاً للتطبيق أو لم يعد مرتبطاً بالهدف نفسه' };
-    }
-    const snapshotVoters = parseEligibleVoterSnapshot(decisionState.description);
-    const storedVotes = await env.DB.prepare(
-      `SELECT user_id, vote_choice FROM community_votes WHERE decision_id = ?`
-    ).bind(decisionId).all<DecisionVoteRow>();
-    const voteCounts = countEligibleDecisionVotes(storedVotes.results || [], snapshotVoters);
-    const eligibleCount = Math.max(1, snapshotVoters === null
-      ? decisionState.total_eligible_voters : snapshotVoters.length);
-    if (!hasDecisionQuorum(voteCounts, eligibleCount, decisionState.threshold_percent)) {
-      return {
-        success: false,
-        message: `لا يمكن تطبيق القرار قبل اكتمال النصاب: ${voteCounts.votesFor}/${getRequiredDecisionVotes(eligibleCount, decisionState.threshold_percent)} أصوات موافقة مؤهلة`,
-      };
+    if (normType === 'SCHEDULE' || normType === 'SCHEDULE_CHANGE') {
+      const decisionState = await env.DB.prepare(
+        `SELECT group_id, request_type, target_id, status, total_eligible_voters,
+                threshold_percent, description
+         FROM community_decisions WHERE id = ? AND group_id = ?`
+      ).bind(decisionId, groupId).first<{
+        group_id: string; request_type: string; target_id: string; status: string;
+        total_eligible_voters: number; threshold_percent: number; description: string | null;
+      }>();
+      const storedType = decisionState?.request_type.toUpperCase();
+      const scheduleTypeMatches = storedType === 'SCHEDULE' || storedType === 'SCHEDULE_CHANGE';
+      if (!decisionState || !scheduleTypeMatches || decisionState.target_id !== targetId ||
+          decisionState.status !== 'PENDING') {
+        return { success: false, message: 'القرار لم يعد مفتوحاً للتطبيق أو لم يعد مرتبطاً بالهدف نفسه' };
+      }
+      const snapshotVoters = parseEligibleVoterSnapshot(decisionState.description);
+      const storedVotes = await env.DB.prepare(
+        `SELECT user_id, vote_choice FROM community_votes WHERE decision_id = ?`
+      ).bind(decisionId).all<DecisionVoteRow>();
+      const voteCounts = countEligibleDecisionVotes(storedVotes.results || [], snapshotVoters);
+      const eligibleCount = Math.max(1, snapshotVoters === null
+        ? decisionState.total_eligible_voters : snapshotVoters.length);
+      if (!hasDecisionQuorum(voteCounts, eligibleCount, decisionState.threshold_percent)) {
+        return {
+          success: false,
+          message: `لا يمكن تطبيق القرار قبل اكتمال النصاب: ${voteCounts.votesFor}/${getRequiredDecisionVotes(eligibleCount, decisionState.threshold_percent)} أصوات موافقة مؤهلة`,
+        };
+      }
     }
     if (normType === 'DELETION' || normType === 'CONTENT_DELETION') {
       type DeletionTargetType = 'CONTENT' | 'HOMEWORK' | 'EXAM' | 'ISSUE';

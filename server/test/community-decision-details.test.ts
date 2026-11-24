@@ -22,7 +22,7 @@ class CommunityDecisionDetailsDb {
         return { success: true, meta: { changes: 0 } };
       },
       async all<T = unknown>() {
-        if (sql.includes('FROM community_votes cv')) {
+        if (sql.includes('SELECT cv.decision_id, cv.user_id, cv.vote_choice')) {
           return { results: [
             { decision_id: 'decision-schedule-1', user_id: 'student-1', vote_choice: 1 },
             { decision_id: 'decision-schedule-1', user_id: 'student-2', vote_choice: 1 },
