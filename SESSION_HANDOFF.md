@@ -830,3 +830,21 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **No local/device claims:** no local Gradle/npm execution or emulator/phone acceptance was performed in this continuation. Phase 5 manual acceptance remains open.
 - **Governance:** no Worker deployment, migration apply, D1 write, secret mutation, Release signing, `main` update or PR merge.
 - **Next roadmap item:** P2-29 — confirm product scope for a general Android notification inbox using the existing notifications API; do not conflate remote notifications with Android-local alarms.
+
+
+## 2026-11-24 — Phase 2 P2-29 private notification inbox checkpoint
+
+- **Branch/source:** `work/release-readiness`; backend/UI commits culminate at `8551dddcdd054a33cbd7ecb85a6af8568fd047c8`. Documentation commit follows separately.
+- **PR:** #6 remains Open + Draft + Unmerged, base `main`; `main` remains unchanged at `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- **Product scope:** the in-app center covers private account notification rows in D1 `user_notifications`, such as group join messages. It is not Android local alarm delivery or push delivery. `TanweerNotificationManager` and exam/homework/schedule local reminder settings are unchanged.
+- **Server:** GET active/archive list; owner-scoped POST read/archive/restore handlers; mutation acknowledgements include exact notification ID and timestamps. Cross-account IDs return 404. Archive marks read; restore preserves read_at. Recovery-code notification mutations are rejected with 409 and its encrypted payload remains Profile-only.
+- **D1:** migration `0035_user_notifications_archive_state.sql` adds `archived_at` plus owner/archive/created index. The migration is committed only; it was not applied to Staging or Production.
+- **Android:** new `SubScreen.NOTIFICATIONS`, Inbox/Archive tabs, All/Unread/Read filters, read state, archive/restore controls, error/loading/empty/retry states and unread badge. Profile links to the center. Arabic/English resources are included. ViewModel separates active/archive states, resets on account change and guards late responses by account identity/request generation.
+- **Secret boundary:** `RECOVERY_CODE_RESET` remains in the dedicated Profile recovery-code card; NotificationInboxPolicy excludes it from general inbox and count, archived API excludes it, and server mutation endpoints reject it.
+- **Tests:** five new Vitest cases for owner-scoped read, cross-account isolation, archive/read coupling, restore/read preservation and recovery notification protection; four Android policy tests for read filters, recovery exclusion, archive unread count and newest-first order.
+- **Exact-SHA Android CI:** run `45450792587` PASS on source SHA `8551dddcdd054a33cbd7ecb85a6af8568fd047c8`: `testStagingDebugUnitTest`, `assembleStagingDebug`, and Debug artifact upload. PR Release signing/build steps were skipped as configured.
+- **Android artifact:** ID `14946839586`; archive size `31,335,361` bytes; SHA-256 `2ec4147d2523a734bb47e05c89d09efdbf9880f63afc348f4aa14829bcef8155`. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45450792587/artifacts/14946839586).
+- **Exact-SHA Server CI:** run `45450792028` PASS: TypeScript; `npm audit` 0 vulnerabilities; 46 Vitest files / 321 tests; Wrangler production and staging dry-runs PASS. No deploy.
+- **No local/device claims:** no local Gradle/npm execution or emulator/phone acceptance. Validate Arabic/English layout, read/archive/restore interactions, account switch and offline/5xx behavior during Phase 5.
+- **Governance:** no Worker deploy, D1 migration apply/write, secrets, production/staging mutation, main update, PR merge or release signing.
+- **Next roadmap item:** P2-30 — reconcile schedule-proposal status with voting and quorum calculations. Keep Phase 5 acceptance open.

@@ -29,6 +29,8 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - `app/src/main/java/com/magd/tanweer/ui/GroupsNavigationPolicy.kt`: validated return destination for the Moderator Dashboard's group-management shortcut.
 - `app/src/main/java/com/magd/tanweer/ui/LibraryNavigationRequest.kt`: one-shot grade/subject context passed from contextual actions to the Library.
 - `app/src/main/java/com/magd/tanweer/util/ExamBookNavigationPolicy.kt`: exact grade/subject resolution for exam-to-book navigation.
+- `app/src/main/java/com/magd/tanweer/ui/screens/NotificationsScreen.kt` and `util/NotificationInboxPolicy.kt`: private account inbox/archive UI and read/unread filtering.
+- `app/src/main/java/com/magd/tanweer/ui/LibraryNavigationRequest.kt`: one-shot contextual library route state remains unchanged.
 - `app/src/main/java/com/magd/tanweer/data/repository/TanweerRepository.kt`: network/data coordination, remote-to-local reconciliation, mutations and media operations.
 - `app/src/main/java/com/magd/tanweer/data/remote/TanweerApiService.kt` and `NetworkModule.kt`: Retrofit API and authenticated network setup.
 - `app/src/main/java/com/magd/tanweer/data/local/TanweerDatabase.kt`: Room database. Current Room schema version is 16.
@@ -67,6 +69,7 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - Database: D1 / SQLite through the `DB` binding.
 - Realtime group chat: Durable Object class `GroupChatDO` under `server/src/realtime/GroupChatDO.ts`.
 - Business logic is organized under `server/src/services`; shared auth, permission, response and ID helpers under `server/src/lib` and `server/src/middleware`.
+- `server/src/services/notifications.ts`: owner-scoped private account inbox, read/archive/restore operations and encrypted recovery-code delivery.
 - D1 migrations: `server/src/db/migrations/*.sql`.
 - Backend tests: `server/test/*.test.ts`, using Vitest. `server/package.json` provides `npm test`, `npm run types`, and Wrangler commands.
 - Worker/D1 bindings and environments: `server/wrangler.jsonc`.
