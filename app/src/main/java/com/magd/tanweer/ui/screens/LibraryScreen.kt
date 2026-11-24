@@ -455,6 +455,19 @@ fun LibraryScreen(
                     PendingSyncEmptyState(dataLabel = "كتب $currentGradeName", syncState = selectedGradeSyncState)
                 }
             }
+            // Confirmed empty state for the selected grade
+            else if (gradeBooks.isEmpty()) {
+                item {
+                    EmptyGradeBooksView(
+                        gradeName = currentGradeName,
+                        onSyncClick = {
+                            viewModel.syncBooks(selectedGradeId, isRefresh = true) { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                }
+            }
             // A subject/search filter may be narrower than a non-empty grade catalogue.
             else if (filteredBooks.isEmpty()) {
                 item {
@@ -479,19 +492,6 @@ fun LibraryScreen(
                             }
                         }
                     }
-                }
-            }
-            // Confirmed empty state for the selected grade
-            else if (gradeBooks.isEmpty()) {
-                item {
-                    EmptyGradeBooksView(
-                        gradeName = currentGradeName,
-                        onSyncClick = {
-                            viewModel.syncBooks(selectedGradeId, isRefresh = true) { _, msg ->
-                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    )
                 }
             }
             // Render Books based on Current View Mode (Default: Wooden Shelf)
