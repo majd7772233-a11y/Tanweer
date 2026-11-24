@@ -3,7 +3,7 @@ import { parseScheduleVoteType } from './services/scheduleValidation';
 import { authenticateRequest } from './middleware/auth';
 import { errorResponse, jsonResponse } from './lib/response';
 import { handleLogin, handleRegister, handleLoginWithRecoveryCode } from './services/auth';
-import { handleGenerateMyRecoveryCode, handleGetMyNotifications } from './services/notifications';
+import { handleGenerateMyRecoveryCode, handleGetMyNotifications, handleMarkMyNotificationRead, handleArchiveMyNotification, handleRestoreMyNotification } from './services/notifications';
 import {
   handleGetGroups,
   handleJoinGroupRequest,
@@ -568,8 +568,16 @@ export async function handleApiRoute(request: Request, env: Env): Promise<Respon
   }
 
   // Private account notifications and self-service recovery-code rotation.
+  const notificationActionMatch = path.match(/^\\/api\\/v1\\/notifications\\/([^/]+)\\/(read|archive|restore)$/);
+  if (notificationActionMatch && method === 'POST') {
+    const notificationId = decodeURIComponent(notificationActionMatch[1]);
+    const action = notificationActionMatch[2];
+    if (action === 'read') return handleMarkMyNotificationRead(user, notificationId, env);
+    if (action === 'archive') return handleArchiveMyNotification(user, notificationId, env);
+    return handleRestoreMyNotification(user, notificationId, env);
+  }
   if (path === '/api/v1/notifications' && method === 'GET') {
-    return handleGetMyNotifications(user, env);
+    return handleGetMyNotifications(user, env, url.searchParams.get('archived') === 'true');
   }
   if (path === '/api/v1/me/recovery-code' && method === 'POST') {
     return handleGenerateMyRecoveryCode(user, env);
