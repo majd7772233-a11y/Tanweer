@@ -2332,17 +2332,48 @@ class TanweerRepository(
             Result.failure(Exception(error.localizedMessage ?: "تعذر الاتصال بالخادم لفصل الطالب"))
         }
     }
-    suspend fun getMyNotifications(): Result<List<com.magd.tanweer.data.model.AppNotification>> = withContext(Dispatchers.IO) {
+    suspend fun getMyNotifications(archived: Boolean = false): Result<List<com.magd.tanweer.data.model.AppNotification>> = withContext(Dispatchers.IO) {
         try {
-            val res = api.getMyNotifications()
+            val res = api.getMyNotifications(archived)
             val body = res.body()
             if (res.isSuccessful && body?.success == true) {
                 Result.success(body.notifications)
             } else {
-                Result.failure(Exception("تعذر جلب إشعارات الحساب"))
+                Result.failure(Exception("تعذر جلب إشعارات الحساب (HTTP ${res.code()})"))
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    suspend fun markMyNotificationRead(notificationId: String) =
+        mutateMyNotification(notificationId) { api.markMyNotificationRead(it) }
+
+    suspend fun archiveMyNotification(notificationId: String) =
+        mutateMyNotification(notificationId) { api.archiveMyNotification(it) }
+
+    suspend fun restoreMyNotification(notificationId: String) =
+        mutateMyNotification(notificationId) { api.restoreMyNotification(it) }
+
+    private suspend fun mutateMyNotification(
+        notificationId: String,
+        request: suspend (String) -> retrofit2.Response<com.magd.tanweer.data.model.NotificationMutationResponse>
+    ): Result<com.magd.tanweer.data.model.NotificationMutationResponse> = withContext(Dispatchers.IO) {
+        try {
+            val response = request(notificationId)
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true && body.notificationId == notificationId) {
+                Result.success(body)
+            } else {
+                Result.failure(
+                    Exception(
+                        body?.error?.message
+                            ?: "لم يؤكد الخادم تحديث الإشعار (HTTP ${response.code()})"
+                    )
+                )
+            }
+        } catch (error: Exception) {
+            Result.failure(error)
         }
     }
 

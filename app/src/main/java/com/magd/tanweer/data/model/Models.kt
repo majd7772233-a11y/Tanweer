@@ -391,6 +391,8 @@ data class AppNotification(
     val title: String,
     val body: String,
     val createdAt: Long = 0L,
+    val readAt: Long? = null,
+    val archivedAt: Long? = null,
     val recoveryCode: String? = null
 )
 
@@ -398,6 +400,15 @@ data class AppNotification(
 data class NotificationsResponse(
     val success: Boolean = true,
     val notifications: List<AppNotification> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class NotificationMutationResponse(
+    val success: Boolean = false,
+    val notificationId: String? = null,
+    val readAt: Long? = null,
+    val archivedAt: Long? = null,
+    val error: ApiError? = null
 )
 
 @JsonClass(generateAdapter = true)

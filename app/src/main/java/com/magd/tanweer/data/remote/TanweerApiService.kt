@@ -433,7 +433,16 @@ interface TanweerApiService {
     suspend fun generateMyRecoveryCode(): Response<RecoveryCodeResponse>
 
     @GET("api/v1/notifications")
-    suspend fun getMyNotifications(): Response<NotificationsResponse>
+    suspend fun getMyNotifications(@Query("archived") archived: Boolean = false): Response<NotificationsResponse>
+
+    @POST("api/v1/notifications/{id}/read")
+    suspend fun markMyNotificationRead(@Path("id") notificationId: String): Response<NotificationMutationResponse>
+
+    @POST("api/v1/notifications/{id}/archive")
+    suspend fun archiveMyNotification(@Path("id") notificationId: String): Response<NotificationMutationResponse>
+
+    @POST("api/v1/notifications/{id}/restore")
+    suspend fun restoreMyNotification(@Path("id") notificationId: String): Response<NotificationMutationResponse>
 
     @GET("api/v1/groups")
     suspend fun getGroups(): Response<GroupsResponse>
