@@ -30,7 +30,8 @@ internal object GroupChatAutoScrollPolicy {
         viewportEndOffset: Int,
         thresholdPx: Int
     ): Boolean {
-        if (previousLastMessageIndex < 0 || lastVisibleItemIndex == null) return true
+        if (previousLastMessageIndex < 0) return true
+        if (lastVisibleItemIndex == null) return false
         if (lastVisibleItemIndex < previousLastMessageIndex) return false
         val itemEnd = lastVisibleItemEnd ?: return false
         return viewportEndOffset - itemEnd <= thresholdPx.coerceAtLeast(0)

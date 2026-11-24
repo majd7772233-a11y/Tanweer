@@ -219,7 +219,8 @@ fun GroupsScreen(
             } else {
                 val layoutInfo = chatListState.layoutInfo
                 val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
-                lastVisibleItem?.index == chatMessageIds.lastIndex &&
+                lastVisibleItem != null &&
+                    lastVisibleItem.index == chatMessageIds.lastIndex &&
                     layoutInfo.viewportEndOffset - (lastVisibleItem.offset + lastVisibleItem.size) <= chatBottomThresholdPx
             }
         }

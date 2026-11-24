@@ -42,6 +42,19 @@ class GroupChatAutoScrollPolicyTest {
     }
 
     @Test
+    fun missingVisibleAnchorDoesNotAssumeAnExistingConversationIsAtBottom() {
+        assertFalse(
+            GroupChatAutoScrollPolicy.shouldAutoFollow(
+                previousLastMessageIndex = 12,
+                lastVisibleItemIndex = null,
+                lastVisibleItemEnd = null,
+                viewportEndOffset = 0,
+                thresholdPx = 96
+            )
+        )
+    }
+
+    @Test
     fun userReadingOlderMessagesIsNotPulledToLatest() {
         assertFalse(
             GroupChatAutoScrollPolicy.shouldAutoFollow(
@@ -90,9 +103,9 @@ class GroupChatAutoScrollPolicyTest {
         assertEquals(
             setOf("m2", "m3"),
             GroupChatAutoScrollPolicy.mergeUnreadMessageIds(
-                previousUnreadIds = setOf("m0"),
+                previousUnreadIds = setOf("m1"),
                 delta = delta,
-                currentMessageIds = setOf("m0", "m1", "m2", "m3"),
+                currentMessageIds = setOf("m1", "m2", "m3"),
                 shouldAutoFollow = false
             )
         )
