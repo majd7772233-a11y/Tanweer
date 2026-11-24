@@ -871,16 +871,25 @@
 
 **الأدلة:** phone_chat_after_manual_scroll.xml/png وphone_chat_bottom_keyboard.xml/png وRoom snapshots في جولة 19 نوفمبر.
 
-## P2-26 — نموذج تعليق Android لا يحمل is_teacher_answer
+## P2-26 — علامة مصدر إجابة الأستاذ في تعليقات الاستفسارات
 
 **مرجع التقرير:** TNW-TEACHER-ROUND-20261120، قسم سؤال الطالب وإجابة الأستاذ. **الأولوية:** P2/P3.
 
-**الدليل:** الخادم يميز إجابة الأستاذ بواسطة is_teacher_answer، لكن IssueCommentItem في Android لا يحمل الحقل؛ لذلك لا تميز الواجهة إجابة الأستاذ بصرياً قبل اعتمادها كإجابة نموذجية.
+**الحالة بعد مراجعة HEAD:** ملاحظة التقرير عن فقدان الحقل لم تعد تصف الكود الحالي على الفرع؛ كان مسار `isTeacherAnswer` موجوداً بالفعل من الخادم حتى Compose قبل بدء هذه المتابعة. أُضيف اختبار انحدار صريح في `3dc3a1f51841f9acd27598a23a11f588d0eba53c` لإثبات استقلال علامة مصدر الأستاذ عن علامة أفضل إجابة. **P2-26: IMPLEMENTATION VERIFIED + REGRESSION TESTED.**
 
-**الإصلاح المطلوب:** تضمين الحقل في DTO/domain mapping وإظهار شارة مصدر الإجابة، مع استمرار تمييز الإجابة النموذجية بعد الاعتماد.
+**المسار المثبت:**
+- Worker `handleGetIssueDetails` يقرأ `is_teacher_answer`، و`mapIssueComment` يحوله إلى `isTeacherAnswer`. استجابة إنشاء التعليق تتضمن العلامة أيضاً.
+- Android `IssueDetailResponse.comments` يستخدم `IssueCommentItem`، الذي يحمل `isTeacherAnswer: Boolean = false`. `GenericResponse` يحمل علامة ACK الاختيارية.
+- `IssueDataSyncCoordinator` ينقل العلامة من DTO إلى `IssueCommentEntity`؛ وRoom يحتفظ بها. Migration `16 → 17` أضافت `isTeacherAnswer INTEGER NOT NULL DEFAULT 0`، لذلك لا يلزم تكرار migration.
+- `TanweerRepository.getIssueComments` يعيدها إلى نموذج الواجهة.
+- `IssuesScreen` يعرض شارة «إجابة معلم معتمد» لكل تعليق معلم، سواء كان أفضل إجابة أم تعليقاً عادياً. بطاقة أفضل إجابة تعرض شارة «الحل المعتمد» بشكل مستقل.
+- DAO `setBestAnswer` يحدّث `isBestAnswer` فقط ولا يمس `isTeacherAnswer`.
 
-**الأدلة:** %TEMP%\tanweer-teacher-round-20261120\evidence.
+**الاختبارات:** اختبارات Room السابقة تغطي snapshot reconciliation، وACK، وظهور العلامة في Flow. أضيف `teacherAnswerAndBestAnswerMarkersRemainIndependent` في `IssueCommentReconciliationTest`: يختار إجابة الأستاذ كأفضل إجابة ثم يغيّر الاختيار إلى إجابة طالب، ويتحقق من بقاء علامة الأستاذ وعدم اختلاط العلامتين. واختبار الخادم `issue-details-teacher-marker.test.ts` يثبت اختيار العمود وإرجاع العلامة بصيغة API الصحيحة.
 
+**مراجع الملفات:** `app/src/main/java/com/magd/tanweer/data/model/Models.kt`, `data/remote/TanweerApiService.kt`, `data/local/Entities.kt`, `data/local/TanweerDatabase.kt`, `data/local/Daos.kt`, `data/sync/IssueDataSyncCoordinator.kt`, `data/repository/TanweerRepository.kt`, `ui/screens/IssuesScreen.kt`, `server/src/lib/mappers.ts`, `server/src/services/issues.ts`.
+
+**القرار:** لا حاجة إلى تعديل DTO أو Room schema أو API أو migrations؛ أُبقيت مطابقة العقد الحالية وأُضيف اختبار الاستقلال كحماية من التراجع.
 
 ## P2-27 — الرجوع من PDF والمجموعات يفقد سياق الشاشة المصدر
 
@@ -1292,3 +1301,16 @@
 - **Local/device verification:** WebGPT local terminal was not available during this continuation; no local Gradle command is claimed. Exact-SHA GitHub Actions is the source of build/test evidence. No emulator or physical phone test was performed; manual scroll feel, gesture interaction, and actual keyboard resizing remain Phase 5 acceptance.
 - **Governance:** no Worker deployment, D1 migration/apply/write, production/staging data write, secret change, Release signing, app install/launch, `main` update, PR merge, or new branch. PR #6 remains Open + Draft + Unmerged.
 - **Next roadmap item:** P2-26 — carry `is_teacher_answer` into Android `IssueCommentItem` and show the teacher-answer source badge independently of the accepted-answer state. Keep Phase 5 acceptance open.
+
+
+## 2026-11-24 — Phase 2 P2-26 teacher-answer marker verification checkpoint
+
+- **Starting HEAD:** `66e8fac951e4392c778c49ebf202b710113ca83c`. The roadmap defect was stale relative to this branch head: `isTeacherAnswer` was already present end-to-end in API/domain model, Room entity, DAO ACK update, issue snapshot coordinator, repository mapper, and both teacher-answer badge positions in IssuesScreen.
+- **Code change:** commit `3dc3a1f51841f9acd27598a23a11f588d0eba53c` adds a Room regression test only. It promotes a teacher comment to best answer, then changes best answer to a student comment, asserting teacher-origin and best-answer booleans remain independent. No runtime code, server code, API contract, database schema, or migration was changed.
+- **Schema history:** Room migration `16 → 17` already adds `isTeacherAnswer INTEGER NOT NULL DEFAULT 0`; do not add another migration.
+- **Exact-SHA Android CI:** run `45436415549` PASS on `3dc3a1f51841f9acd27598a23a11f588d0eba53c`; full `testStagingDebugUnitTest`, `assembleStagingDebug`, and Debug APK upload PASS.
+- **Debug Artifact:** `14942116975`, `31,277,983` bytes, SHA-256 `bc6876e4da1cefc14c98b6700c77f67d40c80ffd4bc9d17e3f659e9095a728c0`. [Download from GitHub Actions](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45436415549/artifacts/14942116975).
+- **Exact-SHA Server CI:** run `45436415405` PASS on the same SHA; TypeScript PASS; `npm audit` reports 0 vulnerabilities; 46 Vitest files / 316 tests PASS; Wrangler production/staging dry-runs PASS. No Worker deployment or D1 write.
+- **Local/device limitation:** WebGPT terminal unavailable; no local Gradle/npm commands, emulator, or phone interaction claimed. The exact-SHA GitHub Actions checks are the automated evidence; Phase 5 visual/device acceptance remains open.
+- **Governance:** PR #6 remains Open + Draft + Unmerged; `main` unchanged. No Worker deployment, D1 migration/apply/write, production/staging data writes, secrets change or release signing.
+- **Next roadmap item:** P2-27 — preserve source screen/context when returning from PDF and group navigation. Re-prove each reported path on current HEAD. The search-to-results return observation remains unconfirmed and must not be treated as a defect without confirming intended UX.

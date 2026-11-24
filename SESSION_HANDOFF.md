@@ -783,3 +783,19 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **No local/device claims:** WebGPT terminal was unavailable; no local Gradle/npm commands were run. No emulator/phone acceptance performed. Verify real keyboard behavior and gesture feel in Phase 5.
 - **PR/governance:** PR #6 remains Open + Draft + Unmerged. `main` unchanged; no Worker/D1 deployment or production data write.
 - **Next step:** P2-26 — add `is_teacher_answer` to Android DTO/domain mapping and distinguish teacher-answer source from accepted/best-answer state. Read current API DTO, mapper, `IssueCommentItem`, Room policy and UI before edits.
+
+
+## 2026-11-24 — P2-26 teacher-answer marker verification handoff
+
+- **Branch:** `work/release-readiness`.
+- **Source code HEAD:** `3dc3a1f51841f9acd27598a23a11f588d0eba53c`.
+- **Docs commit:** follows after the code checkpoint; this changes only `ROADMAP.md` and `SESSION_HANDOFF.md`.
+- **P2-26 status:** implementation verified; regression test added and exact-SHA CI green. The issue description was stale: `isTeacherAnswer` already existed throughout the complete Android/server path at the starting HEAD.
+- **End-to-end path:** D1 `is_teacher_answer` → Worker `mapIssueComment` / issue details response → Moshi `IssueDetailResponse.comments: List<IssueCommentItem>` → `IssueDataSyncCoordinator` → Room `IssueCommentEntity.isTeacherAnswer` → repository `getIssueComments` → Compose badge in both best-answer and ordinary-comment cards. POST acknowledgement also carries `isTeacherAnswer`.
+- **Schema:** migration `16 → 17` already adds the Room column with default 0. No schema change required.
+- **Regression test:** `IssueCommentReconciliationTest.teacherAnswerAndBestAnswerMarkersRemainIndependent` proves a teacher comment can be both teacher-authored and best answer, and that changing the best answer to a student comment does not clear the teacher-origin flag.
+- **Android CI:** run `45436415549` PASS; unit tests, Staging Debug build and Debug artifact upload passed. Artifact `14942116975`, size `31,277,983`, SHA-256 `bc6876e4da1cefc14c98b6700c77f67d40c80ffd4bc9d17e3f659e9095a728c0`. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45436415549/artifacts/14942116975).
+- **Server CI:** run `45436415405` PASS: TypeScript; 46 files / 316 tests; npm audit 0 vulnerabilities; production and staging Wrangler dry-runs. No deployment.
+- **No local/device claims:** no local Gradle/npm commands or device acceptance performed. Retain Phase 5 checks.
+- **PR/governance:** PR #6 Open + Draft + Unmerged; no main update, deployment, D1 write or secret mutation.
+- **Next step:** P2-27 — inspect current navigation source/destination state for PDF return from knowledge base and Moderator Dashboard group-member drill-in. Preserve all route arguments and return state; do not treat search result restoration as a confirmed defect without validating desired behavior.
