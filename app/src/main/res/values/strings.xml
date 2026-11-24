@@ -234,4 +234,32 @@
     <string name="exam_open_general_library">فتح المكتبة العامة 📚</string>
     <string name="library_no_matching_books">لا توجد كتب مطابقة للمادة أو البحث الحالي.</string>
     <string name="library_show_all_books">عرض جميع كتب الصف</string>
+    <string name="notifications_title">مركز الإشعارات</string>
+    <string name="notifications_open_center">فتح مركز الإشعارات</string>
+    <string name="notifications_profile_description">تابع رسائل الحساب وطلبات الانضمام ونتائجها، وأدر المقروء والأرشيف من مكان واحد.</string>
+    <string name="notifications_inbox_tab">الوارد</string>
+    <string name="notifications_archive_tab">الأرشيف</string>
+    <string name="notifications_filter_all">الكل</string>
+    <string name="notifications_filter_unread">غير المقروء</string>
+    <string name="notifications_filter_read">المقروء</string>
+    <string name="notifications_status_unread">جديد</string>
+    <string name="notifications_status_read">مقروء</string>
+    <string name="notifications_mark_read">تحديد كمقروء</string>
+    <string name="notifications_archive_action">أرشفة</string>
+    <string name="notifications_restore_action">استعادة للوارد</string>
+    <string name="notifications_empty_inbox">لا توجد رسائل في الوارد حالياً.</string>
+    <string name="notifications_empty_archive">الأرشيف فارغ حالياً.</string>
+    <string name="notifications_loading">جارٍ تحميل إشعارات الحساب...</string>
+    <string name="notifications_retry">إعادة المحاولة</string>
+    <string name="notifications_marked_read">تم تحديد الإشعار كمقروء.</string>
+    <string name="notifications_archived_success">نُقل الإشعار إلى الأرشيف.</string>
+    <string name="notifications_restored_success">أُعيد الإشعار إلى الوارد.</string>
+    <plurals name="notifications_unread_count">
+        <item quantity="zero">لا توجد رسائل جديدة</item>
+        <item quantity="one">رسالة جديدة واحدة</item>
+        <item quantity="two">رسالتان جديدتان</item>
+        <item quantity="few">%d رسائل جديدة</item>
+        <item quantity="many">%d رسالة جديدة</item>
+        <item quantity="other">%d رسالة جديدة</item>
+    </plurals>
 </resources>

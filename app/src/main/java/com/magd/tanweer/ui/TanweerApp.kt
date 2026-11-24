@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import com.magd.tanweer.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -289,6 +290,7 @@ fun TanweerApp(
                                         SubScreen.SCHEDULE -> "جدول الحصص المدرسي"
                                         SubScreen.TIMELINE -> "رحلة المادة"
                                         SubScreen.PROFILE -> "ملف الطالب والمساهمات"
+                                        SubScreen.NOTIFICATIONS -> context.getString(R.string.notifications_title)
                                         SubScreen.SETTINGS -> "إعدادات التطبيق"
                                         SubScreen.WHAT_DID_I_MISS -> "ماذا فاتني؟"
                                         SubScreen.SEARCH -> "البحث الشامل"
@@ -318,6 +320,7 @@ fun TanweerApp(
                                 SubScreen.SCHEDULE -> ScheduleScreen(viewModel = viewModel)
                                 SubScreen.TIMELINE -> SubjectTimelineScreen(viewModel = viewModel)
                                 SubScreen.PROFILE -> ProfileScreen(viewModel = viewModel)
+                                SubScreen.NOTIFICATIONS -> NotificationsScreen(viewModel = viewModel)
                                 SubScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
                                 SubScreen.WHAT_DID_I_MISS -> WhatDidIMissScreen(viewModel = viewModel)
                                 SubScreen.SEARCH -> SearchScreen(viewModel = viewModel)
@@ -447,6 +450,7 @@ fun GlassBottomNavigationBar(
         SubScreen.MODERATOR_DASHBOARD -> "الإشراف" to Icons.Default.Shield
         SubScreen.ADMIN_DASHBOARD -> "الإدارة" to Icons.Default.AdminPanelSettings
         SubScreen.PROFILE -> "الملف الشخصي" to Icons.Default.Person
+        SubScreen.NOTIFICATIONS -> "الإشعارات" to Icons.Default.Notifications
         SubScreen.SETTINGS -> "الإعدادات" to Icons.Default.Settings
         SubScreen.ACADEMIC_HISTORY -> "الأرشيف" to Icons.Default.Archive
         SubScreen.SUBJECT_KNOWLEDGE_BASE -> "المادة" to Icons.Default.MenuBook

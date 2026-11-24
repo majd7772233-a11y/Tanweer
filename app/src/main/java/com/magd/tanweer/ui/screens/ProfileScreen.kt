@@ -41,6 +41,7 @@ import com.magd.tanweer.data.repository.SyncResult
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.ArabicNameValidator
+import com.magd.tanweer.util.NotificationInboxPolicy
 import com.magd.tanweer.util.TanweerHapticManager
 
 private fun formatYemeniPhoneForDisplay(rawPhone: String): String {
@@ -384,6 +385,64 @@ fun ProfileScreen(
                             modifier = Modifier.fillMaxWidth().height(42.dp)
                         )
                     }
+                }
+            }
+        }
+
+        // Account-wide private notification inbox; the recovery credential stays in its protected Profile card.
+        item {
+            val unreadCount = remember(myNotifications) {
+                NotificationInboxPolicy.unreadCount(myNotifications)
+            }
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = MidnightSurface,
+                borderColor = if (unreadCount > 0) CyanAccent.copy(alpha = 0.45f) else GlassBorderSubtle
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Notifications, contentDescription = null, tint = CyanAccent)
+                            Text(
+                                text = context.getString(R.string.notifications_title),
+                                fontSize = tanweerTextSize(15f),
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        }
+                        GlassPill(
+                            text = context.resources.getQuantityString(
+                                R.plurals.notifications_unread_count,
+                                unreadCount,
+                                unreadCount
+                            ),
+                            color = if (unreadCount > 0) CyanAccent else TextSecondary,
+                            bgColor = if (unreadCount > 0) CyanAccent.copy(alpha = 0.14f) else GlassSurface
+                        )
+                    }
+                    Text(
+                        text = context.getString(R.string.notifications_profile_description),
+                        fontSize = tanweerTextSize(11f),
+                        color = TextSecondary,
+                        lineHeight = tanweerLineHeight(16f)
+                    )
+                    GlassButton(
+                        text = context.getString(R.string.notifications_open_center),
+                        color = CyanAccent,
+                        textColor = TextOnAccent,
+                        onClick = { viewModel.setSubScreen(SubScreen.NOTIFICATIONS) },
+                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                    )
                 }
             }
         }
