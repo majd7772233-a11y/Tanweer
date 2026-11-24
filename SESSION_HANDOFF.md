@@ -768,3 +768,18 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Phase 5:** real-device Arabic/English long-press and confirmation UX; owner vs non-owner; group moderator/teacher/admin; 403/404 behavior; active peer broadcast; app restart; offline-device cache handling. No emulator or physical phone used.
 - **Governance:** no Worker deployment, D1 migration/apply/write, staging/production data write, secret change, Release signing, app install/launch, main update, PR merge or new branch. PR #6 stays Open + Draft + Unmerged.
 - **Next roadmap item:** P2-25 — group chat auto-scroll/unread indicator. Keep Phase 5 acceptance open.
+
+
+## 2026-11-24 — P2-25 group chat auto-scroll/unread implementation handoff
+
+- **Current branch:** `work/release-readiness`.
+- **Current source HEAD:** `839089b52ebaba0cf17a6ac30866a72ad1ae2f9b`.
+- **Source commit sequence:** `06ef124` (auto-follow/unread UI, helper, tests, resources), `c46cc2e` (no-anchor safety and null-safe latest visibility), `839089b` (correct expected unread accumulation set).
+- **P2-25 status:** implementation and exact-SHA Android/Server CI complete.
+- **Android CI:** run `45434428809` PASS: unit tests, Staging Debug APK build, Debug artifact upload. Artifact ID `14941895686`; size `31,277,983` bytes; SHA-256 `f243c3a42e316175b439ae8d111f4d64670da818e8e910dab4284eec459808df`. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45434428809/artifacts/14941895686).
+- **Server CI:** run `45434428853` PASS on the same SHA: 46 files / 316 tests, TypeScript, audit 0 vulnerabilities, Wrangler dry-runs. Server code was not changed by P2-25.
+- **First test attempt:** Android run `45433814960` failed one new assertion because an existing unread ID was correctly retained by the helper but absent from the expected set. Fixed expectation in `839089b`; final Android run passed.
+- **Implementation details:** `GroupChatAutoScrollPolicy` calculates ID additions/removals and the follow threshold using the previous last message anchor. `GroupsScreen` scopes Room messages to the active group, initializes to latest once, preserves Search deep-link position, follows smoothly only when previously near the end, exposes Arabic/English unread plurals, and clears unread IDs on delete or when the user reaches latest. The current activity's `adjustResize` behavior is respected through the live LazyList viewport.
+- **No local/device claims:** WebGPT terminal was unavailable; no local Gradle/npm commands were run. No emulator/phone acceptance performed. Verify real keyboard behavior and gesture feel in Phase 5.
+- **PR/governance:** PR #6 remains Open + Draft + Unmerged. `main` unchanged; no Worker/D1 deployment or production data write.
+- **Next step:** P2-26 — add `is_teacher_answer` to Android DTO/domain mapping and distinguish teacher-answer source from accepted/best-answer state. Read current API DTO, mapper, `IssueCommentItem`, Room policy and UI before edits.
