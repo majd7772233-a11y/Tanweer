@@ -212,4 +212,13 @@
     <string name="homework_delete_confirm">حذف</string>
     <string name="homework_delete_success">تم حذف الواجب بنجاح.</string>
     <string name="homework_delete_failed">تعذر حذف الواجب.</string>
+
+    <string name="chat_message_delete_action">حذف الرسالة</string>
+    <string name="chat_message_delete_title">حذف رسالة المجموعة؟</string>
+    <string name="chat_message_delete_message">سيتم حذف هذه الرسالة من سجل المجموعة لدى الأعضاء. لا يمكن التراجع عن هذا الإجراء.</string>
+    <string name="chat_message_delete_confirm">حذف</string>
+    <string name="chat_message_delete_cancel">إلغاء</string>
+    <string name="chat_message_delete_in_progress">جارٍ الحذف...</string>
+    <string name="chat_message_delete_success">تم حذف الرسالة من المحادثة.</string>
+    <string name="chat_message_delete_failed">لم يؤكد الخادم حذف الرسالة؛ بقيت ظاهرة في المحادثة.</string>
 </resources>
