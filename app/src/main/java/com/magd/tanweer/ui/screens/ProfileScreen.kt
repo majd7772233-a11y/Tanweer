@@ -30,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.content.Intent
 import android.net.Uri
 import com.magd.tanweer.data.model.Role
+import com.magd.tanweer.R
 import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.data.model.UserStats
 import com.magd.tanweer.data.model.SubmitRoleUpgradeResponse
