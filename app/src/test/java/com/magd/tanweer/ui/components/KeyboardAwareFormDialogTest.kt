@@ -9,6 +9,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -17,6 +18,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import com.magd.tanweer.ui.theme.TanweerTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -58,6 +60,48 @@ class KeyboardAwareFormDialogTest {
 
         assertEquals(0, hideCount)
         assertEquals(1, dismissCount)
+    }
+
+    @Test
+    fun firstBackHidesImeWithoutClosingFormAndSecondBackDismissesIt() {
+        var hideCount = 0
+        var dismissCount = 0
+
+        composeRule.setContent {
+            TanweerTheme {
+                var imeVisible by remember { mutableStateOf(true) }
+                var formOpen by remember { mutableStateOf(true) }
+
+                if (formOpen) {
+                    KeyboardAwareFormBackHandler(
+                        imeVisible = imeVisible,
+                        onHideKeyboard = {
+                            imeVisible = false
+                            hideCount++
+                        },
+                        onDismissRequest = {
+                            formOpen = false
+                            dismissCount++
+                        }
+                    )
+                    Text("Draft remains here", Modifier.testTag("form_draft"))
+                }
+            }
+        }
+
+        composeRule.runOnIdle {
+            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+            assertEquals(1, hideCount)
+            assertEquals(0, dismissCount)
+        }
+        composeRule.onNodeWithTag("form_draft").assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+            assertEquals(1, hideCount)
+            assertEquals(1, dismissCount)
+        }
+        composeRule.onNodeWithTag("form_draft").assertDoesNotExist()
     }
 
     @Test
