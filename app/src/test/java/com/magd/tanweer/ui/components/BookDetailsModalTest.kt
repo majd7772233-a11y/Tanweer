@@ -5,9 +5,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Text
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -53,7 +52,9 @@ class BookDetailsModalTest {
             }
         }
 
-        composeRule.onNodeWithTag("book_details_scrim").performClick()
+        composeRule.onNodeWithTag("book_details_scrim").performTouchInput {
+            click(Offset(size.width / 2f, size.height * 0.05f))
+        }
 
         composeRule.runOnIdle {
             assertEquals(1, dismissRequests)
