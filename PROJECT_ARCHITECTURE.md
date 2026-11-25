@@ -1,6 +1,6 @@
 # Tanweer — Project Architecture and Engineering Notes
 
-Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c962814f6cdf288f07fca05af870810bed on work/release-readiness.
+Updated 2026-11-25. Latest verified source-code checkpoint: P2-32 PDF reader controls, 1aefecddc5ad7bc8f73f709211ad9444e0609117 on work/release-readiness. Android and Server CI passed on this exact SHA.
 
 ## 1. Repository and branch contract
 
@@ -8,7 +8,7 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - The only permitted long-lived branches are `main` and `work/release-readiness`.
 - All implementation, tests and documentation for ongoing work go directly to `work/release-readiness`. Do not create per-batch, feature, hotfix, or CI scratch branches.
 - `main` is the Production line. At the verification checkpoint it is `64143994070bcdc410cf044379fe2801da8f9a3c`. Do not push to, merge into, or deploy Production unless the user explicitly requests a release.
-- `work/release-readiness` is the integration and Staging line. Its verified HEAD is `74a20067ab9edff05a9c82e0dd1958a063d73b6f`.
+- `work/release-readiness` is the integration and Staging line. Its latest verified source checkpoint is `1aefecddc5ad7bc8f73f709211ad9444e0609117`; documentation-only commits may advance the branch HEAD, so always read the live branch head.
 - PR #7 (Batch 2) is merged into `work/release-readiness` at `a834068b62094de8247f9b49072090df6d9a8ffb`. PR #6 remains an open Draft from `work/release-readiness` to `main`; it is not merged.
 - Before every new task, read the latest commit, `GPT.md`, this file, and the latest relevant test output. These notes are a map, not a substitute for checking HEAD.
 
@@ -34,12 +34,12 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - `app/src/main/java/com/magd/tanweer/ui/LibraryNavigationRequest.kt`: one-shot contextual library route state remains unchanged.
 - `app/src/main/java/com/magd/tanweer/data/repository/TanweerRepository.kt`: network/data coordination, remote-to-local reconciliation, mutations and media operations.
 - `app/src/main/java/com/magd/tanweer/data/remote/TanweerApiService.kt` and `NetworkModule.kt`: Retrofit API and authenticated network setup.
-- `app/src/main/java/com/magd/tanweer/data/local/TanweerDatabase.kt`: Room database. Current Room schema version is 16.
+- `app/src/main/java/com/magd/tanweer/data/local/TanweerDatabase.kt`: Room database. Current Room schema version is 20.
 - Room entities/DAOs live under `data/local`; models and response contracts are under `data/model` and `data/remote`.
 - `app/src/main/java/com/magd/tanweer/data/sync/UnifiedMutationQueue.kt`: offline mutation outbox, retry/backoff and chat reconciliation.
 - Main feature screens live under `ui/screens`; reusable Compose components under `ui/components`; shared theme/typography under `ui/theme`.
 - Academic-year and date rules live under `util/AcademicYearManager.kt` and related utilities.
-- PDF reader: `ui/screens/pdf/PdfReaderScreen.kt`, `CanvasPageCurl.kt`, with PDF extraction in `util/PdfTextExtractor.kt` and focus ambience in `util/FocusNoisePlayer.kt`.
+- PDF reader: `ui/screens/pdf/PdfReaderScreen.kt` owns `TopReaderBar` and `BottomReaderBar`; secondary actions live in a compact overflow menu and control targets are 48dp minimum. Arabic/English labels are in `res/values/strings.xml` and `res/values-en/strings.xml`. Regression coverage: `app/src/test/java/com/magd/tanweer/ui/screens/pdf/PdfReaderControlsTest.kt` (360/393/411dp). Page curl is in `CanvasPageCurl.kt`; extraction is in `util/PdfTextExtractor.kt` and focus ambience in `util/FocusNoisePlayer.kt`.
 
 ### Data ownership and sync invariants
 - The server is authoritative for shared school records. Room is the local cache/UI source and must remain useful offline.
@@ -170,7 +170,7 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - Validate a server snapshot before replacing local data. Preserve local PENDING/SYNCING/FAILED rows and prefer the local pending version on an ID collision.
 - Keep the settings retry affordance connected to the explicit retry API, not merely to a generic automatic drain.
 
-No PDF reader or page-curl path is in Phase 2 scope.
+P2-32 covers PDF reader toolbar layout and touch targets only; it does not alter PDF extraction, page-curl rendering, zoom/pan gestures, or reading-state persistence.
 
 
 ## Phase 3 — PDF rendering and local book storage (2026-11-15)
