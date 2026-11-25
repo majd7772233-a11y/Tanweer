@@ -30,6 +30,7 @@ Updated 2026-11-14. Latest verified system-purge reset code checkpoint: 6108a4c9
 - `app/src/main/java/com/magd/tanweer/ui/LibraryNavigationRequest.kt`: one-shot grade/subject context passed from contextual actions to the Library.
 - `app/src/main/java/com/magd/tanweer/util/ExamBookNavigationPolicy.kt`: exact grade/subject resolution for exam-to-book navigation.
 - `app/src/main/java/com/magd/tanweer/ui/screens/NotificationsScreen.kt` and `util/NotificationInboxPolicy.kt`: private account inbox/archive UI and read/unread filtering.
+- `app/src/main/java/com/magd/tanweer/ui/components/BookDetailsModal.kt`: full-window modal book-details layer; scrim touch isolation, scrollable content, navigation-bar/IME-safe CTA. Robolectric/Compose regression tests: `ui/components/BookDetailsModalTest.kt`.
 - `app/src/main/java/com/magd/tanweer/ui/LibraryNavigationRequest.kt`: one-shot contextual library route state remains unchanged.
 - `app/src/main/java/com/magd/tanweer/data/repository/TanweerRepository.kt`: network/data coordination, remote-to-local reconciliation, mutations and media operations.
 - `app/src/main/java/com/magd/tanweer/data/remote/TanweerApiService.kt` and `NetworkModule.kt`: Retrofit API and authenticated network setup.

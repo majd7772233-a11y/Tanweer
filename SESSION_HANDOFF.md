@@ -865,3 +865,16 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **SQLite smoke test only:** the migration SQL was run against an isolated fixture of four eligible users, one eligible FOR vote, and one out-of-snapshot FOR vote; it produced `REVIEW_REQUIRED`. This is not a D1 migration or real school-data inspection. No local npm/Gradle or emulator/phone acceptance is claimed.
 - **Phase 5:** manual physical-device and multi-account acceptance remains open. Apply migration only after explicit environment authorisation, then review historical records with an authorised operator.
 - **Next roadmap item:** P2-31 — modal book-details layer must consume background touches and keep its CTA clear of the navigation bar. Keep Phase 5 acceptance open.
+
+
+## 2026-11-25 — P2-31 library book-details modal and CTA checkpoint
+
+- **Source:** `work/release-readiness`, final source SHA `9c064e8251b0cbd6a19bb5afe93b4eccb1aeb97c`. Implementation began at `92a2f446`; compile fix `a12ac23`; final scrim test coordinate correction `9c064e8`.
+- **Android:** replaced the library book-details `ModalBottomSheet` with `ui/components/BookDetailsModal.kt`, a full-window Dialog with an explicit consuming scrim. Non-interactive content taps are consumed within the sheet; Back, scrim and close button dismiss it. The content scrolls, and navigation-bar/IME insets are applied before the primary CTA. CTA fills the available width and retains the GlassButton 48dp minimum height.
+- **Regression tests:** `BookDetailsModalTest` verifies a scrim tap dismisses without invoking the underlying library click, and an inside-sheet tap does not dismiss while the primary open action remains clickable.
+- **Exact-SHA Android CI:** run `45638993850` PASS: `testStagingDebugUnitTest`, `assembleStagingDebug`, Debug artifact upload. PR Release signing/build steps were skipped as configured.
+- **APK artifact:** ID `15033988724`; archive size 31,340,606 bytes; SHA-256 `848bfae4aa4049e1a314db822730822d821578a3d7aa6240a861a8bc97f67a18`. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45638993850/artifacts/15033988724).
+- **Exact-SHA Server CI:** run `45638993845` PASS: TypeScript, zero npm audit vulnerabilities, 47 Vitest files / 327 tests, Wrangler Production/Staging dry-runs. No server files changed in P2-31.
+- **No local/device claims:** no local Gradle run and no emulator/phone acceptance. Validate background-touch isolation, CTA vs gesture navigation, Back, IME and 360/393/411dp layouts during Phase 5.
+- **Governance:** no Worker deployment, D1 migration/apply/write, secret changes, Production/Staging mutation, main update, PR merge or release signing. PR #6 remains Open + Draft + Unmerged; main remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- **Next roadmap item:** P2-32 — crowded PDF reader controls and touch targets below 48dp. Keep Phase 5 acceptance open.
