@@ -22,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.magd.tanweer.ui.theme.TanweerTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -85,18 +86,24 @@ class KeyboardAwareFormDialogTest {
                 var formOpen by remember { mutableStateOf(true) }
 
                 if (formOpen) {
-                    KeyboardAwareFormBackHandler(
-                        imeVisible = imeVisible,
-                        onHideKeyboard = {
-                            imeVisible = false
-                            hideCount++
-                        },
-                        onDismissRequest = {
-                            formOpen = false
-                            dismissCount++
+                    Dialog(onDismissRequest = { formOpen = false }) {
+                        val dialogDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+                        SideEffect {
+                            dispatchBack = { dialogDispatcher?.onBackPressed() }
                         }
-                    )
-                    Text("Draft remains here", Modifier.testTag("form_draft"))
+                        KeyboardAwareFormBackHandler(
+                            imeVisible = imeVisible,
+                            onHideKeyboard = {
+                                imeVisible = false
+                                hideCount++
+                            },
+                            onDismissRequest = {
+                                formOpen = false
+                                dismissCount++
+                            }
+                        )
+                        Text("Draft remains here", Modifier.testTag("form_draft"))
+                    }
                 }
             }
         }
