@@ -1,6 +1,6 @@
 # Tanweer — Project Architecture and Engineering Notes
 
-Updated 2026-11-25. Latest verified source-code checkpoint: P2-37 full-resolution camera capture, be76d445d8476db4d192baed9319b1966ca67a6e on work/release-readiness. Android CI run 45674833698 and Server CI run 45674833715 passed on this exact SHA.
+Updated 2026-11-25. Latest verified source-code checkpoint: P2-38 notification deep-link startup, 8be3366009dd7557542cdfc8322bb88c2d6b0348 on work/release-readiness. Android CI run 45679523512 and Server CI run 45679523400 passed on this exact SHA.
 
 ## 1. Repository and branch contract
 
@@ -8,7 +8,7 @@ Updated 2026-11-25. Latest verified source-code checkpoint: P2-37 full-resolutio
 - The only permitted long-lived branches are `main` and `work/release-readiness`.
 - All implementation, tests and documentation for ongoing work go directly to `work/release-readiness`. Do not create per-batch, feature, hotfix, or CI scratch branches.
 - `main` is the Production line. At the verification checkpoint it is `64143994070bcdc410cf044379fe2801da8f9a3c`. Do not push to, merge into, or deploy Production unless the user explicitly requests a release.
-- `work/release-readiness` is the integration and Staging line. Its latest verified source checkpoint is `be76d445d8476db4d192baed9319b1966ca67a6e`; documentation-only commits may advance the branch HEAD, so always read the live branch head.
+- `work/release-readiness` is the integration and Staging line. Its latest verified source checkpoint is `8be3366009dd7557542cdfc8322bb88c2d6b0348`; documentation-only commits may advance the branch HEAD, so always read the live branch head.
 - PR #7 (Batch 2) is merged into `work/release-readiness` at `a834068b62094de8247f9b49072090df6d9a8ffb`. PR #6 remains an open Draft from `work/release-readiness` to `main`; it is not merged.
 - Before every new task, read the latest commit, `GPT.md`, this file, and the latest relevant test output. These notes are a map, not a substitute for checking HEAD.
 
@@ -26,6 +26,7 @@ Updated 2026-11-25. Latest verified source-code checkpoint: P2-37 full-resolutio
 ### Source map
 - `app/src/main/java/com/magd/tanweer/ui/TanweerApp.kt`: root navigation, tabs and sub-screens.
 - `app/src/main/java/com/magd/tanweer/ui/TanweerViewModel.kt`: navigation state, startup reconciliation, section-entry refreshes and UI actions.
+- `app/src/main/java/com/magd/tanweer/data/notifications/NotificationNavigationPolicy.kt`: allow-listed reminder destinations, one-shot cold-start handoff, safe activity launch flags and fail-closed validation policy. `MainActivity.kt` stages cold intents and forwards warm intents from `onNewIntent()`; `TanweerNotificationManager.kt` builds all notification PendingIntents through the shared helper.
 - `app/src/main/java/com/magd/tanweer/ui/GroupsNavigationPolicy.kt`: validated return destination for the Moderator Dashboard's group-management shortcut.
 - `app/src/main/java/com/magd/tanweer/ui/LibraryNavigationRequest.kt`: one-shot grade/subject context passed from contextual actions to the Library.
 - `app/src/main/java/com/magd/tanweer/util/ExamBookNavigationPolicy.kt`: exact grade/subject resolution for exam-to-book navigation.
@@ -45,6 +46,13 @@ Updated 2026-11-25. Latest verified source-code checkpoint: P2-37 full-resolutio
 - Services Hub: `ui/screens/ExtraSectionsHubScreen.kt` renders academic, community, role and settings actions. `HubActionCard` uses compact horizontal layout, two-line title/description limits, a full-surface Button target and no redundant inner padding. Regression tests: `app/src/test/java/com/magd/tanweer/ui/screens/HubActionCardTest.kt`.
 - Academic-year and date rules live under `util/AcademicYearManager.kt` and related utilities.
 - PDF reader: `ui/screens/pdf/PdfReaderScreen.kt` owns `TopReaderBar` and `BottomReaderBar`; secondary actions live in a compact overflow menu and control targets are 48dp minimum. Arabic/English labels are in `res/values/strings.xml` and `res/values-en/strings.xml`. Regression coverage: `app/src/test/java/com/magd/tanweer/ui/screens/pdf/PdfReaderControlsTest.kt` (360/393/411dp). Page curl is in `CanvasPageCurl.kt`; extraction is in `util/PdfTextExtractor.kt` and focus ambience in `util/FocusNoisePlayer.kt`.
+
+### Notification-driven navigation and startup fast path
+- Reminder PendingIntents use `NEW_TASK | CLEAR_TOP | SINGLE_TOP`, and `MainActivity` declares `singleTop`, so an existing task/activity receives the target through `onNewIntent()` instead of being cleared/recreated.
+- Cold-start extras are allow-listed and staged in `NotificationLaunchStore` before the lazy ViewModel starts. The one-shot store prevents Activity recreation from replaying a consumed target; the Activity removes the extra after staging/forwarding.
+- Notification navigation must pass `verifyServerDataGeneration()`, successful `syncProfile()` and `syncGroups()`, and a post-request equality check of the original local user ID/token. The selected group is resolved only against the server-refreshed active membership list. Failed validation leaves the notification destination unopened; never expose a protected cache by skipping the trust gate.
+- A validated notification uses the existing per-destination state flows and starts only its target refresh. Do not call `setTab()`/`setSubScreen()` from this fast path because they trigger another entry refresh. Broad `syncInitial()` and `refreshStartupAuxiliaryData()` are deferred for notification cold starts; the ordinary launcher startup path remains unchanged.
+- Periodic app-version/catalog maintenance is skipped only during a cold start that carries a notification destination. Outbox generation gating remains authoritative; the notification path avoids the explicit synchronous startup drain before presenting the target.
 
 ### Data ownership and sync invariants
 - The server is authoritative for shared school records. Room is the local cache/UI source and must remain useful offline.
