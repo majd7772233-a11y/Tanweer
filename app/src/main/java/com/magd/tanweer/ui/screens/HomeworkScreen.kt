@@ -1381,7 +1381,7 @@ fun AddHomeworkDialog(
     val processingPageIds = remember { mutableSetOf<String>() }
     var showDatePicker by remember { mutableStateOf(false) }
     var showStudyDatePicker by remember { mutableStateOf(false) }
-    var isSubmitting by remember { mutableStateOf(false) }
+    var isSubmitting by rememberSaveable { mutableStateOf(false) }
 
     val studyDatePickerState = key(studyDate) {
         rememberDatePickerState(
@@ -1606,11 +1606,15 @@ fun AddHomeworkDialog(
         }
     }
 
-    Dialog(
+    KeyboardAwareFormDialog(
         onDismissRequest = { if (!isSubmitting) { discardDraftPages(); onDismiss() } },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         Scaffold(
+            modifier = Modifier.fillMaxSize(),
             topBar = {
                 Box(
                     modifier = Modifier
@@ -1694,12 +1698,11 @@ fun AddHomeworkDialog(
             },
             containerColor = MidnightBackground
         ) { paddingValues ->
-            Column(
+            KeyboardAwareFormScrollColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(horizontal = 16.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Spacer(modifier = Modifier.height(4.dp))
