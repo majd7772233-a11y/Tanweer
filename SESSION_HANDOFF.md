@@ -4,25 +4,27 @@
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; only long-lived branches are `main` and `work/release-readiness`.
-- Latest verified source-code checkpoint: `be76d445d8476db4d192baed9319b1966ca67a6e` on `work/release-readiness`. Documentation-only commits may advance the live branch HEAD; always fetch the branch before further work.
+- Latest verified source-code checkpoint: P2-38 at `8be3366009dd7557542cdfc8322bb88c2d6b0348` on `work/release-readiness`. Documentation-only commits may advance branch HEAD; fetch the live branch before further work.
 - `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; it was not modified.
-- PR #6 remains Open + Draft + Unmerged, base `main`, head `work/release-readiness`. Do not merge or close it without the user's instruction.
-- WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close unless the user expressly asks.
+- PR #6 remains Open + Draft + Unmerged, base `main`, head `work/release-readiness`. Do not merge or close it without instruction.
+- WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` remains RUNNING; do not submit/close unless explicitly asked.
 
-### Current completed checkpoint — P2-37
-- P2-37 full-resolution camera capture is implemented and exact-SHA CI passed on `be76d445d8476db4d192baed9319b1966ca67a6e`.
-- Android CI run `45674833698` PASS: `testStagingDebugUnitTest`, `assembleStagingDebug`, Debug APK upload. Release signing/assembly was skipped as expected for PR validation.
-- Android artifact `15051616638`, name `Tanweer-debug-4cf509ef3ed20d61ba6d8dddc61ee9bc64ad6351`, 31,374,820 bytes, ZIP SHA-256 `55feece2f5caf4397ba61cc92dfa42e3250102ae82ce63debd2242e6c52291e5`.
-- Server CI run `45674833715` PASS on the same SHA: TypeScript, `npm audit`, 47 Vitest files / 327 tests, Wrangler Production/Staging dry-runs. No Server source changed for P2-37.
-- The two former `TakePicturePreview()` call sites in `UploadLessonDialog.kt` and `HomeworkScreen.kt` now use `ActivityResultContracts.TakePicture()` with a full-resolution JPEG target supplied by the existing Tanweer FileProvider. Dedicated provider path: `cacheDir/camera_captures`.
-- Shared file lifecycle is in `app/src/main/java/com/magd/tanweer/util/CameraCaptureFileStore.kt`: create target, resolve canonical-path managed files, copy through FileProvider URI into `filesDir/scan_draft_sources`, delete temp in `finally`, clean failed/canceled captures and expire abandoned captures older than 24h. Draft capture path/page ID are saveable across Activity recreation.
-- Image processing, selected quality preset, enhancement/rotation, page preview/review, and user-confirmed publish flows remain unchanged. No auto-upload starts on camera return.
-- Regression tests: `app/src/test/java/com/magd/tanweer/util/CameraCaptureFileStoreTest.kt` covers secure managed path and cleanup, BuildConfig FileProvider authority, provider XML path, full-resolution 1600×1200 copy into a private draft, and stale cleanup. Robolectric injects a local file URI to test file-copy lifecycle because external ContentProvider resolution is not reliable in that test environment; production defaults still use `FileProvider.getUriForFile`.
-- No local Gradle execution or physical-device/emulator acceptance is claimed. Phase 5 still needs real external-camera URI-grant, camera provider, EXIF orientation, cancel/retry, process recreation, preview/crop and post-confirmation upload checks.
-- No Worker deployment, D1 migration/write, secrets change, Staging/Production data mutation, main update, PR merge or release signing occurred.
+### Current completed checkpoint — P2-38
+- P2-38 notification deep-link startup is implemented and exact-SHA CI passed on `8be3366009dd7557542cdfc8322bb88c2d6b0348`.
+- Android CI run `45679523512` PASS: unit tests, Staging Debug assembly and Debug artifact upload. Release signing/assembly was skipped as expected for PR validation.
+- Android artifact `15051979333`, name `Tanweer-debug-5af1442af461d5c6fb84b1f625bcf9a46406edb3`, 31,383,102 bytes, ZIP SHA-256 `65761ce292b1e84d336a783caf473d3df6183906b39a4e2665488d801cd63d0a`.
+- Server CI run `45679523400` PASS: dependency audit, TypeScript, tests and Wrangler production-bundle validation. No Server source or database files changed.
+- Notification PendingIntents now use `NEW_TASK | CLEAR_TOP | SINGLE_TOP`, and `MainActivity` is `singleTop`; the task is no longer cleared on notification taps.
+- Cold-start routes are staged before ViewModel construction and consumed once. Existing activities handle notification taps through `onNewIntent()`. Only six explicit notification destination values are accepted.
+- A target is not opened until the data-generation guard passes, profile and server-authoritative group membership refreshes both succeed, and the current user ID/token still match the initial session. The selected group is resolved only from refreshed active memberships.
+- After validation, the ViewModel opens the requested destination and starts only its relevant section refresh. It skips the full startup archive, all-group chat history, role dashboards, and explicit synchronous outbox drain before the destination appears. The outbox generation gate and existing post-start drain path remain intact.
+- Cold notification launches skip periodic version/catalog background maintenance so those requests do not compete with the target. Ordinary app launches retain the normal full startup path.
+- Regression coverage: `app/src/test/java/com/magd/tanweer/data/notifications/NotificationNavigationPolicyTest.kt` covers allowed/unknown destinations, one-shot staging, safe task flags, and fail-closed validation requirements.
+- No local Gradle run or physical-device/emulator acceptance is claimed. Phase 5 still needs cold/background notification taps, rapid route changes, expired/revoked sessions, offline behavior, and measured destination load time.
+- No Worker deployment, D1 migration/write, secrets change, Staging/Production data mutation, main update, PR merge or Release signing occurred.
 
 ### Next action
-- P2-38 — improve notification deep-link startup so a notification opens its destination without restarting the full startup request chain. Preserve session/role validation; defer secondary refreshes and use local destination loading rather than skipping authentication.
+- P2-39 — give every notification preference Switch an accessible name/state description and verify the resulting hierarchy and TalkBack navigation. Keep TalkBack/device acceptance explicit; do not claim it from unit tests alone.
 
 ### P2-07 completed
 - Source fix commit `bbeb3e95130cf099cd4dae34b2ea78c3f71ca745`; documentation closeout commit `995eeaf4bc35dac790a2020c01ca2390fc49d512`.
