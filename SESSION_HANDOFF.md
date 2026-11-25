@@ -1,13 +1,27 @@
 # Tanweer — Session Handoff
 
-## Current verified state — 2026-11-23 (supersedes older handoff below)
+## Current verified state — 2026-11-25 (supersedes older handoff below)
 
 ### Repository / PR
-- Repository: `majd7772233-a11y/Tanweer`; working branch only: `work/release-readiness`.
-- Latest pushed code commit: 3e3e42db82112332cf6c57ff2bbc143e13f370c2 (fix: keep official homework badge visible with long titles) on work/release-readiness; P2-10 through P2-19 are complete with exact-SHA Android + Server CI green; main is untouched.
-- PR #6 is Open + Draft + unmerged, base `main`, head `work/release-readiness`. Keep it that way.
-- WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close it unless the user expressly asks.
+- Repository: `majd7772233-a11y/Tanweer`; only long-lived branches are `main` and `work/release-readiness`.
+- Latest verified branch HEAD: `8ade4e834cfb67c53df2cf164bbb0575a45c2558` on `work/release-readiness`.
+- `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; it was not modified.
+- PR #6 remains Open + Draft + Unmerged, base `main`, head `work/release-readiness`. Do not merge or close it without the user's instruction.
+- WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` is not to be submitted/closed unless the user expressly asks.
 
+### Current completed checkpoint — P2-36
+- P2-36 keyboard-safe Homework/Event forms is implemented and exact-SHA CI passed on `8ade4e834cfb67c53df2cf164bbb0575a45c2558`.
+- Android CI run `45665342208` PASS: `testStagingDebugUnitTest`, `assembleStagingDebug`, Debug APK upload. Release signing/assembly was skipped as expected in PR validation.
+- Android artifact `15046703807`, name `Tanweer-debug-2607b2647f414afa75d587bd81c19d7fcfeb297a`, 31,365,985 bytes, ZIP SHA-256 `d9268589f44a95b326d626e5253421b409382ce379168e406315c14980b76884`.
+- Server CI run `45665342049` PASS on the same SHA: TypeScript, `npm audit`, 47 Vitest files / 327 tests and Wrangler Production/Staging dry-runs. No Server source changed for P2-36.
+- Shared Android component: `app/src/main/java/com/magd/tanweer/ui/components/KeyboardAwareFormDialog.kt`; test: `app/src/test/java/com/magd/tanweer/ui/components/KeyboardAwareFormDialogTest.kt`.
+- The first Back press while IME is visible hides the keyboard and keeps the Dialog/draft open; the next Back press dismisses it. Homework save bar and Event publish/cancel row stay outside the scrollable field region. Form draft fields use `rememberSaveable`; transient saving flags do not.
+- No local Gradle execution or physical-device/emulator acceptance is claimed. Phase 5 still requires real keyboard/gesture-navigation and TalkBack/device review.
+- No Worker deployment, D1 migration/write, secrets change, Staging/Production data mutation, main update, PR merge or release signing occurred.
+
+### Next action
+- P2-37 — replace low-resolution camera preview capture for board/homework photos with full-resolution `TakePicture()` + FileProvider, temporary-file lifecycle/cleanup, and user-confirmed upload. Preserve current crop/preview/retry semantics and add regression coverage before CI.
+ 
 ### P2-07 completed
 - Source fix commit `bbeb3e95130cf099cd4dae34b2ea78c3f71ca745`; documentation closeout commit `995eeaf4bc35dac790a2020c01ca2390fc49d512`.
 - Exact-SHA Android run `45041331045` and Server run `45041331041` both passed. Android covered unit tests, Staging Debug assembly and Debug artifact upload; Server covered audit, typecheck, 43 Vitest files / 295 tests and Wrangler Production + Staging dry-runs.
@@ -935,5 +949,18 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Exact-SHA Server CI:** run `45657428272` PASS: TypeScript, dependency security baseline, server tests and Wrangler Production/Staging dry-runs. No Server files changed in P2-35.
 - **Validation boundary:** no local Gradle, emulator/phone install, physical touch, keyboard/IME or visual screenshot acceptance is claimed. Phase 5 remains required; keyboard overlap remains P2-36.
 - **Governance:** no Worker deployment, D1 write/migration, secret change, Staging/Production data mutation, `main` update, PR merge or release signing. PR #6 remains Open + Draft + Unmerged; main remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
-- **Next roadmap item:** P2-36 — keep the Homework/Event form visible above the keyboard and preserve the form when IME is dismissed.
+- **Next roadmap item:** P2-37 — replace low-resolution camera preview captures with full-resolution FileProvider-backed images.
 
+
+
+## 2026-11-25 — P2-36 keyboard-safe form checkpoint
+
+- **Verified source HEAD:** `8ade4e834cfb67c53df2cf164bbb0575a45c2558`, branch `work/release-readiness`.
+- **Implementation:** `KeyboardAwareFormDialog.kt` provides dialog-local BackHandler and safe-content/IME insets. `KeyboardAwareFormScrollColumn` combines vertical scroll with IME nested scrolling. Homework uses a Scaffold whose bottom action bar remains above the keyboard; Event fields scroll within a 92%-height card while cancel/publish actions remain fixed.
+- **Back behavior:** the Dialog-local BackHandler checks `WindowInsets.isImeVisible`; first Back hides the keyboard, subsequent Back dismisses. EventsScreen's parent navigation BackHandler is disabled while the Add Event dialog is open.
+- **Draft behavior:** homework fields remain `rememberSaveable`; event title/category/date/time/location/description now use `rememberSaveable`. In-flight save flags remain transient so a restored screen cannot be stuck in a permanent loading state.
+- **Regression tests:** first/second Back on an actual Compose Dialog dispatcher; compact 360×340dp scroll viewport keeps Save visible and can reach the final field; pure hide-vs-dismiss policy tests.
+- **Android CI:** run `45665342208` PASS on the exact SHA; Staging Debug artifact `15046703807`, 31,365,985 bytes, ZIP SHA-256 `d9268589f44a95b326d626e5253421b409382ce379168e406315c14980b76884`.
+- **Server CI:** run `45665342049` PASS on the same SHA, 47 test files / 327 tests; TypeScript, dependency audit and Wrangler Production/Staging dry-runs passed.
+- **Validation boundary:** CI build only; no local Gradle run, phone/emulator install, real software keyboard interaction, gesture navigation or TalkBack acceptance. Phase 5 remains open.
+- **Next:** P2-37 camera capture full resolution.
