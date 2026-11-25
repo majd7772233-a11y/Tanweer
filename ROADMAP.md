@@ -1260,10 +1260,10 @@
 - `RoleCenterAccessPolicyTest`: أربعة اختبارات JUnit تغطي الطالب، الفئات الأخرى، رتب الطاقم، والحالة غير المعروفة.
 - `ExtraSectionsHubAccessibilityTest`: اختبار عرض تلميح التمرير والوصول إلى ROLES عند عروض 360/393/411dp، واختبار نص الحالة المقفلة وأن الإجراء يفتح callback الملف الشخصي فقط.
 - Server CI run `45686366283` PASS على commit المصدر؛ TypeScript والاختبارات والتحقق من Wrangler اكتملت.
-- Android CI run `45686366246` فشل في المحاولتين 1 و2 قبل تجميع APK. في كل محاولة اكتملت 239 حالة، وفشلت 24 فئة اختبار بسبب `MavenArtifactFetcher.java:129` مع `ExecutionException` / `IOException` في `HttpURLConnection` أثناء تنزيل اعتماد Robolectric. شملت الأخطاء اختبارات موجودة قبل P2-40 (مثل `BookDetailsModalTest` و`HubActionCardTest` و`SettingsToggleAccessibilityTest` و`PdfReaderControlsTest`) والاختبار الجديد؛ لذلك لم يُعزل فشل assertion خاص بالمنطق الجديد. لم يبدأ `assembleStagingDebug` ولم يُرفع APK.
+- Android CI run `45686366246` failed in both attempts during Robolectric dependency download. Follow-up docs-head run `45687372291` successfully fetched dependencies and executed 313 tests; only `ExtraSectionsHubAccessibilityTest.categoryRailShowsScrollCueAndKeepsTheRolesFilterReachableAtPhoneWidths` failed at the scroll-hint visibility assertion (line 60), so APK assembly did not start. The cue no longer depends on post-measure scroll-state flags and is now rendered from the first frame for the multi-category rail.
 - لم يتم تشغيل Gradle محلياً أو تثبيت التطبيق على هاتف/محاكي. لا نزعم أن قصّ الواجهة تم التحقق منه بصرياً على جهاز فعلي.
 
-**الحالة:** التنفيذ البرمجي على الفرع، لكن P2-40 غير متحقق CI بعد. يجب حل تنزيل Robolectric/الاعتماديات أو استعادة توفره في runner، ثم إعادة Android CI على SHA المصدر نفسه قبل اعتباره مكتملاً والانتقال إلى P2-41. لا تخفّض اختبارات التغطية أو تتجاوز فشل Robolectric.
+**الحالة:** تم رفع إصلاح عرض التلميح، لكن P2-40 لا يزال بانتظار Android CI ناجح على SHA الجديد (اختبارات الوحدة وتجميع Staging Debug APK). لا تتجاوز أي assertion أو تخفّض التغطية، ولا تبدأ P2-41 قبل نجاح هذا التحقق.
 
 **الحدود:** لا Worker deployment أو D1 write/migration أو Secrets أو تحديث `main` أو دمج PR. PR #6 بقي Open + Draft + Unmerged.
 

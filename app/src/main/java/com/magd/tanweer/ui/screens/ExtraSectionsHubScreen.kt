@@ -399,9 +399,6 @@ internal fun HubCategoryFilterRow(
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
-    val hasScrollableCategories by remember {
-        derivedStateOf { listState.canScrollForward || listState.canScrollBackward }
-    }
 
     Column(modifier = modifier.fillMaxWidth()) {
         HorizontalFilterStrip(
@@ -433,7 +430,9 @@ internal fun HubCategoryFilterRow(
             }
         }
 
-        AnimatedVisibility(visible = hasScrollableCategories) {
+        // The hub always contains multiple categories; keep the swipe cue visible
+        // from the first frame instead of depending on post-measure scroll flags.
+        if (categories.size > 1) {
             Text(
                 text = stringResource(R.string.hub_category_scroll_hint),
                 modifier = Modifier
