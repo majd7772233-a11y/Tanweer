@@ -920,3 +920,20 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Governance:** no Worker deployment, D1 write/migration, secret change, Staging/Production data mutation, `main` update, PR merge or release signing. PR #6 remains Open + Draft + Unmerged; `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
 - **Next roadmap item:** P2-35 — make the Calendar "add today" sheet scrollable/adaptive so every role-eligible action remains accessible.
 
+
+
+## 2026-11-25 — P2-35 Calendar add-day sheet checkpoint
+
+- **Verified source SHA:** `8420b42659e7f2ffefb01c4d23d9ba68393780b7` on `work/release-readiness`. Main implementation commit `c34562dd25281ac8cacb0765240baebd1c2e8ac8`; test-only follow-up `8420b42659e7f2ffefb01c4d23d9ba68393780b7` replaced an unsupported Compose test assertion after the first Android CI attempt.
+- **Files:** `app/src/main/java/com/magd/tanweer/ui/screens/CalendarScreen.kt`; `ui/screens/CalendarAddActionSheet.kt`; test `app/src/test/java/com/magd/tanweer/ui/screens/CalendarAddActionSheetTest.kt`.
+- **Behavior:** the sheet opens expanded (`skipPartiallyExpanded = true`). Its action content is capped at 82% of screen height and uses `verticalScroll(rememberScrollState())`; the viewport stays bounded while every item is reachable. Existing cards and their callback behavior remain unchanged.
+- **Authorization:** school-holiday action remains visible only to TEACHER/ADMIN. No permission rules or backend endpoints changed.
+- **Regression coverage:** Compose/Robolectric uses a 360×340dp viewport; scrolls to all five eligible actions, checks display/click callbacks, and confirms holiday action absence for other roles while event remains reachable.
+- **First CI attempt:** Android run `45656891198` failed only at test compilation because `assertDoesNotExist` is unavailable in the project’s Compose test API. It was replaced with `onAllNodesWithTag(...).fetchSemanticsNodes().isEmpty()`; production UI code was not weakened.
+- **Exact-SHA Android CI:** run `45657428261` PASS on `8420b42659e7f2ffefb01c4d23d9ba68393780b7`: unit tests, Staging Debug assembly and artifact upload PASS. Release signing/assembly is skipped for PR validation.
+- **Staging Debug artifact:** ID `15042493877`, size `31,358,327` bytes, ZIP SHA-256 `23b5463cbf612dffe24d74ef0fffe7e6c0843d35c8738a1cea5e1587720b69f8`. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45657428261/artifacts/15042493877).
+- **Exact-SHA Server CI:** run `45657428272` PASS: TypeScript, dependency security baseline, server tests and Wrangler Production/Staging dry-runs. No Server files changed in P2-35.
+- **Validation boundary:** no local Gradle, emulator/phone install, physical touch, keyboard/IME or visual screenshot acceptance is claimed. Phase 5 remains required; keyboard overlap remains P2-36.
+- **Governance:** no Worker deployment, D1 write/migration, secret change, Staging/Production data mutation, `main` update, PR merge or release signing. PR #6 remains Open + Draft + Unmerged; main remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- **Next roadmap item:** P2-36 — keep the Homework/Event form visible above the keyboard and preserve the form when IME is dismissed.
+

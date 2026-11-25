@@ -1110,11 +1110,25 @@
 
 **السبب في التقرير:** showAddActionSheet في CalendarScreen.kt يستخدم Column داخل ModalBottomSheet دون verticalScroll/LazyColumn.
 
-**الإصلاح المطلوب:** sheet قابلة للتمرير أو LazyColumn/adaptive layout، مع بقاء كل خيار متاح للدور قابلاً للوصول.
+**التنفيذ (2026-11-25): COMPLETED IN SOURCE**
+- استخراج واجهة الورقة إلى `ui/screens/CalendarAddActionSheet.kt` مع إبقاء منسق callbacks في `CalendarScreen.kt`.
+- جعل `ModalBottomSheet` يتجاوز الحالة الجزئية عند الفتح (`skipPartiallyExpanded = true)) لتظهر الورقة موسعة من البداية.
+- تحديد أقصى ارتفاع لمنطقة المحتوى بنسبة 82% من ارتفاع الشاشة وإضافة `verticalScroll(rememberScrollState())`؛ جميع البطاقات تبقى قابلة للوصول على الشاشات القصيرة.
+- الإبقاء على إجراءات توثيق الدرس وإضافة الواجب والاختبار والفعالية وإعلان الإجازة وعلى callbacks الأصلية والتاريخ المختار.
+- شرط الإجازة لم يتغير: تظهر فقط لدوري `TEACHER` و`ADMIN`.
 
-**ملاحظات مرتبطة:** ورقة إضافة الحدث تتطلب expansion يدوياً والتاريخ حقل نص YYYY-MM-DD. مع الكيبورد تصبح أزرار النموذج السفلية صعبة الوصول، لكن لم يثبت فشل POST؛ لا تسجل فشل submit قبل إعادة اختبار مضبوط.
+**اختبارات الانحدار:**
+- `CalendarAddActionSheetTest.kt` يستخدم Compose/Robolectric في viewport حجمه 360×340dp.
+- يمرر إلى البطاقات الخمس ويثبت ظهورها وقابلية النقر عليها؛ ويثبت غياب خيار الإجازة لغير المصرح لهم مع بقاء خيار الفعالية قابلًا للوصول.
+- لا يدّعي الاختبار الآلي قبولًا بصريًا على هاتف أو اختبار لوحة المفاتيح/نموذج الحدث؛ ملاحظة IME تظل ضمن P2-36.
 
-**الأدلة:** phone-calendar-action-expanded.png وphone-calendar-action-lower.png وphone-daily-plan-dialog.png تحت %TEMP%\tanweer-sync-round-20261118 و%TEMP%\tanweer-calendar-batch-20261119\evidence.
+**التحقق على SHA `8420b42659e7f2ffefb01c4d23d9ba68393780b7`:**
+- Android CI run `45657428261` PASS: `testStagingDebugUnitTest` و`assembleStagingDebug` ورفع Debug APK كلها PASS. Release signing/assembly غير مشمول في تحقق PR.
+- Staging Debug artifact ID `15042493877`، الحجم `31,358,327` bytes، SHA-256 `23b5463cbf612dffe24d74ef0fffe7e6c0843d35c8738a1cea5e1587720b69f8`. [Staging Debug APK artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45657428261/artifacts/15042493877).
+- Server CI run `45657428272` PASS: TypeScript، dependency security baseline، اختبارات الخادم، وWrangler Production/Staging dry-runs. لم تتغير ملفات Server في P2-35.
+- لا يُدّعى تشغيل Gradle محليًا أو تثبيت APK على هاتف/محاكي؛ قبول الأجهزة يبقى في Phase 5.
+
+**حدود التنفيذ:** لا Worker deployment أو D1 write/migration أو Secrets أو تحديث `main` أو دمج PR. PR #6 لا يزال Open + Draft + Unmerged.
 
 ## P2-36 — لوحة المفاتيح تغطي نموذج الواجب/أزرار الإرسال
 

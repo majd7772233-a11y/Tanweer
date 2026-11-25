@@ -24,7 +24,7 @@
 - Current development branch for the active release-readiness work: work/release-readiness.
 - Do not modify main unless the user explicitly asks.
 - Main was last verified at 64143994070bcdc410cf044379fe2801da8f9a3c before the current work.
-- The latest verified source-code checkpoint for P2-34 horizontal filter-strip discoverability and selected-state accessibility is 9f5132e340cd8ff764c1302881e605049263f930 on work/release-readiness; exact-SHA Android CI run 45653781884 and Server CI run 45653782250 passed. P2-33 Hub action-card density remains verified at 51a906225a3820608827eca7f92d5dcf2045ade9; P2-32 PDF reader controls remain verified at 1aefecddc5ad7bc8f73f709211ad9444e0609117. Documentation-only commits may advance the branch after each code checkpoint; always fetch the live HEAD before editing.
+- The latest verified source-code checkpoint for P2-35 Calendar add-day sheet scrollability is 8420b42659e7f2ffefb01c4d23d9ba68393780b7 on work/release-readiness; exact-SHA Android CI run 45657428261 and Server CI run 45657428272 passed. P2-34 horizontal filter-strip discoverability remains verified at 9f5132e340cd8ff764c1302881e605049263f930; P2-33 Hub action-card density at 51a906225a3820608827eca7f92d5dcf2045ade9; P2-32 PDF reader controls at 1aefecddc5ad7bc8f73f709211ad9444e0609117. Documentation-only commits may advance the branch after each code checkpoint; always fetch the live HEAD before editing.
 - PR #6 remains Open + Draft + Unmerged; main remains at 64143994070bcdc410cf044379fe2801da8f9a3c.
 
 ### Previous foundational product/code changes
