@@ -1381,7 +1381,7 @@ fun AddHomeworkDialog(
     val processingPageIds = remember { mutableSetOf<String>() }
     var showDatePicker by remember { mutableStateOf(false) }
     var showStudyDatePicker by remember { mutableStateOf(false) }
-    var isSubmitting by rememberSaveable { mutableStateOf(false) }
+    var isSubmitting by remember { mutableStateOf(false) }
 
     val studyDatePickerState = key(studyDate) {
         rememberDatePickerState(

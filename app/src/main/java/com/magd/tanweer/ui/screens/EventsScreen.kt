@@ -391,7 +391,7 @@ fun EventsScreen(
         var timeStr by rememberSaveable { mutableStateOf("") }
         var location by rememberSaveable { mutableStateOf("") }
         var description by rememberSaveable { mutableStateOf("") }
-        var isSavingEvent by rememberSaveable { mutableStateOf(false) }
+        var isSavingEvent by remember { mutableStateOf(false) }
 
         val dismissDialog = {
             if (!isSavingEvent) {
