@@ -14,6 +14,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.magd.tanweer.MainActivity
 import com.magd.tanweer.R
 import com.magd.tanweer.data.local.TanweerDatabase
+import com.magd.tanweer.data.notifications.NotificationNavigationPolicy
 import com.magd.tanweer.util.HomeworkTaskKind
 import com.magd.tanweer.util.HomeworkTaskTypePolicy
 import com.magd.tanweer.util.NotificationDeliveryPolicy
@@ -468,30 +469,9 @@ object TanweerNotificationManager {
                         .mayDismissEmptySnapshot(autoSyncEnabled, syncSucceeded)
 
                 val today = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date())
-                val pendingHwIntent = PendingIntent.getActivity(
-                    context, 101,
-                    Intent(context, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                        putExtra(EXTRA_NAVIGATE_TO, "HOMEWORK")
-                    },
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                val pendingExamIntent = PendingIntent.getActivity(
-                    context, 102,
-                    Intent(context, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                        putExtra(EXTRA_NAVIGATE_TO, "EXAMS")
-                    },
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                val pendingScheduleIntent = PendingIntent.getActivity(
-                    context, 103,
-                    Intent(context, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                        putExtra(EXTRA_NAVIGATE_TO, "SCHEDULE")
-                    },
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
+                val pendingHwIntent = createNavigationPendingIntent(context, 101, "HOMEWORK")
+                val pendingExamIntent = createNavigationPendingIntent(context, 102, "EXAMS")
+                val pendingScheduleIntent = createNavigationPendingIntent(context, 103, "SCHEDULE")
 
                 if (!notifyHw) {
                     cancelNotificationIfCurrent(
@@ -613,6 +593,23 @@ object TanweerNotificationManager {
     }
 
     const val EXTRA_NAVIGATE_TO = "extra_navigate_to"
+
+    private fun createNavigationPendingIntent(
+        context: Context,
+        requestCode: Int,
+        destination: String
+    ): PendingIntent {
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = NotificationNavigationPolicy.activityLaunchFlags()
+            putExtra(EXTRA_NAVIGATE_TO, destination)
+        }
+        return PendingIntent.getActivity(
+            context,
+            requestCode,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
 
     /**
      * Converts standard Java Calendar.DAY_OF_WEEK (Sunday = 1, Saturday = 7)
@@ -783,15 +780,10 @@ object TanweerNotificationManager {
             HomeworkTaskKind.TASK -> R.string.project_individual_notification_big_text
             HomeworkTaskKind.UNKNOWN -> R.string.other_individual_notification_big_text
         }
-        val openIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra(EXTRA_NAVIGATE_TO, "HOMEWORK")
-        }
-        val pendingIntent = PendingIntent.getActivity(
+        val pendingIntent = createNavigationPendingIntent(
             context,
             (homeworkId.hashCode() and 0x7FFFFFFF),
-            openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            "HOMEWORK"
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
@@ -1004,15 +996,10 @@ object TanweerNotificationManager {
         expectedGeneration: Long = examNotificationGenerationSnapshot()
     ) {
         initChannel(context)
-        val openIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra(EXTRA_NAVIGATE_TO, "EXAMS")
-        }
-        val pendingIntent = PendingIntent.getActivity(
+        val pendingIntent = createNavigationPendingIntent(
             context,
             (examId.hashCode() and 0x7FFFFFFF),
-            openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            "EXAMS"
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
