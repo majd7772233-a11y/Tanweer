@@ -3,6 +3,7 @@ package com.magd.tanweer.ui.components
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -58,6 +59,7 @@ fun KeyboardAwareFormDialog(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun KeyboardAwareFormScrollColumn(
     modifier: Modifier = Modifier,
