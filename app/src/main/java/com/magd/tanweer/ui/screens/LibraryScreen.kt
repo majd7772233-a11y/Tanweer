@@ -897,45 +897,33 @@ fun LibraryScreen(
             val book = selectedBookForDetail!!
             val isDownloaded = downloadedBooksMap[book.id] == true
 
-            ModalBottomSheet(
+            BookDetailsModal(
                 onDismissRequest = { selectedBookForDetail = null },
-                containerColor = MidnightSurface,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = CyanAccent) }
+                dismissContentDescription = stringResource(R.string.library_book_details_dismiss)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Canvas3DBookCard(
-                        book = book,
-                        isDownloaded = isDownloaded,
-                        onDownload = {
-                            selectedBookForDetail = null
-                            viewModel.openBookInPdfReader(book)
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        GlassButton(
-                            text = if (isDownloaded) "فتح ومطالعة الكتاب 📖" else "تحميل وقراءة الآن ⬇️",
-                            icon = if (isDownloaded) Icons.Default.MenuBook else Icons.Default.CloudDownload,
-                            color = if (isDownloaded) EmeraldGreen else CyanAccent,
-                            textColor = TextOnAccent,
-                            onClick = {
-                                selectedBookForDetail = null
-                                viewModel.openBookInPdfReader(book)
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
+                Canvas3DBookCard(
+                    book = book,
+                    isDownloaded = isDownloaded,
+                    onDownload = {
+                        selectedBookForDetail = null
+                        viewModel.openBookInPdfReader(book)
                     }
-                }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                GlassButton(
+                    text = if (isDownloaded) "فتح ومطالعة الكتاب 📖" else "تحميل وقراءة الآن ⬇️",
+                    icon = if (isDownloaded) Icons.Default.MenuBook else Icons.Default.CloudDownload,
+                    color = if (isDownloaded) EmeraldGreen else CyanAccent,
+                    textColor = TextOnAccent,
+                    onClick = {
+                        selectedBookForDetail = null
+                        viewModel.openBookInPdfReader(book)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "book_details_open_button"
+                )
             }
         }
     }

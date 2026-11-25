@@ -256,4 +256,5 @@
         <item quantity="one">%d new notification</item>
         <item quantity="other">%d new notifications</item>
     </plurals>
+    <string name="library_book_details_dismiss">Close book details</string>
 </resources>

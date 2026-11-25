@@ -266,4 +266,5 @@
         <item quantity="many">%d رسالة جديدة</item>
         <item quantity="other">%d رسالة جديدة</item>
     </plurals>
+    <string name="library_book_details_dismiss">إغلاق تفاصيل الكتاب</string>
 </resources>
