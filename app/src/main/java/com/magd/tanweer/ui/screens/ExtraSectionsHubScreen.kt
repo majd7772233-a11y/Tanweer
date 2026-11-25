@@ -76,7 +76,7 @@ fun ExtraSectionsHubScreen(
                     .border(1.dp, CyanGlow.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
                     .padding(18.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -163,7 +163,7 @@ fun ExtraSectionsHubScreen(
             }
 
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (searchQuery.isEmpty() || "مكتبة الكتب المناهج pdf دراسية تحميل تخزين".contains(searchQuery.trim())) {
                         HubActionCard(
                             title = "مكتبة الكتب والمناهج المعتمدة",
@@ -234,7 +234,7 @@ fun ExtraSectionsHubScreen(
             }
 
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (searchQuery.isEmpty() || "قرارات تصويت جماعي حوكمة ديمقراطية نصاب".contains(searchQuery.trim())) {
                         HubActionCard(
                             title = "القرارات والتصويتات الجماعية",
@@ -295,7 +295,7 @@ fun ExtraSectionsHubScreen(
             }
 
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (userRole == Role.TEACHER) {
                         HubActionCard(
                             title = "مركز التعليم للأستاذ المعتمد",
@@ -342,7 +342,7 @@ fun ExtraSectionsHubScreen(
             }
 
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (searchQuery.isEmpty() || "ملف شخصي مساهمات رتبة أوسمة ترقية حساب".contains(searchQuery.trim())) {
                         HubActionCard(
                             title = "الملف الشخصي والمساهمات",
@@ -410,98 +410,99 @@ private fun HubCategoryHeader(title: String, color: Color) {
 }
 
 /**
- * Robust responsive card layout that prevents character wrapping / cutting on any screen size.
+ * Compact, full-surface action card for the services hub.
+ *
+ * GlassCard already contributes 16dp of inner padding. Keep the content free of a
+ * second padding layer so cards remain short while retaining a comfortable target.
  */
 @Composable
-private fun HubActionCard(
+internal fun HubActionCard(
     title: String,
     subtitle: String,
     badge: String,
     badgeColor: Color,
     icon: ImageVector,
     accentColor: Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     GlassCard(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .clickable { onClick() },
+            .heightIn(min = 80.dp)
+            .clickable(
+                role = androidx.compose.ui.semantics.Role.Button,
+                onClick = onClick
+            ),
         backgroundColor = MidnightSurface.copy(alpha = 0.85f),
         borderColor = accentColor.copy(alpha = 0.25f)
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Header Row with Icon, Title, and Badge
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(accentColor.copy(alpha = 0.15f))
+                    .border(1.dp, accentColor.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = accentColor,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.weight(1f, fill = false)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(accentColor.copy(alpha = 0.15f))
-                            .border(1.dp, accentColor.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = title,
-                            tint = accentColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
                     Text(
                         text = title,
-                        fontSize = tanweerTextSize(14f),
+                        modifier = Modifier.weight(1f),
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
+                    )
+
+                    GlassPill(
+                        text = badge,
+                        color = badgeColor,
+                        bgColor = badgeColor.copy(alpha = 0.15f),
+                        modifier = Modifier.padding(start = 2.dp)
                     )
                 }
 
-                GlassPill(
-                    text = badge,
-                    color = badgeColor,
-                    bgColor = badgeColor.copy(alpha = 0.15f)
-                )
-            }
-
-            // Description & Forward Indicator
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
                 Text(
                     text = subtitle,
-                    fontSize = tanweerTextSize(12f),
+                    fontSize = tanweerTextSize(11f),
                     color = TextSecondary,
-                    lineHeight = tanweerLineHeight(17f),
-                    modifier = Modifier.weight(1f)
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Icon(
-                    imageVector = Icons.Default.ChevronLeft,
-                    contentDescription = "فتح",
-                    tint = CyanAccent,
-                    modifier = Modifier.size(18.dp)
+                    lineHeight = tanweerLineHeight(15f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+
+            Icon(
+                imageVector = Icons.Default.ChevronLeft,
+                contentDescription = null,
+                tint = CyanAccent,
+                modifier = Modifier.size(17.dp)
+            )
         }
     }
 }
