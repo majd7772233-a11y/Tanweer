@@ -36,7 +36,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         TanweerNotificationManager.initChannel(this)
         TanweerNotificationManager.scheduleDailyReminder(this)
-        TanweerNotificationManager.performBackgroundMaintenance(this)
+        // Keep periodic version/catalog requests off the critical path of a notification launch.
+        if (intent?.hasExtra(TanweerNotificationManager.EXTRA_NAVIGATE_TO) != true) {
+            TanweerNotificationManager.performBackgroundMaintenance(this)
+        }
         checkAndRequestNotificationPermission()
 
         // Configure Coil image loader to transparently carry authentication headers for school media
