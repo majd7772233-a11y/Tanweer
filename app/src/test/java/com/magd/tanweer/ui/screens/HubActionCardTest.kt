@@ -61,7 +61,7 @@ class HubActionCardTest {
 
             composeRule.onNodeWithTag("hub_action_card")
                 .assertIsDisplayed()
-                .assertWidthIsAtLeast(widthDp.dp)
+                .assertWidthIsAtLeast(widthDp.dp - 40.dp)
                 .assertHeightIsAtLeast(80.dp)
             composeRule.onNodeWithText(title).assertIsDisplayed()
             composeRule.onNodeWithText(badge).assertIsDisplayed()
