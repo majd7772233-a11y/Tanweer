@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.test.core.app.ApplicationProvider
+import com.magd.tanweer.BuildConfig
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -27,7 +28,7 @@ class CameraCaptureFileStoreTest {
         try {
             assertTrue(target.file.isFile)
             assertEquals("content", target.contentUri.scheme)
-            assertEquals("${context.packageName}.fileprovider", target.contentUri.authority)
+            assertEquals("${BuildConfig.APPLICATION_ID}.fileprovider", target.contentUri.authority)
             assertTrue(target.file.canonicalPath.startsWith(File(context.cacheDir, "camera_captures").canonicalPath))
         } finally {
             CameraCaptureFileStore.delete(context, target.file.absolutePath)

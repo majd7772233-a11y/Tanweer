@@ -3,6 +3,7 @@ package com.magd.tanweer.util
 import android.content.Context
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.magd.tanweer.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -42,7 +43,7 @@ object CameraCaptureFileStore {
                 file = file,
                 contentUri = FileProvider.getUriForFile(
                     context,
-                    "${context.packageName}.fileprovider",
+                    providerAuthority(),
                     file
                 )
             )
@@ -71,7 +72,7 @@ object CameraCaptureFileStore {
         val file = managedFile(context, absolutePath) ?: return null
         if (!file.isFile) return null
         return runCatching {
-            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            FileProvider.getUriForFile(context, providerAuthority(), file)
         }.getOrNull()
     }
 
@@ -119,6 +120,8 @@ object CameraCaptureFileStore {
             delete(context, capturePath)
         }
     }
+
+    private fun providerAuthority(): String = "${BuildConfig.APPLICATION_ID}.fileprovider"
 
     private fun captureDirectory(context: Context): File =
         File(context.cacheDir, DIRECTORY_NAME)
