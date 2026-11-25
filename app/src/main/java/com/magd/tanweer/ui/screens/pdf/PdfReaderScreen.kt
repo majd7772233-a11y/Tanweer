@@ -1701,6 +1701,8 @@ fun TopReaderBar(
     onOpenBookInfo: () -> Unit
 ) {
     var isToolsMenuExpanded by remember { mutableStateOf(false) }
+    val backContentDescription = stringResource(R.string.pdf_reader_back_to_library)
+    val moreToolsContentDescription = stringResource(R.string.pdf_reader_more_tools)
     val hrs = sessionReadingSeconds / 3600
     val mins = (sessionReadingSeconds % 3600) / 60
     val secs = sessionReadingSeconds % 60
@@ -1727,14 +1729,14 @@ fun TopReaderBar(
         ) {
             IconButton(
                 onClick = onBack,
-                modifier = Modifier.semantics(mergeDescendants = true) {}
-                    .size(48.dp)
+                modifier = Modifier.size(48.dp)
+                    .semantics(mergeDescendants = true) { contentDescription = backContentDescription }
                     .clip(CircleShape)
                     .background(GlassSurface)
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.pdf_reader_back_to_library),
+                    contentDescription = null,
                     tint = CyanAccent
                 )
             }
@@ -1782,14 +1784,14 @@ fun TopReaderBar(
             Box {
                 IconButton(
                     onClick = { isToolsMenuExpanded = true },
-                    modifier = Modifier.semantics(mergeDescendants = true) {}
-                        .size(48.dp)
+                    modifier = Modifier.size(48.dp)
+                        .semantics(mergeDescendants = true) { contentDescription = moreToolsContentDescription }
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
                     Icon(
                         Icons.Default.MoreVert,
-                        contentDescription = stringResource(R.string.pdf_reader_more_tools),
+                        contentDescription = null,
                         tint = TextPrimary
                     )
                 }
@@ -1874,6 +1876,12 @@ fun BottomReaderBar(
     onToggleFocusRuler: () -> Unit
 ) {
     val jumpToPageDescription = stringResource(R.string.pdf_reader_jump_to_page)
+    val previousPageDescription = stringResource(R.string.pdf_reader_previous_page)
+    val nextPageDescription = stringResource(R.string.pdf_reader_next_page)
+    val resetZoomDescription = stringResource(R.string.pdf_reader_reset_zoom)
+    val rotatePageDescription = stringResource(R.string.pdf_reader_rotate_page)
+    val focusRulerDescription = stringResource(R.string.pdf_reader_focus_ruler)
+    val autoScrollDescription = stringResource(R.string.pdf_reader_auto_scroll)
 
     Box(
         modifier = Modifier
@@ -1898,12 +1906,12 @@ fun BottomReaderBar(
                 IconButton(
                     onClick = onPrevPage,
                     enabled = currentPage > 1,
-                    modifier = Modifier.semantics(mergeDescendants = true) {}
-                        .size(48.dp)
+                    modifier = Modifier.size(48.dp)
+                        .semantics(mergeDescendants = true) { contentDescription = previousPageDescription }
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = stringResource(R.string.pdf_reader_previous_page), tint = CyanAccent, modifier = Modifier.size(20.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
                 }
 
                 Slider(
@@ -1924,12 +1932,12 @@ fun BottomReaderBar(
                 IconButton(
                     onClick = onNextPage,
                     enabled = currentPage < totalPages,
-                    modifier = Modifier.semantics(mergeDescendants = true) {}
-                        .size(48.dp)
+                    modifier = Modifier.size(48.dp)
+                        .semantics(mergeDescendants = true) { contentDescription = nextPageDescription }
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.pdf_reader_next_page), tint = CyanAccent, modifier = Modifier.size(20.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
                 }
             }
 
@@ -1966,35 +1974,35 @@ fun BottomReaderBar(
                 if (zoomScale > 1.05f) {
                     IconButton(
                         onClick = onResetZoom,
-                        modifier = Modifier.semantics(mergeDescendants = true) {}
-                            .size(48.dp)
+                        modifier = Modifier.size(48.dp)
+                            .semantics(mergeDescendants = true) { contentDescription = resetZoomDescription }
                             .clip(CircleShape)
                             .background(CyanGlow)
                     ) {
-                        Icon(Icons.Default.ZoomOutMap, contentDescription = stringResource(R.string.pdf_reader_reset_zoom), tint = CyanAccent, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.ZoomOutMap, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
                     }
                 }
 
                 IconButton(
                     onClick = onRotate,
-                    modifier = Modifier.semantics(mergeDescendants = true) {}
-                        .size(48.dp)
+                    modifier = Modifier.size(48.dp)
+                        .semantics(mergeDescendants = true) { contentDescription = rotatePageDescription }
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.pdf_reader_rotate_page), tint = TextPrimary, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.RotateRight, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(20.dp))
                 }
 
                 IconButton(
                     onClick = onToggleFocusRuler,
-                    modifier = Modifier.semantics(mergeDescendants = true) {}
-                        .size(48.dp)
+                    modifier = Modifier.size(48.dp)
+                        .semantics(mergeDescendants = true) { contentDescription = focusRulerDescription }
                         .clip(CircleShape)
                         .background(if (isFocusRulerActive) CyanGlow else GlassSurface)
                 ) {
                     Icon(
                         Icons.Default.LinearScale,
-                        contentDescription = stringResource(R.string.pdf_reader_focus_ruler),
+                        contentDescription = null,
                         tint = if (isFocusRulerActive) CyanAccent else TextPrimary,
                         modifier = Modifier.size(20.dp)
                     )
@@ -2002,14 +2010,14 @@ fun BottomReaderBar(
 
                 IconButton(
                     onClick = onToggleAutoScroll,
-                    modifier = Modifier.semantics(mergeDescendants = true) {}
-                        .size(48.dp)
+                    modifier = Modifier.size(48.dp)
+                        .semantics(mergeDescendants = true) { contentDescription = autoScrollDescription }
                         .clip(CircleShape)
                         .background(if (isAutoScrollActive) AmberGlow else GlassSurface)
                 ) {
                     Icon(
                         Icons.Default.FastForward,
-                        contentDescription = stringResource(R.string.pdf_reader_auto_scroll),
+                        contentDescription = null,
                         tint = if (isAutoScrollActive) WarmAmber else TextPrimary,
                         modifier = Modifier.size(20.dp)
                     )
