@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.BuildConfig
+import com.magd.tanweer.R
 import com.magd.tanweer.data.model.ComprehensiveSyncReport
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.TanweerViewModel
@@ -1221,7 +1222,7 @@ internal fun SettingsToggleRow(
         }
 
         val switchAccessibilityLabel = listOf(title, subtitle)
-            .map(String::trim)
+            .map { it.trim() }
             .filter(String::isNotEmpty)
             .joinToString(". ")
         val switchStateDescription = stringResource(
