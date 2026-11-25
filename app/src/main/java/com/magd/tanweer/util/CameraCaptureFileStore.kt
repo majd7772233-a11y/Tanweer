@@ -25,7 +25,11 @@ object CameraCaptureFileStore {
     private const val FILE_SUFFIX = ".jpg"
     private const val STALE_AFTER_MILLIS = 24L * 60L * 60L * 1000L
 
-    fun create(context: Context, captureId: String = UUID.randomUUID().toString()): CameraCaptureTarget {
+    fun create(
+        context: Context,
+        captureId: String = UUID.randomUUID().toString(),
+        uriFactory: ((Context, File) -> Uri)? = null
+    ): CameraCaptureTarget {
         val directory = captureDirectory(context)
         if (!directory.isDirectory && !directory.mkdirs()) {
             throw IOException("Could not create camera capture directory")
@@ -41,7 +45,7 @@ object CameraCaptureFileStore {
         return try {
             CameraCaptureTarget(
                 file = file,
-                contentUri = FileProvider.getUriForFile(
+                contentUri = uriFactory?.invoke(context, file) ?: FileProvider.getUriForFile(
                     context,
                     providerAuthority(),
                     file
@@ -68,11 +72,19 @@ object CameraCaptureFileStore {
         }
     }
 
-    fun contentUri(context: Context, absolutePath: String?): Uri? {
+    fun contentUri(
+        context: Context,
+        absolutePath: String?,
+        uriFactory: ((Context, File) -> Uri)? = null
+    ): Uri? {
         val file = managedFile(context, absolutePath) ?: return null
         if (!file.isFile) return null
         return runCatching {
-            FileProvider.getUriForFile(context, providerAuthority(), file)
+            uriFactory?.invoke(context, file) ?: FileProvider.getUriForFile(
+                context,
+                providerAuthority(),
+                file
+            )
         }.getOrNull()
     }
 
@@ -104,12 +116,13 @@ object CameraCaptureFileStore {
     suspend fun persistToDraft(
         context: Context,
         pageId: String,
-        capturePath: String
+        capturePath: String,
+        uriFactory: ((Context, File) -> Uri)? = null
     ): Uri? = withContext(Dispatchers.IO) {
         try {
             val file = managedFile(context, capturePath) ?: return@withContext null
             if (!file.isFile || file.length() <= 0L) return@withContext null
-            val uri = contentUri(context, capturePath) ?: return@withContext null
+            val uri = contentUri(context, capturePath, uriFactory) ?: return@withContext null
             ImageProcessingUtils.persistDraftSource(
                 context = context,
                 pageId = pageId,
