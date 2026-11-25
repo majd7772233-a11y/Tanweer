@@ -878,3 +878,18 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **No local/device claims:** no local Gradle run and no emulator/phone acceptance. Validate background-touch isolation, CTA vs gesture navigation, Back, IME and 360/393/411dp layouts during Phase 5.
 - **Governance:** no Worker deployment, D1 migration/apply/write, secret changes, Production/Staging mutation, main update, PR merge or release signing. PR #6 remains Open + Draft + Unmerged; main remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
 - **Next roadmap item:** P2-32 — crowded PDF reader controls and touch targets below 48dp. Keep Phase 5 acceptance open.
+
+
+## 2026-11-25 — P2-32 PDF reader controls checkpoint
+
+- Branch/source: work/release-readiness؛ verified code SHA 1aefecddc5ad7bc8f73f709211ad9444e0609117. Implementation/test-fix commits in this batch: 8ae2aec، 48921e2، a085d5c، 66725f6، c731512، f879d2d، 2a72a62، and final 1aefecd.
+- UI: TopReaderBar uses a flexible book-information column and moves six secondary actions into a DropdownMenu. BottomReaderBar uses a dedicated page-scrubber row and a separate actions row. Buttons use 48dp sizing and the accessible label is attached to the button-level semantics node.
+- Localization: added menu labels, button descriptions and page-count labels use Arabic default and English strings.xml resources. PdfReaderControlsTest resolves expected labels from R.string and asserts 48dp minimum width/height at widths 360, 393 and 411dp. It verifies secondary menu actions and reset/rotate callbacks.
+- Insets: PDF reader root reserves system bars once with systemBarsPadding(). Child bars do not add a second navigation-bar inset. Phase 5 must validate gesture navigation and real devices.
+- Exact-SHA Android CI: run 45647898847 PASS on 1aefecddc5ad7bc8f73f709211ad9444e0609117؛ testStagingDebugUnitTest، assembleStagingDebug، and Debug APK upload all succeeded.
+- Exact-SHA Server CI: run 45647898651 PASS on the same SHA؛ TypeScript, dependency audit, 47 Vitest files / 327 tests, and Wrangler Production/Staging dry-runs passed. No server files changed in P2-32.
+- Staging APK: artifact ID 15039466112، 31,346,857 bytes، ZIP SHA-256 c182f2a9cf184b4652e6ac0ae88f310cb1d811f9f73a2bc5b76b2b915882c4c0. Artifact: https://github.com/majd7772233-a11y/Tanweer/actions/runs/45647898847/artifacts/15039466112.
+- Intermediate CI issues: early test revisions used unsupported Compose test APIs, called stringResource inside a non-composable semantics lambda, and passed raw resource IDs to String query APIs; all were corrected before the final green run. Earlier Robolectric downloads failed transiently; final exact-SHA run succeeded.
+- Not claimed: no local Gradle execution, no emulator/phone installation, no physical-device/gesture-navigation acceptance, no Worker deployment, no D1 migration/write, no secret change, no Production mutation.
+- Governance: PR #6 remains Open + Draft + Unmerged؛ main remains 64143994070bcdc410cf044379fe2801da8f9a3c.
+- Next roadmap item: P2-33 — reduce vertical height/space consumed by Hub cards.
