@@ -53,7 +53,7 @@ class BookDetailsModalTest {
         }
 
         composeRule.onNodeWithTag("book_details_scrim").performTouchInput {
-            click(Offset(size.width / 2f, size.height * 0.05f))
+            click(Offset(10f, 10f))
         }
 
         composeRule.runOnIdle {
