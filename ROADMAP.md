@@ -1260,10 +1260,10 @@
 - `RoleCenterAccessPolicyTest`: أربعة اختبارات JUnit تغطي الطالب، الفئات الأخرى، رتب الطاقم، والحالة غير المعروفة.
 - `ExtraSectionsHubAccessibilityTest`: اختبار عرض تلميح التمرير والوصول إلى ROLES عند عروض 360/393/411dp، واختبار نص الحالة المقفلة وأن الإجراء يفتح callback الملف الشخصي فقط.
 - Server CI run `45686366283` PASS على commit المصدر؛ TypeScript والاختبارات والتحقق من Wrangler اكتملت.
-- Android CI run `45686366246` failed in both attempts during Robolectric dependency download. Follow-up docs-head run `45687372291` successfully fetched dependencies and executed 313 tests; only `ExtraSectionsHubAccessibilityTest.categoryRailShowsScrollCueAndKeepsTheRolesFilterReachableAtPhoneWidths` failed at the scroll-hint visibility assertion (line 60), so APK assembly did not start. The cue no longer depends on post-measure scroll-state flags and is now rendered from the first frame for the multi-category rail.
+- Android CI run `45689516514` PASS on `a995c935b34c031c15b3bc8db8d2ca365c87c719`: unit tests, Staging Debug APK assembly and artifact upload. Artifact `15057429203` (`Tanweer-debug-78b3c4ccab2ce18f42f6785f2badcb29d8af7a4c`), 31,391,174 bytes. Server CI run `45689516084` PASS: dependency audit, TypeScript, tests and Wrangler validation.
 - لم يتم تشغيل Gradle محلياً أو تثبيت التطبيق على هاتف/محاكي. لا نزعم أن قصّ الواجهة تم التحقق منه بصرياً على جهاز فعلي.
 
-**الحالة:** تم رفع إصلاح عرض التلميح، لكن P2-40 لا يزال بانتظار Android CI ناجح على SHA الجديد (اختبارات الوحدة وتجميع Staging Debug APK). لا تتجاوز أي assertion أو تخفّض التغطية، ولا تبدأ P2-41 قبل نجاح هذا التحقق.
+**الحالة:** مكتمل برمجياً وAndroid/Server CI ناجحان على SHA `a995c935b34c031c15b3bc8db8d2ca365c87c719`. لا يوجد قبول بصري على جهاز حقيقي بعد؛ هذا ضمن Phase 5.
 
 **الحدود:** لا Worker deployment أو D1 write/migration أو Secrets أو تحديث `main` أو دمج PR. PR #6 بقي Open + Draft + Unmerged.
 
@@ -1282,7 +1282,7 @@
 
 **اختبار الانحدار:** `GroupMembersManagementDialogTest` ينشئ ثمانية أعضاء محليين، يتحقق من ظهور التلميح، يمرر القائمة إلى العضو الأخير، ويتأكد من ظهور أزرار الترقية والإزالة والحظر من دون النقر عليها أو استدعاء callbacks.
 
-**الحالة:** التنفيذ والاختبار أُضيفا؛ Android/Server CI على SHA هذا التغيير مطلوبان قبل إغلاق المهمة.
+**التحقق:** Server CI run `45693765348` PASS. Android CI run `45693765576` نفّذ 314 اختباراً؛ فشل اختبار P2-41 عند assertion نص الاسم (line 68) بعد تمرير القائمة، ولم يبدأ Debug APK assembly. جرى جعل اختبار الاسم وأزرار العضو الأخير يعتمد على test tags فردية بدلاً من مطابقة النص. يجب أن يجتاز الـSHA الجديد Android tests + Staging Debug APK assembly قبل إغلاق المهمة.
 
 **الأدلة:** %TEMP%\tanweer-moderator-round-20261120\evidence.
 

@@ -2,7 +2,7 @@
 
 Updated 2026-11-25. Latest verified source-code checkpoint before P2-41: P2-40, a995c935b34c031c15b3bc8db8d2ca365c87c719. Android CI 45689516514 passed tests, Staging Debug assembly and artifact upload 15057429203; Server CI 45689516084 passed.
 
-Current P2-40 candidate source: `3bf43b043a6416cb8f978742f008436e31ecf896`, with a follow-up hint stabilization now pending exact-SHA CI. Server CI run `45686366283` passed. Android CI run `45686366246` initially failed during Robolectric dependency retrieval; follow-up `45687372291` fetched dependencies and ran 313 tests but failed one hint assertion before Staging Debug assembly. The latest verified checkpoint therefore remains P2-39.
+Verified P2-40 exact-SHA checkpoint: `a995c935b34c031c15b3bc8db8d2ca365c87c719`; Android CI `45689516514` passed unit tests, Staging Debug assembly and artifact upload `15057429203`, and Server CI `45689516084` passed. P2-41 latest candidate: `26f3a5385011bc10e04da04a0d7f8e4ac14ff050`; Server CI `45693765348` passed, Android CI `45693765576` ran 314 tests and failed one last-member name assertion. A test-only stabilization now uses individual member/action tags; next exact-SHA Android run is pending.
 
 ## 1. Repository and branch contract
 
@@ -10,7 +10,7 @@ Current P2-40 candidate source: `3bf43b043a6416cb8f978742f008436e31ecf896`, with
 - The only permitted long-lived branches are `main` and `work/release-readiness`.
 - All implementation, tests and documentation for ongoing work go directly to `work/release-readiness`. Do not create per-batch, feature, hotfix, or CI scratch branches.
 - `main` is the Production line. At the verification checkpoint it is `64143994070bcdc410cf044379fe2801da8f9a3c`. Do not push to, merge into, or deploy Production unless the user explicitly requests a release.
-- `work/release-readiness` is the integration and Staging line. Its latest verified source checkpoint is `5fb28ecf2161fb74d4351df783b1a1f24ff56c02`; documentation-only commits may advance the branch HEAD, so always read the live branch head.
+- `work/release-readiness` is the integration and Staging line. Its latest verified source checkpoint at the P2-40 closeout was `a995c935b34c031c15b3bc8db8d2ca365c87c719`; documentation-only commits may advance the branch HEAD, so always read the live branch head.
 - PR #7 (Batch 2) is merged into `work/release-readiness` at `a834068b62094de8247f9b49072090df6d9a8ffb`. PR #6 remains an open Draft from `work/release-readiness` to `main`; it is not merged.
 - Before every new task, read the latest commit, `GPT.md`, this file, and the latest relevant test output. These notes are a map, not a substitute for checking HEAD.
 

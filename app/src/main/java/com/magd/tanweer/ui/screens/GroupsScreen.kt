@@ -1680,6 +1680,7 @@ fun GroupMembersManagementDialog(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 member.fullName,
+                                                modifier = Modifier.testTag("group_member_name_${member.userId}"),
                                                 fontSize = tanweerTextSize(13f),
                                                 fontWeight = FontWeight.Bold,
                                                 color = TextPrimary
@@ -1711,7 +1712,10 @@ fun GroupMembersManagementDialog(
                                             if (member.memberRole == "STUDENT") {
                                                 OutlinedButton(
                                                     onClick = { onUpdateRole(member.userId, "MODERATOR") },
-                                                    modifier = Modifier.weight(1f).height(30.dp),
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height(30.dp)
+                                                        .testTag("group_member_promote_${member.userId}"),
                                                     contentPadding = PaddingValues(horizontal = 3.dp),
                                                     shape = RoundedCornerShape(7.dp)
                                                 ) {
@@ -1729,7 +1733,10 @@ fun GroupMembersManagementDialog(
                                             }
                                             OutlinedButton(
                                                 onClick = { onRemove(member.userId, false) },
-                                                modifier = Modifier.weight(0.75f).height(30.dp),
+                                                modifier = Modifier
+                                                    .weight(0.75f)
+                                                    .height(30.dp)
+                                                    .testTag("group_member_remove_${member.userId}"),
                                                 contentPadding = PaddingValues(horizontal = 3.dp),
                                                 shape = RoundedCornerShape(7.dp)
                                             ) {
@@ -1737,7 +1744,10 @@ fun GroupMembersManagementDialog(
                                             }
                                             OutlinedButton(
                                                 onClick = { onRemove(member.userId, true) },
-                                                modifier = Modifier.weight(0.75f).height(30.dp),
+                                                modifier = Modifier
+                                                    .weight(0.75f)
+                                                    .height(30.dp)
+                                                    .testTag("group_member_ban_${member.userId}"),
                                                 contentPadding = PaddingValues(horizontal = 3.dp),
                                                 shape = RoundedCornerShape(7.dp)
                                             ) {

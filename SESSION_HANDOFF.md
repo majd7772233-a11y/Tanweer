@@ -27,9 +27,9 @@
 - No local Gradle run or physical-device acceptance is claimed. No deployment, D1 write/migration, secrets change, main update or PR merge.
 
 ### P2-41 implementation — CI pending
-- `GroupsScreen.kt` now shows a localized scroll cue when the member list has more than three entries. Stable test tags expose the list, hint and each active member's action row.
-- Added `GroupMembersManagementDialogTest.kt`: eight test-only active members, scroll to last member, assert the last member's promotion/removal/ban actions are visible; callbacks are counted and asserted untouched. No membership mutation is performed.
-- No server, role policy or membership action behavior was changed.
+- `GroupsScreen.kt` now shows a localized scroll cue when the member list has more than three entries. Stable test tags expose the list, hint, each active member's name, and the last member's promotion/removal/ban actions.
+- Added `GroupMembersManagementDialogTest.kt`: eight test-only active members, scroll to last member, assert the last member's name and three actions are visible; callbacks are counted and asserted untouched. No membership mutation is performed.
+- First CI: Server `45693765348` PASS; Android `45693765576` ran 314 tests and failed only the last-member Arabic text matcher at line 68. The test now uses per-member tags for the name and action buttons; next Android exact-SHA run is pending.
 ### Previous completed checkpoint — P2-38
 - P2-38 notification deep-link startup is implemented and exact-SHA CI passed on `8be3366009dd7557542cdfc8322bb88c2d6b0348`.
 - Android CI run `45679523512` PASS: unit tests, Staging Debug assembly and Debug artifact upload. Release signing/assembly was skipped as expected for PR validation.

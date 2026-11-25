@@ -34,7 +34,7 @@ class GroupMembersManagementDialogTest {
         val members = (1..8).map { index ->
             GroupMemberItem(
                 userId = "user-$index",
-                fullName = "عضو %02d".format(index),
+                fullName = "Member $index",
                 memberRole = "STUDENT",
                 status = "ACTIVE",
                 gradeId = 10,
@@ -65,11 +65,11 @@ class GroupMembersManagementDialogTest {
 
         composeRule.onNodeWithTag("group_members_scroll_hint").assertIsDisplayed()
         composeRule.onNodeWithTag("group_members_list").performScrollToIndex(8)
-        composeRule.onNodeWithText("عضو 08").assertIsDisplayed()
+        composeRule.onNodeWithTag("group_member_name_user-8").assertIsDisplayed()
         composeRule.onNodeWithTag("group_member_actions_user-8").assertIsDisplayed()
-        composeRule.onNodeWithText("ترقية لمشرف").assertIsDisplayed()
-        composeRule.onNodeWithText("إزالة").assertIsDisplayed()
-        composeRule.onNodeWithText("حظر").assertIsDisplayed()
+        composeRule.onNodeWithTag("group_member_promote_user-8").assertIsDisplayed()
+        composeRule.onNodeWithTag("group_member_remove_user-8").assertIsDisplayed()
+        composeRule.onNodeWithTag("group_member_ban_user-8").assertIsDisplayed()
 
         composeRule.runOnIdle {
             assertEquals("Scrolling and inspecting must not alter real memberships", 0, mutationCallbacks.intValue)
