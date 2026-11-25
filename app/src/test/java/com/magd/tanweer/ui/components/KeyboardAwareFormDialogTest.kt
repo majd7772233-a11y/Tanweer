@@ -15,9 +15,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -120,7 +120,7 @@ class KeyboardAwareFormDialogTest {
             assertEquals(1, hideCount)
             assertEquals(1, dismissCount)
         }
-        composeRule.onNodeWithTag("form_draft").assertDoesNotExist()
+        assertTrue(composeRule.onAllNodesWithTag("form_draft").fetchSemanticsNodes().isEmpty())
     }
 
     @Test
