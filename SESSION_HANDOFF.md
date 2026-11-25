@@ -4,7 +4,7 @@
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; only long-lived branches are `main` and `work/release-readiness`.
-- Latest verified source-code HEAD: `be76d445d8476db4d192baed9319b1966ca67a6e` on `work/release-readiness`.
+- Latest verified source-code checkpoint: `be76d445d8476db4d192baed9319b1966ca67a6e` on `work/release-readiness`. Documentation-only commits may advance the live branch HEAD; always fetch the branch before further work.
 - `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; it was not modified.
 - PR #6 remains Open + Draft + Unmerged, base `main`, head `work/release-readiness`. Do not merge or close it without the user's instruction.
 - WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close unless the user expressly asks.
