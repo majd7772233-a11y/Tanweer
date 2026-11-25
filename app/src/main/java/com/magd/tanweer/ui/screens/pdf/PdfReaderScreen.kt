@@ -1873,6 +1873,8 @@ fun BottomReaderBar(
     onToggleAutoScroll: () -> Unit,
     onToggleFocusRuler: () -> Unit
 ) {
+    val jumpToPageDescription = stringResource(R.string.pdf_reader_jump_to_page)
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1946,7 +1948,7 @@ fun BottomReaderBar(
                         .background(GlassSurface)
                         .clickable { onOpenJumpDialog() }
                         .semantics(mergeDescendants = true) {
-                            contentDescription = stringResource(R.string.pdf_reader_jump_to_page)
+                            contentDescription = jumpToPageDescription
                         }
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center
