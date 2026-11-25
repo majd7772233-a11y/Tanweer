@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.stringResource
@@ -118,6 +120,7 @@ fun HomeworkScreen(
     }
 
     var selectedFilter by remember { mutableStateOf(HomeworkFilter.ALL) }
+    val homeworkFilterListState = rememberLazyListState()
     var selectedTaskTypeFilter by remember { mutableStateOf<String?>(null) }
     val isAddModalOpenFromVm by viewModel.isAddHomeworkModalOpen.collectAsStateWithLifecycle()
     val initialDueDateFromVm by viewModel.initialHomeworkDueDate.collectAsStateWithLifecycle()
@@ -324,14 +327,16 @@ fun HomeworkScreen(
 
             // Filter Tabs Bar
             item {
-                LazyRow(
+                HorizontalFilterStrip(
+                    state = homeworkFilterListState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(MidnightSurface)
-                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(14.dp))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(14.dp)),
+                    edgeColor = MidnightSurface,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    itemSpacing = 6.dp
                 ) {
                     items(HomeworkFilter.values()) { filter ->
                         val isSelected = selectedFilter == filter
@@ -342,37 +347,60 @@ fun HomeworkScreen(
                             HomeworkFilter.COMPLETED -> typeFilteredHomeworks.count { it.isCompleted }
                             else -> null
                         }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) CyanAccent else Color.Transparent)
-                                .clickable { selectedFilter = filter }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
+                        GlassFilterChip(
+                            selected = isSelected,
+                            onClick = { selectedFilter = filter },
+                            modifier = Modifier,
+                            containerColor = Color.Transparent,
+                            selectedContainerColor = CyanAccent,
+                            labelColor = TextSecondary,
+                            selectedLabelColor = TextOnAccent
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text(text = filter.icon, style = AppTypography.Chip)
+                                Text(
+                                    text = filter.icon,
+                                    modifier = Modifier.clearAndSetSemantics {},
+                                    style = AppTypography.Chip
+                                )
                                 Text(
                                     text = filter.label,
                                     style = AppTypography.Chip.copy(
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSelected) TextOnAccent else if (filter == HomeworkFilter.OVERDUE && overdueCount > 0) Color(0xFFFF5252) else TextSecondary
+                                        color = if (isSelected) TextOnAccent
+                                            else if (filter == HomeworkFilter.OVERDUE && overdueCount > 0) Color(0xFFFF5252)
+                                            else TextSecondary
                                     )
                                 )
+                                if (isSelected) {
+                                    Text(
+                                        text = "✓",
+                                        modifier = Modifier.clearAndSetSemantics {},
+                                        style = AppTypography.Chip.copy(
+                                            color = TextOnAccent,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
                                 if (badgeCount != null && badgeCount > 0) {
                                     Box(
                                         modifier = Modifier
                                             .clip(CircleShape)
-                                            .background(if (isSelected) TextOnAccent.copy(alpha = 0.2f) else if (filter == HomeworkFilter.OVERDUE) Color(0xFFFF5252) else GlassSurfaceLight)
+                                            .background(
+                                                if (isSelected) TextOnAccent.copy(alpha = 0.2f)
+                                                else if (filter == HomeworkFilter.OVERDUE) Color(0xFFFF5252)
+                                                else GlassSurfaceLight
+                                            )
                                             .padding(horizontal = 5.dp, vertical = 1.dp)
                                     ) {
                                         Text(
                                             text = "$badgeCount",
                                             style = AppTypography.Badge.copy(
-                                                color = if (isSelected) TextOnAccent else if (filter == HomeworkFilter.OVERDUE) Color.White else TextSecondary
+                                                color = if (isSelected) TextOnAccent
+                                                    else if (filter == HomeworkFilter.OVERDUE) Color.White
+                                                    else TextSecondary
                                             )
                                         )
                                     }

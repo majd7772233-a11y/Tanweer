@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -20,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -38,6 +40,15 @@ import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.IssueFilter
 import com.magd.tanweer.util.IssueStatus
 import com.magd.tanweer.util.IssueStatusPolicy
+
+
+private val IssueFilter.icon: String
+    get() = when (this) {
+        IssueFilter.ALL -> "📋"
+        IssueFilter.DISCUSSING -> "💬"
+        IssueFilter.SOLVED -> "✅"
+        IssueFilter.CLOSED -> "🔒"
+    }
 
 @Composable
 fun IssuesScreen(
@@ -61,6 +72,7 @@ fun IssuesScreen(
 
     var selectedIssueId by remember { mutableStateOf<String?>(null) }
     var selectedFilter by remember { mutableStateOf(IssueFilter.ALL) }
+    val issueFilterListState = rememberLazyListState()
     var isAddModalOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(activeGroupId) {
@@ -126,26 +138,53 @@ fun IssuesScreen(
 
             // Filters
             item {
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                HorizontalFilterStrip(
+                    state = issueFilterListState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MidnightSurface)
+                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(14.dp)),
+                    edgeColor = MidnightSurface,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    itemSpacing = 6.dp
                 ) {
                     items(IssueFilter.values()) { filter ->
                         val isSelected = selectedFilter == filter
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) CyanGlow else MidnightSurface)
-                                .border(1.dp, if (isSelected) CyanAccent else GlassBorderSubtle, RoundedCornerShape(12.dp))
-                                .clickable { selectedFilter = filter }
-                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                        GlassFilterChip(
+                            selected = isSelected,
+                            onClick = { selectedFilter = filter },
+                            modifier = Modifier,
+                            containerColor = Color.Transparent,
+                            selectedContainerColor = CyanGlow,
+                            labelColor = TextPrimary,
+                            selectedLabelColor = CyanAccent
                         ) {
-                            Text(
-                                text = stringResource(filter.labelRes),
-                                fontSize = tanweerTextSize(12f),
-                                color = if (isSelected) CyanAccent else TextPrimary,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Text(
+                                    text = filter.icon,
+                                    modifier = Modifier.clearAndSetSemantics {},
+                                    fontSize = tanweerTextSize(12f)
+                                )
+                                Text(
+                                    text = stringResource(filter.labelRes),
+                                    fontSize = tanweerTextSize(12f),
+                                    color = if (isSelected) CyanAccent else TextPrimary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                                if (isSelected) {
+                                    Text(
+                                        text = "✓",
+                                        modifier = Modifier.clearAndSetSemantics {},
+                                        fontSize = tanweerTextSize(12f),
+                                        color = CyanAccent,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
