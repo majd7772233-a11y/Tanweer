@@ -1,5 +1,8 @@
 package com.magd.tanweer.ui.screens.pdf
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import com.magd.tanweer.R
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.mutableStateOf
@@ -27,8 +30,11 @@ class PdfReaderControlsTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    private fun assertMinimumTouchTarget(contentDescription: String) {
-        val node = composeRule.onNodeWithContentDescription(contentDescription)
+    private fun localizedString(resourceId: Int): String =
+        ApplicationProvider.getApplicationContext<Context>().getString(resourceId)
+
+    private fun assertMinimumTouchTarget(contentDescriptionResourceId: Int) {
+        val node = composeRule.onNodeWithContentDescription(localizedString(contentDescriptionResourceId))
         node.assertWidthIsAtLeast(48.dp)
         node.assertHeightIsAtLeast(48.dp)
     }
@@ -68,17 +74,17 @@ class PdfReaderControlsTest {
         listOf(360, 393, 411).forEach { widthDp ->
             composeRule.runOnIdle { width.value = widthDp.dp }
             composeRule.waitForIdle()
-            assertMinimumTouchTarget("رجوع للمكتبة")
-            assertMinimumTouchTarget("المزيد من أدوات القراءة")
+            assertMinimumTouchTarget(R.string.pdf_reader_back_to_library)
+            assertMinimumTouchTarget(R.string.pdf_reader_more_tools)
         }
 
-        composeRule.onNodeWithContentDescription("المزيد من أدوات القراءة").performClick()
-        composeRule.onNodeWithText("أدوات الدراسة").assertIsDisplayed()
-        composeRule.onNodeWithText("تشغيل وضع الرسم").assertIsDisplayed()
-        composeRule.onNodeWithText("الفهرس المصغر").assertIsDisplayed()
-        composeRule.onNodeWithText("الإشارات المرجعية").assertIsDisplayed()
-        composeRule.onNodeWithText("الملاحظات").assertIsDisplayed()
-        composeRule.onNodeWithText("الإعدادات وثيمات القراءة")
+        composeRule.onNodeWithContentDescription(R.string.pdf_reader_more_tools).performClick()
+        composeRule.onNodeWithText(localizedString(R.string.pdf_reader_study_tools)).assertIsDisplayed()
+        composeRule.onNodeWithText(localizedString(R.string.pdf_reader_enable_drawing)).assertIsDisplayed()
+        composeRule.onNodeWithText(localizedString(R.string.pdf_reader_thumbnails)).assertIsDisplayed()
+        composeRule.onNodeWithText(localizedString(R.string.pdf_reader_bookmarks)).assertIsDisplayed()
+        composeRule.onNodeWithText(localizedString(R.string.pdf_reader_notes)).assertIsDisplayed()
+        composeRule.onNodeWithText(localizedString(R.string.pdf_reader_settings))
             .assertIsDisplayed()
             .performClick()
 
@@ -118,13 +124,13 @@ class PdfReaderControlsTest {
         }
 
         val targets = listOf(
-            "السابق",
-            "التالي",
-            "إعادة ضبط التكبير",
-            "تدوير الصفحة",
-            "مسطرة التركيز القرائي",
-            "التقليب التلقائي",
-            "الانتقال إلى صفحة"
+            R.string.pdf_reader_previous_page,
+            R.string.pdf_reader_next_page,
+            R.string.pdf_reader_reset_zoom,
+            R.string.pdf_reader_rotate_page,
+            R.string.pdf_reader_focus_ruler,
+            R.string.pdf_reader_auto_scroll,
+            R.string.pdf_reader_jump_to_page
         )
         listOf(360, 393, 411).forEach { widthDp ->
             composeRule.runOnIdle { width.value = widthDp.dp }
@@ -132,8 +138,8 @@ class PdfReaderControlsTest {
             targets.forEach(::assertMinimumTouchTarget)
         }
 
-        composeRule.onNodeWithContentDescription("إعادة ضبط التكبير").performClick()
-        composeRule.onNodeWithContentDescription("تدوير الصفحة").performClick()
+        composeRule.onNodeWithContentDescription(R.string.pdf_reader_reset_zoom).performClick()
+        composeRule.onNodeWithContentDescription(R.string.pdf_reader_rotate_page).performClick()
         composeRule.runOnIdle {
             assertEquals(1, resetZoomCount)
             assertEquals(1, rotateCount)
