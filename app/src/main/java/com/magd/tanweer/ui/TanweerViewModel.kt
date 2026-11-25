@@ -10,6 +10,9 @@ import com.magd.tanweer.data.remote.ConnectionStatus
 import com.magd.tanweer.data.remote.NetworkModule
 import com.magd.tanweer.data.repository.SyncResult
 import com.magd.tanweer.data.repository.TanweerRepository
+import com.magd.tanweer.data.notifications.NotificationDestination
+import com.magd.tanweer.data.notifications.NotificationLaunchStore
+import com.magd.tanweer.data.notifications.NotificationNavigationPolicy
 import com.magd.tanweer.util.AcademicSessionSelection
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
@@ -115,6 +118,8 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
     val isCheckingAuth: StateFlow<Boolean> = _isCheckingAuth.asStateFlow()
     private val localSessionReady = CompletableDeferred<Unit>()
     @Volatile private var dataGenerationVerified = false
+    @Volatile private var pendingNotificationDestination = NotificationLaunchStore.consume()
+    private val notificationNavigationMutex = Mutex()
 
     fun updateUserSessionState(userId: String) {
         if (userId.isBlank()) return
@@ -490,30 +495,40 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                                 }
                             }
 
-                            if (dataGenerationVerified) {
-                                repository.mutationQueue.isDrainAllowed = true
-                                val outboxResult = repository.processOutboxQueue()
-                                outboxResult.exceptionOrNull()?.let {
-                                    android.util.Log.w("TanweerViewModel", "Startup outbox drain was incomplete", it)
-                                }
-                            } else {
-                                repository.mutationQueue.isDrainAllowed = false
-                                android.util.Log.w("TanweerViewModel", "Skipping startup outbox drain because server data generation was not verified")
+                            val startupNotification = pendingNotificationDestination
+                            if (startupNotification != null) {
+                                pendingNotificationDestination = null
                             }
+                            val notificationOpened = startupNotification != null &&
+                                dataGenerationVerified &&
+                                openNotificationDestination(startupNotification, user)
 
-                            val syncResult = repository.syncInitial(getActiveGroupId(), _selectedDate.value)
-                            val refreshedUser = db.userDao().getUserSync()
-                            val activeGroupIds = db.groupDao().getMyGroupsSync().map { it.id }
-                            val authorizedGroupId = AcademicSessionSelection.resolveAuthorizedGroupId(
-                                savedGroupId = _selectedGroupId.value,
-                                defaultGroupId = refreshedUser?.defaultGroupId ?: user.defaultGroupId,
-                                availableGroupIds = activeGroupIds
-                            )
-                            _selectedGroupId.value = authorizedGroupId
-                            prefs.edit().putString("selected_group_id_${user.id}", authorizedGroupId).commit()
+                            if (!notificationOpened) {
+                                if (dataGenerationVerified) {
+                                    repository.mutationQueue.isDrainAllowed = true
+                                    val outboxResult = repository.processOutboxQueue()
+                                    outboxResult.exceptionOrNull()?.let {
+                                        android.util.Log.w("TanweerViewModel", "Startup outbox drain was incomplete", it)
+                                    }
+                                } else {
+                                    repository.mutationQueue.isDrainAllowed = false
+                                    android.util.Log.w("TanweerViewModel", "Skipping startup outbox drain because server data generation was not verified")
+                                }
 
-                            refreshStartupAuxiliaryData(user, authorizedGroupId, activeGroupIds)
-                            applyStartupSyncResult(syncResult, authorizedGroupId, refreshedUser?.gradeId ?: user.gradeId)
+                                val syncResult = repository.syncInitial(getActiveGroupId(), _selectedDate.value)
+                                val refreshedUser = db.userDao().getUserSync()
+                                val activeGroupIds = db.groupDao().getMyGroupsSync().map { it.id }
+                                val authorizedGroupId = AcademicSessionSelection.resolveAuthorizedGroupId(
+                                    savedGroupId = _selectedGroupId.value,
+                                    defaultGroupId = refreshedUser?.defaultGroupId ?: user.defaultGroupId,
+                                    availableGroupIds = activeGroupIds
+                                )
+                                _selectedGroupId.value = authorizedGroupId
+                                prefs.edit().putString("selected_group_id_${user.id}", authorizedGroupId).commit()
+
+                                refreshStartupAuxiliaryData(user, authorizedGroupId, activeGroupIds)
+                                applyStartupSyncResult(syncResult, authorizedGroupId, refreshedUser?.gradeId ?: user.gradeId)
+                            }
                         } catch (e: Exception) {
                             android.util.Log.e("TanweerViewModel", "Startup server reconciliation failed", e)
                             applyStartupSyncResult(
@@ -528,10 +543,129 @@ class TanweerViewModel(application: Application) : AndroidViewModel(application)
                                 repository.mutationQueue.start()
                                 repository.mutationQueue.triggerDrain()
                             }
+                            // A second notification can arrive while the cold-start route is
+                            // validating. Apply that latest tap after the startup gate opens.
+                            val lateNotification = pendingNotificationDestination
+                            val activeUser = currentUser.value
+                            if (lateNotification != null && activeUser != null) {
+                                pendingNotificationDestination = null
+                                launchNotificationNavigation(lateNotification, activeUser)
+                            }
                         }
                     }
                 }
         }
+    }
+
+    /**
+     * Accepts only allow-listed destinations. While startup/session restoration is in flight,
+     * the latest target is staged and consumed by the startup coordinator after its trust gates.
+     */
+    fun requestNotificationNavigation(destinationValue: String?) {
+        val destination = NotificationDestination.parse(destinationValue) ?: return
+        if (_isCheckingAuth.value) {
+            pendingNotificationDestination = destination
+            return
+        }
+        val activeUser = currentUser.value ?: return
+        launchNotificationNavigation(destination, activeUser)
+    }
+
+    private fun launchNotificationNavigation(destination: NotificationDestination, expectedUser: User) {
+        viewModelScope.launch {
+            localSessionReady.await()
+            dataGenerationReady.await()
+            try {
+                if (verifyServerDataGeneration() || !dataGenerationVerified) return@launch
+                openNotificationDestination(destination, expectedUser)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                android.util.Log.w("TanweerViewModel", "Notification destination validation failed", error)
+            }
+        }
+    }
+
+    /**
+     * A notification destination is not shown until the current session's profile and its
+     * server-authoritative active memberships have both been refreshed successfully.
+     * Only the destination's own data is then refreshed; cross-feature startup work is deferred.
+     */
+    private suspend fun openNotificationDestination(
+        destination: NotificationDestination,
+        expectedUser: User
+    ): Boolean = notificationNavigationMutex.withLock {
+        val requestedSession = db.userDao().getUserSync() ?: return@withLock false
+        if (requestedSession.id.isBlank() ||
+            requestedSession.token.isBlank() ||
+            requestedSession.id != expectedUser.id ||
+            !dataGenerationVerified
+        ) {
+            return@withLock false
+        }
+
+        val profileResult = repository.syncProfile()
+        if (profileResult !is SyncResult.Success) return@withLock false
+
+        val membershipsResult = repository.syncGroups()
+        val currentSession = db.userDao().getUserSync()
+        val sameSession = currentSession != null &&
+            currentSession.id == requestedSession.id &&
+            currentSession.token == requestedSession.token
+        if (!NotificationNavigationPolicy.mayOpenAfterValidation(
+                profileSyncSucceeded = profileResult is SyncResult.Success,
+                membershipsSyncSucceeded = membershipsResult is SyncResult.Success,
+                sameSession = sameSession
+            )
+        ) {
+            return@withLock false
+        }
+
+        val refreshedUser = currentSession ?: return@withLock false
+        val activeGroupIds = db.groupDao().getMyGroupsSync().map { it.id }
+        val authorizedGroupId = AcademicSessionSelection.resolveAuthorizedGroupId(
+            savedGroupId = _selectedGroupId.value,
+            defaultGroupId = refreshedUser.defaultGroupId,
+            availableGroupIds = activeGroupIds
+        )
+        _selectedGroupId.value = authorizedGroupId
+        prefs.edit().putString("selected_group_id_${refreshedUser.id}", authorizedGroupId).commit()
+        _groupsSyncState.value = SyncState.Success()
+
+        // Do not use setTab()/setSubScreen(): they synchronously launch the normal
+        // entry-refresh set and would duplicate the targeted request below.
+        val target = when (destination) {
+            NotificationDestination.HOMEWORK -> NavigationTab.HOMEWORK to SubScreen.NONE
+            NotificationDestination.EXAMS -> NavigationTab.EXAMS to SubScreen.NONE
+            NotificationDestination.SCHEDULE -> NavigationTab.MORE to SubScreen.SCHEDULE
+            NotificationDestination.VERSION_CHECK -> NavigationTab.MORE to SubScreen.VERSION_CHECK
+            NotificationDestination.CHAT -> NavigationTab.MORE to SubScreen.GROUPS
+            NotificationDestination.ISSUES -> NavigationTab.MORE to SubScreen.COMMUNITY_DECISIONS
+        }
+        _activeReadingBook.value = null
+        _activeReadingInitialPage.value = null
+        pdfReaderReturnDestination = null
+        groupsReturnDestination = null
+        _currentTab.value = target.first
+        _subScreen.value = target.second
+
+        when (destination) {
+            NotificationDestination.HOMEWORK -> syncHomeworks(authorizedGroupId, isRefresh = true)
+            NotificationDestination.EXAMS -> syncExams(authorizedGroupId, isRefresh = true)
+            NotificationDestination.SCHEDULE -> {
+                syncSchedule(authorizedGroupId, isRefresh = true)
+                loadScheduleData(authorizedGroupId)
+            }
+            NotificationDestination.VERSION_CHECK -> viewModelScope.launch {
+                repository.getSystemVersion()
+            }
+            NotificationDestination.CHAT -> Unit // The fresh membership snapshot already populated this screen.
+            NotificationDestination.ISSUES -> {
+                loadCommunityDecisions(authorizedGroupId)
+                loadScheduleProposals(authorizedGroupId)
+            }
+        }
+        true
     }
 
     fun onAppResumed() {
