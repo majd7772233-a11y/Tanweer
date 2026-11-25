@@ -19,6 +19,15 @@
 - Compose semantics are unit-tested, but real TalkBack announcement/focus-order acceptance is still pending Phase 5 on a physical device. No local Gradle execution or device/emulator install is claimed.
 - P2-38 remains a previous completed source checkpoint at `8be3366009dd7557542cdfc8322bb88c2d6b0348`; see its section below for navigation/authentication safeguards.
 
+### Current implementation candidate — P2-40 (Android CI blocked)
+- Source commit: `3bf43b043a6416cb8f978742f008436e31ecf896` on `work/release-readiness`.
+- `ExtraSectionsHubScreen.kt` now uses `HorizontalFilterStrip`/edge fades and a scroll cue for hidden categories. The student ROLES filter now renders a locked card with the first required rank and an explanation that student contributions remain available. Its only action routes to Profile to request an upgrade; no role dashboard is invoked.
+- Added `RoleCenterAccessPolicy.kt` + 4 JUnit tests. Added `ExtraSectionsHubAccessibilityTest.kt` for 360/393/411dp filter reachability, locked copy and Profile-only callback.
+- Added Arabic and English resource strings.
+- Server CI run `45686366283` PASS. Android CI run `45686366246` failed in both attempts 1 and 2 before APK assembly: both failures were the same Robolectric runtime/dependency fetch issue (`MavenArtifactFetcher.java:129`, `HttpURLConnection` IOException), affecting 24 existing/new test classes out of 239 tests. This is an infrastructure/dependency retrieval failure, not evidence that the new test assertions passed. No Android APK artifact exists for P2-40.
+- P2-40 is implemented but **not CI-verified**. The next action is to resolve the Robolectric dependency-fetch problem and obtain a successful exact-SHA Android run before closing P2-40. No local Gradle run or device/emulator validation is claimed.
+- No deployment, D1 write/migration, Secrets change, main update, PR merge or release.
+
 ### Previous completed checkpoint — P2-38
 - P2-38 notification deep-link startup is implemented and exact-SHA CI passed on `8be3366009dd7557542cdfc8322bb88c2d6b0348`.
 - Android CI run `45679523512` PASS: unit tests, Staging Debug assembly and Debug artifact upload. Release signing/assembly was skipped as expected for PR validation.
@@ -34,7 +43,7 @@
 - No Worker deployment, D1 migration/write, secrets change, Staging/Production data mutation, main update, PR merge or Release signing occurred.
 
 ### Next action
-- P2-40 — fix the clipped “مراكز الإدارة” category rail and explain role-gated student categories with an honest locked/required-role state. Do not expose or invoke admin screens for student accounts.
+- Resolve the P2-40 Android CI blocker, then continue P2-41. P2-40 source commit `3bf43b043a6416cb8f978742f008436e31ecf896` implements the scroll cue and locked student role-center state. Server CI `45686366283` passed; Android CI `45686366246` failed in both attempts on Robolectric `MavenArtifactFetcher` HTTP IOExceptions (24 of 239 test classes), with no APK assembled. Do not mark P2-40 verified or begin P2-41 until a successful Android run on the exact source SHA.
 
 ### P2-07 completed
 - Source fix commit `bbeb3e95130cf099cd4dae34b2ea78c3f71ca745`; documentation closeout commit `995eeaf4bc35dac790a2020c01ca2390fc49d512`.
