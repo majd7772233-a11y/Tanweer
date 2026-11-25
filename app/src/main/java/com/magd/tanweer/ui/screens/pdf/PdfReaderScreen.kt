@@ -1727,7 +1727,7 @@ fun TopReaderBar(
         ) {
             IconButton(
                 onClick = onBack,
-                modifier = Modifier
+                modifier = Modifier.semantics(mergeDescendants = true) {}
                     .size(48.dp)
                     .clip(CircleShape)
                     .background(GlassSurface)
@@ -1782,7 +1782,7 @@ fun TopReaderBar(
             Box {
                 IconButton(
                     onClick = { isToolsMenuExpanded = true },
-                    modifier = Modifier
+                    modifier = Modifier.semantics(mergeDescendants = true) {}
                         .size(48.dp)
                         .clip(CircleShape)
                         .background(GlassSurface)
@@ -1898,7 +1898,7 @@ fun BottomReaderBar(
                 IconButton(
                     onClick = onPrevPage,
                     enabled = currentPage > 1,
-                    modifier = Modifier
+                    modifier = Modifier.semantics(mergeDescendants = true) {}
                         .size(48.dp)
                         .clip(CircleShape)
                         .background(GlassSurface)
@@ -1924,7 +1924,7 @@ fun BottomReaderBar(
                 IconButton(
                     onClick = onNextPage,
                     enabled = currentPage < totalPages,
-                    modifier = Modifier
+                    modifier = Modifier.semantics(mergeDescendants = true) {}
                         .size(48.dp)
                         .clip(CircleShape)
                         .background(GlassSurface)
@@ -1966,7 +1966,7 @@ fun BottomReaderBar(
                 if (zoomScale > 1.05f) {
                     IconButton(
                         onClick = onResetZoom,
-                        modifier = Modifier
+                        modifier = Modifier.semantics(mergeDescendants = true) {}
                             .size(48.dp)
                             .clip(CircleShape)
                             .background(CyanGlow)
@@ -1977,7 +1977,7 @@ fun BottomReaderBar(
 
                 IconButton(
                     onClick = onRotate,
-                    modifier = Modifier
+                    modifier = Modifier.semantics(mergeDescendants = true) {}
                         .size(48.dp)
                         .clip(CircleShape)
                         .background(GlassSurface)
@@ -1987,7 +1987,7 @@ fun BottomReaderBar(
 
                 IconButton(
                     onClick = onToggleFocusRuler,
-                    modifier = Modifier
+                    modifier = Modifier.semantics(mergeDescendants = true) {}
                         .size(48.dp)
                         .clip(CircleShape)
                         .background(if (isFocusRulerActive) CyanGlow else GlassSurface)
@@ -2002,7 +2002,7 @@ fun BottomReaderBar(
 
                 IconButton(
                     onClick = onToggleAutoScroll,
-                    modifier = Modifier
+                    modifier = Modifier.semantics(mergeDescendants = true) {}
                         .size(48.dp)
                         .clip(CircleShape)
                         .background(if (isAutoScrollActive) AmberGlow else GlassSurface)
