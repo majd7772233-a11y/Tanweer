@@ -257,4 +257,22 @@
         <item quantity="other">%d new notifications</item>
     </plurals>
     <string name="library_book_details_dismiss">Close book details</string>
+    <string name="pdf_reader_back_to_library">Back to library</string>
+    <string name="pdf_reader_more_tools">More reading tools</string>
+    <string name="pdf_reader_study_tools">Study tools</string>
+    <string name="pdf_reader_enable_drawing">Enable drawing mode</string>
+    <string name="pdf_reader_disable_drawing">Disable drawing mode</string>
+    <string name="pdf_reader_thumbnails">Page thumbnails</string>
+    <string name="pdf_reader_bookmarks">Bookmarks</string>
+    <string name="pdf_reader_notes">Notes</string>
+    <string name="pdf_reader_settings">Reading settings and themes</string>
+    <string name="pdf_reader_page_count">Page %1$d of %2$d</string>
+    <string name="pdf_reader_jump_to_page">Jump to page</string>
+    <string name="pdf_reader_page_jump_label">📖 %1$d / %2$d</string>
+    <string name="pdf_reader_previous_page">Previous page</string>
+    <string name="pdf_reader_next_page">Next page</string>
+    <string name="pdf_reader_reset_zoom">Reset zoom</string>
+    <string name="pdf_reader_rotate_page">Rotate page</string>
+    <string name="pdf_reader_focus_ruler">Reading focus ruler</string>
+    <string name="pdf_reader_auto_scroll">Auto page turn</string>
 </resources>

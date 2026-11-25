@@ -1734,7 +1734,7 @@ fun TopReaderBar(
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "رجوع للمكتبة",
+                    contentDescription = stringResource(R.string.pdf_reader_back_to_library),
                     tint = CyanAccent
                 )
             }
@@ -1760,7 +1760,7 @@ fun TopReaderBar(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = "صفحة $currentPage / $totalPages",
+                        text = stringResource(R.string.pdf_reader_page_count, currentPage, totalPages),
                         fontSize = tanweerTextSize(11f),
                         color = CyanAccent,
                         fontWeight = FontWeight.Medium,
@@ -1789,7 +1789,7 @@ fun TopReaderBar(
                 ) {
                     Icon(
                         Icons.Default.MoreVert,
-                        contentDescription = "المزيد من أدوات القراءة",
+                        contentDescription = stringResource(R.string.pdf_reader_more_tools),
                         tint = TextPrimary
                     )
                 }
@@ -1799,7 +1799,7 @@ fun TopReaderBar(
                     onDismissRequest = { isToolsMenuExpanded = false }
                 ) {
                     DropdownMenuItem(
-                        text = { Text("أدوات الدراسة") },
+                        text = { Text(stringResource(R.string.pdf_reader_study_tools)) },
                         onClick = {
                             isToolsMenuExpanded = false
                             onOpenStudyTools()
@@ -1807,7 +1807,7 @@ fun TopReaderBar(
                         modifier = Modifier.heightIn(min = 48.dp)
                     )
                     DropdownMenuItem(
-                        text = { Text(if (isDrawingMode) "إيقاف وضع الرسم" else "تشغيل وضع الرسم") },
+                        text = { Text(stringResource(if (isDrawingMode) R.string.pdf_reader_disable_drawing else R.string.pdf_reader_enable_drawing)) },
                         onClick = {
                             isToolsMenuExpanded = false
                             onToggleDrawing()
@@ -1815,7 +1815,7 @@ fun TopReaderBar(
                         modifier = Modifier.heightIn(min = 48.dp)
                     )
                     DropdownMenuItem(
-                        text = { Text("الفهرس المصغر") },
+                        text = { Text(stringResource(R.string.pdf_reader_thumbnails)) },
                         onClick = {
                             isToolsMenuExpanded = false
                             onOpenThumbnails()
@@ -1823,7 +1823,7 @@ fun TopReaderBar(
                         modifier = Modifier.heightIn(min = 48.dp)
                     )
                     DropdownMenuItem(
-                        text = { Text("الإشارات المرجعية") },
+                        text = { Text(stringResource(R.string.pdf_reader_bookmarks)) },
                         onClick = {
                             isToolsMenuExpanded = false
                             onOpenBookmarks()
@@ -1831,7 +1831,7 @@ fun TopReaderBar(
                         modifier = Modifier.heightIn(min = 48.dp)
                     )
                     DropdownMenuItem(
-                        text = { Text("الملاحظات") },
+                        text = { Text(stringResource(R.string.pdf_reader_notes)) },
                         onClick = {
                             isToolsMenuExpanded = false
                             onOpenNotes()
@@ -1839,7 +1839,7 @@ fun TopReaderBar(
                         modifier = Modifier.heightIn(min = 48.dp)
                     )
                     DropdownMenuItem(
-                        text = { Text("الإعدادات وثيمات القراءة") },
+                        text = { Text(stringResource(R.string.pdf_reader_settings)) },
                         onClick = {
                             isToolsMenuExpanded = false
                             onOpenSettings()
@@ -1901,7 +1901,7 @@ fun BottomReaderBar(
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "السابق", tint = CyanAccent, modifier = Modifier.size(20.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = stringResource(R.string.pdf_reader_previous_page), tint = CyanAccent, modifier = Modifier.size(20.dp))
                 }
 
                 Slider(
@@ -1927,7 +1927,7 @@ fun BottomReaderBar(
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "التالي", tint = CyanAccent, modifier = Modifier.size(20.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.pdf_reader_next_page), tint = CyanAccent, modifier = Modifier.size(20.dp))
                 }
             }
 
@@ -1946,13 +1946,13 @@ fun BottomReaderBar(
                         .background(GlassSurface)
                         .clickable { onOpenJumpDialog() }
                         .semantics(mergeDescendants = true) {
-                            contentDescription = "الانتقال إلى صفحة"
+                            contentDescription = stringResource(R.string.pdf_reader_jump_to_page)
                         }
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "📖 $currentPage / $totalPages",
+                        text = stringResource(R.string.pdf_reader_page_jump_label, currentPage, totalPages),
                         fontSize = tanweerTextSize(12f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent,
@@ -1969,7 +1969,7 @@ fun BottomReaderBar(
                             .clip(CircleShape)
                             .background(CyanGlow)
                     ) {
-                        Icon(Icons.Default.ZoomOutMap, contentDescription = "إعادة ضبط التكبير", tint = CyanAccent, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.ZoomOutMap, contentDescription = stringResource(R.string.pdf_reader_reset_zoom), tint = CyanAccent, modifier = Modifier.size(20.dp))
                     }
                 }
 
@@ -1980,7 +1980,7 @@ fun BottomReaderBar(
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.Default.RotateRight, contentDescription = "تدوير الصفحة", tint = TextPrimary, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.RotateRight, contentDescription = stringResource(R.string.pdf_reader_rotate_page), tint = TextPrimary, modifier = Modifier.size(20.dp))
                 }
 
                 IconButton(
@@ -1992,7 +1992,7 @@ fun BottomReaderBar(
                 ) {
                     Icon(
                         Icons.Default.LinearScale,
-                        contentDescription = "مسطرة التركيز القرائي",
+                        contentDescription = stringResource(R.string.pdf_reader_focus_ruler),
                         tint = if (isFocusRulerActive) CyanAccent else TextPrimary,
                         modifier = Modifier.size(20.dp)
                     )
@@ -2007,7 +2007,7 @@ fun BottomReaderBar(
                 ) {
                     Icon(
                         Icons.Default.FastForward,
-                        contentDescription = "التقليب التلقائي",
+                        contentDescription = stringResource(R.string.pdf_reader_auto_scroll),
                         tint = if (isAutoScrollActive) WarmAmber else TextPrimary,
                         modifier = Modifier.size(20.dp)
                     )

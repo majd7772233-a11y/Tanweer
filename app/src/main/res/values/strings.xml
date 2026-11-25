@@ -267,4 +267,22 @@
         <item quantity="other">%d رسالة جديدة</item>
     </plurals>
     <string name="library_book_details_dismiss">إغلاق تفاصيل الكتاب</string>
+    <string name="pdf_reader_back_to_library">الرجوع إلى المكتبة</string>
+    <string name="pdf_reader_more_tools">المزيد من أدوات القراءة</string>
+    <string name="pdf_reader_study_tools">أدوات الدراسة</string>
+    <string name="pdf_reader_enable_drawing">تشغيل وضع الرسم</string>
+    <string name="pdf_reader_disable_drawing">إيقاف وضع الرسم</string>
+    <string name="pdf_reader_thumbnails">الفهرس المصغر</string>
+    <string name="pdf_reader_bookmarks">الإشارات المرجعية</string>
+    <string name="pdf_reader_notes">الملاحظات</string>
+    <string name="pdf_reader_settings">الإعدادات وثيمات القراءة</string>
+    <string name="pdf_reader_page_count">صفحة %1$d من %2$d</string>
+    <string name="pdf_reader_jump_to_page">الانتقال إلى صفحة</string>
+    <string name="pdf_reader_page_jump_label">📖 %1$d / %2$d</string>
+    <string name="pdf_reader_previous_page">الصفحة السابقة</string>
+    <string name="pdf_reader_next_page">الصفحة التالية</string>
+    <string name="pdf_reader_reset_zoom">إعادة ضبط التكبير</string>
+    <string name="pdf_reader_rotate_page">تدوير الصفحة</string>
+    <string name="pdf_reader_focus_ruler">مسطرة التركيز القرائي</string>
+    <string name="pdf_reader_auto_scroll">التقليب التلقائي</string>
 </resources>
