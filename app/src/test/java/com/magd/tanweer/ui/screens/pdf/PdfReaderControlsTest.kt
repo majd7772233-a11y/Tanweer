@@ -78,7 +78,7 @@ class PdfReaderControlsTest {
             assertMinimumTouchTarget(R.string.pdf_reader_more_tools)
         }
 
-        composeRule.onNodeWithContentDescription(R.string.pdf_reader_more_tools).performClick()
+        composeRule.onNodeWithContentDescription(localizedString(R.string.pdf_reader_more_tools)).performClick()
         composeRule.onNodeWithText(localizedString(R.string.pdf_reader_study_tools)).assertIsDisplayed()
         composeRule.onNodeWithText(localizedString(R.string.pdf_reader_enable_drawing)).assertIsDisplayed()
         composeRule.onNodeWithText(localizedString(R.string.pdf_reader_thumbnails)).assertIsDisplayed()
@@ -138,8 +138,8 @@ class PdfReaderControlsTest {
             targets.forEach(::assertMinimumTouchTarget)
         }
 
-        composeRule.onNodeWithContentDescription(R.string.pdf_reader_reset_zoom).performClick()
-        composeRule.onNodeWithContentDescription(R.string.pdf_reader_rotate_page).performClick()
+        composeRule.onNodeWithContentDescription(localizedString(R.string.pdf_reader_reset_zoom)).performClick()
+        composeRule.onNodeWithContentDescription(localizedString(R.string.pdf_reader_rotate_page)).performClick()
         composeRule.runOnIdle {
             assertEquals(1, resetZoomCount)
             assertEquals(1, rotateCount)
