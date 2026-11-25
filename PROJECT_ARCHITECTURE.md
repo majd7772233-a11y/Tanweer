@@ -1,6 +1,6 @@
 # Tanweer — Project Architecture and Engineering Notes
 
-Updated 2026-11-25. Latest verified source-code checkpoint: P2-32 PDF reader controls, 1aefecddc5ad7bc8f73f709211ad9444e0609117 on work/release-readiness. Android and Server CI passed on this exact SHA.
+Updated 2026-11-25. Latest verified source-code checkpoint: P2-33 Hub action-card density, 51a906225a3820608827eca7f92d5dcf2045ade9 on work/release-readiness. Android and Server CI passed on this exact SHA.
 
 ## 1. Repository and branch contract
 
@@ -8,7 +8,7 @@ Updated 2026-11-25. Latest verified source-code checkpoint: P2-32 PDF reader con
 - The only permitted long-lived branches are `main` and `work/release-readiness`.
 - All implementation, tests and documentation for ongoing work go directly to `work/release-readiness`. Do not create per-batch, feature, hotfix, or CI scratch branches.
 - `main` is the Production line. At the verification checkpoint it is `64143994070bcdc410cf044379fe2801da8f9a3c`. Do not push to, merge into, or deploy Production unless the user explicitly requests a release.
-- `work/release-readiness` is the integration and Staging line. Its latest verified source checkpoint is `1aefecddc5ad7bc8f73f709211ad9444e0609117`; documentation-only commits may advance the branch HEAD, so always read the live branch head.
+- `work/release-readiness` is the integration and Staging line. Its latest verified source checkpoint is `51a906225a3820608827eca7f92d5dcf2045ade9`; documentation-only commits may advance the branch HEAD, so always read the live branch head.
 - PR #7 (Batch 2) is merged into `work/release-readiness` at `a834068b62094de8247f9b49072090df6d9a8ffb`. PR #6 remains an open Draft from `work/release-readiness` to `main`; it is not merged.
 - Before every new task, read the latest commit, `GPT.md`, this file, and the latest relevant test output. These notes are a map, not a substitute for checking HEAD.
 
@@ -38,6 +38,7 @@ Updated 2026-11-25. Latest verified source-code checkpoint: P2-32 PDF reader con
 - Room entities/DAOs live under `data/local`; models and response contracts are under `data/model` and `data/remote`.
 - `app/src/main/java/com/magd/tanweer/data/sync/UnifiedMutationQueue.kt`: offline mutation outbox, retry/backoff and chat reconciliation.
 - Main feature screens live under `ui/screens`; reusable Compose components under `ui/components`; shared theme/typography under `ui/theme`.
+- Services Hub: `ui/screens/ExtraSectionsHubScreen.kt` renders academic, community, role and settings actions. `HubActionCard` uses compact horizontal layout, two-line title/description limits, a full-surface Button target and no redundant inner padding. Regression tests: `app/src/test/java/com/magd/tanweer/ui/screens/HubActionCardTest.kt`.
 - Academic-year and date rules live under `util/AcademicYearManager.kt` and related utilities.
 - PDF reader: `ui/screens/pdf/PdfReaderScreen.kt` owns `TopReaderBar` and `BottomReaderBar`; secondary actions live in a compact overflow menu and control targets are 48dp minimum. Arabic/English labels are in `res/values/strings.xml` and `res/values-en/strings.xml`. Regression coverage: `app/src/test/java/com/magd/tanweer/ui/screens/pdf/PdfReaderControlsTest.kt` (360/393/411dp). Page curl is in `CanvasPageCurl.kt`; extraction is in `util/PdfTextExtractor.kt` and focus ambience in `util/FocusNoisePlayer.kt`.
 

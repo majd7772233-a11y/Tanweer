@@ -1062,6 +1062,19 @@
 
 **الإصلاح المطلوب:** بطاقات أقصر/شبكة/صفوف، وصف لا يتجاوز سطرين، وجعل كامل البطاقة قابلاً للنقر مع هدف لمس مناسب.
 
+
+**حالة التنفيذ (2026-11-25): مكتمل على مستوى المصدر والتحقق الآلي — `51a906225a3820608827eca7f92d5dcf2045ade9`.**
+
+- أعيد تصميم HubActionCard كسطر خدمة مضغوط: أيقونة، عنوان وشارة، ثم وصف لا يتجاوز سطرين؛ العنوان أيضاً لا يتجاوز سطرين.
+- أزيلت طبقة padding إضافية 14dp لأن GlassCard يضيف 16dp padding داخلياً أصلاً، وخُفض التباعد بين البطاقات داخل الفئات من 10dp إلى 8dp.
+- البطاقة بكامل سطحها clickable مع role=Button، وارتفاعها الأدنى مضبوط على 80dp؛ الأيقونة وسهم الاتجاه زخرفيان بلا أوصاف وصول مكررة.
+- أضيف HubActionCardTest.kt لاختبار ظهور العنوان والشارة عند عروض 360/393/411dp، وهدف وصول 48dp على الأقل، وإمكانية تفعيل البطاقة بالنقر.
+- Android CI run `45651084444` PASS على SHA النهائي: `testStagingDebugUnitTest` و`assembleStagingDebug` ورفع Staging Debug APK.
+- Server CI run `45651085325` PASS: TypeScript و`npm audit` و47 ملف Vitest و327 اختباراً وWrangler Production/Staging dry-runs. لم تتغير ملفات Server في P2-33.
+- Artifact ID `15041066120`، حجم الأرشيف 31,346,752 bytes، SHA-256 للأرشيف `2604351dc68f709215c0bc681ead9b435fc18d82350a2ef45cef8d92923dc5b6`. [Staging Debug APK artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45651084444/artifacts/15041066120).
+- لا يُدّعى قبول فعلي على هاتف/محاكي أو قياس بصري نهائي؛ Phase 5 ما زال يحتاج مراجعة ارتفاع البطاقات على Pixel 7 Pro وRTL/LTR والتمرير والتباين على جهاز.
+- لا Worker deploy أو D1 write/migration أو Secrets أو تحديث `main` أو دمج PR. PR #6 لا يزال Open + Draft + Unmerged.
+
 ## P2-34 — شرائط الفلاتر أفقية ومضغوطة ولا تكشف التمرير بسهولة
 
 **مرجع التقرير:** TNW-UX-003. **الأولوية:** P2.

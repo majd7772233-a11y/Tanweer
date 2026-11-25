@@ -24,7 +24,7 @@
 - Current development branch for the active release-readiness work: work/release-readiness.
 - Do not modify main unless the user explicitly asks.
 - Main was last verified at 64143994070bcdc410cf044379fe2801da8f9a3c before the current work.
-- The latest verified source-code checkpoint for P2-32 PDF reader controls is 1aefecddc5ad7bc8f73f709211ad9444e0609117 on work/release-readiness; exact-SHA Android and Server CI passed. Documentation-only commits may advance the branch after that code checkpoint; always fetch the live HEAD before editing.
+- The latest verified source-code checkpoint for P2-33 Hub action-card density is 51a906225a3820608827eca7f92d5dcf2045ade9 on work/release-readiness; exact-SHA Android CI run 45651084444 and Server CI run 45651085325 passed. P2-32 PDF reader controls remain verified at 1aefecddc5ad7bc8f73f709211ad9444e0609117. Documentation-only commits may advance the branch after each code checkpoint; always fetch the live HEAD before editing.
 - PR #6 remains Open + Draft + Unmerged; main remains at 64143994070bcdc410cf044379fe2801da8f9a3c.
 
 ### Previous foundational product/code changes

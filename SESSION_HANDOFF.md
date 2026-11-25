@@ -893,3 +893,16 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - Not claimed: no local Gradle execution, no emulator/phone installation, no physical-device/gesture-navigation acceptance, no Worker deployment, no D1 migration/write, no secret change, no Production mutation.
 - Governance: PR #6 remains Open + Draft + Unmerged؛ main remains 64143994070bcdc410cf044379fe2801da8f9a3c.
 - Next roadmap item: P2-33 — reduce vertical height/space consumed by Hub cards.
+## 2026-11-25 — P2-33 Hub action-card density checkpoint
+
+- **Verified branch/head:** work/release-readiness, final source SHA 51a906225a3820608827eca7f92d5dcf2045ade9. PR #6 remains Open + Draft + Unmerged against main; main remains 64143994070bcdc410cf044379fe2801da8f9a3c.
+- **Implementation commits:** 6ab2ff9 compacted Hub service cards and added the Compose/Robolectric test; 3cabd9d adjusted the test's content-node width expectation for GlassCard's inner inset; 51a9062 asserts the minimum accessible content-node height while keeping full-card click behavior coverage.
+- **Android source:** app/src/main/java/com/magd/tanweer/ui/screens/ExtraSectionsHubScreen.kt. Tests: app/src/test/java/com/magd/tanweer/ui/screens/HubActionCardTest.kt.
+- **UI change:** GlassCard contributes 16dp internal padding. Removed the old additional 14dp content padding, shortened category card spacing from 10dp to 8dp, and changed the card to a compact horizontal row with a 36dp icon, title + badge, two-line-clamped subtitle and decorative chevron. Full card surface remains clickable with Button role and 80dp minimum outer height. Icon and chevron descriptions are null to avoid duplicate accessibility nodes.
+- **Regression coverage:** Compose/Robolectric renders at 360/393/411dp, verifies title and badge visibility, checks a 48dp minimum semantics height, and performs the whole-card click to verify callback delivery.
+- **Exact-SHA Android CI:** run 45651084444 PASS on 51a906225a3820608827eca7f92d5dcf2045ade9: testStagingDebugUnitTest, assembleStagingDebug and Debug APK upload. Release-signing tasks were skipped as expected for PR validation.
+- **Staging Debug artifact:** ID 15041066120, archive size 31,346,752 bytes, ZIP SHA-256 2604351dc68f709215c0bc681ead9b435fc18d82350a2ef45cef8d92923dc5b6. Artifact: https://github.com/majd7772233-a11y/Tanweer/actions/runs/45651084444/artifacts/15041066120
+- **Exact-SHA Server CI:** run 45651085325 PASS: TypeScript, npm audit, 47 Vitest files / 327 tests, Wrangler Production/Staging dry-runs. No server files changed for P2-33.
+- **Known validation boundary:** no local Gradle or physical-device/emulator execution is claimed. Phase 5 still needs a real Pixel 7 Pro / phone review of card height, RTL/LTR, scroll density, contrast and touch accuracy.
+- **Governance:** no Worker deploy, D1 migration/write, secret change, Production/Staging mutation, main update, PR merge or release signing.
+- **Next roadmap item:** P2-34 — improve horizontal filter-strip discoverability and selected-state clarity without reducing 48dp touch targets. Phase 5 acceptance remains open.
