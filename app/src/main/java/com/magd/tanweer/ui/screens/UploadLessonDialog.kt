@@ -43,6 +43,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.CameraCaptureFileStore
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
 import kotlinx.coroutines.launch
@@ -111,6 +112,8 @@ fun UploadLessonDialog(
         mutableStateOf<List<LessonScanPage>>(emptyList())
     }
     var isUploading by remember { mutableStateOf(false) }
+    var pendingCameraCapturePath by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingCameraCapturePageId by rememberSaveable { mutableStateOf<String?>(null) }
     val processingPageIds = remember { mutableSetOf<String>() }
 
     // Persist source media before processing so a recreated Activity can resume this page.
@@ -175,13 +178,21 @@ fun UploadLessonDialog(
         }
     }
 
+    fun discardPendingCameraCapture() {
+        CameraCaptureFileStore.delete(context, pendingCameraCapturePath)
+        pendingCameraCapturePath = null
+        pendingCameraCapturePageId = null
+    }
+
     fun discardDraftSources() {
+        discardPendingCameraCapture()
         scannedPages.forEach { page ->
             ImageProcessingUtils.deleteDraftSource(context, page.uri)
         }
     }
 
     fun discardDraftPages() {
+        discardPendingCameraCapture()
         scannedPages.forEach { page ->
             ImageProcessingUtils.deleteDraftPage(
                 context = context,
@@ -215,26 +226,53 @@ fun UploadLessonDialog(
         }
     }
 
-    // Camera launcher
+    // Full-resolution camera capture. The path/id are saveable so an external camera
+    // Activity can return safely after this Activity is recreated.
     val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        if (bitmap != null) {
-            val pageId = UUID.randomUUID().toString()
-            val sourceUri = ImageProcessingUtils.persistCameraPreview(context, pageId, bitmap)
-            if (sourceUri == null) {
-                Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        val capturePath = pendingCameraCapturePath
+        val pageId = pendingCameraCapturePageId
+        pendingCameraCapturePath = null
+        pendingCameraCapturePageId = null
+
+        if (capturePath != null) {
+            if (!success || pageId.isNullOrBlank()) {
+                CameraCaptureFileStore.delete(context, capturePath)
             } else {
-                val newPage = LessonScanPage(
-                    id = pageId,
-                    uri = sourceUri,
-                    rawBitmap = null,
-                    autoEnhance = globalAutoEnhance,
-                    isProcessing = true
-                )
-                scannedPages = scannedPages + newPage
+                scope.launch {
+                    val sourceUri = CameraCaptureFileStore.persistToDraft(
+                        context = context,
+                        pageId = pageId,
+                        capturePath = capturePath
+                    )
+                    if (sourceUri == null) {
+                        Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+                    } else {
+                        scannedPages = scannedPages + LessonScanPage(
+                            id = pageId,
+                            uri = sourceUri,
+                            rawBitmap = null,
+                            autoEnhance = globalAutoEnhance,
+                            isProcessing = true
+                        )
+                    }
+                }
             }
         }
+    }
+
+    fun launchCameraCapture() {
+        if (pendingCameraCapturePath != null) return
+        val pageId = UUID.randomUUID().toString()
+        val target = runCatching { CameraCaptureFileStore.create(context, pageId) }
+            .getOrElse {
+                Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+                return
+            }
+        pendingCameraCapturePath = target.file.absolutePath
+        pendingCameraCapturePageId = pageId
+        cameraLauncher.launch(target.contentUri)
     }
 
     // Permission launcher for Camera
@@ -242,7 +280,7 @@ fun UploadLessonDialog(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
-            cameraLauncher.launch(null)
+            launchCameraCapture()
         } else {
             Toast.makeText(context, "يرجى منح إذن الكاميرا لتوثيق صفحات الدرس", Toast.LENGTH_SHORT).show()
         }

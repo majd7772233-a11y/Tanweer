@@ -64,6 +64,7 @@ import com.magd.tanweer.ui.theme.*
 import com.magd.tanweer.util.HomeworkTaskKind
 import com.magd.tanweer.util.HomeworkTaskTypePolicy
 import com.magd.tanweer.util.HomeworkStudyDatePolicy
+import com.magd.tanweer.util.CameraCaptureFileStore
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
 import kotlinx.coroutines.Dispatchers
@@ -1379,6 +1380,8 @@ fun AddHomeworkDialog(
         mutableStateOf<List<HomeworkScanPage>>(emptyList())
     }
     val processingPageIds = remember { mutableSetOf<String>() }
+    var pendingCameraCapturePath by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingCameraCapturePageId by rememberSaveable { mutableStateOf<String?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showStudyDatePicker by remember { mutableStateOf(false) }
     var isSubmitting by remember { mutableStateOf(false) }
@@ -1544,6 +1547,9 @@ fun AddHomeworkDialog(
     }
 
     fun discardDraftPages() {
+        CameraCaptureFileStore.delete(context, pendingCameraCapturePath)
+        pendingCameraCapturePath = null
+        pendingCameraCapturePageId = null
         scannedPages.forEach { page ->
             ImageProcessingUtils.deleteDraftPage(
                 context = context,
@@ -1573,30 +1579,56 @@ fun AddHomeworkDialog(
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        if (bitmap != null) {
-            val pageId = java.util.UUID.randomUUID().toString()
-            val sourceUri = ImageProcessingUtils.persistCameraPreview(context, pageId, bitmap)
-            if (sourceUri == null) {
-                Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        val capturePath = pendingCameraCapturePath
+        val pageId = pendingCameraCapturePageId
+        pendingCameraCapturePath = null
+        pendingCameraCapturePageId = null
+
+        if (capturePath != null) {
+            if (!success || pageId.isNullOrBlank()) {
+                CameraCaptureFileStore.delete(context, capturePath)
             } else {
-                val newPage = HomeworkScanPage(
-                    id = pageId,
-                    uri = sourceUri,
-                    rawBitmap = null,
-                    isProcessing = true
-                )
-                scannedPages = scannedPages + newPage
+                scope.launch {
+                    val sourceUri = CameraCaptureFileStore.persistToDraft(
+                        context = context,
+                        pageId = pageId,
+                        capturePath = capturePath
+                    )
+                    if (sourceUri == null) {
+                        Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+                    } else {
+                        scannedPages = scannedPages + HomeworkScanPage(
+                            id = pageId,
+                            uri = sourceUri,
+                            rawBitmap = null,
+                            isProcessing = true
+                        )
+                    }
+                }
             }
         }
+    }
+
+    fun launchCameraCapture() {
+        if (pendingCameraCapturePath != null) return
+        val pageId = java.util.UUID.randomUUID().toString()
+        val target = runCatching { CameraCaptureFileStore.create(context, pageId) }
+            .getOrElse {
+                Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+                return
+            }
+        pendingCameraCapturePath = target.file.absolutePath
+        pendingCameraCapturePageId = pageId
+        cameraLauncher.launch(target.contentUri)
     }
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            cameraLauncher.launch(null)
+            launchCameraCapture()
         } else {
             Toast.makeText(
                 context,
@@ -1941,7 +1973,7 @@ fun AddHomeworkDialog(
                                 ) == PackageManager.PERMISSION_GRANTED
 
                                 if (hasCameraPermission) {
-                                    cameraLauncher.launch(null)
+                                    launchCameraCapture()
                                 } else {
                                     cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                                 }

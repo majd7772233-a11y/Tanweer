@@ -146,35 +146,6 @@ object ImageProcessingUtils {
     }
 
     /**
-     * Persist a small camera-preview bitmap before leaving the Activity result callback.
-     * PNG is used for this source copy so the later configured image pipeline remains
-     * the only lossy/compression step.
-     */
-    fun persistCameraPreview(context: Context, pageId: String, bitmap: Bitmap): Uri? {
-        val sourceFile = draftSourceFile(context, pageId)
-        val partialFile = File(sourceFile.parentFile, sourceFile.name + ".part")
-        return try {
-            sourceFile.parentFile?.mkdirs()
-            partialFile.delete()
-            FileOutputStream(partialFile).use { output ->
-                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
-                    throw IllegalStateException("Could not persist camera preview")
-                }
-                output.fd.sync()
-            }
-            sourceFile.delete()
-            if (!partialFile.renameTo(sourceFile)) {
-                throw IllegalStateException("Could not finalize camera preview source")
-            }
-            Uri.fromFile(sourceFile)
-        } catch (error: Exception) {
-            partialFile.delete()
-            Log.w("ImageProcessingUtils", "Could not persist camera preview for draft page $pageId", error)
-            null
-        }
-    }
-
-    /**
      * Copies picker content into app-private storage so Activity/process recreation
      * does not depend on a transient external URI grant.
      */
