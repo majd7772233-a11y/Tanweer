@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.magd.tanweer.ui.theme.TanweerTheme
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -77,10 +76,6 @@ class KeyboardAwareFormDialogTest {
         var dispatchBack: (() -> Unit)? = null
 
         composeRule.setContent {
-            val dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
-            SideEffect {
-                dispatchBack = { dispatcher?.onBackPressed() }
-            }
             TanweerTheme {
                 var imeVisible by remember { mutableStateOf(true) }
                 var formOpen by remember { mutableStateOf(true) }
