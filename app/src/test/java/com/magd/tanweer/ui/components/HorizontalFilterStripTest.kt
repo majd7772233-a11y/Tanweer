@@ -5,10 +5,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,7 +92,10 @@ class HorizontalFilterStripTest {
         }
 
         listOf(360, 393, 411).forEach { widthDp ->
-            composeRule.runOnIdle { width.value = widthDp.dp }
+            composeRule.runOnIdle {
+                width.value = widthDp.dp
+                selectedIndex.value = 0
+            }
             composeRule.waitForIdle()
 
             composeRule.onNodeWithTag("filter_chip_0")
@@ -108,7 +111,6 @@ class HorizontalFilterStripTest {
             composeRule.onNodeWithTag("filter_chip_5").assertIsDisplayed()
             composeRule.onNodeWithTag("filter_chip_5").performClick()
             composeRule.onNodeWithTag("filter_chip_5").assertIsSelected()
-            composeRule.runOnIdle { assertEquals(widthDp / 1, widthDp) }
             composeRule.onNodeWithTag("filter_strip").performScrollToIndex(0)
             composeRule.waitForIdle()
         }
