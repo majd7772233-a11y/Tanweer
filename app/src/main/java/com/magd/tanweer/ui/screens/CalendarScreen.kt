@@ -858,152 +858,38 @@ fun CalendarScreen(
     }
 
     if (showAddActionSheet) {
-        ModalBottomSheet(
+        CalendarAddActionSheet(
+            dateLabel = TanweerViewModel.getFormattedArabicDate(selectedDateStr),
+            canDeclareSchoolHoliday = currentUser?.role in listOf("TEACHER", "ADMIN"),
             onDismissRequest = { showAddActionSheet = false },
-            containerColor = MidnightSurface,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = CyanAccent) }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .padding(bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "➕ إضافة وتوثيق ليوم: ${TanweerViewModel.getFormattedArabicDate(selectedDateStr)}",
-                    fontSize = tanweerTextSize(16f),
-                    fontWeight = FontWeight.Bold,
-                    color = CyanAccent
-                )
-                Text(
-                    text = "اختر نوع النشاط الذي ترغب في إضافته أو توثيقه لهذا التاريخ:",
-                    fontSize = tanweerTextSize(12f),
-                    color = TextSecondary
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface,
-                    onClick = {
-                        showAddActionSheet = false
-                        viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.openUploadDialog()
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text("📷", fontSize = tanweerTextSize(24f))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("توثيق درس للشعبة", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("التقاط صور السبورة ومشاركتها مع زملاء الصف", fontSize = tanweerTextSize(11f), color = TextSecondary)
-                        }
-                        GlassPill(text = "درس", color = CyanAccent, bgColor = CyanGlow)
-                    }
-                }
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface,
-                    onClick = {
-                        showAddActionSheet = false
-                        viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.openAddHomeworkDialog(selectedDateStr)
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text("📝", fontSize = tanweerTextSize(24f))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("إضافة واجب أو تكليف مدرسي", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تسجيل الواجب المطلوب وتاريخ التسليم المعتمد", fontSize = tanweerTextSize(11f), color = TextSecondary)
-                        }
-                        GlassPill(text = "واجب", color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.15f))
-                    }
-                }
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface,
-                    onClick = {
-                        showAddActionSheet = false
-                        viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.openAddExamDialog(selectedDateStr)
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text("📑", fontSize = tanweerTextSize(24f))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("إضافة اختبار أو تسميع دوري", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تحديد موعد الاختبار والفصول المقررة", fontSize = tanweerTextSize(11f), color = TextSecondary)
-                        }
-                        GlassPill(text = "اختبار", color = RubyRed, bgColor = RubyRed.copy(alpha = 0.15f))
-                    }
-                }
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface,
-                    onClick = {
-                        showAddActionSheet = false
-                        viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.openAddEventDialog(selectedDateStr)
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text("🎪", fontSize = tanweerTextSize(24f))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("إضافة فعالية أو مناسبة مدرسية", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تسجيل مسابقة، عطلة، أو نشاط صفي تفاعلي", fontSize = tanweerTextSize(11f), color = TextSecondary)
-                        }
-                        GlassPill(text = "فعالية", color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
-                    }
-                }
-
-                if (currentUser?.role in listOf("TEACHER", "ADMIN")) {
-                    GlassCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        backgroundColor = GlassSurface,
-                        onClick = {
-                            showAddActionSheet = false
-                            holidayTitle = ""
-                            holidayReason = ""
-                            holidayError = null
-                            showAddHolidayDialog = true
-                        }
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text("🌴", fontSize = tanweerTextSize(24f))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("إعلان إجازة مدرسية رسمية", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = EmeraldGreen)
-                                Text("تعيين هذا اليوم كإجازة مع توثيق السبب والمبرر الإلزامي", fontSize = tanweerTextSize(11f), color = TextSecondary)
-                            }
-                            GlassPill(text = "إجازة", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
-                        }
-                    }
-                }
+            onAddLesson = {
+                showAddActionSheet = false
+                viewModel.setSelectedDate(selectedDateStr)
+                viewModel.openUploadDialog()
+            },
+            onAddHomework = {
+                showAddActionSheet = false
+                viewModel.setSelectedDate(selectedDateStr)
+                viewModel.openAddHomeworkDialog(selectedDateStr)
+            },
+            onAddExam = {
+                showAddActionSheet = false
+                viewModel.setSelectedDate(selectedDateStr)
+                viewModel.openAddExamDialog(selectedDateStr)
+            },
+            onAddEvent = {
+                showAddActionSheet = false
+                viewModel.setSelectedDate(selectedDateStr)
+                viewModel.openAddEventDialog(selectedDateStr)
+            },
+            onDeclareSchoolHoliday = {
+                showAddActionSheet = false
+                holidayTitle = ""
+                holidayReason = ""
+                holidayError = null
+                showAddHolidayDialog = true
             }
-        }
+        )
     }
 
     if (showAddHolidayDialog) {
