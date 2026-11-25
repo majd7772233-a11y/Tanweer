@@ -28,10 +28,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.R
 import com.magd.tanweer.data.model.ChatMessageItem
 import com.magd.tanweer.data.model.GroupItem
 import com.magd.tanweer.data.model.Role
@@ -1519,8 +1521,26 @@ fun GroupMembersManagementDialog(
                     }
                 }
                 else -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 430.dp),
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (members.size > 3) {
+                            Text(
+                                text = stringResource(R.string.group_members_scroll_hint),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("group_members_scroll_hint"),
+                                color = TextMuted,
+                                fontSize = tanweerTextSize(10f),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.End
+                            )
+                        }
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 430.dp)
+                                .testTag("group_members_list"),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (canManage && pendingMembers.isNotEmpty()) {
@@ -1683,7 +1703,9 @@ fun GroupMembersManagementDialog(
                                     if (canManage) {
                                         HorizontalDivider(color = GlassBorderSubtle, thickness = 0.5.dp)
                                         Row(
-                                            modifier = Modifier.fillMaxWidth(),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("group_member_actions_${member.userId}"),
                                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                                         ) {
                                             if (member.memberRole == "STUDENT") {
@@ -1756,6 +1778,7 @@ fun GroupMembersManagementDialog(
                                 }
                             }
                         }
+                    }
                     }
                 }
             }

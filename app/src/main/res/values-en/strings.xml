@@ -282,4 +282,5 @@
     <string name="hub_role_center_locked_description">These centers become available after approval as a Class Moderator, Verified Teacher, or School Administrator. You can keep contributing to lessons and class activities without this role.</string>
     <string name="hub_role_center_required_badge">Requires Class Moderator or higher</string>
     <string name="hub_role_center_request_upgrade">Request a role upgrade from your profile</string>
+    <string name="group_members_scroll_hint">Scroll within this list to see the remaining members and their actions ↓</string>
 </resources>

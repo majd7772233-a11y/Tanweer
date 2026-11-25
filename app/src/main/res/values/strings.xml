@@ -292,4 +292,5 @@
     <string name="hub_role_center_locked_description">تظهر هذه المراكز بعد اعتماد رتبة مسؤول شعبة أو أستاذ معتمد أو مدير المدرسة. مساهمتك التعليمية ومشاركتك في الشعبة متاحتان دون هذه الرتبة.</string>
     <string name="hub_role_center_required_badge">يتطلب رتبة مسؤول شعبة أو أعلى</string>
     <string name="hub_role_center_request_upgrade">طلب ترقية الرتبة من الملف الشخصي</string>
+    <string name="group_members_scroll_hint">اسحب داخل القائمة لعرض بقية الأعضاء وأزرار إدارتهم ↓</string>
 </resources>

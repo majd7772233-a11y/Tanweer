@@ -4,7 +4,7 @@
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; only long-lived branches are `main` and `work/release-readiness`.
-- Latest verified source-code checkpoint: P2-39 at `5fb28ecf2161fb74d4351df783b1a1f24ff56c02` on `work/release-readiness`. Documentation-only commits may advance branch HEAD; fetch the live branch before further work.
+- Latest verified source-code checkpoint before P2-41: P2-40 `a995c935b34c031c15b3bc8db8d2ca365c87c719` on `work/release-readiness`. Documentation-only commits may advance branch HEAD; fetch the live branch before further work.
 - `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; it was not modified.
 - PR #6 remains Open + Draft + Unmerged, base `main`, head `work/release-readiness`. Do not merge or close it without instruction.
 - WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` remains RUNNING; do not submit/close unless explicitly asked.
@@ -19,15 +19,17 @@
 - Compose semantics are unit-tested, but real TalkBack announcement/focus-order acceptance is still pending Phase 5 on a physical device. No local Gradle execution or device/emulator install is claimed.
 - P2-38 remains a previous completed source checkpoint at `8be3366009dd7557542cdfc8322bb88c2d6b0348`; see its section below for navigation/authentication safeguards.
 
-### Current implementation candidate — P2-40 (Android CI blocked)
-- Source commit: `3bf43b043a6416cb8f978742f008436e31ecf896` on `work/release-readiness`.
-- `ExtraSectionsHubScreen.kt` now uses `HorizontalFilterStrip`/edge fades and a scroll cue for hidden categories. The student ROLES filter now renders a locked card with the first required rank and an explanation that student contributions remain available. Its only action routes to Profile to request an upgrade; no role dashboard is invoked.
-- Added `RoleCenterAccessPolicy.kt` + 4 JUnit tests. Added `ExtraSectionsHubAccessibilityTest.kt` for 360/393/411dp filter reachability, locked copy and Profile-only callback.
-- Added Arabic and English resource strings.
-- Server CI run `45686366283` PASS. Android CI run `45686366246` first failed twice during Robolectric dependency retrieval. Follow-up docs-head run `45687372291` fetched dependencies and ran 313 tests; only `ExtraSectionsHubAccessibilityTest` failed at line 60 because the initial hint depended on post-measure scroll flags. The multi-category rail now renders the hint from the first frame. No APK was assembled on that SHA.
-- The next action is to obtain a successful exact-SHA Android test/build run for the deterministic hint change before closing P2-40. No local Gradle run or device/emulator validation is claimed.
-- No deployment, D1 write/migration, Secrets change, main update, PR merge or release.
+### Completed checkpoint — P2-40
+- Source candidate: `3bf43b043a6416cb8f978742f008436e31ecf896`; deterministic scroll hint fix + docs: `a995c935b34c031c15b3bc8db8d2ca365c87c719`.
+- Android CI `45689516514` PASS: unit tests, Staging Debug APK assembly and artifact upload. Artifact `15057429203`, name `Tanweer-debug-78b3c4ccab2ce18f42f6785f2badcb29d8af7a4c`, 31,391,174 bytes.
+- Server CI `45689516084` PASS: dependency audit, TypeScript, tests and Wrangler bundle validation.
+- Category rail cue is deterministic from first frame; student ROLES filter displays a locked explanation and routes only to Profile. No role dashboard is exposed to Student accounts.
+- No local Gradle run or physical-device acceptance is claimed. No deployment, D1 write/migration, secrets change, main update or PR merge.
 
+### P2-41 implementation — CI pending
+- `GroupsScreen.kt` now shows a localized scroll cue when the member list has more than three entries. Stable test tags expose the list, hint and each active member's action row.
+- Added `GroupMembersManagementDialogTest.kt`: eight test-only active members, scroll to last member, assert the last member's promotion/removal/ban actions are visible; callbacks are counted and asserted untouched. No membership mutation is performed.
+- No server, role policy or membership action behavior was changed.
 ### Previous completed checkpoint — P2-38
 - P2-38 notification deep-link startup is implemented and exact-SHA CI passed on `8be3366009dd7557542cdfc8322bb88c2d6b0348`.
 - Android CI run `45679523512` PASS: unit tests, Staging Debug assembly and Debug artifact upload. Release signing/assembly was skipped as expected for PR validation.
@@ -43,7 +45,7 @@
 - No Worker deployment, D1 migration/write, secrets change, Staging/Production data mutation, main update, PR merge or Release signing occurred.
 
 ### Next action
-- Obtain a passing exact-SHA Android run for P2-40 first. Follow-up run `45687372291` resolved Robolectric dependency retrieval and ran 313 tests, but exposed one P2-40 hint assertion at line 60; the hint is now deterministic for the multi-category rail. Do not mark P2-40 verified or begin P2-41 until the new SHA passes Android tests and Debug APK assembly.
+- Finish P2-41 by passing Android unit tests + Staging Debug APK assembly and Server CI on its exact SHA. Then proceed to P2-42 (Exam Detail and Add Exam sticky actions; SubjectPickerSheet pinned save action) with regression tests that inspect visibility only and do not invoke save/reminder/book callbacks.
 
 ### P2-07 completed
 - Source fix commit `bbeb3e95130cf099cd4dae34b2ea78c3f71ca745`; documentation closeout commit `995eeaf4bc35dac790a2020c01ca2390fc49d512`.
