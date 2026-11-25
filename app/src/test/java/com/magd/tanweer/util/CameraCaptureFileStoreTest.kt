@@ -65,14 +65,8 @@ class CameraCaptureFileStoreTest {
                 if (
                     parser.eventType == XmlPullParser.START_TAG &&
                     parser.name == "cache-path" &&
-                    parser.getAttributeValue(
-                        "http://schemas.android.com/apk/res/android",
-                        "name"
-                    ) == "camera_captures" &&
-                    parser.getAttributeValue(
-                        "http://schemas.android.com/apk/res/android",
-                        "path"
-                    ) == "camera_captures/"
+                    parser.getAttributeValue(null, "name") == "camera_captures" &&
+                    parser.getAttributeValue(null, "path") == "camera_captures/"
                 ) {
                     found = true
                     break
