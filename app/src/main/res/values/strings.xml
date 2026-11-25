@@ -285,4 +285,6 @@
     <string name="pdf_reader_rotate_page">تدوير الصفحة</string>
     <string name="pdf_reader_focus_ruler">مسطرة التركيز القرائي</string>
     <string name="pdf_reader_auto_scroll">التقليب التلقائي</string>
+    <string name="settings_switch_state_on">مفعّل</string>
+    <string name="settings_switch_state_off">غير مفعّل</string>
 </resources>

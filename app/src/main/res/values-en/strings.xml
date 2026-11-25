@@ -275,4 +275,6 @@
     <string name="pdf_reader_rotate_page">Rotate page</string>
     <string name="pdf_reader_focus_ruler">Reading focus ruler</string>
     <string name="pdf_reader_auto_scroll">Auto page turn</string>
+    <string name="settings_switch_state_on">On</string>
+    <string name="settings_switch_state_off">Off</string>
 </resources>

@@ -21,6 +21,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1187,7 +1191,7 @@ private fun ThemeButton(
 }
 
 @Composable
-private fun SettingsToggleRow(
+internal fun SettingsToggleRow(
     icon: ImageVector,
     title: String,
     subtitle: String,
@@ -1216,9 +1220,21 @@ private fun SettingsToggleRow(
             }
         }
 
+        val switchAccessibilityLabel = listOf(title, subtitle)
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .joinToString(". ")
+        val switchStateDescription = stringResource(
+            if (checked) R.string.settings_switch_state_on else R.string.settings_switch_state_off
+        )
+
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            modifier = Modifier.semantics {
+                contentDescription = switchAccessibilityLabel
+                stateDescription = switchStateDescription
+            },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = CyanAccent,
