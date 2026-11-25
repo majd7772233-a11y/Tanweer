@@ -277,4 +277,9 @@
     <string name="pdf_reader_auto_scroll">Auto page turn</string>
     <string name="settings_switch_state_on">On</string>
     <string name="settings_switch_state_off">Off</string>
+    <string name="hub_category_scroll_hint">Swipe horizontally to view the remaining categories ↔</string>
+    <string name="hub_role_center_locked_title">Role centers are not available to Student accounts</string>
+    <string name="hub_role_center_locked_description">These centers become available after approval as a Class Moderator, Verified Teacher, or School Administrator. You can keep contributing to lessons and class activities without this role.</string>
+    <string name="hub_role_center_required_badge">Requires Class Moderator or higher</string>
+    <string name="hub_role_center_request_upgrade">Request a role upgrade from your profile</string>
 </resources>

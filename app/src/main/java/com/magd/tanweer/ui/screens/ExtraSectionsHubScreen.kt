@@ -6,8 +6,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,14 +22,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.Role
 import com.magd.tanweer.data.model.getRoleEnum
+import com.magd.tanweer.R
 import com.magd.tanweer.ui.SubScreen
+import com.magd.tanweer.ui.RoleCenterAccess
+import com.magd.tanweer.ui.roleCenterAccess
 import com.magd.tanweer.ui.TanweerViewModel
+import com.magd.tanweer.ui.components.GlassButton
 import com.magd.tanweer.ui.components.GlassCard
+import com.magd.tanweer.ui.components.GlassFilterChip
+import com.magd.tanweer.ui.components.HorizontalFilterStrip
 import com.magd.tanweer.ui.components.GlassPill
 import com.magd.tanweer.ui.theme.*
 
@@ -134,24 +143,13 @@ fun ExtraSectionsHubScreen(
                         singleLine = true
                     )
 
-                    // Quick Category Filter Row
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
-                    ) {
-                        items(categories) { (catKey, catLabel) ->
-                            val isSelected = selectedCategoryFilter == catKey
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { selectedCategoryFilter = catKey },
-                                label = { Text(catLabel, fontSize = tanweerTextSize(11f), fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = CyanAccent,
-                                    selectedLabelColor = TextOnAccent
-                                )
-                            )
-                        }
-                    }
+                    // Quick Category Filter Row with an explicit continuation cue.
+                    HubCategoryFilterRow(
+                        categories = categories,
+                        selectedCategoryFilter = selectedCategoryFilter,
+                        onCategorySelected = { selectedCategoryFilter = it },
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
                 }
             }
         }
@@ -287,9 +285,7 @@ fun ExtraSectionsHubScreen(
         }
 
         // Section 3: مركز الرتبة الحالية (Current Role Center Only)
-        if ((selectedCategoryFilter == "ALL" || selectedCategoryFilter == "ROLES") &&
-            (userRole == Role.TEACHER || userRole == Role.MODERATOR || userRole == Role.ADMIN)
-        ) {
+        if (roleCenterAccess(userRole, selectedCategoryFilter) == RoleCenterAccess.AVAILABLE) {
             item {
                 HubCategoryHeader(title = "🛡️ مركز الرتبة المعتمدة", color = WarmAmber)
             }
@@ -332,6 +328,17 @@ fun ExtraSectionsHubScreen(
                         )
                     }
                 }
+            }
+        }
+
+        if (roleCenterAccess(userRole, selectedCategoryFilter) == RoleCenterAccess.LOCKED) {
+            item {
+                HubCategoryHeader(title = "🛡️ مراكز الإدارة والرتب", color = WarmAmber)
+            }
+            item {
+                LockedRoleCenterCard(
+                    onOpenProfile = { viewModel.setSubScreen(SubScreen.PROFILE) }
+                )
             }
         }
 
@@ -380,6 +387,134 @@ fun ExtraSectionsHubScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun HubCategoryFilterRow(
+    categories: List<Pair<String, String>>,
+    selectedCategoryFilter: String,
+    onCategorySelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val listState = rememberLazyListState()
+    val hasScrollableCategories by remember {
+        derivedStateOf { listState.canScrollForward || listState.canScrollBackward }
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        HorizontalFilterStrip(
+            state = listState,
+            edgeColor = MidnightSurface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("hub_category_filter_row"),
+            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+            itemSpacing = 6.dp
+        ) {
+            items(items = categories, key = { it.first }) { (categoryKey, categoryLabel) ->
+                val isSelected = selectedCategoryFilter == categoryKey
+                GlassFilterChip(
+                    selected = isSelected,
+                    onClick = { onCategorySelected(categoryKey) },
+                    modifier = Modifier.testTag("hub_category_chip_$categoryKey"),
+                    containerColor = MidnightSurface.copy(alpha = 0.65f),
+                    selectedContainerColor = CyanAccent,
+                    labelColor = TextSecondary,
+                    selectedLabelColor = TextOnAccent
+                ) {
+                    Text(
+                        text = categoryLabel,
+                        fontSize = tanweerTextSize(11f),
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+
+        AnimatedVisibility(visible = hasScrollableCategories) {
+            Text(
+                text = stringResource(R.string.hub_category_scroll_hint),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("hub_category_scroll_hint"),
+                textAlign = TextAlign.End,
+                fontSize = tanweerTextSize(10f),
+                color = TextMuted
+            )
+        }
+    }
+}
+
+@Composable
+internal fun LockedRoleCenterCard(
+    onOpenProfile: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    GlassCard(
+        modifier = modifier.fillMaxWidth(),
+        backgroundColor = MidnightSurface.copy(alpha = 0.88f),
+        borderColor = WarmAmber.copy(alpha = 0.48f)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(WarmAmber.copy(alpha = 0.14f))
+                        .border(1.dp, WarmAmber.copy(alpha = 0.38f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = WarmAmber,
+                        modifier = Modifier.size(21.dp)
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.hub_role_center_locked_title),
+                        fontSize = tanweerTextSize(13f),
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    GlassPill(
+                        text = stringResource(R.string.hub_role_center_required_badge),
+                        color = WarmAmber,
+                        bgColor = WarmAmber.copy(alpha = 0.14f)
+                    )
+                }
+            }
+
+            Text(
+                text = stringResource(R.string.hub_role_center_locked_description),
+                fontSize = tanweerTextSize(11f),
+                color = TextSecondary,
+                lineHeight = tanweerLineHeight(16f)
+            )
+
+            GlassButton(
+                text = stringResource(R.string.hub_role_center_request_upgrade),
+                onClick = onOpenProfile,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("hub_role_locked_upgrade_button"),
+                color = WarmAmber,
+                textColor = TextOnAccent,
+                icon = Icons.Default.Person
+            )
         }
     }
 }
