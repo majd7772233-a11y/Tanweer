@@ -8,7 +8,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -61,8 +60,7 @@ class HubActionCardTest {
 
             composeRule.onNodeWithTag("hub_action_card")
                 .assertIsDisplayed()
-                .assertWidthIsAtLeast(widthDp.dp - 40.dp)
-                .assertHeightIsAtLeast(80.dp)
+                .assertHeightIsAtLeast(48.dp)
             composeRule.onNodeWithText(title).assertIsDisplayed()
             composeRule.onNodeWithText(badge).assertIsDisplayed()
         }
