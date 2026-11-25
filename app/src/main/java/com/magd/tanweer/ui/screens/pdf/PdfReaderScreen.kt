@@ -54,6 +54,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -1680,7 +1682,8 @@ fun PdfReaderScreen(
 
 // -------------------------------------------------------------
 // TOP READER APP BAR
-// -------------------------------------------------------------
+// Keep the title and reading metadata in a flexible column. Secondary actions live
+// in an overflow menu so compact phones never have to squeeze six 34dp buttons.
 @Composable
 fun TopReaderBar(
     book: BookItem,
@@ -1697,6 +1700,7 @@ fun TopReaderBar(
     onOpenThumbnails: () -> Unit,
     onOpenBookInfo: () -> Unit
 ) {
+    var isToolsMenuExpanded by remember { mutableStateOf(false) }
     val hrs = sessionReadingSeconds / 3600
     val mins = (sessionReadingSeconds % 3600) / 60
     val secs = sessionReadingSeconds % 60
@@ -1717,140 +1721,131 @@ fun TopReaderBar(
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Back button + Book title (Compact and responsive)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(GlassSurface)
             ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(GlassSurface)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "رجوع للمكتبة",
-                        tint = CyanAccent
-                    )
-                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "رجوع للمكتبة",
+                    tint = CyanAccent
+                )
+            }
 
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column(
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .clickable { onOpenBookInfo() }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .clickable { onOpenBookInfo() },
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = book.title,
+                    fontSize = tanweerTextSize(13f),
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = book.title,
-                        fontSize = tanweerTextSize(13f),
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
+                        text = "صفحة $currentPage / $totalPages",
+                        fontSize = tanweerTextSize(11f),
+                        color = CyanAccent,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "صفحة $currentPage من $totalPages",
-                            fontSize = tanweerTextSize(11f),
-                            color = CyanAccent,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(text = "•", fontSize = tanweerTextSize(11f), color = TextMuted)
-                        Text(
-                            text = "⏱️ $timeFormatted",
-                            fontSize = tanweerTextSize(11f),
-                            color = WarmAmber
-                        )
-                    }
+                    Text(text = "•", fontSize = tanweerTextSize(11f), color = TextMuted)
+                    Text(
+                        text = "⏱ $timeFormatted",
+                        modifier = Modifier.weight(1f),
+                        fontSize = tanweerTextSize(11f),
+                        color = WarmAmber,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.width(6.dp))
-
-            // Quick Tool Icons (Compact & Responsive)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // Study Tools Hub
+            Box {
                 IconButton(
-                    onClick = onOpenStudyTools,
+                    onClick = { isToolsMenuExpanded = true },
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
-                        .background(WarmAmber.copy(alpha = 0.15f))
-                ) {
-                    Text(text = "⚡", fontSize = tanweerTextSize(15f))
-                }
-
-                // Drawing Pen Toggle
-                IconButton(
-                    onClick = onToggleDrawing,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(if (isDrawingMode) CyanGlow else GlassSurface)
+                        .background(GlassSurface)
                 ) {
                     Icon(
-                        Icons.Default.Edit,
-                        contentDescription = "قلم الرسم والتظليل",
-                        tint = if (isDrawingMode) CyanAccent else TextPrimary,
-                        modifier = Modifier.size(17.dp)
+                        Icons.Default.MoreVert,
+                        contentDescription = "المزيد من أدوات القراءة",
+                        tint = TextPrimary
                     )
                 }
 
-                // Thumbnails
-                IconButton(
-                    onClick = onOpenThumbnails,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(GlassSurface)
+                DropdownMenu(
+                    expanded = isToolsMenuExpanded,
+                    onDismissRequest = { isToolsMenuExpanded = false }
                 ) {
-                    Icon(Icons.Default.GridView, contentDescription = "الفهرس المصغر", tint = TextPrimary, modifier = Modifier.size(17.dp))
-                }
-
-                // Bookmarks
-                IconButton(
-                    onClick = onOpenBookmarks,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(GlassSurface)
-                ) {
-                    Icon(Icons.Default.BookmarkBorder, contentDescription = "الإشارات المرجعية", tint = TextPrimary, modifier = Modifier.size(17.dp))
-                }
-
-                // Notes
-                IconButton(
-                    onClick = onOpenNotes,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(GlassSurface)
-                ) {
-                    Icon(Icons.Default.Description, contentDescription = "الملاحظات", tint = TextPrimary, modifier = Modifier.size(17.dp))
-                }
-
-                // Settings
-                IconButton(
-                    onClick = onOpenSettings,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(GlassSurface)
-                ) {
-                    Icon(Icons.Default.Tune, contentDescription = "الإعدادات وثيمات القراءة", tint = TextPrimary, modifier = Modifier.size(17.dp))
+                    DropdownMenuItem(
+                        text = { Text("أدوات الدراسة") },
+                        onClick = {
+                            isToolsMenuExpanded = false
+                            onOpenStudyTools()
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (isDrawingMode) "إيقاف وضع الرسم" else "تشغيل وضع الرسم") },
+                        onClick = {
+                            isToolsMenuExpanded = false
+                            onToggleDrawing()
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
+                    DropdownMenuItem(
+                        text = { Text("الفهرس المصغر") },
+                        onClick = {
+                            isToolsMenuExpanded = false
+                            onOpenThumbnails()
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
+                    DropdownMenuItem(
+                        text = { Text("الإشارات المرجعية") },
+                        onClick = {
+                            isToolsMenuExpanded = false
+                            onOpenBookmarks()
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
+                    DropdownMenuItem(
+                        text = { Text("الملاحظات") },
+                        onClick = {
+                            isToolsMenuExpanded = false
+                            onOpenNotes()
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
+                    DropdownMenuItem(
+                        text = { Text("الإعدادات وثيمات القراءة") },
+                        onClick = {
+                            isToolsMenuExpanded = false
+                            onOpenSettings()
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
                 }
             }
         }
@@ -1886,36 +1881,37 @@ fun BottomReaderBar(
                     colors = listOf(Color.Transparent, Color(0xCC070B14), Color(0xF0070B14))
                 )
             )
-            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Quick Scrubber Slider with Previous / Next Buttons
+            // Page scrubber: navigation controls use full 48dp touch targets.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 IconButton(
                     onClick = onPrevPage,
                     enabled = currentPage > 1,
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "السابق", tint = CyanAccent, modifier = Modifier.size(18.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "السابق", tint = CyanAccent, modifier = Modifier.size(20.dp))
                 }
 
                 Slider(
-                    value = currentPage.toFloat(),
-                    onValueChange = { onPageChange(it.toInt()) },
+                    value = currentPage.toFloat().coerceIn(1f, totalPages.coerceAtLeast(1).toFloat()),
+                    onValueChange = { onPageChange(it.toInt().coerceIn(1, totalPages.coerceAtLeast(1))) },
                     valueRange = 1f..totalPages.coerceAtLeast(1).toFloat(),
                     modifier = Modifier
                         .weight(1f)
-                        .padding(horizontal = 10.dp),
+                        .heightIn(min = 48.dp)
+                        .padding(horizontal = 8.dp),
                     colors = SliderDefaults.colors(
                         thumbColor = CyanAccent,
                         activeTrackColor = CyanAccent,
@@ -1927,96 +1923,94 @@ fun BottomReaderBar(
                     onClick = onNextPage,
                     enabled = currentPage < totalPages,
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(GlassSurface)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "التالي", tint = CyanAccent, modifier = Modifier.size(18.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "التالي", tint = CyanAccent, modifier = Modifier.size(20.dp))
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Quick Tool Bar Actions
+            // The page jump remains prominent; all auxiliary actions keep a minimum
+            // 48dp target and fit without a hidden horizontal-scroll dependency.
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // Page Jump Button
                 Box(
                     modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(GlassSurface)
                         .clickable { onOpenJumpDialog() }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = "الانتقال إلى صفحة"
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "📖 $currentPage / $totalPages",
                         fontSize = tanweerTextSize(12f),
                         fontWeight = FontWeight.Bold,
-                        color = CyanAccent
+                        color = CyanAccent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                // Action Tools
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Zoom Reset
-                    if (zoomScale > 1.05f) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(CyanGlow)
-                                .border(1.dp, CyanAccent, RoundedCornerShape(12.dp))
-                                .clickable { onResetZoom() }
-                                .padding(horizontal = 8.dp, vertical = 6.dp)
-                        ) {
-                            Text(text = "🔍 ${(zoomScale * 100).toInt()}% (إعادة)", fontSize = tanweerTextSize(11f), color = CyanAccent, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    // Rotate 90
+                if (zoomScale > 1.05f) {
                     IconButton(
-                        onClick = onRotate,
+                        onClick = onResetZoom,
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
-                            .background(GlassSurface)
+                            .background(CyanGlow)
                     ) {
-                        Icon(Icons.Default.RotateRight, contentDescription = "تدوير الصفحة", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.ZoomOutMap, contentDescription = "إعادة ضبط التكبير", tint = CyanAccent, modifier = Modifier.size(20.dp))
                     }
+                }
 
-                    // Focus Ruler Toggle
-                    IconButton(
-                        onClick = onToggleFocusRuler,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(if (isFocusRulerActive) CyanGlow else GlassSurface)
-                    ) {
-                        Icon(
-                            Icons.Default.LinearScale,
-                            contentDescription = "مسطرة التركيز القرائي",
-                            tint = if (isFocusRulerActive) CyanAccent else TextPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                IconButton(
+                    onClick = onRotate,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(GlassSurface)
+                ) {
+                    Icon(Icons.Default.RotateRight, contentDescription = "تدوير الصفحة", tint = TextPrimary, modifier = Modifier.size(20.dp))
+                }
 
-                    // Auto Scroll Toggle
-                    IconButton(
-                        onClick = onToggleAutoScroll,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(if (isAutoScrollActive) AmberGlow else GlassSurface)
-                    ) {
-                        Icon(
-                            Icons.Default.FastForward,
-                            contentDescription = "التقليب التلقائي",
-                            tint = if (isAutoScrollActive) WarmAmber else TextPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                IconButton(
+                    onClick = onToggleFocusRuler,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (isFocusRulerActive) CyanGlow else GlassSurface)
+                ) {
+                    Icon(
+                        Icons.Default.LinearScale,
+                        contentDescription = "مسطرة التركيز القرائي",
+                        tint = if (isFocusRulerActive) CyanAccent else TextPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onToggleAutoScroll,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (isAutoScrollActive) AmberGlow else GlassSurface)
+                ) {
+                    Icon(
+                        Icons.Default.FastForward,
+                        contentDescription = "التقليب التلقائي",
+                        tint = if (isAutoScrollActive) WarmAmber else TextPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
         }
