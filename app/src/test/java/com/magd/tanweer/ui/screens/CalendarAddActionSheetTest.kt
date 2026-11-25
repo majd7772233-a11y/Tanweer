@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import com.magd.tanweer.ui.theme.TanweerTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -85,7 +86,13 @@ class CalendarAddActionSheetTest {
             }
         }
 
-        composeRule.onNodeWithTag("calendar_add_holiday_action").assertDoesNotExist()
+        composeRule.runOnIdle {
+            assertTrue(
+                composeRule.onAllNodesWithTag("calendar_add_holiday_action")
+                    .fetchSemanticsNodes()
+                    .isEmpty()
+            )
+        }
         composeRule.onNodeWithTag("calendar_add_event_action")
             .performScrollTo()
             .assertIsDisplayed()
