@@ -134,7 +134,7 @@ object CameraCaptureFileStore {
         }
     }
 
-    private fun providerAuthority(): String = "${BuildConfig.APPLICATION_ID}.fileprovider"
+    internal fun providerAuthority(): String = "${BuildConfig.APPLICATION_ID}.fileprovider"
 
     private fun captureDirectory(context: Context): File =
         File(context.cacheDir, DIRECTORY_NAME)
