@@ -6,9 +6,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -71,7 +73,13 @@ class KeyboardAwareFormDialogTest {
         var hideCount = 0
         var dismissCount = 0
 
+        var dispatchBack: (() -> Unit)? = null
+
         composeRule.setContent {
+            val dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            SideEffect {
+                dispatchBack = { dispatcher?.onBackPressed() }
+            }
             TanweerTheme {
                 var imeVisible by remember { mutableStateOf(true) }
                 var formOpen by remember { mutableStateOf(true) }
@@ -94,14 +102,14 @@ class KeyboardAwareFormDialogTest {
         }
 
         composeRule.runOnIdle {
-            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+            dispatchBack?.invoke()
             assertEquals(1, hideCount)
             assertEquals(0, dismissCount)
         }
         composeRule.onNodeWithTag("form_draft").assertIsDisplayed()
 
         composeRule.runOnIdle {
-            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+            dispatchBack?.invoke()
             assertEquals(1, hideCount)
             assertEquals(1, dismissCount)
         }
