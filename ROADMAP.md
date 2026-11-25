@@ -1083,8 +1083,24 @@
 
 **الأثر:** قد لا يكتشف المستخدم بقية الخيارات أو الفلتر المحدد.
 
-**الإصلاح المطلوب:** مؤشر حواف/تدرج تمرير، Chips مدمجة بعناوين واضحة، وربط الأيقونة والنص في عنصر وصول واحد.
+**التنفيذ (2026-11-25): COMPLETED IN SOURCE**
+- إضافة مكوّن مشترك `ui/components/HorizontalFilterStrip.kt`: يستخدم `LazyRow` و`LazyListState`، ويعرض تدرجاً شفافاً بعرض 20dp على الحافة المنطقية التي ما زالت خلفها عناصر، مع احترام اتجاه RTL/LTR. التدرج مرئي فقط ولا يلتقط اللمس.
+- إضافة `GlassFilterChip` فوق Material 3 `FilterChip` بحد أدنى 48dp، وحالة اختيار دلالية (selected) مدمجة في عنصر النقر نفسه. الأيقونة وعلامة الاختيار عناصر زخرفية؛ النص والعداد يبقيان داخل عنصر الوصول الواحد.
+- تحديث شريط فلاتر الواجبات في `HomeworkScreen.kt` وشريط فلاتر الاستفسارات في `IssuesScreen.kt`، مع تباين واضح للخيار المحدد وعلامة ✓ مرئية، وتباعد متناسق.
+- لم يتغير تعداد الفلاتر أو شروط التصفية أو حالة المزامنة أو تدفق فتح التفاصيل؛ بقيت `HomeworkFilter` و`IssueStatusPolicy.matches` كما هي.
 
+**اختبارات الانحدار:**
+- `HorizontalFilterStripTest.kt` يستخدم Compose/Robolectric عند عروض 360/393/411dp.
+- يتحقق من حد لمس 48dp، وظهور الخيار المحدد ودلالته، وتغير حالة الاختيار بالنقر، وإمكانية تمرير القائمة حتى الخيار الأخير ثم التفاعل معه.
+- الاختبار الآلي لا يدّعي قياس تدرج الحافة بصرياً على شاشة فعلية؛ تبقى مراجعة RTL/LTR وTalkBack والتمرير باللمس ضمن Phase 5.
+
+**التحقق على SHA `9f5132e340cd8ff764c1302881e605049263f930`:**
+- Android CI run `45653781884` PASS: `testStagingDebugUnitTest` و`assembleStagingDebug` ورفع Debug APK كلها PASS. خطوات Release signing/assembly ليست جزءاً من تحقق PR.
+- Staging Debug artifact ID `15041163651`، الحجم `31,354,721` bytes، SHA-256 `c36718d49c3ff2d4ffb0cf7e3eba2987d0d832af38aafc05d4f830aa001912dd`. [Staging Debug APK artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45653781884/artifacts/15041163651).
+- Server CI run `45653782250` PASS: TypeScript، dependency security baseline، اختبارات الخادم، وWrangler Production/Staging dry-runs. لم تتغير ملفات الخادم في هذه المهمة.
+- لا ادعاء بتشغيل Gradle محلياً أو تثبيت APK على محاكي/هاتف؛ القبول الفعلي وTalkBack والقياس البصري تبقى في Phase 5.
+
+**حدود التنفيذ:** لا Worker deployment أو D1 write/migration أو Secrets أو تغيير `main` أو دمج PR. PR #6 يظل Open + Draft + Unmerged.
 
 ## P2-35 — ورقة إضافة اليوم في التقويم تقص الخيارات الأخيرة
 

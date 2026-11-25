@@ -906,3 +906,17 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Known validation boundary:** no local Gradle or physical-device/emulator execution is claimed. Phase 5 still needs a real Pixel 7 Pro / phone review of card height, RTL/LTR, scroll density, contrast and touch accuracy.
 - **Governance:** no Worker deploy, D1 migration/write, secret change, Production/Staging mutation, main update, PR merge or release signing.
 - **Next roadmap item:** P2-34 — improve horizontal filter-strip discoverability and selected-state clarity without reducing 48dp touch targets. Phase 5 acceptance remains open.
+
+## 2026-11-25 — P2-34 horizontal filter-strip checkpoint
+
+- **Verified source SHA:** `9f5132e340cd8ff764c1302881e605049263f930` on `work/release-readiness`. Implementation commit `0b82c9d274358ceb759cd009904bf6bd98a10b1b`; test-only follow-up `9f5132e340cd8ff764c1302881e605049263f930` added the missing test import and resets selection across viewport cases.
+- **Files:** `app/src/main/java/com/magd/tanweer/ui/components/HorizontalFilterStrip.kt`; `ui/screens/HomeworkScreen.kt`; `ui/screens/IssuesScreen.kt`; test `app/src/test/java/com/magd/tanweer/ui/components/HorizontalFilterStripTest.kt`.
+- **Behavior:** common `HorizontalFilterStrip` uses LazyRow/LazyListState and draws a 20dp edge fade on whichever logical side still has off-screen content, respecting RTL/LTR. `GlassFilterChip` wraps Material3 FilterChip with a 48dp minimum target. The chip presents selected semantics, text and optional counts as one accessibility control; decorative icons/check marks are excluded from duplicate semantics. Homework and issue filter values, filter predicates, sync state and detail navigation remain unchanged.
+- **Regression test:** Compose/Robolectric at 360/393/411dp checks selected/unselected semantics, text, minimum 48dp height, horizontal access to the final item and click handling.
+- **Exact-SHA Android CI:** run `45653781884` PASS on `9f5132e340cd8ff764c1302881e605049263f930`: unit tests, Staging Debug assembly and Debug artifact upload PASS. Release signing/assembly is skipped for PR validation.
+- **Staging Debug artifact:** ID `15041163651`, size `31,354,721` bytes, ZIP SHA-256 `c36718d49c3ff2d4ffb0cf7e3eba2987d0d832af38aafc05d4f830aa001912dd`. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45653781884/artifacts/15041163651).
+- **Exact-SHA Server CI:** run `45653782250` PASS: TypeScript, dependency security baseline, server unit/integration tests and Wrangler Production/Staging dry-runs. No server files changed in P2-34.
+- **Validation boundary:** no local Gradle invocation, emulator/phone installation, physical touch testing, visual screenshot review or TalkBack acceptance is claimed. Phase 5 remains required for those checks.
+- **Governance:** no Worker deployment, D1 write/migration, secret change, Staging/Production data mutation, `main` update, PR merge or release signing. PR #6 remains Open + Draft + Unmerged; `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`.
+- **Next roadmap item:** P2-35 — make the Calendar "add today" sheet scrollable/adaptive so every role-eligible action remains accessible.
+
