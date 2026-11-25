@@ -4,24 +4,26 @@
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; only long-lived branches are `main` and `work/release-readiness`.
-- Latest verified branch HEAD: `8ade4e834cfb67c53df2cf164bbb0575a45c2558` on `work/release-readiness`.
+- Latest verified source-code HEAD: `be76d445d8476db4d192baed9319b1966ca67a6e` on `work/release-readiness`.
 - `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; it was not modified.
 - PR #6 remains Open + Draft + Unmerged, base `main`, head `work/release-readiness`. Do not merge or close it without the user's instruction.
-- WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` is not to be submitted/closed unless the user expressly asks.
+- WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` must remain RUNNING; do not submit/close unless the user expressly asks.
 
-### Current completed checkpoint — P2-36
-- P2-36 keyboard-safe Homework/Event forms is implemented and exact-SHA CI passed on `8ade4e834cfb67c53df2cf164bbb0575a45c2558`.
-- Android CI run `45665342208` PASS: `testStagingDebugUnitTest`, `assembleStagingDebug`, Debug APK upload. Release signing/assembly was skipped as expected in PR validation.
-- Android artifact `15046703807`, name `Tanweer-debug-2607b2647f414afa75d587bd81c19d7fcfeb297a`, 31,365,985 bytes, ZIP SHA-256 `d9268589f44a95b326d626e5253421b409382ce379168e406315c14980b76884`.
-- Server CI run `45665342049` PASS on the same SHA: TypeScript, `npm audit`, 47 Vitest files / 327 tests and Wrangler Production/Staging dry-runs. No Server source changed for P2-36.
-- Shared Android component: `app/src/main/java/com/magd/tanweer/ui/components/KeyboardAwareFormDialog.kt`; test: `app/src/test/java/com/magd/tanweer/ui/components/KeyboardAwareFormDialogTest.kt`.
-- The first Back press while IME is visible hides the keyboard and keeps the Dialog/draft open; the next Back press dismisses it. Homework save bar and Event publish/cancel row stay outside the scrollable field region. Form draft fields use `rememberSaveable`; transient saving flags do not.
-- No local Gradle execution or physical-device/emulator acceptance is claimed. Phase 5 still requires real keyboard/gesture-navigation and TalkBack/device review.
+### Current completed checkpoint — P2-37
+- P2-37 full-resolution camera capture is implemented and exact-SHA CI passed on `be76d445d8476db4d192baed9319b1966ca67a6e`.
+- Android CI run `45674833698` PASS: `testStagingDebugUnitTest`, `assembleStagingDebug`, Debug APK upload. Release signing/assembly was skipped as expected for PR validation.
+- Android artifact `15051616638`, name `Tanweer-debug-4cf509ef3ed20d61ba6d8dddc61ee9bc64ad6351`, 31,374,820 bytes, ZIP SHA-256 `55feece2f5caf4397ba61cc92dfa42e3250102ae82ce63debd2242e6c52291e5`.
+- Server CI run `45674833715` PASS on the same SHA: TypeScript, `npm audit`, 47 Vitest files / 327 tests, Wrangler Production/Staging dry-runs. No Server source changed for P2-37.
+- The two former `TakePicturePreview()` call sites in `UploadLessonDialog.kt` and `HomeworkScreen.kt` now use `ActivityResultContracts.TakePicture()` with a full-resolution JPEG target supplied by the existing Tanweer FileProvider. Dedicated provider path: `cacheDir/camera_captures`.
+- Shared file lifecycle is in `app/src/main/java/com/magd/tanweer/util/CameraCaptureFileStore.kt`: create target, resolve canonical-path managed files, copy through FileProvider URI into `filesDir/scan_draft_sources`, delete temp in `finally`, clean failed/canceled captures and expire abandoned captures older than 24h. Draft capture path/page ID are saveable across Activity recreation.
+- Image processing, selected quality preset, enhancement/rotation, page preview/review, and user-confirmed publish flows remain unchanged. No auto-upload starts on camera return.
+- Regression tests: `app/src/test/java/com/magd/tanweer/util/CameraCaptureFileStoreTest.kt` covers secure managed path and cleanup, BuildConfig FileProvider authority, provider XML path, full-resolution 1600×1200 copy into a private draft, and stale cleanup. Robolectric injects a local file URI to test file-copy lifecycle because external ContentProvider resolution is not reliable in that test environment; production defaults still use `FileProvider.getUriForFile`.
+- No local Gradle execution or physical-device/emulator acceptance is claimed. Phase 5 still needs real external-camera URI-grant, camera provider, EXIF orientation, cancel/retry, process recreation, preview/crop and post-confirmation upload checks.
 - No Worker deployment, D1 migration/write, secrets change, Staging/Production data mutation, main update, PR merge or release signing occurred.
 
 ### Next action
-- P2-37 — replace low-resolution camera preview capture for board/homework photos with full-resolution `TakePicture()` + FileProvider, temporary-file lifecycle/cleanup, and user-confirmed upload. Preserve current crop/preview/retry semantics and add regression coverage before CI.
- 
+- P2-38 — improve notification deep-link startup so a notification opens its destination without restarting the full startup request chain. Preserve session/role validation; defer secondary refreshes and use local destination loading rather than skipping authentication.
+
 ### P2-07 completed
 - Source fix commit `bbeb3e95130cf099cd4dae34b2ea78c3f71ca745`; documentation closeout commit `995eeaf4bc35dac790a2020c01ca2390fc49d512`.
 - Exact-SHA Android run `45041331045` and Server run `45041331041` both passed. Android covered unit tests, Staging Debug assembly and Debug artifact upload; Server covered audit, typecheck, 43 Vitest files / 295 tests and Wrangler Production + Staging dry-runs.
@@ -964,3 +966,17 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Server CI:** run `45665342049` PASS on the same SHA, 47 test files / 327 tests; TypeScript, dependency audit and Wrangler Production/Staging dry-runs passed.
 - **Validation boundary:** CI build only; no local Gradle run, phone/emulator install, real software keyboard interaction, gesture navigation or TalkBack acceptance. Phase 5 remains open.
 - **Next:** P2-37 camera capture full resolution.
+
+
+## 2026-11-25 — P2-37 full-resolution camera capture checkpoint
+
+- **Verified source HEAD:** `be76d445d8476db4d192baed9319b1966ca67a6e`, branch `work/release-readiness`.
+- **Files:** `UploadLessonDialog.kt`, `HomeworkScreen.kt`, `ImageProcessingUtils.kt`, `res/xml/file_paths.xml`, new `util/CameraCaptureFileStore.kt`, new `util/CameraCaptureFileStoreTest.kt`.
+- **Capture:** both camera launchers use `ActivityResultContracts.TakePicture()`; full-size JPEG is written to a cache FileProvider URI instead of returning a preview Bitmap. The provider uses `${BuildConfig.APPLICATION_ID}.fileprovider` and its XML exposes the dedicated `camera_captures/` cache path.
+- **Draft lifecycle:** the capture file and page ID survive Activity recreation through `rememberSaveable`. A successful capture is copied via ContentResolver into the same private draft-source store used by the gallery path; the temporary cache file is deleted in `finally`. Cancel/failure removes the capture target. Canonical-path checks restrict deletion to expected managed files; captures older than 24h are pruned at the next create.
+- **Downstream behavior:** the copied full-resolution source enters the existing `loadAndProcessImage` path, keeping quality preset, enhancement, rotation, preview and current publish confirmation. Camera return adds a page to the editable review list; it does not upload until the user presses the existing publish button.
+- **Tests:** secure directory/cleanup tests; BuildConfig authority and provider-path XML checks; a 1600×1200 JPEG is persisted to a private draft and verified to retain its full source dimensions before the temporary file is deleted. Robolectric injects a local file URI for storage tests; the production implementation still defaults to FileProvider URI creation, which remains a real-device acceptance item.
+- **Android CI:** run `45674833698` PASS on exact SHA; Staging Debug artifact `15051616638`, 31,374,820 bytes, ZIP SHA-256 `55feece2f5caf4397ba61cc92dfa42e3250102ae82ce63debd2242e6c52291e5`.
+- **Server CI:** run `45674833715` PASS on same SHA, 47 test files / 327 tests; TypeScript, dependency audit and Wrangler Production/Staging dry-runs passed.
+- **Validation boundary:** CI test/build only; no local Gradle run, no physical device/emulator install, no external camera provider launch, no actual permission-grant check, no EXIF-orientation visual check, and no live upload. Phase 5 remains open for those tests.
+- **Next:** P2-38 notification deep-link startup path.

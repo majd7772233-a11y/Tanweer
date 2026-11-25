@@ -1161,15 +1161,36 @@
 
 **حدود التنفيذ:** لا Worker deployment أو D1 write/migration أو Secrets أو تحديث `main` أو دمج PR. PR #6 لا يزال Open + Draft + Unmerged. القبول الفعلي للوحة المفاتيح والتنقل واللمس يبقى ضمن Phase 5.
 
-## P2-37 — معاينة الكاميرا تستخدم صورة منخفضة التفاصيل
+## P2-37 — التقاط صور الكاميرا بدقة كاملة
 
-**مرجع التقرير:** TNW-PHOTO-002. **الأولوية:** P2.
+**الحالة:** مكتمل برمجياً، ونجح التحقق الآلي على SHA النهائي `be76d445d8476db4d192baed9319b1966ca67a6e`.
 
-**الدليل:** UploadLessonDialog.kt وHomeworkScreen.kt يستخدمان ActivityResultContracts.TakePicturePreview() ويحفظان Bitmap? في rawBitmap. هذا Preview صغير لا ملف كاميرا كامل الدقة، وغير مناسب لسبورة أو صفحة كتاب تحتاج قراءة وتكبيراً.
+**السبب الجذري:**
+- `UploadLessonDialog.kt` و`HomeworkScreen.kt` كانا يستخدمان `ActivityResultContracts.TakePicturePreview()`، الذي يعيد Bitmap معاينة صغيرة بدلاً من ملف الالتقاط الكامل.
+- هذا المصدر الصغير كان يُحفظ في مسودة الصفحة ثم يدخل خط معالجة الصور الحالي، ما وضع سقفاً منخفضاً لتفاصيل صور السبورة وصفحات الكتاب حتى عند اختيار جودة أعلى.
 
-**الإصلاح:** TakePicture() مع FileProvider وملف كامل الدقة، إدارة مؤقت الملف وتنظيفه عند الإلغاء، ورفع الملف بعد تأكيد المستخدم.
+**التنفيذ:**
+- استبدال العقدين بـ`ActivityResultContracts.TakePicture()`؛ كل تدفق ينشئ ملف JPEG مؤقتاً داخل `cacheDir/camera_captures` ثم يمرر له URI من `FileProvider`.
+- أُضيف `<cache-path name="camera_captures" path="camera_captures/" />` إلى `res/xml/file_paths.xml`. authority مشتقة من `BuildConfig.APPLICATION_ID` لتطابق `${applicationId}.fileprovider` في Manifest للنكهتين production وstaging.
+- `CameraCaptureFileStore` ينشئ أهداف الالتقاط بأسماء آمنة، ولا يحل/يحذف إلا الملفات التي يطابق مسارها canonical مجلد الالتقاط المخصص واسم الملف المتوقع. ينظف الملفات المهجورة الأقدم من 24 ساعة.
+- عند الإلغاء أو فشل الالتقاط، يحذف الهدف المؤقت ولا يضيف صفحة فارغة. عند النجاح، ينسخ JPEG الكامل عبر ContentResolver إلى `filesDir/scan_draft_sources` باستخدام `ImageProcessingUtils.persistDraftSource` ثم يحذف ملف الكاش في `finally`.
+- مسارات الدروس والواجبات تحفظ مسار/معرّف الالتقاط بـ`rememberSaveable` حتى يمكن ربط نتيجة تطبيق الكاميرا بعد إعادة إنشاء Activity.
+- بعد إضافة الصفحة، يستمر نفس خط `loadAndProcessImage` الحالي وإعداد الجودة والتحسين والدوران والمعاينة وإعادة المعالجة. لم يتغير القص/المراجعة أو نشر الدرس/الواجب: المستخدم يراجع الصفحات ثم يؤكد زر النشر الموجود؛ لا يبدأ رفع الكاميرا تلقائياً.
+- أزيلت دالة `persistCameraPreview` منخفضة الدقة بعد إزالة جميع استخداماتها من الشاشتين.
 
+**اختبارات الانحدار:**
+- `CameraCaptureFileStoreTest` يغطي إنشاء الملف داخل المجلد المخصص، authority المبنية من Application ID، وجود cache-path في XML، منع حذف ملفات خارج المجلد، نقل صورة JPEG 1600×1200 إلى مسودة خاصة مع بقاء الأبعاد الأصلية، وتنظيف الملفات القديمة.
+- اختبارات إدارة URI والملفات تستخدم URI ملف محلي مع مصنع URI محقون في Robolectric لأن محاكاة استدعاء ContentProvider/منح URI الخارجي لم تكن موثوقة في هذه البيئة. مسار الإنتاج يظل يستخدم `FileProvider.getUriForFile`; لذلك يجب التحقق من تشغيل تطبيق كاميرا خارجي فعلياً في Phase 5.
+- جميع اختبارات Android Unit Tests على SHA النهائي نجحت، ثم نجح `assembleStagingDebug` ورفع APK.
 
+**التحقق على SHA النهائي:**
+- Android CI run `45674833698` PASS: `testStagingDebugUnitTest` و`assembleStagingDebug` ورفع Debug APK. لم يُنفذ Release signing/assembly ضمن تحقق PR.
+- Staging Debug artifact ID `15051616638`، الاسم `Tanweer-debug-4cf509ef3ed20d61ba6d8dddc61ee9bc64ad6351`، الحجم `31,374,820` bytes، ZIP SHA-256 `55feece2f5caf4397ba61cc92dfa42e3250102ae82ce63debd2242e6c52291e5`. [Staging Debug APK artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45674833698/artifacts/15051616638).
+- Server CI run `45674833715` PASS على SHA نفسه: TypeScript، `npm audit`، 47 ملف Vitest و327 اختباراً، وWrangler Production/Staging dry-runs. لم تتغير ملفات Server في P2-37.
+- لا Gradle محلي ولا تثبيت APK على هاتف/محاكي. لم يتم التحقق على جهاز فعلي من إذن الكتابة الذي يمنحه Intent الكاميرا إلى URI أو من اختلافات مزودي الكاميرا أو EXIF orientation.
+
+**حدود التنفيذ:** لا Worker deployment أو D1 write/migration أو Secrets أو تحديث `main` أو دمج PR. PR #6 لا يزال Open + Draft + Unmerged. Phase 5 يجب أن يختبر الكاميرا الخلفية/الأمامية ومزود كاميرا فعلي، صورة سبورة عالية الدقة وملف كتاب، تدوير الصورة، إلغاء الالتقاط، إعادة المحاولة، إعادة إنشاء Activity أثناء فتح الكاميرا، المعاينة/القص، وبقاء الملف بعد تأكيد النشر فقط.
+ 
 ## P2-38 — فتح وجهة الإشعار بطيء بسبب إعادة سلسلة بدء كاملة
 
 **مرجع التقرير:** دفعة الإشعارات، قياسات UX. **الأولوية:** P2.
