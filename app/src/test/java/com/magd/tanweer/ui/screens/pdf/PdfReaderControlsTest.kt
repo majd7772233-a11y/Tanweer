@@ -3,10 +3,11 @@ package com.magd.tanweer.ui.screens.pdf
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.test.assertExists
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.fetchSemanticsNode
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -14,7 +15,6 @@ import androidx.compose.ui.test.performClick
 import com.magd.tanweer.data.model.BookItem
 import com.magd.tanweer.ui.theme.TanweerTheme
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,21 +28,9 @@ class PdfReaderControlsTest {
     val composeRule = createComposeRule()
 
     private fun assertMinimumTouchTarget(contentDescription: String) {
-        val bounds = composeRule
-            .onNodeWithContentDescription(contentDescription)
-            .fetchSemanticsNode()
-            .boundsInRoot
-        val widthDp = bounds.width / composeRule.density
-        val heightDp = bounds.height / composeRule.density
-
-        assertTrue(
-            "$contentDescription width was $widthDp dp; expected at least 48 dp",
-            widthDp >= 48f
-        )
-        assertTrue(
-            "$contentDescription height was $heightDp dp; expected at least 48 dp",
-            heightDp >= 48f
-        )
+        val node = composeRule.onNodeWithContentDescription(contentDescription)
+        node.assertWidthIsAtLeast(48.dp)
+        node.assertHeightIsAtLeast(48.dp)
     }
 
     @Test
@@ -85,11 +73,11 @@ class PdfReaderControlsTest {
         }
 
         composeRule.onNodeWithContentDescription("المزيد من أدوات القراءة").performClick()
-        composeRule.onNodeWithText("أدوات الدراسة").assertExists()
-        composeRule.onNodeWithText("تشغيل وضع الرسم").assertExists()
-        composeRule.onNodeWithText("الفهرس المصغر").assertExists()
-        composeRule.onNodeWithText("الإشارات المرجعية").assertExists()
-        composeRule.onNodeWithText("الملاحظات").assertExists()
+        composeRule.onNodeWithText("أدوات الدراسة").assertIsDisplayed()
+        composeRule.onNodeWithText("تشغيل وضع الرسم").assertIsDisplayed()
+        composeRule.onNodeWithText("الفهرس المصغر").assertIsDisplayed()
+        composeRule.onNodeWithText("الإشارات المرجعية").assertIsDisplayed()
+        composeRule.onNodeWithText("الملاحظات").assertIsDisplayed()
         composeRule.onNodeWithText("الإعدادات وثيمات القراءة")
             .assertIsDisplayed()
             .performClick()
