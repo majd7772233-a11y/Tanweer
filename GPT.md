@@ -24,7 +24,8 @@
 - Current development branch for the active release-readiness work: work/release-readiness.
 - Do not modify main unless the user explicitly asks.
 - Main was last verified at 64143994070bcdc410cf044379fe2801da8f9a3c before the current work.
-- The latest verified source-code checkpoint for the system-purge reset fix is 6108a4c962814f6cdf288f07fca05af870810bed. Documentation-only commits may advance the branch after that code checkpoint; always fetch the live HEAD before editing.
+- The latest verified source-code checkpoint for P2-32 PDF reader controls is 1aefecddc5ad7bc8f73f709211ad9444e0609117 on work/release-readiness; exact-SHA Android and Server CI passed. Documentation-only commits may advance the branch after that code checkpoint; always fetch the live HEAD before editing.
+- PR #6 remains Open + Draft + Unmerged; main remains at 64143994070bcdc410cf044379fe2801da8f9a3c.
 
 ### Previous foundational product/code changes
 
