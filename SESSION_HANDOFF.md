@@ -4,12 +4,22 @@
 
 ### Repository / PR
 - Repository: `majd7772233-a11y/Tanweer`; only long-lived branches are `main` and `work/release-readiness`.
-- Latest verified source-code checkpoint: P2-38 at `8be3366009dd7557542cdfc8322bb88c2d6b0348` on `work/release-readiness`. Documentation-only commits may advance branch HEAD; fetch the live branch before further work.
+- Latest verified source-code checkpoint: P2-39 at `5fb28ecf2161fb74d4351df783b1a1f24ff56c02` on `work/release-readiness`. Documentation-only commits may advance branch HEAD; fetch the live branch before further work.
 - `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; it was not modified.
 - PR #6 remains Open + Draft + Unmerged, base `main`, head `work/release-readiness`. Do not merge or close it without instruction.
 - WebGPT task token `d8ff20f1-780c-4e55-acc5-ed2dfe8d71be` remains RUNNING; do not submit/close unless explicitly asked.
 
-### Current completed checkpoint — P2-38
+### Current completed checkpoint — P2-39
+- The shared `SettingsToggleRow` now provides each settings Switch with a content description composed from its title and subtitle, plus localized stateDescription: Arabic «مفعّل» / «غير مفعّل» and English “On” / “Off”. All five uses are covered; notification preferences are the primary accessibility target.
+- New regression test: `app/src/test/java/com/magd/tanweer/ui/screens/SettingsToggleAccessibilityTest.kt`; it verifies names/descriptions and OFF/ON state for homework, schedule and exam notification preferences, and checks the callback still changes only the selected setting.
+- Source checkpoint: `5fb28ecf2161fb74d4351df783b1a1f24ff56c02`.
+- Android CI run `45682025227` PASS: Unit Tests, Staging Debug assembly and artifact upload. PR flow skips signed Release steps as expected.
+- Staging Debug artifact `15055745116`, name `Tanweer-debug-2c5bb2ffd511082638c3437c60cdbfd848cfe279`, size 31,384,605 bytes; ZIP SHA-256 `9e140e340b8f75a37673346ba150323cb88bd4ebd10d5ceb7a9c28a5512675d6`.
+- Server CI run `45682025305` PASS; no Server/database files changed.
+- Compose semantics are unit-tested, but real TalkBack announcement/focus-order acceptance is still pending Phase 5 on a physical device. No local Gradle execution or device/emulator install is claimed.
+- P2-38 remains a previous completed source checkpoint at `8be3366009dd7557542cdfc8322bb88c2d6b0348`; see its section below for navigation/authentication safeguards.
+
+### Previous completed checkpoint — P2-38
 - P2-38 notification deep-link startup is implemented and exact-SHA CI passed on `8be3366009dd7557542cdfc8322bb88c2d6b0348`.
 - Android CI run `45679523512` PASS: unit tests, Staging Debug assembly and Debug artifact upload. Release signing/assembly was skipped as expected for PR validation.
 - Android artifact `15051979333`, name `Tanweer-debug-5af1442af461d5c6fb84b1f625bcf9a46406edb3`, 31,383,102 bytes, ZIP SHA-256 `65761ce292b1e84d336a783caf473d3df6183906b39a4e2665488d801cd63d0a`.
@@ -24,7 +34,7 @@
 - No Worker deployment, D1 migration/write, secrets change, Staging/Production data mutation, main update, PR merge or Release signing occurred.
 
 ### Next action
-- P2-39 — give every notification preference Switch an accessible name/state description and verify the resulting hierarchy and TalkBack navigation. Keep TalkBack/device acceptance explicit; do not claim it from unit tests alone.
+- P2-40 — fix the clipped “مراكز الإدارة” category rail and explain role-gated student categories with an honest locked/required-role state. Do not expose or invoke admin screens for student accounts.
 
 ### P2-07 completed
 - Source fix commit `bbeb3e95130cf099cd4dae34b2ea78c3f71ca745`; documentation closeout commit `995eeaf4bc35dac790a2020c01ca2390fc49d512`.

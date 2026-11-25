@@ -1,6 +1,6 @@
 # Tanweer — Project Architecture and Engineering Notes
 
-Updated 2026-11-25. Latest verified source-code checkpoint: P2-38 notification deep-link startup, 8be3366009dd7557542cdfc8322bb88c2d6b0348 on work/release-readiness. Android CI run 45679523512 and Server CI run 45679523400 passed on this exact SHA.
+Updated 2026-11-25. Latest verified source-code checkpoint: P2-39 notification Switch accessibility, 5fb28ecf2161fb74d4351df783b1a1f24ff56c02 on work/release-readiness. Android CI run 45682025227 and Server CI run 45682025305 passed on this exact SHA.
 
 ## 1. Repository and branch contract
 
@@ -39,6 +39,7 @@ Updated 2026-11-25. Latest verified source-code checkpoint: P2-38 notification d
 - Room entities/DAOs live under `data/local`; models and response contracts are under `data/model` and `data/remote`.
 - `app/src/main/java/com/magd/tanweer/data/sync/UnifiedMutationQueue.kt`: offline mutation outbox, retry/backoff and chat reconciliation.
 - Main feature screens live under `ui/screens`; reusable Compose components under `ui/components`; shared theme/typography under `ui/theme`.
+- `ui/screens/SettingsScreen.kt` owns settings and the shared `SettingsToggleRow`; each Switch composes its title/subtitle into an accessible name and exposes localized ON/OFF state. Regression coverage: `ui/screens/SettingsToggleAccessibilityTest.kt`.
 - Horizontal filter rails: `ui/components/HorizontalFilterStrip.kt` provides RTL/LTR-aware edge fades based on `LazyListState` plus `GlassFilterChip` (Material 3 selected semantics, one merged control, 48dp minimum). Homework and Issues screens use the shared component; regression coverage is `app/src/test/java/com/magd/tanweer/ui/components/HorizontalFilterStripTest.kt`.
 - Calendar add-day sheet: `ui/screens/CalendarAddActionSheet.kt` opens the ModalBottomSheet expanded, caps its content to 82% of screen height and provides vertical scrolling for all role-eligible actions. `CalendarScreen.kt` retains original callbacks and TEACHER/ADMIN holiday gate. Regression coverage: `app/src/test/java/com/magd/tanweer/ui/screens/CalendarAddActionSheetTest.kt`.
 - Keyboard-aware forms: `ui/components/KeyboardAwareFormDialog.kt` provides dialog-local BackHandler semantics (hide visible IME before dismiss), `WindowInsets.safeContent` handling and `KeyboardAwareFormScrollColumn` with IME nested scrolling. The Add Homework dialog keeps its Scaffold bottom bar above the keyboard; the Add Event dialog scrolls fields while pinning cancel/publish actions. Draft fields use `rememberSaveable`. Regression coverage: `app/src/test/java/com/magd/tanweer/ui/components/KeyboardAwareFormDialogTest.kt`.
@@ -46,6 +47,7 @@ Updated 2026-11-25. Latest verified source-code checkpoint: P2-38 notification d
 - Services Hub: `ui/screens/ExtraSectionsHubScreen.kt` renders academic, community, role and settings actions. `HubActionCard` uses compact horizontal layout, two-line title/description limits, a full-surface Button target and no redundant inner padding. Regression tests: `app/src/test/java/com/magd/tanweer/ui/screens/HubActionCardTest.kt`.
 - Academic-year and date rules live under `util/AcademicYearManager.kt` and related utilities.
 - PDF reader: `ui/screens/pdf/PdfReaderScreen.kt` owns `TopReaderBar` and `BottomReaderBar`; secondary actions live in a compact overflow menu and control targets are 48dp minimum. Arabic/English labels are in `res/values/strings.xml` and `res/values-en/strings.xml`. Regression coverage: `app/src/test/java/com/magd/tanweer/ui/screens/pdf/PdfReaderControlsTest.kt` (360/393/411dp). Page curl is in `CanvasPageCurl.kt`; extraction is in `util/PdfTextExtractor.kt` and focus ambience in `util/FocusNoisePlayer.kt`.
+- Notification settings Switch accessibility: title and description are combined into one `contentDescription`, and `stateDescription` is localized (`مفعّل`/`غير مفعّل`, `On`/`Off`). This is applied to the shared row (five settings switches). Compose/Robolectric test verifies the three notification preferences and an actual semantic toggle. Physical TalkBack focus-order/announcement validation remains Phase 5.
 
 ### Notification-driven navigation and startup fast path
 - Reminder PendingIntents use `NEW_TASK | CLEAR_TOP | SINGLE_TOP`, and `MainActivity` declares `singleTop`, so an existing task/activity receives the target through `onNewIntent()` instead of being cleared/recreated.
