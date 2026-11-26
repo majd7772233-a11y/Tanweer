@@ -102,7 +102,6 @@ fun ExtraSectionsHubScreen(
         showAvailableRoleCenterSection || showLockedRoleCenterCard || showSettingsSection
 
     LazyColumn(
-    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(MidnightBackground)
@@ -481,7 +480,6 @@ internal fun HubSearchEmptyState(
 }
 
 @Composable
-internal fun HubCategoryFilterRow(@Composable
 internal fun HubCategoryFilterRow(
     categories: List<Pair<String, String>>,
     selectedCategoryFilter: String,
