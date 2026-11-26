@@ -12,6 +12,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -110,6 +111,9 @@ fun GroupsScreen(
     // A previous group's last Room emission must never flash or affect the new group's scroll state.
     val visibleChatMessages = remember(chatMessages, activeChatGroupId) {
         chatMessages.filter { it.groupId == activeChatGroupId }
+    }
+    val chatMessagePresentations = remember(visibleChatMessages) {
+        buildChatMessagePresentations(visibleChatMessages)
     }
     val chatMessageIds = remember(visibleChatMessages) { visibleChatMessages.map { it.id } }
     var chatScrollInitialized by remember(activeChatGroupId) { mutableStateOf(false) }
@@ -361,7 +365,8 @@ fun GroupsScreen(
                             )
                         }
                     } else {
-                        items(visibleChatMessages, key = { it.id }) { msg ->
+                        itemsIndexed(chatMessagePresentations, key = { _, presentation -> presentation.message.id }) { _, presentation ->
+                            val msg = presentation.message
                             val isMe = msg.senderId == currentUser?.id || msg.isMe
                             val isHighlighted = msg.id == highlightedMessageId
                             var isMessageMenuExpanded by remember(msg.id) { mutableStateOf(false) }
@@ -370,10 +375,31 @@ fun GroupsScreen(
                                 user = currentUser,
                                 group = activeChatGroup
                             )
-                            Box(
+                            Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                contentAlignment = if (isMe) Alignment.CenterEnd else Alignment.CenterStart
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
+                                if (presentation.startsNewDay) {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = presentation.dateLabel,
+                                            fontSize = tanweerTextSize(10f),
+                                            color = TextMuted,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(GlassSurface)
+                                                .padding(horizontal = 12.dp, vertical = 5.dp)
+                                                .testTag("chat_date_divider_${presentation.dayKey}")
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentAlignment = if (isMe) Alignment.CenterEnd else Alignment.CenterStart
+                                ) {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth(0.82f)
@@ -420,15 +446,21 @@ fun GroupsScreen(
                                         modifier = Modifier.padding(top = 2.dp)
                                     )
 
-                                    // Delivery Status indicator for me
-                                    if (isMe) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(top = 4.dp),
-                                            horizontalArrangement = Arrangement.End,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 4.dp),
+                                        horizontalArrangement = Arrangement.End,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = presentation.timeLabel,
+                                            fontSize = tanweerTextSize(9f),
+                                            color = TextMuted,
+                                            modifier = Modifier.testTag("chat_message_time_${msg.id}")
+                                        )
+                                        if (isMe) {
+                                            Spacer(modifier = Modifier.width(6.dp))
                                             when (msg.status) {
                                                 "SENDING" -> {
                                                     Text("⏳ جاري الإرسال...", fontSize = tanweerTextSize(9f), color = TextMuted)
@@ -476,6 +508,7 @@ fun GroupsScreen(
                             }
                         }
                     }
+                }
                 }
 
                 if (activeChatGroupCanSend) {
