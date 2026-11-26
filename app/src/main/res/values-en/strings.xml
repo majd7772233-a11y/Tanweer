@@ -284,4 +284,6 @@
     <string name="hub_role_center_request_upgrade">Request a role upgrade from your profile</string>
     <string name="group_members_scroll_hint">Scroll within this list to see the remaining members and their actions ↓</string>
     <string name="sticky_sheet_scroll_hint">Scroll to see more details; actions stay visible below</string>
+    <string name="calendar_day_item_count">Items recorded for this day: %1$d</string>
+    <string name="calendar_day_scroll_hint">Scroll down to review every item; the list may extend below the visible area.</string>
 </resources>
