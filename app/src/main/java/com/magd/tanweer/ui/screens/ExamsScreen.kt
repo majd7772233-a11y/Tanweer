@@ -1147,10 +1147,8 @@ fun CanvasExamsTableBoard(
                 val isPassed = isExamDatePassed(exam.examDate, todayDateStr)
                 val isToday = exam.examDate == todayDateStr
                 val dayName = remember(exam.examDate) { getArabicDayOfWeek(exam.examDate) }
-                val teacherOrHall = remember(exam.notes) {
-                    if (!exam.notes.isNullOrBlank()) exam.notes.take(18) else "أستاذ المادة"
-                }
-                val chapters = localizedChapterListLabel(exam.requiredChapters).take(22)
+                val teacherOrHall = exam.notes?.takeIf { it.isNotBlank() } ?: "أستاذ المادة"
+                val chapters = localizedChapterListLabel(exam.requiredChapters)
 
                 val rowColor = when {
                     isReviewed -> Color(0x1800E676)

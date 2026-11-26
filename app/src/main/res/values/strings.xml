@@ -296,4 +296,7 @@
     <string name="sticky_sheet_scroll_hint">اسحب المحتوى لرؤية بقية التفاصيل؛ تبقى الأزرار في الأسفل</string>
     <string name="calendar_day_item_count">العناصر المسجلة لهذا اليوم: %1$d</string>
     <string name="calendar_day_scroll_hint">مرّر لأسفل لمراجعة جميع العناصر؛ قد تمتد القائمة إلى ما بعد الجزء الظاهر.</string>
+    <string name="hub_search_no_results_title">لا توجد أقسام تطابق بحثك</string>
+    <string name="hub_search_no_results_description">جرّب كلمة أخرى أو امسح البحث لعرض الأقسام المتاحة.</string>
+    <string name="hub_search_clear_action">مسح البحث</string>
 </resources>

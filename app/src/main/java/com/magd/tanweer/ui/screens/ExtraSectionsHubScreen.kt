@@ -59,6 +59,49 @@ fun ExtraSectionsHubScreen(
         "SETTINGS" to "النظام والإعدادات ⚙️"
     )
 
+
+    val matchesHubSearch: (String) -> Boolean = { searchableText ->
+        ExtraSectionsHubSearchPolicy.matches(searchQuery, searchableText)
+    }
+    val showLibraryCard = matchesHubSearch("مكتبة الكتب المناهج pdf دراسية تحميل تخزين")
+    val showCatchUpCard = matchesHubSearch("ماذا فاتني غياب واجبات دروس سابقة استدراك")
+    val showScheduleCard = matchesHubSearch("جدول حصص أسبوعي مواعيد مقترحات")
+    val showTimelineCard = matchesHubSearch("رحلة المادة خط زمني دروس مستودع معرفة")
+    val showArchiveCard = matchesHubSearch("أرشيف أكاديمي سجل سنوي سنوات سابقة")
+    val showAcademicSection = (selectedCategoryFilter == "ALL" || selectedCategoryFilter == "ACADEMIC") &&
+        (showLibraryCard || showCatchUpCard || showScheduleCard || showTimelineCard || showArchiveCard)
+
+    val showDecisionsCard = matchesHubSearch("قرارات تصويت جماعي حوكمة ديمقراطية نصاب")
+    val showGroupsCard = matchesHubSearch("مجموعات شعب دردشة حية صف أعضاء")
+    val showEventsCard = matchesHubSearch("فعاليات انشطة مسابقات مناسبات اجازات احداث")
+    val showGlobalSearchCard = matchesHubSearch("بحث شامل دروس واجبات كتب وسائط")
+    val showCommunitySection = (selectedCategoryFilter == "ALL" || selectedCategoryFilter == "COMMUNITY") &&
+        (showDecisionsCard || showGroupsCard || showEventsCard || showGlobalSearchCard)
+
+    val roleCenterAvailability = roleCenterAccess(userRole, selectedCategoryFilter)
+    val showTeacherRoleCard = roleCenterAvailability == RoleCenterAccess.AVAILABLE &&
+        userRole == Role.TEACHER &&
+        matchesHubSearch("مركز التعليم للأستاذ المعتمد إدارة الواجبات الرسمية الاختبارات الدورية الإجابات النموذجية")
+    val showModeratorRoleCard = roleCenterAvailability == RoleCenterAccess.AVAILABLE &&
+        userRole == Role.MODERATOR &&
+        matchesHubSearch("مركز إشراف الشعبة والتدقيق تقارير المحادثة التصحيحات مقترحات الطلاب")
+    val showAdminRoleCard = roleCenterAvailability == RoleCenterAccess.AVAILABLE &&
+        userRole == Role.ADMIN &&
+        matchesHubSearch("لوحة مدير المدرسة والنظام إدارة الشعب كادر المعلمين سجلات التدقيق")
+    val showAvailableRoleCenterSection = showTeacherRoleCard || showModeratorRoleCard || showAdminRoleCard
+    val showLockedRoleCenterCard = roleCenterAvailability == RoleCenterAccess.LOCKED &&
+        matchesHubSearch("مراكز الإدارة والرتب مسؤول شعبة أستاذ معتمد مدير المدرسة")
+
+    val showProfileCard = matchesHubSearch("ملف شخصي مساهمات رتبة أوسمة ترقية حساب")
+    val showVersionCard = matchesHubSearch("تحديثات إصدار فحص النسخة ترقية changelog")
+    val showSettingsCard = matchesHubSearch("إعدادات حجم الخط سمة مظهر مزامنة إشعارات")
+    val showSettingsSection = (selectedCategoryFilter == "ALL" || selectedCategoryFilter == "SETTINGS") &&
+        (showProfileCard || showVersionCard || showSettingsCard)
+
+    val hasSearchResults = showAcademicSection || showCommunitySection ||
+        showAvailableRoleCenterSection || showLockedRoleCenterCard || showSettingsSection
+
+    LazyColumn(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -154,15 +197,21 @@ fun ExtraSectionsHubScreen(
             }
         }
 
+        if (searchQuery.isNotBlank() && !hasSearchResults) {
+            item {
+                HubSearchEmptyState(onClear = { searchQuery = "" })
+            }
+        }
+
         // Section 1: الأكاديمية والتعلم (Academic & Learning Hub)
-        if (selectedCategoryFilter == "ALL" || selectedCategoryFilter == "ACADEMIC") {
+        if (showAcademicSection) {
             item {
                 HubCategoryHeader(title = "📚 التعلم والمناهج الأكاديمية", color = CyanAccent)
             }
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (searchQuery.isEmpty() || "مكتبة الكتب المناهج pdf دراسية تحميل تخزين".contains(searchQuery.trim())) {
+                    if (showLibraryCard) {
                         HubActionCard(
                             title = "مكتبة الكتب والمناهج المعتمدة",
                             subtitle = "الكتب الدراسية المعتمدة مع قارئ PDF الذكي وخاصية القراءة بدون إنترنت",
@@ -174,7 +223,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (searchQuery.isEmpty() || "ماذا فاتني غياب واجبات دروس سابقة استدراك".contains(searchQuery.trim())) {
+                    if (showCatchUpCard) {
                         HubActionCard(
                             title = "ماذا فاتني أثناء الغياب؟",
                             subtitle = "تجميع ذكي وشامل لكل الواجبات والدروس والاختبارات المضافة أثناء الغياب",
@@ -186,7 +235,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (searchQuery.isEmpty() || "جدول حصص أسبوعي مواعيد مقترحات".contains(searchQuery.trim())) {
+                    if (showScheduleCard) {
                         HubActionCard(
                             title = "جدول الحصص الأسبوعي",
                             subtitle = "استعراض جدول الشعبة وتقديم مقترحات تعديل الحصص والتصويت الجماعي عليها",
@@ -198,7 +247,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (searchQuery.isEmpty() || "رحلة المادة خط زمني دروس مستودع معرفة".contains(searchQuery.trim())) {
+                    if (showTimelineCard) {
                         HubActionCard(
                             title = "رحلة المادة والخط الزمني",
                             subtitle = "الخريطة التراكمية والتسلسل الزمني للدروس والمراجعات الدورية",
@@ -210,7 +259,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (searchQuery.isEmpty() || "أرشيف أكاديمي سجل سنوي سنوات سابقة".contains(searchQuery.trim())) {
+                    if (showArchiveCard) {
                         HubActionCard(
                             title = "الأرشيف الأكاديمي والسنوات السابقة",
                             subtitle = "استعراض سجلات الأعوام والمواد المؤرشفة والرجوع إليها في أي وقت",
@@ -226,14 +275,14 @@ fun ExtraSectionsHubScreen(
         }
 
         // Section 2: المجتمع والحوكمة (Community & Governance)
-        if (selectedCategoryFilter == "ALL" || selectedCategoryFilter == "COMMUNITY") {
+        if (showCommunitySection) {
             item {
                 HubCategoryHeader(title = "🗳️ المجتمع والحوكمة المدرسية", color = EmeraldGreen)
             }
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (searchQuery.isEmpty() || "قرارات تصويت جماعي حوكمة ديمقراطية نصاب".contains(searchQuery.trim())) {
+                    if (showDecisionsCard) {
                         HubActionCard(
                             title = "القرارات والتصويتات الجماعية",
                             subtitle = "محرك الحوكمة الموحد للتصويت على الحذف، التصويب، وتعديل الجداول",
@@ -245,7 +294,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (searchQuery.isEmpty() || "مجموعات شعب دردشة حية صف أعضاء".contains(searchQuery.trim())) {
+                    if (showGroupsCard) {
                         HubActionCard(
                             title = "المجموعات والشعب الدراسية",
                             subtitle = "الانضمام إلى مجموعات الصف، والمحادثة الفورية التفاعلية مع الزملاء",
@@ -257,7 +306,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (searchQuery.isEmpty() || "فعاليات انشطة مسابقات مناسبات اجازات احداث".contains(searchQuery.trim())) {
+                    if (showEventsCard) {
                         HubActionCard(
                             title = "الفعاليات والأنشطة المدرسية",
                             subtitle = "جدول المسابقات، الاحتفالات، العطل الرسمية والورش التفاعلية",
@@ -269,7 +318,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (searchQuery.isEmpty() || "بحث شامل دروس واجبات كتب وسائط".contains(searchQuery.trim())) {
+                    if (showGlobalSearchCard) {
                         HubActionCard(
                             title = "محرك البحث الشامل",
                             subtitle = "البحث الفوري الدقيق في كافة الدروس والواجبات والاختبارات والكتب",
@@ -285,14 +334,14 @@ fun ExtraSectionsHubScreen(
         }
 
         // Section 3: مركز الرتبة الحالية (Current Role Center Only)
-        if (roleCenterAccess(userRole, selectedCategoryFilter) == RoleCenterAccess.AVAILABLE) {
+        if (showAvailableRoleCenterSection) {
             item {
                 HubCategoryHeader(title = "🛡️ مركز الرتبة المعتمدة", color = WarmAmber)
             }
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (userRole == Role.TEACHER) {
+                    if (showTeacherRoleCard) {
                         HubActionCard(
                             title = "مركز التعليم للأستاذ المعتمد",
                             subtitle = "إدارة وتثبيت الواجبات الرسمية، الاختبارات الدورية، وتوثيق الإجابات النموذجية",
@@ -304,7 +353,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (userRole == Role.MODERATOR) {
+                    if (showModeratorRoleCard) {
                         HubActionCard(
                             title = "مركز إشراف الشعبة والتدقيق",
                             subtitle = "مراجعة تقارير المحادثة، اعتماد التصحيحات، وتدقيق مقترحات الطلاب",
@@ -316,7 +365,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (userRole == Role.ADMIN) {
+                    if (showAdminRoleCard) {
                         HubActionCard(
                             title = "لوحة مدير المدرسة والنظام",
                             subtitle = "إدارة كاملة للشعب، كادر المعلمين، سجلات التدقيق، القرارات الإدارية والتنبيهات",
@@ -331,7 +380,7 @@ fun ExtraSectionsHubScreen(
             }
         }
 
-        if (roleCenterAccess(userRole, selectedCategoryFilter) == RoleCenterAccess.LOCKED) {
+        if (showLockedRoleCenterCard) {
             item {
                 HubCategoryHeader(title = "🛡️ مراكز الإدارة والرتب", color = WarmAmber)
             }
@@ -343,14 +392,14 @@ fun ExtraSectionsHubScreen(
         }
 
         // Section 4: الحساب والتحديثات (Account & System Updates)
-        if (selectedCategoryFilter == "ALL" || selectedCategoryFilter == "SETTINGS") {
+        if (showSettingsSection) {
             item {
                 HubCategoryHeader(title = "⚙️ الحساب وإدارة النظام", color = TextSecondary)
             }
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (searchQuery.isEmpty() || "ملف شخصي مساهمات رتبة أوسمة ترقية حساب".contains(searchQuery.trim())) {
+                    if (showProfileCard) {
                         HubActionCard(
                             title = "الملف الشخصي والمساهمات",
                             subtitle = "بيانات الحساب، الأوسمة المحصلة، وسجل المشاركات الفعالة وطلب الترقية",
@@ -362,7 +411,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (searchQuery.isEmpty() || "تحديثات إصدار فحص النسخة ترقية changelog".contains(searchQuery.trim())) {
+                    if (showVersionCard) {
                         HubActionCard(
                             title = "فحص التحديثات والإصدار",
                             subtitle = "التحقق من توافق النسخة، سجل التحديثات، والميزات الجديدة في المنظومة",
@@ -374,7 +423,7 @@ fun ExtraSectionsHubScreen(
                         )
                     }
 
-                    if (searchQuery.isEmpty() || "إعدادات حجم الخط سمة مظهر مزامنة إشعارات".contains(searchQuery.trim())) {
+                    if (showSettingsCard) {
                         HubActionCard(
                             title = "إعدادات التطبيق وتخصيص المظهر",
                             subtitle = "تخصيص حجم الخط المفضل، السمة الليلية، والمزامنة السحابية الذكية",
@@ -391,7 +440,48 @@ fun ExtraSectionsHubScreen(
     }
 }
 
+
 @Composable
+internal fun HubSearchEmptyState(
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    GlassCard(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("hub_search_empty_state"),
+        backgroundColor = GlassSurface
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.hub_search_no_results_title),
+                fontSize = tanweerTextSize(14f),
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text = stringResource(R.string.hub_search_no_results_description),
+                fontSize = tanweerTextSize(12f),
+                color = TextSecondary,
+                textAlign = TextAlign.Center
+            )
+            GlassButton(
+                text = stringResource(R.string.hub_search_clear_action),
+                icon = Icons.Default.Clear,
+                onClick = onClear,
+                modifier = Modifier.fillMaxWidth().testTag("hub_search_clear_action")
+            )
+        }
+    }
+}
+
+@Composable
+internal fun HubCategoryFilterRow(@Composable
 internal fun HubCategoryFilterRow(
     categories: List<Pair<String, String>>,
     selectedCategoryFilter: String,

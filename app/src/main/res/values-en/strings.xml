@@ -286,4 +286,7 @@
     <string name="sticky_sheet_scroll_hint">Scroll to see more details; actions stay visible below</string>
     <string name="calendar_day_item_count">Items recorded for this day: %1$d</string>
     <string name="calendar_day_scroll_hint">Scroll down to review every item; the list may extend below the visible area.</string>
+    <string name="hub_search_no_results_title">No sections match your search</string>
+    <string name="hub_search_no_results_description">Try another term or clear the search to browse available sections.</string>
+    <string name="hub_search_clear_action">Clear search</string>
 </resources>

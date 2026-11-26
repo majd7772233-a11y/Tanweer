@@ -9,6 +9,12 @@ import java.util.Locale
  */
 enum class HomeworkTaskKind { HOMEWORK, TASK, UNKNOWN }
 
+data class HomeworkTaskTypeSummary(
+    val homeworkCount: Int,
+    val projectCount: Int,
+    val otherAssignmentCount: Int
+)
+
 object HomeworkTaskTypePolicy {
     fun classify(taskType: String?): HomeworkTaskKind {
         return when (taskType?.trim()?.uppercase(Locale.ROOT)) {
@@ -23,4 +29,18 @@ object HomeworkTaskTypePolicy {
 
     fun isTask(taskType: String?): Boolean =
         classify(taskType) == HomeworkTaskKind.TASK
+
+    fun summarize(taskTypes: Iterable<String?>): HomeworkTaskTypeSummary {
+        var homeworkCount = 0
+        var projectCount = 0
+        var otherAssignmentCount = 0
+        taskTypes.forEach { taskType ->
+            when (classify(taskType)) {
+                HomeworkTaskKind.HOMEWORK -> homeworkCount++
+                HomeworkTaskKind.TASK -> projectCount++
+                HomeworkTaskKind.UNKNOWN -> otherAssignmentCount++
+            }
+        }
+        return HomeworkTaskTypeSummary(homeworkCount, projectCount, otherAssignmentCount)
+    }
 }

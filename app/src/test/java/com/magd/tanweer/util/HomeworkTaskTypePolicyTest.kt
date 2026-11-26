@@ -30,6 +30,24 @@ class HomeworkTaskTypePolicyTest {
     }
 
     @Test
+    fun summarySeparatesHomeworkProjectsAndUnknownTypes() {
+        val summary = HomeworkTaskTypePolicy.summarize(
+            listOf("HOMEWORK", " homework ", "TASK", "FUTURE_KIND")
+        )
+        assertEquals(2, summary.homeworkCount)
+        assertEquals(1, summary.projectCount)
+        assertEquals(1, summary.otherAssignmentCount)
+    }
+
+    @Test
+    fun summaryOfNoRecordsIsZeroForEveryCategory() {
+        val summary = HomeworkTaskTypePolicy.summarize(emptyList())
+        assertEquals(0, summary.homeworkCount)
+        assertEquals(0, summary.projectCount)
+        assertEquals(0, summary.otherAssignmentCount)
+    }
+
+    @Test
     fun unknownTypesAreNotCountedAsHomeworkOrProject() {
         assertEquals(HomeworkTaskKind.UNKNOWN, HomeworkTaskTypePolicy.classify("PROJECT_V2"))
         assertFalse(HomeworkTaskTypePolicy.isHomework("PROJECT_V2"))

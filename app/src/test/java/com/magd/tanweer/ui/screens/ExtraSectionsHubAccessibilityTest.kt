@@ -69,6 +69,23 @@ class ExtraSectionsHubAccessibilityTest {
     }
 
     @Test
+    fun hubSearchEmptyStateExplainsNoMatchesAndClearsTheQuery() {
+        var clearCount = 0
+        composeRule.setContent {
+            TanweerTheme {
+                Box(Modifier.width(360.dp)) {
+                    HubSearchEmptyState(onClear = { clearCount++ })
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("hub_search_empty_state").assertIsDisplayed()
+        composeRule.onNodeWithText("لا توجد أقسام تطابق بحثك").assertIsDisplayed()
+        composeRule.onNodeWithTag("hub_search_clear_action").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertEquals(1, clearCount) }
+    }
+
+    @Test
     fun lockedStudentRoleCardExplainsTheRequirementAndOnlyOpensTheProfileAction() {
         var profileOpenCount = 0
         composeRule.setContent {

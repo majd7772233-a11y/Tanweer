@@ -210,21 +210,19 @@ fun HomeworkScreen(
         }
     }
 
-    val homeworkCount = remember(homeworks) {
-        homeworks.count { HomeworkTaskTypePolicy.isHomework(it.taskType) }
+    val homeworkTypeSummary = remember(homeworks) {
+        HomeworkTaskTypePolicy.summarize(homeworks.map { it.taskType })
     }
-    val projectCount = remember(homeworks) {
-        homeworks.count { HomeworkTaskTypePolicy.isTask(it.taskType) }
+    val todayHomeworkTypeSummary = remember(homeworks, todayDate) {
+        HomeworkTaskTypePolicy.summarize(
+            homeworks.filter { it.dueDate == todayDate }.map { it.taskType }
+        )
     }
-    val otherAssignmentCount = remember(homeworks) {
-        homeworks.count { HomeworkTaskTypePolicy.classify(it.taskType) == HomeworkTaskKind.UNKNOWN }
-    }
-    val todayHomeworkCount = remember(homeworks, todayDate) {
-        homeworks.count { HomeworkTaskTypePolicy.isHomework(it.taskType) && it.dueDate == todayDate }
-    }
-    val todayProjectCount = remember(homeworks, todayDate) {
-        homeworks.count { HomeworkTaskTypePolicy.isTask(it.taskType) && it.dueDate == todayDate }
-    }
+    val homeworkCount = homeworkTypeSummary.homeworkCount
+    val projectCount = homeworkTypeSummary.projectCount
+    val otherAssignmentCount = homeworkTypeSummary.otherAssignmentCount
+    val todayHomeworkCount = todayHomeworkTypeSummary.homeworkCount
+    val todayProjectCount = todayHomeworkTypeSummary.projectCount
     val overdueCount = remember(typeFilteredHomeworks, todayDate) {
         typeFilteredHomeworks.count { !it.isCompleted && it.dueDate < todayDate }
     }
