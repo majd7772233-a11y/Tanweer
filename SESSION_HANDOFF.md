@@ -1003,3 +1003,15 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Server CI:** run `45674833715` PASS on same SHA, 47 test files / 327 tests; TypeScript, dependency audit and Wrangler Production/Staging dry-runs passed.
 - **Validation boundary:** CI test/build only; no local Gradle run, no physical device/emulator install, no external camera provider launch, no actual permission-grant check, no EXIF-orientation visual check, and no live upload. Phase 5 remains open for those tests.
 - **Next:** P2-38 notification deep-link startup path.
+
+## 2026-11-26 - P2-40 / P2-41 / P2-42 continuation checkpoint
+
+- **Verified branch/head:** `work/release-readiness`, source commit `44ce0be9dd07dfc99639f1407f31dd9554af37db`; local working tree contains documentation edits only after this source commit. `main` remains `64143994070bcdc410cf044379fe2801da8f9a3c`; PR #6 remains Open + Draft + Unmerged.
+- **P2-40:** completed at `a995c935b34c031c15b3bc8db8d2ca365c87c719`; Android CI `45689516514` PASS, Server CI `45689516084` PASS.
+- **P2-41:** completed at `715e77839d06359ddf40eb2a06adf2fc1d37c47c`; Android CI `45694425388` PASS, Server CI `45694425315` PASS. Eight-member Compose fixture verifies the final row and its controls are visible after scrolling; no management callbacks are invoked. Debug artifact `15060072585` (31,391,337 bytes).
+- **P2-42 source:** commit `44ce0be9dd07dfc99639f1407f31dd9554af37db` adds `StickyActionSheetLayout.kt`, integrates it into `ExamsScreen.kt` (`ExamDetailModal`) and `ScheduleScreen.kt` (`SubjectPickerSheet`), adds bilingual hint strings, and adds `StickyActionSheetLayoutTest.kt`.
+- **P2-42 local checks:** targeted Robolectric/Compose test 2/2 PASS; `assembleStagingDebug` PASS. Local APK `app/build/outputs/apk/staging/debug/app-staging-debug.apk`, 33,726,712 bytes, SHA-256 `F23B0B6B149F18FEE4C44D343DD46FAE051E53319795C92333D6A712E2FF4FA5`.
+- **Full local Android unit run:** 316 tests, 1 failure (`StudentNotebookManagerTest.valid notebook records round trip through atomic storage`, line 37). This is the known Windows/Robolectric `AtomicFile` failure; no test was disabled or skipped. CI Linux result is still pending.
+- **Exact-SHA CI for P2-42:** Server run `45804200860` PASS and Android run `45804201953` PASS on the same SHA. Android unit tests, Staging Debug assembly and Debug artifact upload succeeded. Artifact ID `15108209724`, 31,398,702 bytes: https://github.com/majd7772233-a11y/Tanweer/actions/runs/45804201953/artifacts/15108209724.
+- **Next roadmap item after P2-42:** P2-43 - long calendar day lists need a continuation cue/count so items below the initial viewport do not appear absent.
+- **Boundaries:** no `main` changes, PR merge, Worker deployment, D1 migration/write, secret changes, live schedule or membership mutations, phone/emulator installation, or Phase 5 visual acceptance.

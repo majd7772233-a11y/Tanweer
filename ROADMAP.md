@@ -1269,31 +1269,43 @@
 
 **الأدلة:** %TEMP%\tanweer-role-readiness-20261120\evidence.
 
-## P2-41 — حوار إدارة أعضاء المشرف لا يوضح أن الصف الأخير أسفل viewport — التنفيذ مضاف، CI قيد التحقق
+## P2-41 - Moderator management dialog last-member visibility - COMPLETE (Android/Server CI green)
 
-**مرجع التقرير:** TNW-MOD-UI-001. **الأولوية:** P3.
+**Report:** TNW-MOD-UI-001. **Priority:** P3.
 
-**السبب:** قائمة الأعضاء داخل Dialog محددة بـ430dp، من دون توضيح أن محتواها الداخلي قابل للتمرير.
+**Root cause:** The member list inside the moderator-management Dialog is capped at 430dp but had no continuation cue, so the final member row and its controls could sit below the initial viewport.
 
-**التنفيذ على الفرع:**
-- إضافة تلميح عربي/إنجليزي عندما يتجاوز عدد الأعضاء والطلبات ثلاثة عناصر، يوضح أن السحب داخل القائمة يعرض بقية الأعضاء وأزرارهم.
-- إضافة هويات اختبار مستقرة للقائمة `group_members_list` والتلميح `group_members_scroll_hint` وصف أفعال العضو.
-- لم تتغير callbacks أو صلاحيات الترقية/الخفض/الإزالة/الحظر، ولم تتم أي عملية على عضويات فعلية.
+**Implementation commit:** `715e77839d06359ddf40eb2a06adf2fc1d37c47c`.
+- Added Arabic/English continuation guidance when more than three member/request entries exist.
+- Added stable tags for the scroll list, cue, final-member name and management actions.
+- Kept promotion/demotion/removal/ban callbacks, authorization rules and real membership records unchanged.
 
-**اختبار الانحدار:** `GroupMembersManagementDialogTest` ينشئ ثمانية أعضاء محليين، يتحقق من ظهور التلميح، يمرر القائمة إلى العضو الأخير، ويتأكد من ظهور أزرار الترقية والإزالة والحظر من دون النقر عليها أو استدعاء callbacks.
+**Regression test:** `GroupMembersManagementDialogTest` creates eight local fixture members, verifies the hint, scrolls to the last member, and asserts the promotion/removal/ban controls are visible without clicking them or invoking callbacks.
 
-**التحقق:** Server CI run `45693765348` PASS. Android CI run `45693765576` نفّذ 314 اختباراً؛ فشل اختبار P2-41 عند assertion نص الاسم (line 68) بعد تمرير القائمة، ولم يبدأ Debug APK assembly. جرى جعل اختبار الاسم وأزرار العضو الأخير يعتمد على test tags فردية بدلاً من مطابقة النص. يجب أن يجتاز الـSHA الجديد Android tests + Staging Debug APK assembly قبل إغلاق المهمة.
+**Exact-SHA CI:** Android run `45694425388` PASS; Server run `45694425315` PASS on `715e77839d06359ddf40eb2a06adf2fc1d37c47c`.
+**Staging Debug artifact:** ID `15060072585`, 31,391,337 bytes. [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45694425388/artifacts/15060072585).
 
-**الأدلة:** %TEMP%\tanweer-moderator-round-20261120\evidence.
+**Boundary:** No live membership action or role change was performed. No phone/emulator visual acceptance is claimed; keep Phase 5 open.
 
+## P2-42 — أفعال تفاصيل الاختبار وحفظ الجدول خارج الجزء المرئي الأول - COMPLETE (Android/Server CI green)
 
-## P2-42 — أفعال تفاصيل الاختبار وحفظ الجدول خارج الجزء المرئي الأول
+**Reports:** TNW-EXAM-DETAIL-UX-001 and TNW-TEACHER-ROUND-20261120. **Priority:** P3.
 
-**مراجع التقرير:** TNW-EXAM-DETAIL-UX-001 وTNW-TEACHER-ROUND-20261120. **الأولوية:** P3.
+**Root cause:** Exam detail actions (reminder and subject book) shared the same vertical content column as long exam details; schedule subject selection similarly placed the pin/save action after the subject grid and time fields inside the scroll region.
 
-**الدليل:** أزرار «تذكير بالموعد» و«كتاب المادة» تظهر بعد swipe في ورقة تفاصيل الاختبار. حقل الفصول وملاحظات الأستاذ/القاعة كذلك أسفل الورقة. زر «تثبيت في الجدول» في ورقة تحرير الحصة يحتاج تمرير عمودي للوصول؛ الحفظ يعمل بعد الوصول.
+**Implementation commit:** `44ce0be9dd07dfc99639f1407f31dd9554af37db`.
+- Added reusable `ui/components/StickyActionSheetLayout.kt`: bounded 90%-height sheet, independently scrollable body, and a footer outside the scroll container.
+- `ExamDetailModal` now keeps **Reminder** and **Subject book** actions in the fixed footer; chapters, teacher/room notes, status and secondary edit information remain in the scrollable body.
+- `SubjectPickerSheet` now keeps **Pin to schedule / Update slot** (and existing clear action) in the fixed footer; subject grid and start/end time fields remain scrollable.
+- Added Arabic/English guidance explaining that details scroll while actions stay visible.
 
-**الإصلاح:** علامة تمرير واضحة أو sticky actions، وعدم دفن الإجراء الأساسي أسفل محتوى طويل.
+**Regression coverage:** `StickyActionSheetLayoutTest` has two Compose/Robolectric tests. On 360x340dp it scrolls to the last detail and confirms the footer action remains visible and is invoked only on an explicit click. On 411x891dp it confirms short content and the footer remain visible without requiring scrolling.
+
+**Local verification:** targeted Compose test `2/2` PASS; `assembleStagingDebug` PASS. APK: 33,726,712 bytes; SHA-256 `F23B0B6B149F18FEE4C44D343DD46FAE051E53319795C92333D6A712E2FF4FA5`.
+
+**Full local unit suite:** 316 tests, one failure (`StudentNotebookManagerTest`, line 37, `AtomicFile` under Windows/Robolectric); the two new P2-42 tests passed. Do not suppress or skip the existing failure. Exact-SHA Android CI run `45804201953` PASS (unit tests, Staging Debug assembly and Debug artifact upload); exact-SHA Server CI run `45804200860` PASS (dependency audit, TypeScript, tests and Wrangler validation). Both runs validate `44ce0be9dd07dfc99639f1407f31dd9554af37db`. Debug artifact ID `15108209724`, 31,398,702 bytes: [Artifact](https://github.com/majd7772233-a11y/Tanweer/actions/runs/45804201953/artifacts/15108209724).
+
+**Boundary:** No real-device install or visual confirmation, no schedule write to a real group, and no server/database/deployment changes. Phase 5 acceptance remains open.
 
 ## P2-43 — جدول اليوم طويل ولا يوضح وجود عناصر أسفل الشاشة
 
