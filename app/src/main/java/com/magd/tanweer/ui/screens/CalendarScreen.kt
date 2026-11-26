@@ -165,6 +165,15 @@ fun CalendarScreen(
         events.filter { it.eventDate == selectedDateStr }
     }
 
+    val daySummary = remember(dayContents, dayExams, dayAssignments, dayEvents) {
+        buildCalendarDaySummary(
+            lessonCount = dayContents.size,
+            examCount = dayExams.size,
+            assignmentCount = dayAssignments.size,
+            eventCount = dayEvents.size
+        )
+    }
+
     // Days in current month
     val daysInMonth = remember(currentCalendar.timeInMillis, exams, homeworks, events, allContents) {
         val cal = currentCalendar.clone() as Calendar
@@ -525,6 +534,23 @@ fun CalendarScreen(
                         fontSize = tanweerTextSize(11f),
                         color = TextSecondary
                     )
+                    if (daySummary.totalCount > 0) {
+                        Text(
+                            text = stringResource(R.string.calendar_day_item_count, daySummary.totalCount),
+                            fontSize = tanweerTextSize(11f),
+                            fontWeight = FontWeight.SemiBold,
+                            color = CyanAccent,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    if (daySummary.shouldShowContinuationHint) {
+                        Text(
+                            text = stringResource(R.string.calendar_day_scroll_hint),
+                            fontSize = tanweerTextSize(10f),
+                            color = TextMuted,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
 
                 GlassButton(
