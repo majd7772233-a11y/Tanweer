@@ -1,18 +1,5 @@
 package com.magd.tanweer.ui.components
 
-/**
- * The global sync banner is intentionally silent for initial/background loading and success.
- * Explicit refresh gets a short-lived busy banner; offline and error states remain actionable.
- */
-fun shouldShowSyncStatusBar(syncState: SyncState): Boolean = when (syncState) {
-    is SyncState.Refreshing,
-    is SyncState.OfflineCached,
-    is SyncState.Error -> true
-    is SyncState.Idle,
-    is SyncState.Loading,
-    is SyncState.Success -> false
-}
-
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -40,6 +27,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.theme.*
+
+/**
+ * The global sync banner is intentionally silent for initial/background loading and success.
+ * Explicit refresh gets a short-lived busy banner; offline and error states remain actionable.
+ */
+fun shouldShowSyncStatusBar(syncState: SyncState): Boolean = when (syncState) {
+    is SyncState.Refreshing,
+    is SyncState.OfflineCached,
+    is SyncState.Error -> true
+    is SyncState.Idle,
+    is SyncState.Loading,
+    is SyncState.Success -> false
+}
 
 @Composable
 fun SyncStatusBar(
