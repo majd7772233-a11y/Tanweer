@@ -294,4 +294,6 @@
     <string name="hub_role_center_request_upgrade">طلب ترقية الرتبة من الملف الشخصي</string>
     <string name="group_members_scroll_hint">اسحب داخل القائمة لعرض بقية الأعضاء وأزرار إدارتهم ↓</string>
     <string name="sticky_sheet_scroll_hint">اسحب المحتوى لرؤية بقية التفاصيل؛ تبقى الأزرار في الأسفل</string>
+    <string name="calendar_day_item_count">العناصر المسجلة لهذا اليوم: %1$d</string>
+    <string name="calendar_day_scroll_hint">مرّر لأسفل لمراجعة جميع العناصر؛ قد تمتد القائمة إلى ما بعد الجزء الظاهر.</string>
 </resources>
