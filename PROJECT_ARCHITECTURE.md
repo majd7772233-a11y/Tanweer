@@ -222,3 +222,14 @@ P2-32 covers PDF reader toolbar layout and touch targets only; it does not alter
 - The three Phase 3 work areas are implemented: TNR-006 student notebook atomic/recoverable persistence; TNR-007 bounded PDF rendering and validator-backed partial downloads; TNR-009 trustworthy reminder reconciliation and fresh alarm validation.
 - Device/Staging tests are intentionally held for Phase 5. CI does not replace physical acceptance.
 - Five phases total; Phases 4 and 5 remain.
+
+
+## P2-46 / P2-47 / P2-48 — verified implementation checkpoint
+
+- Code SHA: fc36594c711521f2d20c3bbe24e8977d8308671f.
+- Hub search: ExtraSectionsHubSearchPolicy normalizes query and keywords with Locale.ROOT. The original query is not rewritten. Section and role-card visibility are evaluated together; no empty category groups are rendered; HubSearchEmptyState exposes a clear action. LibraryScreen's confirmed-snapshot empty state and filter-empty reset behavior were already present and remain unchanged.
+- Homework summary: HomeworkTaskTypePolicy.summarize is the shared counting boundary for all items and due-today items. HOMEWORK, TASK and UNKNOWN remain distinct.
+- Exam row: pre-truncation has been removed from notes and chapter labels. Compose uses its existing one-line ellipsis while the detail sheet retains full text. Existing sticky footer and book routing are preserved.
+- Android CI run 45815000928 passed unit tests, Staging Debug assembly and Debug artifact upload. Artifact 15114707135 SHA-256 850b9bc592faebda80f3650dacd852dc8ed5e9b54879fb9555ab5480e9ffdeb3.
+- Server CI run 45815000929 passed dependency baseline, TypeScript, tests and Wrangler bundle validation.
+- No production/staging deployments or D1 mutations were performed. Physical-device visual/TalkBack acceptance remains Phase 5.

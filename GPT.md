@@ -2323,3 +2323,13 @@ When giving the user a statement about the current state, re-read GitHub if it m
 - Migration `0036_schedule_decision_quorum_reconciliation.sql` is committed but NOT applied. It flags migrated APPLIED records whose saved eligible votes do not prove quorum. It does not update/delete `schedule_slots` or `schedule_versions`. The snapshot carried by migration 0029 is not guaranteed to be the original electorate, and missing historical membership is not reconstructed. The reported live D1 record was not queried or changed.
 - Exact-SHA Server CI run `45458689752`: 47 Vitest files / 327 tests, TypeScript, zero npm audit vulnerabilities, Wrangler Production/Staging dry-runs all passed. Exact-SHA Android CI run `45458689696`: unit tests, Staging Debug APK build and upload passed. Artifact ID `14951977560`, SHA-256 `5ad9882bb3f796aeae2653b13b6628084e05dbbc0177ed8fa3d6b92d67521b1f`.
 - No D1 apply/write, Worker deployment, secret changes, release signing, PR merge or `main` modification. Phase 5 physical acceptance remains open. Next: P2-31.
+
+
+### Verified continuation checkpoint — P2-46 / P2-47 / P2-48 (2026-11-26)
+- Final source SHA: fc36594c711521f2d20c3bbe24e8977d8308671f on work/release-readiness.
+- P2-46: case-insensitive Sections Hub search, role-center-aware card filtering, clearable localized no-results state. Library empty-search/reset behavior was already implemented and verified.
+- P2-47: unified HomeworkTaskTypePolicy.summarize for distinct Homework / Project / Other counts.
+- P2-48: removed pre-truncation of exam notes and chapter labels; kept existing sticky action footer and P2-28 book routing.
+- Android CI 45815000928 PASS; Server CI 45815000929 PASS.
+- Debug artifact 15114707135; 31,412,284 bytes; SHA-256 850b9bc592faebda80f3650dacd852dc8ed5e9b54879fb9555ab5480e9ffdeb3.
+- No local/device acceptance, signed release, deployment, D1 mutation or PR merge. Phase 5 remains open.

@@ -1028,3 +1028,18 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Governance:** `main` unchanged at `64143994070bcdc410cf044379fe2801da8f9a3c`; PR #6 remains Open + Draft + Unmerged. No Worker deployment, D1 write/migration, secret change, production/staging data mutation or live schedule/chat mutation.
 - **Next roadmap item:** P2-46 — Library empty-search feedback and case-insensitive Sections Hub search.
 
+
+
+## P2-46 / P2-47 / P2-48 — إغلاق التنفيذ والتحقق الآلي
+
+- Source checkpoint: fc36594c711521f2d20c3bbe24e8977d8308671f على work/release-readiness.
+- P2-46: LibraryScreen empty-search/filter state كان موجوداً بالفعل ويعيد البحث والمرشح إلى العرض الكامل؛ أضيفت مطابقة Hub غير حساسة لحالة الأحرف بـLocale.ROOT، تصفية كل الأقسام بما فيها role center، وإظهار Empty State قابلة لمسح query. اختبارات السياسة واختبار Compose أضيفت.
+- P2-47: HomeworkTaskTypePolicy.summarize أصبح مصدر التجميع الواحد للواجبات والمشاريع والأنواع الأخرى في الملخص العام وملخص المستحق اليوم. تبقى قيم Homework وProject وOther منفصلة، و«الكل» يظل إجمالي السجلات.
+- P2-48: أزيل take(18) من الملاحظات وtake(22) من قائمة الفصول. النص الكامل يصل إلى Compose؛ الاقتصاص مرئي فقط في الصف، والتفاصيل تعرض النص الكامل. StickyActionSheetLayout يثبت أزرار التذكير والكتاب، ووجهة الكتاب تظل عبر ExamBookNavigationPolicy.
+- Android CI run 45815000928: PASS — unit tests, Staging Debug assembly, Debug artifact upload.
+- Server CI run 45815000929: PASS — security baseline, TypeScript, Vitest/unit-integration tests and Wrangler bundle validation.
+- Debug artifact ID 15114707135, 31,412,284 bytes, SHA-256 850b9bc592faebda80f3650dacd852dc8ed5e9b54879fb9555ab5480e9ffdeb3.
+- An initial Android attempt (45814592407) caught a duplicate Hub declaration introduced by insertion; removed in fc36594. Final green run is on the corrected SHA.
+- main remains 64143994070bcdc410cf044379fe2801da8f9a3c; PR #6 remains Open + Draft + Unmerged. No Worker deploy, D1 write/migration, secret change, live data mutation or merge.
+- No local Gradle build or physical-device install / visual / TalkBack acceptance is claimed. Signed Release steps were skipped; Phase 5 stays open.
+- Next roadmap item after these is the subsequent pending P2 item; re-read ROADMAP before starting to confirm it is unchanged.
