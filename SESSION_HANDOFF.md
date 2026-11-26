@@ -1015,3 +1015,16 @@ These were source-audited and CI-green as of the 2026-11-07 checkpoint. The user
 - **Exact-SHA CI for P2-42:** Server run `45804200860` PASS and Android run `45804201953` PASS on the same SHA. Android unit tests, Staging Debug assembly and Debug artifact upload succeeded. Artifact ID `15108209724`, 31,398,702 bytes: https://github.com/majd7772233-a11y/Tanweer/actions/runs/45804201953/artifacts/15108209724.
 - **Next roadmap item after P2-42:** P2-43 - long calendar day lists need a continuation cue/count so items below the initial viewport do not appear absent.
 - **Boundaries:** no `main` changes, PR merge, Worker deployment, D1 migration/write, secret changes, live schedule or membership mutations, phone/emulator installation, or Phase 5 visual acceptance.
+## 2026-11-26 — P2-43 / P2-44 / P2-45 checkpoint
+
+- **Verified source SHA:** `d5470103f4600128cb768f6bf79a089fd9fcef15`, branch `work/release-readiness`.
+- **P2-43:** `CalendarScreen.kt` now shows the count of locally rendered day entries and a continuation cue for multi-item days. `CalendarDaySummaryPolicy.kt` and `CalendarDaySummaryPolicyTest.kt` cover four categories, empty/single/multiple entries and negative-count clamping. Arabic/English resources added.
+- **P2-44:** `SyncStatusBar.kt` now stays hidden for initial/background Loading, Success and Idle. Explicit Refreshing is transient; Error and OfflineCached remain visible with refresh available. Policy tests added.
+- **P2-45:** `ChatMessageTimelinePresentation.kt` derives localized local-time date/time labels. `GroupsScreen.kt` renders a date divider on the first message of each local day and a compact time on every bubble. One LazyColumn item remains per message, preserving message order, deep-link indices and auto-follow. No edited/deleted marker was invented because the model has no such metadata and the current delete path removes the row.
+- **Exact-SHA Android CI:** run `45808382451` PASS — unit tests, Staging Debug assembly and Debug artifact upload.
+- **Exact-SHA Server CI:** run `45808382430` PASS — audit, TypeScript, 47 Vitest files and Wrangler production-bundle validation.
+- **Staging Debug artifact:** ID `15110922208`, 31,406,502 bytes, SHA-256 `6d41eeec7ae707e6ae60e0970fb85fd795e8a87dd82cf62c7c88581c3631e3f8`.
+- **No local/device claim:** source was checked with exact-SHA GitHub CI; no local Gradle build, phone/emulator install, visual review or TalkBack acceptance is claimed. Phase 5 remains open.
+- **Governance:** `main` unchanged at `64143994070bcdc410cf044379fe2801da8f9a3c`; PR #6 remains Open + Draft + Unmerged. No Worker deployment, D1 write/migration, secret change, production/staging data mutation or live schedule/chat mutation.
+- **Next roadmap item:** P2-46 — Library empty-search feedback and case-insensitive Sections Hub search.
+
