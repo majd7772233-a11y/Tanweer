@@ -28,6 +28,19 @@ import androidx.compose.ui.unit.sp
 import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.ui.theme.*
 
+/**
+ * The global sync banner is intentionally silent for initial/background loading and success.
+ * Explicit refresh gets a short-lived busy banner; offline and error states remain actionable.
+ */
+fun shouldShowSyncStatusBar(syncState: SyncState): Boolean = when (syncState) {
+    is SyncState.Refreshing,
+    is SyncState.OfflineCached,
+    is SyncState.Error -> true
+    is SyncState.Idle,
+    is SyncState.Loading,
+    is SyncState.Success -> false
+}
+
 @Composable
 fun SyncStatusBar(
     syncState: SyncState,
@@ -48,7 +61,9 @@ fun SyncStatusBar(
     )
 
     AnimatedVisibility(
-        visible = true,
+        // Background/entry Loading and steady Success are silent. Only an explicit
+        // Refreshing state is transient; actionable offline/error states stay visible.
+        visible = shouldShowSyncStatusBar(syncState),
         enter = fadeIn() + expandVertically(),
         exit = fadeOut() + shrinkVertically(),
         modifier = modifier.fillMaxWidth()
@@ -132,7 +147,7 @@ fun SyncStatusBar(
                     Text(
                         text = labelText,
                         color = textColor,
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -161,6 +176,91 @@ fun SyncStatusBar(
     }
 }
 
+
+@Composable
+fun PendingSyncEmptyState(
+    dataLabel: String,
+    syncState: SyncState,
+    modifier: Modifier = Modifier
+) {
+    if (syncState is SyncState.Success) return
+
+    val accent = when (syncState) {
+        is SyncState.Error -> RubyRed
+        is SyncState.OfflineCached -> WarmAmber
+        else -> CyanAccent
+    }
+    val message = when (syncState) {
+        is SyncState.Loading, is SyncState.Refreshing ->
+            "جارٍ التحقق من $dataLabel مع الخادم؛ لن نعرض القائمة فارغة قبل اكتمال المزامنة."
+        is SyncState.OfflineCached ->
+            "لا توجد سجلات محفوظة محلياً لـ$dataLabel؛ لا يمكن تأكيد خلو القائمة أثناء عدم الاتصال."
+        is SyncState.Error ->
+            "تعذّر تأكيد حالة $dataLabel. أعد المحاولة من شريط المزامنة."
+        is SyncState.Idle ->
+            "لم يتم التحقق من $dataLabel بعد؛ لذلك لم نؤكد أن القائمة فارغة."
+        is SyncState.Success -> return
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(GlassSurface)
+            .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .padding(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (syncState.isBusy()) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = accent
+                )
+            } else {
+                Icon(
+                    imageVector = if (syncState is SyncState.Error) Icons.Default.Warning else Icons.Default.CloudOff,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Text(
+                text = message,
+                color = TextSecondary,
+                fontSize = tanweerTextSize(11f),
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+/**
+ * Resolves several source sync states into one truthful screen-level status.
+ * A failed source is never hidden by another source completing successfully.
+ */
+fun aggregateSyncStates(states: List<SyncState>): SyncState {
+    if (states.isEmpty()) return SyncState.Idle
+
+    states.filterIsInstance<SyncState.Error>().firstOrNull()?.let { return it }
+    if (states.any { it is SyncState.Loading }) return SyncState.Loading
+    if (states.any { it is SyncState.Refreshing }) return SyncState.Refreshing
+
+    states.filterIsInstance<SyncState.OfflineCached>()
+        .minByOrNull { it.lastSyncedAt }
+        ?.let { return it }
+
+    if (states.all { it is SyncState.Success }) {
+        val oldestIncludedSync = states.filterIsInstance<SyncState.Success>().minOfOrNull { it.lastSyncedAt }
+        return SyncState.Success(oldestIncludedSync ?: System.currentTimeMillis())
+    }
+
+    return SyncState.Idle
+}
 private data class Quintet<A, B, C, D, E>(
     val first: A,
     val second: B,

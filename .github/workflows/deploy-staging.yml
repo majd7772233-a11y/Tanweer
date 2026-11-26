@@ -1,0 +1,126 @@
+name: Deploy Tanweer Staging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tanweer-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    name: Deploy isolated staging Worker + D1
+    if: github.ref == 'refs/heads/work/release-readiness'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: ./server
+
+    steps:
+      - name: Checkout release-readiness branch only
+        uses: actions/checkout@v7
+        with:
+          ref: work/release-readiness
+          fetch-depth: 1
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and run server tests
+        run: |
+          npm run types
+          npm test -- --reporter=verbose
+
+      - name: Validate staging Worker bundle
+        run: ./node_modules/.bin/wrangler deploy --dry-run --env staging
+
+      - name: Verify Cloudflare credentials
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: server
+          command: whoami
+
+      - name: Apply staging D1 migrations only
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: server
+          command: d1 migrations apply tanweer-staging-db --remote --env staging
+
+      - name: Configure staging application secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MAGD_JWT_SECRET: ${{ secrets.MAGD_JWT_SECRET }}
+          TANWEER_OWNER_SECRET_STAGING: ${{ secrets.TANWEER_OWNER_SECRET_STAGING }}
+        run: |
+          set -euo pipefail
+
+          test -n "${MAGD_JWT_SECRET:-}" || {
+            echo "::error::MAGD_JWT_SECRET is required to deploy staging."
+            exit 1
+          }
+
+          printf '%s' "$MAGD_JWT_SECRET" | ./node_modules/.bin/wrangler secret put JWT_SECRET --env staging
+          printf '%s' "$MAGD_JWT_SECRET" | ./node_modules/.bin/wrangler secret put SESSION_PEPPER --env staging
+          printf '%s' "$MAGD_JWT_SECRET" | ./node_modules/.bin/wrangler secret put PASSWORD_PEPPER --env staging
+
+          if [ -n "${TANWEER_OWNER_SECRET_STAGING:-}" ]; then
+            printf '%s' "$TANWEER_OWNER_SECRET_STAGING" | ./node_modules/.bin/wrangler secret put TANWEER_OWNER_SECRET --env staging
+          else
+            echo "::warning::TANWEER_OWNER_SECRET_STAGING is not configured. The staging Owner Dashboard login will remain disabled until this GitHub Actions secret is added."
+          fi
+
+      - name: Deploy staging Worker only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: ./node_modules/.bin/wrangler deploy --env staging
+
+      - name: Staging health check
+        working-directory: .
+        run: |
+          set -euo pipefail
+          URL="https://tanweer-staging.magd.workers.dev/api/v1/health"
+
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error --max-time 15 "$URL"; then
+              echo "Staging health check succeeded."
+              exit 0
+            fi
+            echo "Staging health check attempt $attempt failed."
+            sleep 5
+          done
+
+          echo "::error::Staging health check failed."
+          exit 1
+
+      - name: Owner Dashboard route smoke test
+        working-directory: .
+        run: |
+          set -euo pipefail
+          BASE_URL="https://tanweer-staging.magd.workers.dev"
+
+          LOGIN_STATUS="$(curl --silent --show-error --max-time 15 --output dashboard-login.html --write-out '%{http_code}' "$BASE_URL/dashboard/login")"
+          test "$LOGIN_STATUS" = "200"
+          grep -q "TANWEER CONTROL CENTER" dashboard-login.html
+
+          DASHBOARD_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' "$BASE_URL/dashboard")"
+          test "$DASHBOARD_STATUS" = "302"
+
+          echo "Owner Dashboard login page is reachable and unauthenticated dashboard access redirects to login."

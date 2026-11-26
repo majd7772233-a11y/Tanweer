@@ -1,6 +1,11 @@
 package com.magd.tanweer.ui.screens
 
+import com.magd.tanweer.R
+
+
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -8,6 +13,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,11 +32,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -43,12 +53,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.magd.tanweer.data.model.HomeworkItem
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.data.remote.NetworkModule
 import com.magd.tanweer.data.notifications.TanweerNotificationManager
 import com.magd.tanweer.ui.SubScreen
 import com.magd.tanweer.ui.NavigationTab
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.HomeworkTaskKind
+import com.magd.tanweer.util.HomeworkTaskTypePolicy
+import com.magd.tanweer.util.HomeworkStudyDatePolicy
+import com.magd.tanweer.util.CameraCaptureFileStore
 import com.magd.tanweer.util.ImageProcessingUtils
 import com.magd.tanweer.util.ProcessedPageResult
 import kotlinx.coroutines.Dispatchers
@@ -86,9 +102,13 @@ fun HomeworkScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
 
     val homeworks by viewModel.repository.getHomeworks(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
+    val scopedHomeworkSyncState = syncStateForScope(homeworkSyncState, groupSyncScopeIds[GroupSyncSource.HOMEWORKS], activeGroupId)
+    val hasHomeworkSnapshot = homeworks.isNotEmpty() || hasAuthoritativeSnapshot(scopedHomeworkSyncState)
 
     val plannedHwIds by viewModel.todayPlannedHomeworkIds
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -101,13 +121,19 @@ fun HomeworkScreen(
     }
 
     var selectedFilter by remember { mutableStateOf(HomeworkFilter.ALL) }
+    val homeworkFilterListState = rememberLazyListState()
     var selectedTaskTypeFilter by remember { mutableStateOf<String?>(null) }
     val isAddModalOpenFromVm by viewModel.isAddHomeworkModalOpen.collectAsStateWithLifecycle()
     val initialDueDateFromVm by viewModel.initialHomeworkDueDate.collectAsStateWithLifecycle()
-    var isLocalAddModalOpen by remember { mutableStateOf(false) }
+    val selectedStudyDate by viewModel.selectedDate.collectAsStateWithLifecycle()
+    var isLocalAddModalOpen by rememberSaveable { mutableStateOf(false) }
     val isAddModalOpen = isLocalAddModalOpen || isAddModalOpenFromVm
     var fullScreenImagePreviewUrl by remember { mutableStateOf<String?>(null) }
     var pendingReminderHw by remember { mutableStateOf<com.magd.tanweer.data.model.HomeworkItem?>(null) }
+    var homeworkToEdit by remember { mutableStateOf<HomeworkItem?>(null) }
+    var homeworkToDelete by remember { mutableStateOf<HomeworkItem?>(null) }
+    var isSavingHomeworkEdit by remember { mutableStateOf(false) }
+    var isDeletingHomework by remember { mutableStateOf(false) }
     var showExactAlarmDialog by remember { mutableStateOf(false) }
     var showNotificationSettingsDialog by remember { mutableStateOf(false) }
 
@@ -124,6 +150,9 @@ fun HomeworkScreen(
                     dueDate = hw.dueDate
                 )
                 when (res) {
+                    TanweerNotificationManager.ScheduleReminderResult.NOTIFICATIONS_DISABLED -> {
+                        Toast.makeText(context, context.getString(R.string.notification_reminders_disabled), Toast.LENGTH_SHORT).show()
+                    }
                     TanweerNotificationManager.ScheduleReminderResult.SUCCESS -> {
                         Toast.makeText(context, "🔔 تم تفعيل تذكير دراسي دقيق على جهازك للواجب: ${hw.title}", Toast.LENGTH_SHORT).show()
                     }
@@ -147,12 +176,6 @@ fun HomeworkScreen(
         pendingReminderHw = null
     }
 
-    LaunchedEffect(activeGroupId) {
-        if (activeGroupId.isNotBlank()) {
-            viewModel.syncHomeworks(activeGroupId, isRefresh = false)
-        }
-    }
-
     val sdf = remember { SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH) }
     val todayDate = remember { sdf.format(Date()) }
 
@@ -168,28 +191,43 @@ fun HomeworkScreen(
         sdf.format(cal.time)
     }
 
-    val filteredHomeworks = remember(homeworks, selectedFilter, selectedTaskTypeFilter) {
-        val typeFiltered = if (selectedTaskTypeFilter == null) {
-            homeworks
-        } else {
-            homeworks.filter { it.taskType == selectedTaskTypeFilter }
+    val typeFilteredHomeworks = remember(homeworks, selectedTaskTypeFilter) {
+        when (selectedTaskTypeFilter) {
+            "HOMEWORK" -> homeworks.filter { HomeworkTaskTypePolicy.isHomework(it.taskType) }
+            "TASK" -> homeworks.filter { HomeworkTaskTypePolicy.isTask(it.taskType) }
+            else -> homeworks
         }
+    }
 
+    val filteredHomeworks = remember(typeFilteredHomeworks, selectedFilter) {
         when (selectedFilter) {
-            HomeworkFilter.ALL -> typeFiltered
-            HomeworkFilter.TODAY -> typeFiltered.filter { it.dueDate == todayDate }
-            HomeworkFilter.TOMORROW -> typeFiltered.filter { it.dueDate == tomorrowDate }
-            HomeworkFilter.THIS_WEEK -> typeFiltered.filter { it.dueDate in todayDate..endOfWeekDate }
-            HomeworkFilter.OVERDUE -> typeFiltered.filter { !it.isCompleted && it.dueDate < todayDate }
-            HomeworkFilter.COMPLETED -> typeFiltered.filter { it.isCompleted }
+            HomeworkFilter.ALL -> typeFilteredHomeworks
+            HomeworkFilter.TODAY -> typeFilteredHomeworks.filter { it.dueDate == todayDate }
+            HomeworkFilter.TOMORROW -> typeFilteredHomeworks.filter { it.dueDate == tomorrowDate }
+            HomeworkFilter.THIS_WEEK -> typeFilteredHomeworks.filter { it.dueDate in todayDate..endOfWeekDate }
+            HomeworkFilter.OVERDUE -> typeFilteredHomeworks.filter { !it.isCompleted && it.dueDate < todayDate }
+            HomeworkFilter.COMPLETED -> typeFilteredHomeworks.filter { it.isCompleted }
         }
     }
 
-    val overdueCount = remember(homeworks, todayDate) {
-        homeworks.count { !it.isCompleted && it.dueDate < todayDate }
+    val homeworkTypeSummary = remember(homeworks) {
+        HomeworkTaskTypePolicy.summarize(homeworks.map { it.taskType })
     }
-    val todayCount = remember(homeworks, todayDate) {
-        homeworks.count { it.dueDate == todayDate }
+    val todayHomeworkTypeSummary = remember(homeworks, todayDate) {
+        HomeworkTaskTypePolicy.summarize(
+            homeworks.filter { it.dueDate == todayDate }.map { it.taskType }
+        )
+    }
+    val homeworkCount = homeworkTypeSummary.homeworkCount
+    val projectCount = homeworkTypeSummary.projectCount
+    val otherAssignmentCount = homeworkTypeSummary.otherAssignmentCount
+    val todayHomeworkCount = todayHomeworkTypeSummary.homeworkCount
+    val todayProjectCount = todayHomeworkTypeSummary.projectCount
+    val overdueCount = remember(typeFilteredHomeworks, todayDate) {
+        typeFilteredHomeworks.count { !it.isCompleted && it.dueDate < todayDate }
+    }
+    val todayCount = remember(typeFilteredHomeworks, todayDate) {
+        typeFilteredHomeworks.count { it.dueDate == todayDate }
     }
 
     Box(
@@ -217,9 +255,19 @@ fun HomeworkScreen(
                             style = AppTypography.SectionHeader.copy(color = CyanAccent)
                         )
                         Text(
-                            text = "${homeworks.size} واجب • $todayCount مستحق اليوم",
+                            text = if (hasHomeworkSnapshot) {
+                                stringResource(R.string.homework_screen_summary, homeworkCount, projectCount, otherAssignmentCount)
+                            } else {
+                                stringResource(R.string.homework_screen_summary_loading)
+                            },
                             style = AppTypography.Body.copy(color = TextSecondary)
                         )
+                        if (hasHomeworkSnapshot) {
+                            Text(
+                                text = stringResource(R.string.homework_screen_due_today, todayHomeworkCount, todayProjectCount),
+                                style = AppTypography.Meta.copy(color = TextMuted)
+                            )
+                        }
                     }
                     GlassButton(
                         text = "إضافة واجب",
@@ -239,7 +287,7 @@ fun HomeworkScreen(
                     FilterChip(
                         selected = selectedTaskTypeFilter == null,
                         onClick = { selectedTaskTypeFilter = null },
-                        label = { Text("الكل (${homeworks.size})") },
+                        label = { Text(if (hasHomeworkSnapshot) stringResource(R.string.homework_type_filter_all, homeworks.size) else stringResource(R.string.homework_type_filter_all_loading)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyanAccent,
                             selectedLabelColor = TextOnAccent
@@ -248,7 +296,12 @@ fun HomeworkScreen(
                     FilterChip(
                         selected = selectedTaskTypeFilter == "HOMEWORK",
                         onClick = { selectedTaskTypeFilter = if (selectedTaskTypeFilter == "HOMEWORK") null else "HOMEWORK" },
-                        label = { Text("واجبات 📝") },
+                        label = {
+                            Text(
+                                if (hasHomeworkSnapshot) stringResource(R.string.homework_type_filter_homework, homeworkCount)
+                                else stringResource(R.string.homework_type_filter_homework_loading)
+                            )
+                        },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyanAccent,
                             selectedLabelColor = TextOnAccent
@@ -257,7 +310,12 @@ fun HomeworkScreen(
                     FilterChip(
                         selected = selectedTaskTypeFilter == "TASK",
                         onClick = { selectedTaskTypeFilter = if (selectedTaskTypeFilter == "TASK") null else "TASK" },
-                        label = { Text("مشاريع 🎯") },
+                        label = {
+                            Text(
+                                if (hasHomeworkSnapshot) stringResource(R.string.homework_type_filter_projects, projectCount)
+                                else stringResource(R.string.homework_type_filter_projects_loading)
+                            )
+                        },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = CyanAccent,
                             selectedLabelColor = TextOnAccent
@@ -268,55 +326,80 @@ fun HomeworkScreen(
 
             // Filter Tabs Bar
             item {
-                LazyRow(
+                HorizontalFilterStrip(
+                    state = homeworkFilterListState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(MidnightSurface)
-                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(14.dp))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(14.dp)),
+                    edgeColor = MidnightSurface,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    itemSpacing = 6.dp
                 ) {
                     items(HomeworkFilter.values()) { filter ->
                         val isSelected = selectedFilter == filter
-                        val badgeCount = when (filter) {
-                            HomeworkFilter.ALL -> homeworks.size
+                        val badgeCount = if (!hasHomeworkSnapshot) null else when (filter) {
+                            HomeworkFilter.ALL -> typeFilteredHomeworks.size
                             HomeworkFilter.TODAY -> todayCount
                             HomeworkFilter.OVERDUE -> overdueCount
-                            HomeworkFilter.COMPLETED -> homeworks.count { it.isCompleted }
+                            HomeworkFilter.COMPLETED -> typeFilteredHomeworks.count { it.isCompleted }
                             else -> null
                         }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) CyanAccent else Color.Transparent)
-                                .clickable { selectedFilter = filter }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
+                        GlassFilterChip(
+                            selected = isSelected,
+                            onClick = { selectedFilter = filter },
+                            modifier = Modifier,
+                            containerColor = Color.Transparent,
+                            selectedContainerColor = CyanAccent,
+                            labelColor = TextSecondary,
+                            selectedLabelColor = TextOnAccent
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text(text = filter.icon, style = AppTypography.Chip)
+                                Text(
+                                    text = filter.icon,
+                                    modifier = Modifier.clearAndSetSemantics {},
+                                    style = AppTypography.Chip
+                                )
                                 Text(
                                     text = filter.label,
                                     style = AppTypography.Chip.copy(
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSelected) TextOnAccent else if (filter == HomeworkFilter.OVERDUE && overdueCount > 0) Color(0xFFFF5252) else TextSecondary
+                                        color = if (isSelected) TextOnAccent
+                                            else if (filter == HomeworkFilter.OVERDUE && overdueCount > 0) Color(0xFFFF5252)
+                                            else TextSecondary
                                     )
                                 )
+                                if (isSelected) {
+                                    Text(
+                                        text = "✓",
+                                        modifier = Modifier.clearAndSetSemantics {},
+                                        style = AppTypography.Chip.copy(
+                                            color = TextOnAccent,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
                                 if (badgeCount != null && badgeCount > 0) {
                                     Box(
                                         modifier = Modifier
                                             .clip(CircleShape)
-                                            .background(if (isSelected) TextOnAccent.copy(alpha = 0.2f) else if (filter == HomeworkFilter.OVERDUE) Color(0xFFFF5252) else GlassSurfaceLight)
+                                            .background(
+                                                if (isSelected) TextOnAccent.copy(alpha = 0.2f)
+                                                else if (filter == HomeworkFilter.OVERDUE) Color(0xFFFF5252)
+                                                else GlassSurfaceLight
+                                            )
                                             .padding(horizontal = 5.dp, vertical = 1.dp)
                                     ) {
                                         Text(
                                             text = "$badgeCount",
                                             style = AppTypography.Badge.copy(
-                                                color = if (isSelected) TextOnAccent else if (filter == HomeworkFilter.OVERDUE) Color.White else TextSecondary
+                                                color = if (isSelected) TextOnAccent
+                                                    else if (filter == HomeworkFilter.OVERDUE) Color.White
+                                                    else TextSecondary
                                             )
                                         )
                                     }
@@ -329,13 +412,29 @@ fun HomeworkScreen(
 
             if (filteredHomeworks.isEmpty()) {
                 item {
-                    EmptyStateGlass(
-                        title = "لا توجد واجبات في هذا القسم",
-                        subtitle = "يمكنك إضافة واجب جديد وتضمين صور الحلول",
-                        icon = "📝",
-                        actionButtonText = "إضافة واجب جديد",
-                        onActionClick = { isLocalAddModalOpen = true }
-                    )
+                    if (hasHomeworkSnapshot) {
+                        EmptyStateGlass(
+                            title = when (selectedTaskTypeFilter) {
+                                "HOMEWORK" -> stringResource(R.string.homework_empty_homeworks_title)
+                                "TASK" -> stringResource(R.string.homework_empty_projects_title)
+                                else -> if (homeworks.isEmpty()) stringResource(R.string.homework_empty_all_title)
+                                    else stringResource(R.string.homework_empty_filtered_title)
+                            },
+                            subtitle = stringResource(R.string.homework_empty_description),
+                            icon = "📝",
+                            actionButtonText = if (homeworks.isEmpty()) stringResource(R.string.homework_empty_add_action)
+                                else stringResource(R.string.homework_empty_show_all_action),
+                            onActionClick = {
+                                if (homeworks.isEmpty()) isLocalAddModalOpen = true
+                                else {
+                                    selectedFilter = HomeworkFilter.ALL
+                                    selectedTaskTypeFilter = null
+                                }
+                            }
+                        )
+                    } else {
+                        PendingSyncEmptyState(dataLabel = "الواجبات", syncState = scopedHomeworkSyncState)
+                    }
                 }
             } else {
                 items(filteredHomeworks, key = { it.id }) { hw ->
@@ -347,6 +446,18 @@ fun HomeworkScreen(
                         isOverdue = isOverdue,
                         isDueToday = isDueToday,
                         isPlanned = plannedHwIds.contains(hw.id),
+                        canEdit = HomeworkOwnershipPolicy.canEdit(
+                            createdBy = hw.createdBy,
+                            syncStatus = hw.syncStatus,
+                            currentUserId = currentUser?.id
+                        ),
+                        canDelete = HomeworkOwnershipPolicy.canDelete(
+                            createdBy = hw.createdBy,
+                            syncStatus = hw.syncStatus,
+                            currentUserId = currentUser?.id
+                        ),
+                        onEdit = { homeworkToEdit = hw },
+                        onDelete = { homeworkToDelete = hw },
                         onToggle = {
                             val willBeCompleted = !hw.isCompleted
                             if (willBeCompleted) {
@@ -405,6 +516,9 @@ fun HomeworkScreen(
                                 dueDate = hw.dueDate
                             )
                             when (result) {
+                                TanweerNotificationManager.ScheduleReminderResult.NOTIFICATIONS_DISABLED -> {
+                                    Toast.makeText(context, context.getString(R.string.notification_reminders_disabled), Toast.LENGTH_SHORT).show()
+                                }
                                 TanweerNotificationManager.ScheduleReminderResult.SUCCESS -> {
                                     Toast.makeText(context, "🔔 تم تفعيل تذكير دراسي دقيق على جهازك للواجب: ${hw.title}", Toast.LENGTH_SHORT).show()
                                 }
@@ -467,11 +581,12 @@ fun HomeworkScreen(
             AddHomeworkDialog(
                 subjects = gradeSubjects,
                 initialDueDate = initialDueDateFromVm,
+                initialStudyDate = selectedStudyDate,
                 onDismiss = {
                     isLocalAddModalOpen = false
                     viewModel.closeAddHomeworkDialog()
                 },
-                onAddWithPages = { subjId, title, details, pages, questions, dueDate, taskType, scanPages ->
+                onAddWithPages = { subjId, title, details, pages, questions, dueDate, studyDate, taskType, scanPages, finishSubmission ->
                     viewModel.addHomework(
                         subjectId = subjId,
                         title = title,
@@ -479,10 +594,16 @@ fun HomeworkScreen(
                         pageNumbers = pages,
                         questionNumbers = questions,
                         dueDate = dueDate,
+                        studyDate = studyDate,
                         taskType = taskType,
                         pages = scanPages.mapNotNull { it.processedResult },
+                        isOfficial = false,
                         onResult = { result ->
+                            finishSubmission()
                             if (result.isSuccess) {
+                                scanPages.forEach { page ->
+                                    ImageProcessingUtils.deleteDraftSource(context, page.uri)
+                                }
                                 val outcome = result.getOrNull()
                                 if (outcome?.isSynced == true) {
                                     Toast.makeText(context, "تم حفظ ونشر الواجب على الخادم بنجاح ✨", Toast.LENGTH_SHORT).show()
@@ -501,6 +622,91 @@ fun HomeworkScreen(
             )
         }
 
+        homeworkToEdit?.let { homework ->
+            EditHomeworkDialog(
+                homework = homework,
+                isSaving = isSavingHomeworkEdit,
+                onDismiss = {
+                    if (!isSavingHomeworkEdit) homeworkToEdit = null
+                },
+                onSave = { title, details, pages, questions, dueDate ->
+                    if (!isSavingHomeworkEdit) {
+                        isSavingHomeworkEdit = true
+                        viewModel.updateHomework(
+                            homeworkId = homework.id,
+                            dueDate = dueDate,
+                            title = title,
+                            details = details,
+                            pageNumbers = pages,
+                            questionNumbers = questions
+                        ) { result ->
+                            isSavingHomeworkEdit = false
+                            result.fold(
+                                onSuccess = {
+                                    Toast.makeText(context, context.getString(R.string.homework_edit_success), Toast.LENGTH_SHORT).show()
+                                    homeworkToEdit = null
+                                },
+                                onFailure = { error ->
+                                    Toast.makeText(
+                                        context,
+                                        error.message?.takeIf { it.isNotBlank() }
+                                            ?: context.getString(R.string.homework_edit_failed),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            )
+                        }
+                    }
+                }
+            )
+        }
+
+        homeworkToDelete?.let { homework ->
+            AlertDialog(
+                onDismissRequest = { if (!isDeletingHomework) homeworkToDelete = null },
+                containerColor = MidnightSurface,
+                titleContentColor = TextPrimary,
+                textContentColor = TextSecondary,
+                title = { Text(stringResource(R.string.homework_delete_title), fontWeight = FontWeight.Bold) },
+                text = { Text(stringResource(R.string.homework_delete_message)) },
+                confirmButton = {
+                    TextButton(
+                        enabled = !isDeletingHomework,
+                        onClick = {
+                            if (!isDeletingHomework) {
+                                isDeletingHomework = true
+                                viewModel.deleteHomework(homework.id) { result ->
+                                    isDeletingHomework = false
+                                    result.fold(
+                                        onSuccess = {
+                                            TanweerNotificationManager.cancelReminder(context, homework.id)
+                                            Toast.makeText(context, context.getString(R.string.homework_delete_success), Toast.LENGTH_SHORT).show()
+                                            homeworkToDelete = null
+                                        },
+                                        onFailure = { error ->
+                                            Toast.makeText(
+                                                context,
+                                                error.message?.takeIf { it.isNotBlank() }
+                                                    ?: context.getString(R.string.homework_delete_failed),
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    ) {
+                        Text(stringResource(R.string.homework_delete_confirm), color = Color(0xFFFF6B6B))
+                    }
+                },
+                dismissButton = {
+                    TextButton(enabled = !isDeletingHomework, onClick = { homeworkToDelete = null }) {
+                        Text(stringResource(R.string.homework_edit_cancel), color = TextSecondary)
+                    }
+                }
+            )
+        }
+
         // Full Screen Image Preview Modal
         if (fullScreenImagePreviewUrl != null) {
             Dialog(
@@ -515,7 +721,10 @@ fun HomeworkScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     val imgUrl = fullScreenImagePreviewUrl!!
-                    if (imgUrl.startsWith("/") || imgUrl.startsWith("file://")) {
+                    val isLocalImage = imgUrl.startsWith("file://") ||
+                        (!imgUrl.startsWith("http://", true) && !imgUrl.startsWith("https://", true) &&
+                            !imgUrl.startsWith("/api/", true) && !imgUrl.startsWith("api/", true))
+                    if (isLocalImage) {
                         val file = File(imgUrl.removePrefix("file://"))
                         if (file.exists()) {
                             val bmp = BitmapFactory.decodeFile(file.absolutePath)
@@ -533,7 +742,7 @@ fun HomeworkScreen(
                         }
                     } else {
                         AsyncImage(
-                            model = imgUrl,
+                            model = NetworkModule.resolveApiUrl(imgUrl),
                             contentDescription = "معاينة صورة الواجب",
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -649,12 +858,141 @@ fun HomeworkScreen(
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun EditHomeworkDialog(
+    homework: HomeworkItem,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (title: String, details: String, pages: String, questions: String, dueDate: String) -> Unit
+) {
+    var title by rememberSaveable(homework.id) { mutableStateOf(homework.title) }
+    var details by rememberSaveable(homework.id) { mutableStateOf(homework.details.orEmpty()) }
+    var pages by rememberSaveable(homework.id) { mutableStateOf(homework.pageNumbers.orEmpty()) }
+    var questions by rememberSaveable(homework.id) { mutableStateOf(homework.questionNumbers.orEmpty()) }
+    var dueDate by rememberSaveable(homework.id) { mutableStateOf(homework.dueDate) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val initialDateMillis = remember(homework.dueDate) {
+        runCatching {
+            SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(homework.dueDate)?.time
+        }.getOrNull() ?: System.currentTimeMillis()
+    }
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialDateMillis)
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        dueDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }.format(Date(millis))
+                    }
+                    showDatePicker = false
+                }) {
+                    Text(stringResource(R.string.homework_edit_date_confirm), color = CyanAccent)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text(stringResource(R.string.homework_edit_cancel), color = TextSecondary)
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        containerColor = MidnightSurface,
+        titleContentColor = TextPrimary,
+        textContentColor = TextSecondary,
+        title = { Text(stringResource(R.string.homework_edit_title), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    enabled = !isSaving,
+                    label = { Text(stringResource(R.string.homework_edit_title_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = details,
+                    onValueChange = { details = it },
+                    enabled = !isSaving,
+                    label = { Text(stringResource(R.string.homework_edit_details_label)) },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = pages,
+                    onValueChange = { pages = it },
+                    enabled = !isSaving,
+                    label = { Text(stringResource(R.string.homework_edit_pages_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = questions,
+                    onValueChange = { questions = it },
+                    enabled = !isSaving,
+                    label = { Text(stringResource(R.string.homework_edit_questions_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = dueDate,
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = !isSaving,
+                    label = { Text(stringResource(R.string.homework_edit_due_date_label)) },
+                    trailingIcon = {
+                        IconButton(onClick = { showDatePicker = true }, enabled = !isSaving) {
+                            Icon(Icons.Default.CalendarMonth, contentDescription = stringResource(R.string.homework_edit_due_date_label), tint = CyanAccent)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !isSaving && title.isNotBlank() && dueDate.isNotBlank(),
+                onClick = { onSave(title, details, pages, questions, dueDate) }
+            ) {
+                Text(stringResource(R.string.homework_edit_save), color = CyanAccent)
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = !isSaving, onClick = onDismiss) {
+                Text(stringResource(R.string.homework_edit_cancel), color = TextSecondary)
+            }
+        }
+    )
+}
+
 @Composable
 fun HomeworkCard(
     homework: HomeworkItem,
     isOverdue: Boolean = false,
     isDueToday: Boolean = false,
     isPlanned: Boolean = false,
+    canEdit: Boolean = false,
+    canDelete: Boolean = false,
+    onEdit: () -> Unit = {},
+    onDelete: () -> Unit = {},
     onToggle: () -> Unit,
     onRetrySync: (() -> Unit)? = null,
     onImageClick: (String) -> Unit,
@@ -673,6 +1011,7 @@ fun HomeworkCard(
     val countdownText = remember(homework.dueDate) {
         getRemainingTimeText(homework.dueDate)
     }
+    var actionsExpanded by remember(homework.id) { mutableStateOf(false) }
 
     GlassCard(
         modifier = Modifier.fillMaxWidth(),
@@ -699,23 +1038,8 @@ fun HomeworkCard(
                         Text(text = homework.subjectIcon, fontSize = TanweerTypographyTokens.SizeHeader)
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "${homework.subjectName}: ${homework.title}",
-                                style = AppTypography.Title.copy(color = TextPrimary)
-                            )
-                            if (homework.taskType == "TASK") {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(WarmAmber.copy(alpha = 0.15f))
-                                        .padding(horizontal = 5.dp, vertical = 2.dp)
-                                ) {
-                                    Text("مشروع 🎯", style = AppTypography.Badge.copy(color = WarmAmber))
-                                }
-                            }
-                        }
+                    Column(modifier = Modifier.weight(1f)) {
+                        HomeworkCardHeading(homework = homework)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -737,14 +1061,53 @@ fun HomeworkCard(
                     }
                 }
 
-                Checkbox(
-                    checked = homework.isCompleted,
-                    onCheckedChange = { onToggle() },
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = EmeraldGreen,
-                        uncheckedColor = TextSecondary
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = homework.isCompleted,
+                        onCheckedChange = { onToggle() },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = EmeraldGreen,
+                            uncheckedColor = TextSecondary
+                        )
                     )
-                )
+                    if (canEdit || canDelete) {
+                        Box {
+                            IconButton(onClick = { actionsExpanded = true }) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = stringResource(R.string.homework_action_more),
+                                    tint = TextSecondary
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = actionsExpanded,
+                                onDismissRequest = { actionsExpanded = false },
+                                containerColor = MidnightSurface
+                            ) {
+                                if (canEdit) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.homework_action_edit), color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = CyanAccent) },
+                                        onClick = {
+                                            actionsExpanded = false
+                                            onEdit()
+                                        }
+                                    )
+                                }
+                                if (canDelete) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.homework_action_delete), color = Color(0xFFFF6B6B)) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFFF6B6B)) },
+                                        onClick = {
+                                            actionsExpanded = false
+                                            onDelete()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             if (!homework.details.isNullOrBlank() || !homework.pageNumbers.isNullOrBlank() || !homework.questionNumbers.isNullOrBlank()) {
@@ -831,7 +1194,10 @@ fun HomeworkCard(
                                     .border(1.dp, CyanGlow, RoundedCornerShape(8.dp))
                                     .clickable { onImageClick(imgUrl) }
                             ) {
-                                if (imgUrl.startsWith("/") || imgUrl.startsWith("file://")) {
+                                val isLocalImage = imgUrl.startsWith("file://") ||
+                                    (!imgUrl.startsWith("http://", true) && !imgUrl.startsWith("https://", true) &&
+                                        !imgUrl.startsWith("/api/", true) && !imgUrl.startsWith("api/", true))
+                                if (isLocalImage) {
                                     val file = File(imgUrl.removePrefix("file://"))
                                     if (file.exists()) {
                                         val bmp = BitmapFactory.decodeFile(file.absolutePath)
@@ -846,7 +1212,7 @@ fun HomeworkCard(
                                     }
                                 } else {
                                     AsyncImage(
-                                        model = imgUrl,
+                                        model = NetworkModule.resolveApiUrl(imgUrl),
                                         contentDescription = "صورة الحل",
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Crop
@@ -963,22 +1329,74 @@ fun getRemainingTimeText(dueDateStr: String): String {
 fun AddHomeworkDialog(
     subjects: List<SubjectItem>,
     initialDueDate: String? = null,
+    initialStudyDate: String? = null,
+    isOfficial: Boolean = false,
     onDismiss: () -> Unit,
-    onAddWithPages: (subjectId: String, title: String, details: String?, pages: String?, questions: String?, dueDate: String, taskType: String, scanPages: List<HomeworkScanPage>) -> Unit
+    onAddWithPages: (subjectId: String, title: String, details: String?, pages: String?, questions: String?, dueDate: String, studyDate: String, taskType: String, scanPages: List<HomeworkScanPage>, onFinished: () -> Unit) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var selectedSubjId by remember { mutableStateOf(subjects.firstOrNull()?.id ?: "math") }
-    var title by remember { mutableStateOf("") }
-    var details by remember { mutableStateOf("") }
-    var pageNumbers by remember { mutableStateOf("") }
-    var questionNumbers by remember { mutableStateOf("") }
-    var dueDate by remember(initialDueDate) { mutableStateOf(initialDueDate ?: TanweerViewModel.getTodayDateString()) }
-    var taskType by remember { mutableStateOf("HOMEWORK") }
-    var scannedPages by remember { mutableStateOf<List<HomeworkScanPage>>(emptyList()) }
+    var selectedSubjId by rememberSaveable { mutableStateOf(subjects.firstOrNull()?.id ?: "math") }
+    var title by rememberSaveable { mutableStateOf("") }
+    var details by rememberSaveable { mutableStateOf("") }
+    var pageNumbers by rememberSaveable { mutableStateOf("") }
+    var questionNumbers by rememberSaveable { mutableStateOf("") }
+    var dueDate by rememberSaveable(initialDueDate) { mutableStateOf(initialDueDate ?: TanweerViewModel.getTodayDateString()) }
+    var studyDate by rememberSaveable(initialStudyDate) {
+        mutableStateOf(HomeworkStudyDatePolicy.initial(initialStudyDate, TanweerViewModel.getTodayDateString()))
+    }
+    var taskType by rememberSaveable { mutableStateOf("HOMEWORK") }
+    val scannedPagesSaver = remember(context) {
+        scanPageListSaver<HomeworkScanPage>(
+            toRecord = { page ->
+                ScanPageDraftRecord(
+                    id = page.id,
+                    sourceUri = page.uri?.toString(),
+                    processedFilePath = page.processedResult?.file?.absolutePath,
+                    rotation = page.rotation,
+                    autoEnhance = page.autoEnhance,
+                    blackAndWhite = false,
+                    isProcessing = page.isProcessing
+                )
+            },
+            fromRecord = { record, processed, preview, shouldResume ->
+                HomeworkScanPage(
+                    id = record.id,
+                    uri = record.sourceUri?.let(Uri::parse),
+                    rawBitmap = null,
+                    processedResult = processed,
+                    displayBitmap = preview,
+                    rotation = record.rotation,
+                    autoEnhance = record.autoEnhance,
+                    isProcessing = shouldResume
+                )
+            }
+        )
+    }
+    var scannedPages by rememberSaveable(stateSaver = scannedPagesSaver) {
+        mutableStateOf<List<HomeworkScanPage>>(emptyList())
+    }
+    val processingPageIds = remember { mutableSetOf<String>() }
+    var pendingCameraCapturePath by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingCameraCapturePageId by rememberSaveable { mutableStateOf<String?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var showStudyDatePicker by remember { mutableStateOf(false) }
+    var isSubmitting by remember { mutableStateOf(false) }
 
+    val studyDatePickerState = key(studyDate) {
+        rememberDatePickerState(
+            initialSelectedDateMillis = remember(studyDate) {
+                try {
+                    SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }.parse(studyDate)?.time
+                } catch (_: Exception) {
+                    System.currentTimeMillis()
+                }
+            }
+        )
+    }
     val datePickerState = rememberDatePickerState(
         initialSelectedDateMillis = remember(dueDate) {
             try {
@@ -991,6 +1409,41 @@ fun AddHomeworkDialog(
         }
     )
 
+    if (showStudyDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showStudyDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    studyDatePickerState.selectedDateMillis?.let { millis ->
+                        studyDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }.format(Date(millis))
+                    }
+                    showStudyDatePicker = false
+                }) {
+                    Text(stringResource(R.string.homework_study_date_confirm), color = CyanAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStudyDatePicker = false }) {
+                    Text(stringResource(R.string.homework_study_date_cancel), color = TextSecondary)
+                }
+            },
+            colors = DatePickerDefaults.colors(containerColor = MidnightSurface)
+        ) {
+            DatePicker(
+                state = studyDatePickerState,
+                colors = DatePickerDefaults.colors(
+                    containerColor = MidnightSurface,
+                    titleContentColor = CyanAccent,
+                    headlineContentColor = TextPrimary,
+                    selectedDayContainerColor = CyanAccent,
+                    selectedDayContentColor = TextOnAccent,
+                    todayDateBorderColor = CyanAccent
+                )
+            )
+        }
+    }
     if (showDatePicker) {
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
@@ -1032,23 +1485,74 @@ fun AddHomeworkDialog(
 
     fun processPageItem(page: HomeworkScanPage, onUpdated: (HomeworkScanPage) -> Unit) {
         scope.launch {
+            val sourceUri = ImageProcessingUtils.persistDraftSource(
+                context = context,
+                pageId = page.id,
+                sourceUri = page.uri,
+                rawBitmap = page.rawBitmap
+            )
+            if (sourceUri == null) {
+                onUpdated(page.copy(isProcessing = false))
+                Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+                return@launch
+            }
+
+            val sourcePage = page.copy(uri = sourceUri, rawBitmap = null, isProcessing = true)
+            onUpdated(sourcePage)
+
             val result = ImageProcessingUtils.loadAndProcessImage(
                 context = context,
-                uri = page.uri,
-                rawBitmap = page.rawBitmap,
+                uri = sourceUri,
+                rawBitmap = null,
                 autoEnhance = page.autoEnhance,
                 blackAndWhite = false,
                 rotationDegrees = page.rotation
             )
-            val bmp = result?.file?.let {
-                BitmapFactory.decodeFile(it.absolutePath)
+            val preview = result?.file?.let {
+                ImageProcessingUtils.decodeProcessedPreview(it.absolutePath)
             }
             onUpdated(
-                page.copy(
+                sourcePage.copy(
                     processedResult = result,
-                    displayBitmap = bmp,
+                    displayBitmap = preview,
                     isProcessing = false
                 )
+            )
+        }
+    }
+
+    LaunchedEffect(scannedPages.filter {
+        it.isProcessing && it.processedResult == null
+    }.map { it.id }) {
+        scannedPages.filter { it.isProcessing && it.processedResult == null }.forEach { page ->
+            if (processingPageIds.add(page.id)) {
+                processPageItem(page) { updated ->
+                    if (scannedPages.any { it.id == updated.id }) {
+                        scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
+                    } else {
+                        // The user removed this page while its background processing was
+                        // still running. Delete any output produced after the removal.
+                        ImageProcessingUtils.deleteDraftPage(
+                            context = context,
+                            sourceUri = updated.uri,
+                            processedFilePath = updated.processedResult?.file?.absolutePath
+                        )
+                    }
+                    if (!updated.isProcessing) processingPageIds.remove(page.id)
+                }
+            }
+        }
+    }
+
+    fun discardDraftPages() {
+        CameraCaptureFileStore.delete(context, pendingCameraCapturePath)
+        pendingCameraCapturePath = null
+        pendingCameraCapturePageId = null
+        scannedPages.forEach { page ->
+            ImageProcessingUtils.deleteDraftPage(
+                context = context,
+                sourceUri = page.uri,
+                processedFilePath = page.processedResult?.file?.absolutePath
             )
         }
     }
@@ -1057,35 +1561,90 @@ fun AddHomeworkDialog(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 5)
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
+            uris.forEach { uri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
             val newPages = uris.map { uri ->
                 HomeworkScanPage(uri = uri, isProcessing = true)
             }
             scannedPages = scannedPages + newPages
-            newPages.forEach { p ->
-                processPageItem(p) { updated ->
-                    scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        val capturePath = pendingCameraCapturePath
+        val pageId = pendingCameraCapturePageId
+        pendingCameraCapturePath = null
+        pendingCameraCapturePageId = null
+
+        if (capturePath != null) {
+            if (!success || pageId.isNullOrBlank()) {
+                CameraCaptureFileStore.delete(context, capturePath)
+            } else {
+                scope.launch {
+                    val sourceUri = CameraCaptureFileStore.persistToDraft(
+                        context = context,
+                        pageId = pageId,
+                        capturePath = capturePath
+                    )
+                    if (sourceUri == null) {
+                        Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+                    } else {
+                        scannedPages = scannedPages + HomeworkScanPage(
+                            id = pageId,
+                            uri = sourceUri,
+                            rawBitmap = null,
+                            isProcessing = true
+                        )
+                    }
                 }
             }
         }
     }
 
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        if (bitmap != null) {
-            val newPage = HomeworkScanPage(rawBitmap = bitmap, isProcessing = true)
-            scannedPages = scannedPages + newPage
-            processPageItem(newPage) { updated ->
-                scannedPages = scannedPages.map { if (it.id == updated.id) updated else it }
+    fun launchCameraCapture() {
+        if (pendingCameraCapturePath != null) return
+        val pageId = java.util.UUID.randomUUID().toString()
+        val target = runCatching { CameraCaptureFileStore.create(context, pageId) }
+            .getOrElse {
+                Toast.makeText(context, context.getString(R.string.scan_draft_save_failed), Toast.LENGTH_LONG).show()
+                return
             }
+        pendingCameraCapturePath = target.file.absolutePath
+        pendingCameraCapturePageId = pageId
+        cameraLauncher.launch(target.contentUri)
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            launchCameraCapture()
+        } else {
+            Toast.makeText(
+                context,
+                "يلزم السماح لتنوير باستخدام الكاميرا حتى تتمكن من تصوير مرفقات الواجب.",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    KeyboardAwareFormDialog(
+        onDismissRequest = { if (!isSubmitting) { discardDraftPages(); onDismiss() } },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         Scaffold(
+            modifier = Modifier.fillMaxSize(),
             topBar = {
                 Box(
                     modifier = Modifier
@@ -1103,7 +1662,7 @@ fun AddHomeworkDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             IconButton(
-                                onClick = onDismiss,
+                                onClick = { if (!isSubmitting) { discardDraftPages(); onDismiss() } },
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
@@ -1112,13 +1671,13 @@ fun AddHomeworkDialog(
                                 Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextPrimary)
                             }
                             Text(
-                                text = "إضافة وتوثيق واجب مدرسي 📝",
+                                text = if (isOfficial) "إضافة واجب رسمي معتمد 📝" else "إضافة وتوثيق واجب مدرسي 📝",
                                 style = AppTypography.CardTitle.copy(color = CyanAccent)
                             )
                         }
 
                         GlassPill(
-                            text = if (taskType == "HOMEWORK") "واجب منزلي" else "مشروع / بحث",
+                            text = if (isOfficial) "رسمي من الأستاذ 🎓" else if (taskType == "HOMEWORK") "واجب منزلي" else "مشروع / بحث",
                             color = CyanAccent,
                             bgColor = CyanGlow
                         )
@@ -1138,15 +1697,28 @@ fun AddHomeworkDialog(
                     ) {
                         GlassOutlinedButton(
                             text = "إلغاء",
-                            onClick = onDismiss,
+                            onClick = { if (!isSubmitting) { discardDraftPages(); onDismiss() } },
                             modifier = Modifier.weight(1f)
                         )
                         GlassButton(
-                            text = "حفظ ونشر الواجب ✨",
-                            enabled = title.isNotBlank(),
+                            text = if (isSubmitting) "جارٍ النشر..." else if (isOfficial) "نشر الواجب الرسمي ⭐" else "حفظ ونشر الواجب ✨",
+                            enabled = title.isNotBlank() && !isSubmitting,
                             onClick = {
-                                if (title.isNotBlank()) {
-                                    onAddWithPages(selectedSubjId, title, details, pageNumbers, questionNumbers, dueDate, taskType, scannedPages)
+                                if (title.isNotBlank() && !isSubmitting) {
+                                    isSubmitting = true
+                                    onAddWithPages(
+                                        selectedSubjId,
+                                        title,
+                                        details,
+                                        pageNumbers,
+                                        questionNumbers,
+                                        dueDate,
+                                        studyDate,
+                                        taskType,
+                                        scannedPages
+                                    ) {
+                                        isSubmitting = false
+                                    }
                                 }
                             },
                             modifier = Modifier.weight(2f)
@@ -1156,12 +1728,11 @@ fun AddHomeworkDialog(
             },
             containerColor = MidnightBackground
         ) { paddingValues ->
-            Column(
+            KeyboardAwareFormScrollColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(horizontal = 16.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Spacer(modifier = Modifier.height(4.dp))
@@ -1264,6 +1835,55 @@ fun AddHomeworkDialog(
                     placeholder = "ملاحظات المعلم أو شروط ومواصفات الحل..."
                 )
 
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MidnightSurface,
+                    borderColor = CyanGlow
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.homework_study_date_title),
+                            style = AppTypography.FieldLabel,
+                            color = CyanAccent
+                        )
+                        Text(
+                            text = TanweerViewModel.getFormattedArabicDate(studyDate),
+                            style = AppTypography.Button,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = studyDate,
+                            style = AppTypography.Hint,
+                            color = TextSecondary
+                        )
+                        Text(
+                            text = stringResource(R.string.homework_study_date_description),
+                            style = AppTypography.Hint,
+                            color = TextMuted
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(
+                                onClick = { showStudyDatePicker = true },
+                                colors = ButtonDefaults.textButtonColors(contentColor = CyanAccent)
+                            ) {
+                                Text(stringResource(R.string.homework_study_date_choose))
+                            }
+                            TextButton(
+                                onClick = { studyDate = TanweerViewModel.getTodayDateString() },
+                                colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary)
+                            ) {
+                                Text(stringResource(R.string.homework_study_date_today))
+                            }
+                        }
+                    }
+                }
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "موعد التسليم (تاريخ تقويمي معتمد) *",
@@ -1344,7 +1964,18 @@ fun AddHomeworkDialog(
                         }
 
                         OutlinedButton(
-                            onClick = { cameraLauncher.launch(null) },
+                            onClick = {
+                                val hasCameraPermission = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.CAMERA
+                                ) == PackageManager.PERMISSION_GRANTED
+
+                                if (hasCameraPermission) {
+                                    launchCameraCapture()
+                                } else {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            },
                             modifier = Modifier.weight(1f).height(42.dp),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = WarmAmber),
@@ -1389,6 +2020,11 @@ fun AddHomeworkDialog(
                                     // Remove Page Button
                                     IconButton(
                                         onClick = {
+                                            ImageProcessingUtils.deleteDraftPage(
+                                                context = context,
+                                                sourceUri = page.uri,
+                                                processedFilePath = page.processedResult?.file?.absolutePath
+                                            )
                                             scannedPages = scannedPages.filter { it.id != page.id }
                                         },
                                         modifier = Modifier

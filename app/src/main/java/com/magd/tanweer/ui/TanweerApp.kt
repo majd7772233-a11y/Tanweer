@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,12 +27,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import com.magd.tanweer.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.Role
+import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.data.model.getRoleEnum
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.screens.*
@@ -53,6 +56,94 @@ fun TanweerApp(
     val uploadInitialSubjectId by viewModel.uploadInitialSubjectId.collectAsStateWithLifecycle()
     val recoveryCodeDialog by viewModel.recoveryCodeDialog.collectAsStateWithLifecycle()
     val isCheckingAuth by viewModel.isCheckingAuth.collectAsStateWithLifecycle()
+    val sectionContentsSyncState by viewModel.sectionContentsSyncState.collectAsStateWithLifecycle()
+    val homeSyncState by viewModel.homeSyncState.collectAsStateWithLifecycle()
+    val scheduleSyncState by viewModel.scheduleSyncState.collectAsStateWithLifecycle()
+    val homeworkSyncState by viewModel.homeworkSyncState.collectAsStateWithLifecycle()
+    val examsSyncState by viewModel.examsSyncState.collectAsStateWithLifecycle()
+    val calendarSyncState by viewModel.calendarSyncState.collectAsStateWithLifecycle()
+    val issuesSyncState by viewModel.issuesSyncState.collectAsStateWithLifecycle()
+    val eventsSyncState by viewModel.eventsSyncState.collectAsStateWithLifecycle()
+    val librarySyncState by viewModel.librarySyncState.collectAsStateWithLifecycle()
+    val groupsSyncState by viewModel.groupsSyncState.collectAsStateWithLifecycle()
+    val academicArchiveSyncState by viewModel.academicArchiveSyncState.collectAsStateWithLifecycle()
+    val navigationStateHolder = rememberSaveableStateHolder()
+
+    val syncStatesForCurrentDestination: List<SyncState>? = when (subScreen) {
+        SubScreen.NONE -> when (currentTab) {
+            NavigationTab.TODAY -> listOf(homeSyncState, scheduleSyncState, homeworkSyncState, examsSyncState, eventsSyncState)
+            NavigationTab.CALENDAR -> listOf(calendarSyncState, eventsSyncState)
+            NavigationTab.HOMEWORK -> listOf(homeworkSyncState)
+            NavigationTab.EXAMS -> listOf(examsSyncState)
+            NavigationTab.ISSUES -> listOf(issuesSyncState)
+            NavigationTab.MORE -> listOf(groupsSyncState, eventsSyncState)
+        }
+        SubScreen.EXTRA_SECTIONS_HUB -> listOf(groupsSyncState, eventsSyncState)
+        SubScreen.GROUPS -> listOf(groupsSyncState)
+        SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> listOf(librarySyncState)
+        SubScreen.SCHEDULE -> listOf(scheduleSyncState)
+        SubScreen.TIMELINE -> listOf(sectionContentsSyncState, homeworkSyncState, examsSyncState)
+        SubScreen.SUBJECT_KNOWLEDGE_BASE -> listOf(sectionContentsSyncState, homeworkSyncState, examsSyncState, issuesSyncState)
+        SubScreen.ACADEMIC_HISTORY -> listOf(academicArchiveSyncState)
+        SubScreen.EVENTS -> listOf(eventsSyncState)
+        SubScreen.WHAT_DID_I_MISS -> listOf(sectionContentsSyncState, homeworkSyncState, examsSyncState, eventsSyncState, scheduleSyncState)
+        // Search combines chat and book caches with several streams and has no authoritative aggregate yet.
+        else -> null
+    }
+    val activeSyncState = syncStatesForCurrentDestination?.let(::aggregateSyncStates)
+
+    val refreshCurrentSync: () -> Unit = {
+        when (subScreen) {
+            SubScreen.NONE -> when (currentTab) {
+                NavigationTab.TODAY -> {
+                    viewModel.refreshHome()
+                    viewModel.refreshSchedule()
+                    viewModel.refreshHomeworks()
+                    viewModel.refreshExams()
+                    viewModel.refreshEvents()
+                }
+                NavigationTab.CALENDAR -> {
+                    viewModel.refreshCalendar()
+                    viewModel.refreshEvents()
+                }
+                NavigationTab.HOMEWORK -> viewModel.refreshHomeworks()
+                NavigationTab.EXAMS -> viewModel.refreshExams()
+                NavigationTab.ISSUES -> viewModel.refreshIssues()
+                NavigationTab.MORE -> {
+                    viewModel.refreshGroups()
+                    viewModel.refreshEvents()
+                }
+            }
+            SubScreen.EXTRA_SECTIONS_HUB -> {
+                viewModel.refreshGroups()
+                viewModel.refreshEvents()
+            }
+            SubScreen.GROUPS -> viewModel.refreshGroups()
+            SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> viewModel.refreshBooks()
+            SubScreen.SCHEDULE -> viewModel.refreshSchedule()
+            SubScreen.TIMELINE -> {
+                viewModel.refreshSectionContents()
+                viewModel.refreshHomeworks()
+                viewModel.refreshExams()
+            }
+            SubScreen.SUBJECT_KNOWLEDGE_BASE -> {
+                viewModel.refreshSectionContents()
+                viewModel.refreshHomeworks()
+                viewModel.refreshExams()
+                viewModel.refreshIssues()
+            }
+            SubScreen.ACADEMIC_HISTORY -> viewModel.syncAcademicArchive(isRefresh = true)
+            SubScreen.EVENTS -> viewModel.refreshEvents()
+            SubScreen.WHAT_DID_I_MISS -> {
+                viewModel.refreshSectionContents()
+                viewModel.refreshHomeworks()
+                viewModel.refreshExams()
+                viewModel.refreshEvents()
+                viewModel.refreshSchedule()
+            }
+            else -> Unit
+        }
+    }
 
     if (isCheckingAuth) {
         Box(
@@ -76,12 +167,12 @@ fun TanweerApp(
                 ) {
                     Text(
                         text = "📚",
-                        fontSize = 34.sp
+                        fontSize = tanweerTextSize(34f)
                     )
                 }
                 Text(
                     text = "تنوير",
-                    fontSize = 22.sp,
+                    fontSize = tanweerTextSize(22f),
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
@@ -96,6 +187,15 @@ fun TanweerApp(
         AuthScreen(viewModel = viewModel)
     } else {
         Scaffold(
+            topBar = {
+                activeSyncState?.takeUnless { it is SyncState.Idle }?.let { state ->
+                    SyncStatusBar(
+                        syncState = state,
+                        onRefresh = refreshCurrentSync,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            },
             bottomBar = {
                 if (subScreen != SubScreen.PDF_VIEWER) {
                     GlassBottomNavigationBar(
@@ -110,7 +210,8 @@ fun TanweerApp(
                                     viewModel.setSubScreen(SubScreen.EXTRA_SECTIONS_HUB)
                                 }
                             } else {
-                                viewModel.setSubScreen(SubScreen.NONE)
+                                // setTab() already returns to the root and refreshes the
+                                // selected tab; avoid syncing the previous tab first.
                                 viewModel.setTab(tab)
                             }
                         }
@@ -189,6 +290,7 @@ fun TanweerApp(
                                         SubScreen.SCHEDULE -> "جدول الحصص المدرسي"
                                         SubScreen.TIMELINE -> "رحلة المادة"
                                         SubScreen.PROFILE -> "ملف الطالب والمساهمات"
+                                        SubScreen.NOTIFICATIONS -> context.getString(R.string.notifications_title)
                                         SubScreen.SETTINGS -> "إعدادات التطبيق"
                                         SubScreen.WHAT_DID_I_MISS -> "ماذا فاتني؟"
                                         SubScreen.SEARCH -> "البحث الشامل"
@@ -203,42 +305,47 @@ fun TanweerApp(
                                         SubScreen.STORAGE_MANAGER -> "إدارة تخزين ومساحة الكتب 💾"
                                         else -> ""
                                     },
-                                    fontSize = 17.sp,
+                                    fontSize = tanweerTextSize(17f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                             }
                         }
 
-                        when (subScreen) {
-                            SubScreen.EXTRA_SECTIONS_HUB -> ExtraSectionsHubScreen(viewModel = viewModel)
-                            SubScreen.GROUPS -> GroupsScreen(viewModel = viewModel)
-                            SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> LibraryScreen(viewModel = viewModel)
-                            SubScreen.SCHEDULE -> ScheduleScreen(viewModel = viewModel)
-                            SubScreen.TIMELINE -> SubjectTimelineScreen(viewModel = viewModel)
-                            SubScreen.PROFILE -> ProfileScreen(viewModel = viewModel)
-                            SubScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
-                            SubScreen.WHAT_DID_I_MISS -> WhatDidIMissScreen(viewModel = viewModel)
-                            SubScreen.SEARCH -> SearchScreen(viewModel = viewModel)
-                            SubScreen.SUBJECT_KNOWLEDGE_BASE -> ClassKnowledgeBaseScreen(viewModel = viewModel)
-                            SubScreen.ACADEMIC_HISTORY -> AcademicHistoryScreen(viewModel = viewModel)
-                            SubScreen.TEACHER_DASHBOARD -> TeacherDashboardScreen(viewModel = viewModel)
-                            SubScreen.MODERATOR_DASHBOARD -> ModeratorDashboardScreen(viewModel = viewModel)
-                            SubScreen.ADMIN_DASHBOARD -> AdminDashboardScreen(viewModel = viewModel)
-                            SubScreen.COMMUNITY_DECISIONS -> CommunityDecisionsScreen(viewModel = viewModel)
-                            SubScreen.EVENTS -> EventsScreen(viewModel = viewModel)
-                            SubScreen.VERSION_CHECK -> VersionCheckScreen(viewModel = viewModel)
-                            else -> HomeScreen(viewModel = viewModel)
+                        navigationStateHolder.SaveableStateProvider(key = "subscreen-${subScreen.name}") {
+                            when (subScreen) {
+                                SubScreen.EXTRA_SECTIONS_HUB -> ExtraSectionsHubScreen(viewModel = viewModel)
+                                SubScreen.GROUPS -> GroupsScreen(viewModel = viewModel)
+                                SubScreen.LIBRARY, SubScreen.STORAGE_MANAGER -> LibraryScreen(viewModel = viewModel)
+                                SubScreen.SCHEDULE -> ScheduleScreen(viewModel = viewModel)
+                                SubScreen.TIMELINE -> SubjectTimelineScreen(viewModel = viewModel)
+                                SubScreen.PROFILE -> ProfileScreen(viewModel = viewModel)
+                                SubScreen.NOTIFICATIONS -> NotificationsScreen(viewModel = viewModel)
+                                SubScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
+                                SubScreen.WHAT_DID_I_MISS -> WhatDidIMissScreen(viewModel = viewModel)
+                                SubScreen.SEARCH -> SearchScreen(viewModel = viewModel)
+                                SubScreen.SUBJECT_KNOWLEDGE_BASE -> ClassKnowledgeBaseScreen(viewModel = viewModel)
+                                SubScreen.ACADEMIC_HISTORY -> AcademicHistoryScreen(viewModel = viewModel)
+                                SubScreen.TEACHER_DASHBOARD -> TeacherDashboardScreen(viewModel = viewModel)
+                                SubScreen.MODERATOR_DASHBOARD -> ModeratorDashboardScreen(viewModel = viewModel)
+                                SubScreen.ADMIN_DASHBOARD -> AdminDashboardScreen(viewModel = viewModel)
+                                SubScreen.COMMUNITY_DECISIONS -> CommunityDecisionsScreen(viewModel = viewModel)
+                                SubScreen.EVENTS -> EventsScreen(viewModel = viewModel)
+                                SubScreen.VERSION_CHECK -> VersionCheckScreen(viewModel = viewModel)
+                                else -> HomeScreen(viewModel = viewModel)
+                            }
                         }
                     }
                 } else {
-                    when (currentTab) {
-                        NavigationTab.TODAY -> HomeScreen(viewModel = viewModel)
-                        NavigationTab.CALENDAR -> CalendarScreen(viewModel = viewModel)
-                        NavigationTab.HOMEWORK -> HomeworkScreen(viewModel = viewModel)
-                        NavigationTab.EXAMS -> ExamsScreen(viewModel = viewModel)
-                        NavigationTab.ISSUES -> IssuesScreen(viewModel = viewModel)
-                        NavigationTab.MORE -> HomeScreen(viewModel = viewModel)
+                    navigationStateHolder.SaveableStateProvider(key = "tab-${currentTab.name}") {
+                        when (currentTab) {
+                            NavigationTab.TODAY -> HomeScreen(viewModel = viewModel)
+                            NavigationTab.CALENDAR -> CalendarScreen(viewModel = viewModel)
+                            NavigationTab.HOMEWORK -> HomeworkScreen(viewModel = viewModel)
+                            NavigationTab.EXAMS -> ExamsScreen(viewModel = viewModel)
+                            NavigationTab.ISSUES -> IssuesScreen(viewModel = viewModel)
+                            NavigationTab.MORE -> HomeScreen(viewModel = viewModel)
+                        }
                     }
                 }
 
@@ -261,14 +368,14 @@ fun TanweerApp(
                                 text = "🔑 رقمك السري ورمز الاسترداد (هام جداً)",
                                 color = WarmAmber,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp
+                                fontSize = tanweerTextSize(17f)
                             )
                         },
                         text = {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text(
                                     text = "احتفظ بهذا الرقم السري! يمكنك استخدامه لتسجيل الدخول مباشرة إلى حسابك من أي مكان، أو استعادة حسابك إذا نسيت كلمة المرور:",
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     color = TextSecondary
                                 )
                                 Box(
@@ -282,7 +389,7 @@ fun TanweerApp(
                                 ) {
                                     Text(
                                         text = codeToCopy,
-                                        fontSize = 17.sp,
+                                        fontSize = tanweerTextSize(17f),
                                         fontWeight = FontWeight.Black,
                                         color = WarmAmber,
                                         textAlign = TextAlign.Center
@@ -343,6 +450,7 @@ fun GlassBottomNavigationBar(
         SubScreen.MODERATOR_DASHBOARD -> "الإشراف" to Icons.Default.Shield
         SubScreen.ADMIN_DASHBOARD -> "الإدارة" to Icons.Default.AdminPanelSettings
         SubScreen.PROFILE -> "الملف الشخصي" to Icons.Default.Person
+        SubScreen.NOTIFICATIONS -> "الإشعارات" to Icons.Default.Notifications
         SubScreen.SETTINGS -> "الإعدادات" to Icons.Default.Settings
         SubScreen.ACADEMIC_HISTORY -> "الأرشيف" to Icons.Default.Archive
         SubScreen.SUBJECT_KNOWLEDGE_BASE -> "المادة" to Icons.Default.MenuBook
@@ -384,7 +492,7 @@ fun GlassBottomNavigationBar(
                 label = {
                     Text(
                         text = label,
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     )
                 },
@@ -431,7 +539,7 @@ fun GlassBottomNavigationBar(
                 ) { targetLabel ->
                     Text(
                         text = targetLabel,
-                        fontSize = 10.sp,
+                        fontSize = tanweerTextSize(10f),
                         fontWeight = if (isMoreSelected) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1
                     )

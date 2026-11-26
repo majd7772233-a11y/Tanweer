@@ -129,12 +129,12 @@ fun VersionCheckScreen(
                             .border(2.dp, CyanAccent, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("✨", fontSize = 34.sp)
+                        Text("✨", fontSize = tanweerTextSize(34f))
                     }
 
                     Text(
                         text = "منظومة تـنـويـر التعليمية",
-                        fontSize = 20.sp,
+                        fontSize = tanweerTextSize(20f),
                         fontWeight = FontWeight.Black,
                         color = TextPrimary
                     )
@@ -162,7 +162,7 @@ fun VersionCheckScreen(
 
                     Text(
                         text = "المنصة التعاونية المدرسية الذكية للطلاب والمعلمين وإدارات المدارس",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         color = TextSecondary,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 16.dp)
@@ -185,7 +185,7 @@ fun VersionCheckScreen(
 
                     Text(
                         text = "آخر فحص: ${lastCheckedTime ?: "الآن"}",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         color = TextMuted
                     )
                 }
@@ -228,7 +228,7 @@ fun VersionCheckScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(
                                         text = "يتوفر إصدار جديد (${versionInfo.currentVersionName})",
-                                        fontSize = 14.sp,
+                                        fontSize = tanweerTextSize(14f),
                                         fontWeight = FontWeight.Bold,
                                         color = if (versionInfo.isMandatory) Color(0xFFFF5252) else WarmAmber
                                     )
@@ -240,7 +240,7 @@ fun VersionCheckScreen(
                                 }
                                 Text(
                                     text = "تاريخ الإطلاق: ${versionInfo.releaseDate ?: "معتمد"} • إصدار جهازك: v${versionInfo.installedVersionName}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextSecondary
                                 )
                             }
@@ -249,7 +249,7 @@ fun VersionCheckScreen(
                         if (versionInfo.isMandatory) {
                             Text(
                                 text = "⚠️ هذا التحديث إلزامي لضمان توافق البيانات وأمان الحساب المدرسي.",
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = Color(0xFFFF8A80),
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -309,7 +309,7 @@ fun VersionCheckScreen(
 
                         Text(
                             text = "ℹ️ وفق معايير أمان أندرويد، يتطلب التثبيت تأكيدك عبر مثبت الحزم الرسمي، ولا يتم تثبيت أي تطبيق صامتاً.",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextMuted,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth()
@@ -356,13 +356,13 @@ fun VersionCheckScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "وضع عدم الاتصال / تعذر فحص الخادم",
-                                fontSize = 14.sp,
+                                fontSize = tanweerTextSize(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             Text(
                                 text = checkErrorMessage ?: "يرجى التحقق من الشبكة لمعرفة آخر الإصدارات",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                         }
@@ -392,13 +392,13 @@ fun VersionCheckScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "أنت تستخدم أحدث إصدار معتمد من تـنـويـر ✓",
-                                fontSize = 14.sp,
+                                fontSize = tanweerTextSize(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             Text(
                                 text = "النسخة الحالية $installedVersionName مثبتة ومحدثة بالكامل",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                         }
@@ -411,7 +411,7 @@ fun VersionCheckScreen(
         item {
             Text(
                 text = "سجل التحديثات والميزات الجديدة في الإصدار ${versionInfo?.currentVersionName ?: installedVersionName}:",
-                fontSize = 14.sp,
+                fontSize = tanweerTextSize(14f),
                 fontWeight = FontWeight.Bold,
                 color = CyanAccent,
                 modifier = Modifier.padding(top = 4.dp)
@@ -430,9 +430,9 @@ fun VersionCheckScreen(
                 ) {
                     Text(
                         text = change,
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         color = TextPrimary,
-                        lineHeight = 18.sp
+                        lineHeight = tanweerLineHeight(18f)
                     )
                 }
             }
@@ -448,13 +448,13 @@ fun VersionCheckScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = "📱 معلومات بيئة التشغيل والتوافق المعتمدة:",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
-                    Text("• متوافق مع كافة أجهزة Android بدءاً من Android 6.0 (API 23+) فما فوق", fontSize = 12.sp, color = TextSecondary)
-                    Text("• واجهات مستخدم حديثة مبنية بتقنية Jetpack Compose و Material 3", fontSize = 12.sp, color = TextSecondary)
-                    Text("• قاعدة بيانات Room المحلية عالية الأداء والمعزولة أمنيًا مع دعم كامل لنمط Offline-First", fontSize = 12.sp, color = TextSecondary)
+                    Text("• متوافق مع كافة أجهزة Android بدءاً من Android 6.0 (API 23+) فما فوق", fontSize = tanweerTextSize(12f), color = TextSecondary)
+                    Text("• واجهات مستخدم حديثة مبنية بتقنية Jetpack Compose و Material 3", fontSize = tanweerTextSize(12f), color = TextSecondary)
+                    Text("• قاعدة بيانات Room المحلية عالية الأداء والمعزولة أمنيًا مع دعم كامل لنمط Offline-First", fontSize = tanweerTextSize(12f), color = TextSecondary)
                 }
             }
         }

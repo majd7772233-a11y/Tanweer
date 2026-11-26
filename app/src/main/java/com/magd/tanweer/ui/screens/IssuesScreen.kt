@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -20,8 +21,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,16 +32,23 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.IssueCommentItem
 import com.magd.tanweer.data.model.IssueItem
 import com.magd.tanweer.data.model.SubjectItem
+import com.magd.tanweer.R
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.IssueFilter
+import com.magd.tanweer.util.IssueStatus
+import com.magd.tanweer.util.IssueStatusPolicy
 
-enum class IssueFilter(val label: String) {
-    ALL("الكل"),
-    OPEN("قيد الانتظار ⏳"),
-    SOLVED("تم حلها ✅"),
-    DISCUSSING("قيد النقاش 💬")
-}
+
+private val IssueFilter.icon: String
+    get() = when (this) {
+        IssueFilter.ALL -> "📋"
+        IssueFilter.DISCUSSING -> "💬"
+        IssueFilter.SOLVED -> "✅"
+        IssueFilter.CLOSED -> "🔒"
+    }
 
 @Composable
 fun IssuesScreen(
@@ -48,9 +58,13 @@ fun IssuesScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
 
     val issues by viewModel.repository.getIssues(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val issuesSyncState by viewModel.issuesSyncState.collectAsStateWithLifecycle()
+    val scopedIssuesSyncState = syncStateForScope(issuesSyncState, groupSyncScopeIds[GroupSyncSource.ISSUES], activeGroupId)
+    val hasIssuesSnapshot = issues.isNotEmpty() || hasAuthoritativeSnapshot(scopedIssuesSyncState)
 
     val gradeSubjects = remember(currentUser?.gradeId) {
         viewModel.getSubjectsForCurrentGrade()
@@ -58,6 +72,7 @@ fun IssuesScreen(
 
     var selectedIssueId by remember { mutableStateOf<String?>(null) }
     var selectedFilter by remember { mutableStateOf(IssueFilter.ALL) }
+    val issueFilterListState = rememberLazyListState()
     var isAddModalOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(activeGroupId) {
@@ -77,12 +92,7 @@ fun IssuesScreen(
     }
 
     val filteredIssues = remember(issues, selectedFilter) {
-        when (selectedFilter) {
-            IssueFilter.ALL -> issues
-            IssueFilter.OPEN -> issues.filter { it.status == "OPEN" }
-            IssueFilter.SOLVED -> issues.filter { it.status == "SOLVED" }
-            IssueFilter.DISCUSSING -> issues.filter { it.status == "IN_DISCUSSION" }
-        }
+        issues.filter { IssueStatusPolicy.matches(selectedFilter, it.status) }
     }
 
     Box(
@@ -107,13 +117,13 @@ fun IssuesScreen(
                     Column {
                         Text(
                             text = "❓ الاستفسارات الدراسية",
-                            fontSize = 20.sp,
+                            fontSize = tanweerTextSize(20f),
                             fontWeight = FontWeight.Black,
                             color = CyanAccent
                         )
                         Text(
-                            text = "${issues.size} استفسار • نقاشات وحلول المنهج",
-                            fontSize = 12.sp,
+                            text = if (hasIssuesSnapshot) "${issues.size} استفسار • نقاشات وحلول المنهج" else "جارٍ التحقق من الاستفسارات...",
+                            fontSize = tanweerTextSize(12f),
                             color = TextSecondary
                         )
                     }
@@ -128,26 +138,53 @@ fun IssuesScreen(
 
             // Filters
             item {
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                HorizontalFilterStrip(
+                    state = issueFilterListState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MidnightSurface)
+                        .border(1.dp, GlassBorderSubtle, RoundedCornerShape(14.dp)),
+                    edgeColor = MidnightSurface,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    itemSpacing = 6.dp
                 ) {
                     items(IssueFilter.values()) { filter ->
                         val isSelected = selectedFilter == filter
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) CyanGlow else MidnightSurface)
-                                .border(1.dp, if (isSelected) CyanAccent else GlassBorderSubtle, RoundedCornerShape(12.dp))
-                                .clickable { selectedFilter = filter }
-                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                        GlassFilterChip(
+                            selected = isSelected,
+                            onClick = { selectedFilter = filter },
+                            modifier = Modifier,
+                            containerColor = Color.Transparent,
+                            selectedContainerColor = CyanGlow,
+                            labelColor = TextPrimary,
+                            selectedLabelColor = CyanAccent
                         ) {
-                            Text(
-                                text = filter.label,
-                                fontSize = 12.sp,
-                                color = if (isSelected) CyanAccent else TextPrimary,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Text(
+                                    text = filter.icon,
+                                    modifier = Modifier.clearAndSetSemantics {},
+                                    fontSize = tanweerTextSize(12f)
+                                )
+                                Text(
+                                    text = stringResource(filter.labelRes),
+                                    fontSize = tanweerTextSize(12f),
+                                    color = if (isSelected) CyanAccent else TextPrimary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                                if (isSelected) {
+                                    Text(
+                                        text = "✓",
+                                        modifier = Modifier.clearAndSetSemantics {},
+                                        fontSize = tanweerTextSize(12f),
+                                        color = CyanAccent,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -155,13 +192,19 @@ fun IssuesScreen(
 
             if (filteredIssues.isEmpty()) {
                 item {
-                    EmptyStateGlass(
-                        title = "لا توجد استفسارات هنا",
-                        subtitle = "اطرح سؤالك أو نقطة غير واضحة ليجيبك زملاؤك في الشعبة",
-                        icon = "❓",
-                        actionButtonText = "طرح استفسار جديد",
-                        onActionClick = { isAddModalOpen = true }
-                    )
+                    if (hasIssuesSnapshot) {
+                        EmptyStateGlass(
+                            title = if (issues.isEmpty()) "لا توجد استفسارات هنا" else "لا توجد استفسارات تطابق هذا التصنيف",
+                            subtitle = "اطرح سؤالك أو غيّر التصنيف لعرض نقاشات أخرى.",
+                            icon = "❓",
+                            actionButtonText = if (issues.isEmpty()) "طرح استفسار جديد" else "عرض الكل",
+                            onActionClick = {
+                                if (issues.isEmpty()) isAddModalOpen = true else selectedFilter = IssueFilter.ALL
+                            }
+                        )
+                    } else {
+                        PendingSyncEmptyState(dataLabel = "الاستفسارات", syncState = scopedIssuesSyncState)
+                    }
                 }
             } else {
                 items(filteredIssues, key = { it.id }) { issue ->
@@ -203,8 +246,8 @@ fun IssueListItemCard(
     issue: IssueItem,
     onClick: () -> Unit
 ) {
-    val isSolved = issue.status == "SOLVED"
-    val borderColor = if (isSolved) EmeraldGreen.copy(alpha = 0.5f) else GlassBorderSubtle
+    val status = IssueStatusPolicy.fromApiValue(issue.status)
+    val borderColor = if (status.isResolved) EmeraldGreen.copy(alpha = 0.5f) else GlassBorderSubtle
 
     GlassCard(
         modifier = Modifier
@@ -223,16 +266,14 @@ fun IssueListItemCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    val statusColor = when (issue.status) {
-                        "SOLVED" -> EmeraldGreen
-                        "IN_DISCUSSION" -> WarmAmber
-                        else -> CyanAccent
+                    val statusColor = when (status) {
+                        IssueStatus.OPEN -> CyanAccent
+                        IssueStatus.IN_DISCUSSION -> WarmAmber
+                        IssueStatus.SOLVED, IssueStatus.VERIFIED -> EmeraldGreen
+                        IssueStatus.CLOSED -> TextMuted
+                        IssueStatus.UNKNOWN -> TextSecondary
                     }
-                    val statusText = when (issue.status) {
-                        "SOLVED" -> "تم الحل بنموذجية ✓"
-                        "IN_DISCUSSION" -> "قيد النقاش 💬"
-                        else -> "مفتوح للنقاش ⏳"
-                    }
+                    val statusText = stringResource(status.labelRes)
 
                     GlassPill(
                         text = statusText,
@@ -243,7 +284,7 @@ fun IssueListItemCard(
                     if (!issue.subjectName.isNullOrBlank()) {
                         Text(
                             text = "${issue.subjectIcon ?: "📚"} ${issue.subjectName}",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             color = TextSecondary,
                             maxLines = 1
                         )
@@ -258,7 +299,7 @@ fun IssueListItemCard(
                 ) {
                     Text(
                         text = "${issue.commentsCount} إجابة",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         fontWeight = FontWeight.Bold,
                         color = if (issue.commentsCount > 0) CyanAccent else TextMuted
                     )
@@ -269,7 +310,7 @@ fun IssueListItemCard(
 
             Text(
                 text = issue.title,
-                fontSize = 15.sp,
+                fontSize = tanweerTextSize(15f),
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
             )
@@ -277,7 +318,7 @@ fun IssueListItemCard(
             if (!issue.description.isNullOrBlank()) {
                 Text(
                     text = issue.description,
-                    fontSize = 13.sp,
+                    fontSize = tanweerTextSize(13f),
                     color = TextSecondary,
                     maxLines = 2,
                     modifier = Modifier.padding(top = 4.dp)
@@ -288,7 +329,7 @@ fun IssueListItemCard(
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = if (issue.syncStatus == "FAILED") "⚠️ محفوظ محلياً فقط (لم يُرفع للسيرفر)" else "🔄 جاري المزامنة مع السيرفر...",
-                    fontSize = 10.sp,
+                    fontSize = tanweerTextSize(10f),
                     color = if (issue.syncStatus == "FAILED") Color(0xFFFF8A80) else CyanAccent
                 )
             }
@@ -302,7 +343,7 @@ fun IssueListItemCard(
             ) {
                 Text(
                     text = "سأل: ${issue.authorName}",
-                    fontSize = 11.sp,
+                    fontSize = tanweerTextSize(11f),
                     color = TextSecondary
                 )
 
@@ -312,7 +353,7 @@ fun IssueListItemCard(
                 ) {
                     Text(
                         text = "عرض الإجابات والمناقشة",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent
                     )
@@ -347,6 +388,32 @@ fun IssueDetailView(
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val currentRole = currentUser?.role?.trim()?.uppercase().orEmpty()
+    var isApprovedGroupTeacher by remember(issueId) { mutableStateOf(false) }
+
+    LaunchedEffect(issue?.groupId, currentUser?.id, currentRole) {
+        isApprovedGroupTeacher = false
+        val groupId = issue?.groupId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        val userId = currentUser?.id ?: return@LaunchedEffect
+        val hasGlobalApproval = currentRole in setOf(
+            "TEACHER", "VERIFIED_TEACHER", "ADMIN", "ADMINISTRATOR", "SYSTEM_OWNER", "OWNER"
+        )
+        val isIssueAuthor = issue?.authorName == currentUser?.fullName
+        if (hasGlobalApproval || isIssueAuthor) return@LaunchedEffect
+
+        viewModel.repository.getGroupMembers(groupId).onSuccess { response ->
+            isApprovedGroupTeacher = response.members.any { member ->
+                member.userId == userId &&
+                    member.status.equals("ACTIVE", ignoreCase = true) &&
+                    member.memberRole.equals("TEACHER", ignoreCase = true)
+            }
+        }
+    }
+
+    val canApproveBestAnswer =
+        issue?.authorName == currentUser?.fullName ||
+            isApprovedGroupTeacher ||
+            currentRole in setOf("TEACHER", "VERIFIED_TEACHER", "ADMIN", "ADMINISTRATOR", "SYSTEM_OWNER", "OWNER")
     val context = LocalContext.current
     var replyText by remember { mutableStateOf("") }
 
@@ -385,16 +452,26 @@ fun IssueDetailView(
                     }
                     Text(
                         text = "تفاصيل الاستفسار",
-                        fontSize = 18.sp,
+                        fontSize = tanweerTextSize(18f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
                 }
 
                 issue?.let { iss ->
-                    val statusColor = if (iss.status == "SOLVED") EmeraldGreen else CyanAccent
-                    val statusText = if (iss.status == "SOLVED") "تم الحل بنجاح" else "قيد النقاش"
-                    GlassPill(text = statusText, color = statusColor, bgColor = statusColor.copy(alpha = 0.15f))
+                    val status = IssueStatusPolicy.fromApiValue(iss.status)
+                    val statusColor = when (status) {
+                        IssueStatus.OPEN -> CyanAccent
+                        IssueStatus.IN_DISCUSSION -> WarmAmber
+                        IssueStatus.SOLVED, IssueStatus.VERIFIED -> EmeraldGreen
+                        IssueStatus.CLOSED -> TextMuted
+                        IssueStatus.UNKNOWN -> TextSecondary
+                    }
+                    GlassPill(
+                        text = stringResource(status.labelRes),
+                        color = statusColor,
+                        bgColor = statusColor.copy(alpha = 0.15f)
+                    )
                 }
             }
 
@@ -421,10 +498,10 @@ fun IssueDetailView(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         modifier = Modifier.padding(bottom = 6.dp)
                                     ) {
-                                        Text(issue!!.subjectIcon ?: "📚", fontSize = 16.sp)
+                                        Text(issue!!.subjectIcon ?: "📚", fontSize = tanweerTextSize(16f))
                                         Text(
                                             text = issue!!.subjectName ?: "",
-                                            fontSize = 12.sp,
+                                            fontSize = tanweerTextSize(12f),
                                             fontWeight = FontWeight.Bold,
                                             color = CyanAccent
                                         )
@@ -433,7 +510,7 @@ fun IssueDetailView(
 
                                 Text(
                                     text = issue!!.title,
-                                    fontSize = 18.sp,
+                                    fontSize = tanweerTextSize(18f),
                                     fontWeight = FontWeight.Black,
                                     color = TextPrimary
                                 )
@@ -442,9 +519,9 @@ fun IssueDetailView(
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
                                         text = issue!!.description ?: "",
-                                        fontSize = 14.sp,
+                                        fontSize = tanweerTextSize(14f),
                                         color = TextSecondary,
-                                        lineHeight = 22.sp
+                                        lineHeight = tanweerLineHeight(22f)
                                     )
                                 }
 
@@ -459,12 +536,12 @@ fun IssueDetailView(
                                 ) {
                                     Text(
                                         text = "طرح بواسطة: ${issue!!.authorName}",
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         color = TextMuted
                                     )
                                     Text(
                                         text = "${comments.size} إجابات مسجلة",
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         fontWeight = FontWeight.Bold,
                                         color = CyanAccent
                                     )
@@ -486,7 +563,7 @@ fun IssueDetailView(
                                 Icon(Icons.Default.Star, contentDescription = null, tint = WarmAmber, modifier = Modifier.size(18.dp))
                                 Text(
                                     text = "الإجابة النموذجية المعتمدة 🏆",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Black,
                                     color = WarmAmber
                                 )
@@ -505,7 +582,7 @@ fun IssueDetailView(
                                     ) {
                                         Text(
                                             text = bestComment.authorName,
-                                            fontSize = 13.sp,
+                                            fontSize = tanweerTextSize(13f),
                                             fontWeight = FontWeight.Bold,
                                             color = WarmAmber
                                         )
@@ -515,12 +592,20 @@ fun IssueDetailView(
                                             bgColor = EmeraldGreen.copy(alpha = 0.15f)
                                         )
                                     }
+                                    if (bestComment.isTeacherAnswer) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        GlassPill(
+                                            text = stringResource(R.string.issue_teacher_answer_badge),
+                                            color = CyanAccent,
+                                            bgColor = CyanAccent.copy(alpha = 0.12f)
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
                                         text = bestComment.comment,
-                                        fontSize = 14.sp,
+                                        fontSize = tanweerTextSize(14f),
                                         color = TextPrimary,
-                                        lineHeight = 22.sp
+                                        lineHeight = tanweerLineHeight(22f)
                                     )
                                 }
                             }
@@ -532,7 +617,7 @@ fun IssueDetailView(
                 item {
                     Text(
                         text = if (bestComment != null) "بقية الإجابات والمناقشات (${otherComments.size}):" else "الإجابات والمناقشات (${comments.size}):",
-                        fontSize = 13.sp,
+                        fontSize = tanweerTextSize(13f),
                         fontWeight = FontWeight.Bold,
                         color = TextSecondary,
                         modifier = Modifier.padding(top = 4.dp)
@@ -561,13 +646,13 @@ fun IssueDetailView(
                                 ) {
                                     Text(
                                         text = comment.authorName,
-                                        fontSize = 13.sp,
+                                        fontSize = tanweerTextSize(13f),
                                         fontWeight = FontWeight.Bold,
                                         color = CyanAccent
                                     )
 
                                     // Mark as Best Answer button if issue not solved or if this can be chosen
-                                    if (bestComment == null) {
+                                    if (bestComment == null && canApproveBestAnswer) {
                                         OutlinedButton(
                                             onClick = {
                                                 viewModel.markBestAnswer(issueId, comment.id) { res ->
@@ -587,17 +672,26 @@ fun IssueDetailView(
                                         ) {
                                             Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(12.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("اعتماد كحل ⭐", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            Text("اعتماد كحل ⭐", fontSize = tanweerTextSize(10f), fontWeight = FontWeight.Bold)
                                         }
                                     }
+                                }
+
+                                if (comment.isTeacherAnswer) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    GlassPill(
+                                        text = stringResource(R.string.issue_teacher_answer_badge),
+                                        color = CyanAccent,
+                                        bgColor = CyanAccent.copy(alpha = 0.12f)
+                                    )
                                 }
 
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
                                     text = comment.comment,
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     color = TextPrimary,
-                                    lineHeight = 20.sp
+                                    lineHeight = tanweerLineHeight(20f)
                                 )
 
                                 if (comment.syncStatus != "SYNCED") {
@@ -609,13 +703,13 @@ fun IssueDetailView(
                                     ) {
                                         Text(
                                             text = if (comment.syncStatus == "FAILED") "⚠️ لم يتم الإرسال للسيرفر (محلي)" else "🔄 جاري الإرسال...",
-                                            fontSize = 10.sp,
+                                            fontSize = tanweerTextSize(10f),
                                             color = if (comment.syncStatus == "FAILED") Color(0xFFFF8A80) else CyanAccent
                                         )
                                         if (comment.syncStatus == "FAILED") {
                                             Text(
                                                 text = "إعادة المحاولة 🔁",
-                                                fontSize = 10.sp,
+                                                fontSize = tanweerTextSize(10f),
                                                 fontWeight = FontWeight.Bold,
                                                 color = CyanAccent,
                                                 modifier = Modifier.clickable {
@@ -693,7 +787,7 @@ fun AddIssueDialog(
                 text = "طرح استفسار دراسي ❓",
                 color = CyanAccent,
                 fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                fontSize = tanweerTextSize(18f)
             )
         },
         text = {
@@ -703,7 +797,7 @@ fun AddIssueDialog(
                     .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("المادة المرتبطة (اختياري):", fontSize = 12.sp, color = TextSecondary)
+                Text("المادة المرتبطة (اختياري):", fontSize = tanweerTextSize(12f), color = TextSecondary)
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -721,7 +815,7 @@ fun AddIssueDialog(
                         ) {
                             Text(
                                 text = "${subj.icon} ${subj.name}",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = if (isSelected) CyanAccent else TextPrimary,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             )

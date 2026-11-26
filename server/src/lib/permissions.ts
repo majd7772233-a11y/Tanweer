@@ -24,8 +24,9 @@ export enum Permission {
   MANAGE_CONTENT = 'MODERATE_CONTENT',       // Alias for MODERATE_CONTENT
   DELETE_ANY_CONTENT = 'DELETE_ANY_CONTENT', // Force delete content across group/platform
   PIN_CONTENT = 'PIN_CONTENT',               // Pin key lessons or announcements
-  MODERATE_HOMEWORK = 'MODERATE_HOMEWORK',   // Edit or remove homework of others
-  MANAGE_HOMEWORK = 'MODERATE_HOMEWORK',     // Alias for MODERATE_HOMEWORK
+  MODERATE_HOMEWORK = 'MODERATE_HOMEWORK',   // Edit homework created by others
+  MANAGE_HOMEWORK = 'MODERATE_HOMEWORK',     // Alias for homework moderation/edit
+  DELETE_HOMEWORK = 'DELETE_HOMEWORK',       // Delete homework created by others (separate from edit)
   PUBLISH_OFFICIAL_HOMEWORK = 'MODERATE_HOMEWORK', // Alias for official teacher homework
   MODERATE_EXAM = 'MODERATE_EXAM',           // Edit or remove exams of others
   MANAGE_EXAMS = 'MODERATE_EXAM',            // Alias for MODERATE_EXAM
@@ -81,16 +82,16 @@ export async function hasPermission(
     return false;
   }
 
-  // 3. Strict Global System Permissions (Must have global ADMIN)
-  const GLOBAL_SYSTEM_PERMISSIONS = new Set<Permission>([
+  // 3. System-wide governance permissions are reserved for SYSTEM_OWNER.
+  const OWNER_ONLY_SYSTEM_PERMISSIONS = new Set<Permission>([
     Permission.MANAGE_USERS,
     Permission.REVOKE_SESSIONS,
     Permission.VIEW_AUDIT_LOG,
     Permission.REVIEW_ROLE_REQUESTS,
   ]);
 
-  if (GLOBAL_SYSTEM_PERMISSIONS.has(permission)) {
-    return globalRole === Role.ADMIN;
+  if (OWNER_ONLY_SYSTEM_PERMISSIONS.has(permission)) {
+    return false;
   }
 
   // 3. Global ADMIN has full access to all resources

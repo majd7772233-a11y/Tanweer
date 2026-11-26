@@ -1,0 +1,235 @@
+# Tanweer — Project Architecture and Engineering Notes
+
+Updated 2026-11-26. Latest verified source checkpoint: `d5470103f4600128cb768f6bf79a089fd9fcef15` on `work/release-readiness`. P2-43 calendar day count/continuation, P2-44 transient sync-banner policy, and P2-45 chat-local date/time presentation all pass exact-SHA Android CI `45808382451` and Server CI `45808382430`. Staging Debug artifact `15110922208` (31,406,502 bytes). Phase 5 device acceptance remains open.
+
+## 1. Repository and branch contract
+
+- Repository: `majd7772233-a11y/Tanweer`.
+- The only permitted long-lived branches are `main` and `work/release-readiness`.
+- All implementation, tests and documentation for ongoing work go directly to `work/release-readiness`. Do not create per-batch, feature, hotfix, or CI scratch branches.
+- `main` is the Production line. At the verification checkpoint it is `64143994070bcdc410cf044379fe2801da8f9a3c`. Do not push to, merge into, or deploy Production unless the user explicitly requests a release.
+- `work/release-readiness` is the integration and Staging line. Its latest verified source checkpoint at the P2-40 closeout was `a995c935b34c031c15b3bc8db8d2ca365c87c719`; documentation-only commits may advance the branch HEAD, so always read the live branch head.
+- PR #7 (Batch 2) is merged into `work/release-readiness` at `a834068b62094de8247f9b49072090df6d9a8ffb`. PR #6 remains an open Draft from `work/release-readiness` to `main`; it is not merged.
+- Before every new task, read the latest commit, `GPT.md`, this file, and the latest relevant test output. These notes are a map, not a substitute for checking HEAD.
+
+## 2. Android client
+
+### Toolchain and app identity
+- Module: `app`.
+- Language: Kotlin; UI is Jetpack Compose / Material 3.
+- Android namespace/application ID: `com.magd.tanweer`; staging adds `.staging`.
+- Gradle build uses JDK 17 in CI, Java source/target compatibility 11, Room KSP, and the version catalog at `gradle/libs.versions.toml`.
+- `compileSdk = 36.1`, `minSdk = 23`, `targetSdk = 36`, version name `1.2.0`, version code `120`.
+- Flavors: `production` → `https://tanweer.magd.workers.dev/`; `staging` → `https://tanweer-staging.magd.workers.dev/`.
+- Important dependencies: Room, Retrofit, OkHttp, Moshi, Kotlin Coroutines, Coil Compose, PDFBox-Android.
+
+### Source map
+- `app/src/main/java/com/magd/tanweer/ui/TanweerApp.kt`: root navigation, tabs and sub-screens.
+- `app/src/main/java/com/magd/tanweer/ui/TanweerViewModel.kt`: navigation state, startup reconciliation, section-entry refreshes and UI actions.
+- `app/src/main/java/com/magd/tanweer/data/notifications/NotificationNavigationPolicy.kt`: allow-listed reminder destinations, one-shot cold-start handoff, safe activity launch flags and fail-closed validation policy. `MainActivity.kt` stages cold intents and forwards warm intents from `onNewIntent()`; `TanweerNotificationManager.kt` builds all notification PendingIntents through the shared helper.
+- `app/src/main/java/com/magd/tanweer/ui/GroupsNavigationPolicy.kt`: validated return destination for the Moderator Dashboard's group-management shortcut.
+- `app/src/main/java/com/magd/tanweer/ui/LibraryNavigationRequest.kt`: one-shot grade/subject context passed from contextual actions to the Library.
+- `app/src/main/java/com/magd/tanweer/util/ExamBookNavigationPolicy.kt`: exact grade/subject resolution for exam-to-book navigation.
+- `app/src/main/java/com/magd/tanweer/ui/screens/NotificationsScreen.kt` and `util/NotificationInboxPolicy.kt`: private account inbox/archive UI and read/unread filtering.
+- `app/src/main/java/com/magd/tanweer/ui/components/BookDetailsModal.kt`: full-window modal book-details layer; scrim touch isolation, scrollable content, navigation-bar/IME-safe CTA. Robolectric/Compose regression tests: `ui/components/BookDetailsModalTest.kt`.
+- `app/src/main/java/com/magd/tanweer/ui/LibraryNavigationRequest.kt`: one-shot contextual library route state remains unchanged.
+- `app/src/main/java/com/magd/tanweer/data/repository/TanweerRepository.kt`: network/data coordination, remote-to-local reconciliation, mutations and media operations.
+- `app/src/main/java/com/magd/tanweer/data/remote/TanweerApiService.kt` and `NetworkModule.kt`: Retrofit API and authenticated network setup.
+- `app/src/main/java/com/magd/tanweer/data/local/TanweerDatabase.kt`: Room database. Current Room schema version is 20.
+- Room entities/DAOs live under `data/local`; models and response contracts are under `data/model` and `data/remote`.
+- `app/src/main/java/com/magd/tanweer/data/sync/UnifiedMutationQueue.kt`: offline mutation outbox, retry/backoff and chat reconciliation.
+- Main feature screens live under `ui/screens`; reusable Compose components under `ui/components`; shared theme/typography under `ui/theme`.
+- `ui/screens/SettingsScreen.kt` owns settings and the shared `SettingsToggleRow`; each Switch composes its title/subtitle into an accessible name and exposes localized ON/OFF state. Regression coverage: `ui/screens/SettingsToggleAccessibilityTest.kt`.
+- Horizontal filter rails: `ui/components/HorizontalFilterStrip.kt` provides RTL/LTR-aware edge fades based on `LazyListState` plus `GlassFilterChip` (Material 3 selected semantics, one merged control, 48dp minimum). Homework and Issues screens use the shared component; regression coverage is `app/src/test/java/com/magd/tanweer/ui/components/HorizontalFilterStripTest.kt`.
+- Calendar add-day sheet: `ui/screens/CalendarAddActionSheet.kt` opens the ModalBottomSheet expanded, caps its content to 82% of screen height and provides vertical scrolling for all role-eligible actions. `CalendarScreen.kt` retains original callbacks and TEACHER/ADMIN holiday gate. Regression coverage: `app/src/test/java/com/magd/tanweer/ui/screens/CalendarAddActionSheetTest.kt`.
+- Keyboard-aware forms: `ui/components/KeyboardAwareFormDialog.kt` provides dialog-local BackHandler semantics (hide visible IME before dismiss), `WindowInsets.safeContent` handling and `KeyboardAwareFormScrollColumn` with IME nested scrolling. The Add Homework dialog keeps its Scaffold bottom bar above the keyboard; the Add Event dialog scrolls fields while pinning cancel/publish actions. Draft fields use `rememberSaveable`. Regression coverage: `app/src/test/java/com/magd/tanweer/ui/components/KeyboardAwareFormDialogTest.kt`.
+- Full-resolution camera capture: `util/CameraCaptureFileStore.kt` creates JPEG targets in `cacheDir/camera_captures`, emits `FileProvider` URIs using `${BuildConfig.APPLICATION_ID}.fileprovider`, copies confirmed captures into `filesDir/scan_draft_sources`, and deletes temp files on completion/cancel/failure or stale cleanup (>24h). Both `UploadLessonDialog.kt` and `HomeworkScreen.kt` use `ActivityResultContracts.TakePicture()`; the shared image processing/preview/review/user-publish pipeline remains in place. Provider cache path: `res/xml/file_paths.xml`; regression coverage: `app/src/test/java/com/magd/tanweer/util/CameraCaptureFileStoreTest.kt`. Robolectric injects a local URI for file-lifecycle tests; actual external camera URI grants remain Phase 5 acceptance.
+- Services Hub: `ui/screens/ExtraSectionsHubScreen.kt` renders academic, community, role and settings actions. `HubActionCard` uses compact horizontal layout, two-line title/description limits, a full-surface Button target and no redundant inner padding. Regression tests: `app/src/test/java/com/magd/tanweer/ui/screens/HubActionCardTest.kt`.
+- P2-40 verified checkpoint: `ui/RoleCenterAccessPolicy.kt` selects HIDDEN/AVAILABLE/LOCKED role-center states; `ui/screens/ExtraSectionsHubScreen.kt` composes the category row with `HorizontalFilterStrip` edge fades and a deterministic first-frame scroll cue and shows a Profile-only locked state to Student accounts in ROLES. Tests: `ui/RoleCenterAccessPolicyTest.kt` and `ui/screens/ExtraSectionsHubAccessibilityTest.kt`; exact-SHA Android/Server CI passed on `a995c935b34c031c15b3bc8db8d2ca365c87c719`.
+- Academic-year and date rules live under `util/AcademicYearManager.kt` and related utilities.
+- Calendar day summary: `ui/screens/CalendarDaySummaryPolicy.kt` counts the currently rendered lesson, exam, assignment and event rows. `CalendarScreen.kt` shows that count and a continuation cue for days with multiple entries. It does not claim remote completeness when source snapshots are unverified. Regression coverage: `ui/screens/CalendarDaySummaryPolicyTest.kt`.
+- Sync banner visibility: `ui/components/SyncStatusBar.kt` suppresses initial/background Loading, steady Success and Idle. Explicit Refreshing is transient; Error and OfflineCached remain actionable. Root `TanweerApp.kt` and in-screen uses share the same visibility policy. Regression coverage: `ui/components/SyncStatusBarVisibilityPolicyTest.kt`.
+- Chat timeline: `ui/screens/ChatMessageTimelinePresentation.kt` formats a local-time date key, localized date label and short time label while preserving input order and one timeline entry per message. `GroupsScreen.kt` renders day dividers and per-message time labels without shifting message indices used by deep links or auto-follow. Edited/deleted flags are not shown because `ChatMessageItem` has no such metadata and current deletion removes messages. Regression coverage: `ui/screens/ChatMessageTimelinePresentationTest.kt`.
+- Sticky action sheets: `ui/components/StickyActionSheetLayout.kt` keeps a 90%-height sheet body vertically scrollable while a separate footer remains outside that scroll container. `ExamsScreen.kt` uses it in `ExamDetailModal` to pin reminder/subject-book actions while chapters and teacher/room notes scroll. `ScheduleScreen.kt` uses it in `SubjectPickerSheet` to pin pin/update/clear actions while the subject grid and time fields scroll. Arabic/English guidance is `R.string.sticky_sheet_scroll_hint`; regression coverage is `app/src/test/java/com/magd/tanweer/ui/components/StickyActionSheetLayoutTest.kt` (compact 360x340dp and 411x891dp layouts).
+
+- PDF reader: `ui/screens/pdf/PdfReaderScreen.kt` owns `TopReaderBar` and `BottomReaderBar`; secondary actions live in a compact overflow menu and control targets are 48dp minimum. Arabic/English labels are in `res/values/strings.xml` and `res/values-en/strings.xml`. Regression coverage: `app/src/test/java/com/magd/tanweer/ui/screens/pdf/PdfReaderControlsTest.kt` (360/393/411dp). Page curl is in `CanvasPageCurl.kt`; extraction is in `util/PdfTextExtractor.kt` and focus ambience in `util/FocusNoisePlayer.kt`.
+- Notification settings Switch accessibility: title and description are combined into one `contentDescription`, and `stateDescription` is localized (`مفعّل`/`غير مفعّل`, `On`/`Off`). This is applied to the shared row (five settings switches). Compose/Robolectric test verifies the three notification preferences and an actual semantic toggle. Physical TalkBack focus-order/announcement validation remains Phase 5.
+
+### Notification-driven navigation and startup fast path
+- Reminder PendingIntents use `NEW_TASK | CLEAR_TOP | SINGLE_TOP`, and `MainActivity` declares `singleTop`, so an existing task/activity receives the target through `onNewIntent()` instead of being cleared/recreated.
+- Cold-start extras are allow-listed and staged in `NotificationLaunchStore` before the lazy ViewModel starts. The one-shot store prevents Activity recreation from replaying a consumed target; the Activity removes the extra after staging/forwarding.
+- Notification navigation must pass `verifyServerDataGeneration()`, successful `syncProfile()` and `syncGroups()`, and a post-request equality check of the original local user ID/token. The selected group is resolved only against the server-refreshed active membership list. Failed validation leaves the notification destination unopened; never expose a protected cache by skipping the trust gate.
+- A validated notification uses the existing per-destination state flows and starts only its target refresh. Do not call `setTab()`/`setSubScreen()` from this fast path because they trigger another entry refresh. Broad `syncInitial()` and `refreshStartupAuxiliaryData()` are deferred for notification cold starts; the ordinary launcher startup path remains unchanged.
+- Periodic app-version/catalog maintenance is skipped only during a cold start that carries a notification destination. Outbox generation gating remains authoritative; the notification path avoids the explicit synchronous startup drain before presenting the target.
+
+### Data ownership and sync invariants
+- The server is authoritative for shared school records. Room is the local cache/UI source and must remain useful offline.
+- Never treat a temporary empty response, partial/malformed response, or network failure as permission to wipe Room. Ordinary server snapshot reconciliation is non-destructive.
+- The Owner Dashboard's explicit global purge rotates data_generation. A changed, previously recorded marker for the same normalized API origin and account ID is the only automatic full-wipe signal. A missing marker initializes a baseline; same/blank values, failed checks, or environment changes do not wipe.
+- On a confirmed global-purge mismatch, close and drain the outbox gate, wait for in-flight queue work, skip remote logout (the server already removed sessions), clear Room including outbox, account-scoped preferences, notebook data, reminders, app-private files/caches/downloaded PDFs, auth token and in-memory account UI, then return to sign-in. Commit the new marker only after cleanup succeeds.
+- App-wide preferences and the stable device-installation identifier survive a global purge. Ordinary user logout clears account Room/session/notebook state but preserves shared downloaded PDF books; only the explicit system purge wipes all app-private storage.
+- Verify the marker at startup and on Activity foreground resume. The app does not claim instantaneous push-based logout while suspended.
+- Server snapshots must be validated before reconciliation: check declared counts when present, unique/nonblank IDs, requested group/date scope and required shape. Retain cached rows on invalid/incomplete snapshots.
+- A local write is not confirmed by HTTP 2xx alone. Check the response body's `success == true` and any required returned entity/ID before marking data SENT/SYNCED or showing success.
+- For multi-row lesson/homework publications, use the server's atomic parent-plus-media batch and same-ID repairable idempotent retry. Do not re-create duplicate pages on retry.
+- The offline outbox has atomic item reservation, exponential backoff and startup recovery for stuck SYNCING rows. Do not bypass or delete pending mutations casually.
+- Chat SENT requires a persisted server ACK/echo or confirmed HTTP success using the same idempotency ID; WebSocket local send acceptance is not delivery confirmation.
+- Startup and destination-entry refreshes already exist. Inspect `TanweerViewModel`'s `syncInitialData`, `syncAllComprehensive`, `syncTabOnEntry`, `syncSubScreenOnEntry` and `syncCurrentDestinationOnEntry` before adding overlapping calls.
+
+### Global purge reset implementation (2026-11-14)
+
+- Android implementation lives in TanweerRepository.checkAndApplyDataGeneration, TanweerRepository.logout, TanweerViewModel.verifyServerDataGeneration/onAppResumed, and UnifiedMutationQueue.stopAndAwait.
+- TanweerNotificationManager.cancelAccountReminders cancels account-sourced alarms before Room is erased; DAO ID queries supply the request-code identities.
+- LocalAccountDataPolicy is the allowlist boundary for deleting account preferences while preserving app settings. Do not broaden it to include device identity or UI preferences without a product decision.
+- StartupPersistencePolicyTest covers marker baselines/mismatches and account-preference cleanup scope.
+
+## 3. Cloudflare backend
+
+### Stack
+- Worker entry point: `server/src/index.ts`; route dispatch is in `server/src/router.ts`.
+- Runtime and APIs: TypeScript on Cloudflare Workers.
+- Database: D1 / SQLite through the `DB` binding.
+- Realtime group chat: Durable Object class `GroupChatDO` under `server/src/realtime/GroupChatDO.ts`.
+- Business logic is organized under `server/src/services`; shared auth, permission, response and ID helpers under `server/src/lib` and `server/src/middleware`.
+- `server/src/services/notifications.ts`: owner-scoped private account inbox, read/archive/restore operations and encrypted recovery-code delivery.
+- `server/src/services/decisionQuorum.ts`: frozen eligible-voter snapshot parsing, persisted vote counting and shared quorum/strict-majority policy for schedule decisions.
+- `server/src/services/governance.ts`: unified community decisions, eligible vote recounting and the independent schedule-application quorum guard.
+- `server/src/services/schedule.ts`: schedule-proposal API with group-scoped decision joins, live vote counts and required-vote metadata.
+- D1 migrations: `server/src/db/migrations/*.sql`.
+- Backend tests: `server/test/*.test.ts`, using Vitest. `server/package.json` provides `npm test`, `npm run types`, and Wrangler commands.
+- Worker/D1 bindings and environments: `server/wrangler.jsonc`.
+
+### Security and data invariants
+- Server-side permission checks are authoritative. Android visibility, role labels or hidden buttons are not authorization.
+- The system owner (infrastructure-level authority) is distinct from school ADMIN and from group moderators/teachers. Preserve that boundary; do not expose the Owner Dashboard secret or replace it with ordinary role checks.
+- Check group membership and `chatPolicy` on the server, including existing WebSocket sessions/messages.
+- Group visibility must fail closed: unknown/missing visibility must not silently become PUBLIC. Preserve `visibility` and `chatPolicy` through D1 → API mapper → Room entity → UI model.
+- Join requests for private/approval-required groups require a nonblank reason (max 500 characters); persist `request_reason` and return it to authorized managers. Do not fabricate a reason.
+- Idempotency must verify identity/scope/content, not merely accept a duplicate ID. Exact retries can be treated as already persisted; conflicting ID reuse must return a conflict and must not rebroadcast.
+- D1 multi-statement invariants should use `DB.batch()` where atomicity is required, and check each statement's `meta.changes`. Never report success after partial publication.
+
+## 4. Main academic/domain concepts
+
+- **Official class section:** a school's main class group, typically `class_<grade>_<section>`. It is distinct from optional/shared groups and clubs.
+- **Optional/shared group or club:** group membership is per-group. A user can enter one joined group, return to the list, then enter another; there is no single global “activate one group” switch.
+- **Visibility:** PUBLIC groups are discoverable; PRIVATE optional groups are not exposed to strangers. A user's own pending/rejected request may still see the group to inspect/retry. Other school CLASS sections may remain discoverable as approval-required.
+- **Membership statuses:** ACTIVE, PENDING, REJECTED and BANNED are materially different. Do not conflate them with the global user role.
+- **Group roles:** STUDENT/MEMBER, MODERATOR, TEACHER and related normalized variants are scoped to the group; ADMIN/SYSTEM_OWNER are governed separately.
+- **Academic year:** derive from the configured school-year boundary and valid stored record dates. Do not hardcode a rollover or manufacture empty years based solely on the device clock. `AcademicYearManager` uses date-derived records plus the current academic period.
+- **Timeline/archive detail:** Subject Timeline and Academic History already use typed detail previews for lesson/homework/exam items. Verify actual on-device interaction before adding a second overlapping navigation flow.
+- **Exams:** monthly exams are unique per group + subject + calendar month; oral exams are flexible and not constrained by the monthly calendar; legacy QUIZ rows must be considered in uniqueness checks.
+- **Schedule:** teacher/admin direct edits are immediate; student proposals use the unified decision engine. Quorum is derived from persisted votes cast by the frozen eligible-voter snapshot (60% threshold, minimum two approvals for multi-member groups, strict majority). Cached vote counters are not authoritative. Historical imported approvals without verifiable quorum become `REVIEW_REQUIRED`; active timetable versions are preserved for human review.
+
+## 5. Branches, environments and deployment
+
+- Android CI builds Staging for non-main branches and Production for `main`. PR builds create a Staging Debug APK; signed Release is not produced by normal PR validation.
+- The isolated Staging deploy workflow is `.github/workflows/deploy-staging.yml`, manually dispatched only (`workflow_dispatch`) and guarded to `work/release-readiness`.
+- It runs typecheck/tests, validates the Staging Worker bundle, applies Staging D1 migrations only, configures Staging application secrets, deploys the Staging Worker, then checks health and Owner Dashboard routes.
+- Do not run `npm run db:migrate:prod`, apply Production D1 migrations, deploy Production, change secrets, or merge to `main` without the user's explicit release instruction.
+- Apply D1 migrations sequentially to the intended environment. Never infer Production schema from Staging or vice versa.
+
+### Last verified environment checkpoint
+- Successful Staging deployment: workflow run `42411869740`, deployed source commit `dca3e13ca21b8ee8ced6e0c89c8903a33c0d5c20`.
+- That run applied Staging migrations `0031_user_dismissed_school_announcements.sql` and `0032_monthly_exam_uniqueness.sql`, configured Staging secrets from GitHub Actions secrets, deployed `tanweer-staging`, and passed `/api/v1/health` plus Owner Dashboard route smoke tests.
+- The run was explicitly Staging-only. It did not apply migrations or deploy to Production.
+- Latest production migration state had last been read-only checked on 2026-11-07 as `0023_group_request_reason.sql`. Re-check Production read-only before any future release; do not assume Staging migration state matches Production.
+
+## 6. Workflow expectations for code changes
+
+1. Read latest commit and the exact relevant code before editing. Do not rely on chat memory or an earlier summary when repository state is available.
+2. Read/update `GPT.md` for every substantial phase and keep this architecture document aligned when architecture or deployment facts change.
+3. Reproduce the reported failure from the new test/log evidence. Identify the first causal failure, distinguish it from downstream symptoms, then fix the root cause.
+4. Add regression coverage for the failure and adjacent edge cases. Do not weaken/remove existing tests to make CI green.
+5. Run targeted tests, then full server typecheck/tests/Wrangler validation and Android unit tests/build as applicable.
+6. Inspect final diff, current branch list and exact HEAD. Ensure only `main` and `work/release-readiness` exist.
+7. Report PASS/FAIL/NOT RUN truthfully. CI success is not real-device acceptance.
+8. Do not merge PR #6 into `main` or deploy Production unless explicitly instructed.
+
+## 7. Relevant documentation
+
+- `GPT.md`: project engineering instructions, phase history, current checkpoint and known limitations.
+- `PROJECT_ARCHITECTURE.md`: architecture and durable invariants (this file).
+- `SESSION_HANDOFF.md`: exact current session continuation state and next action.
+- `server/README.md`: backend development and local commands.
+
+## Phase 1 security invariants (2026-11-14)
+
+- System version responses are successful only when D1 returns a non-empty `system_settings.data_generation`. D1 errors and missing/blank values return 503; release metadata fallback must retain the already-verified D1 value and must never fabricate a generation marker. Android's existing blank/error behavior remains non-destructive.
+- Public registration is creation-only. An existing phone number cannot be used to mutate grade/section, recreate a class membership, or turn a PENDING/REJECTED/BANNED membership into ACTIVE. Existing accounts must use login/recovery; legacy partial records require a separate authorized repair process.
+- Group chat text must be a non-empty string of at most 2,000 Unicode code points. REST and WebSocket sends share the same persisted Durable Object per-user/per-group quota (8 per 10 seconds and 30 per minute). REST payloads and WS frames are limited to 16 KiB. If the limiter storage is unavailable, reject the send before D1 insert/broadcast.
+- The PDF reader is explicitly out of scope for Phase 1. Keep its gesture ownership, page curl, zoom/pan, animation and aspect ratio unchanged.
+
+
+## WebSocket action quota completion (2026-11-14)
+- The persisted per-user/per-group Durable Object quota applies to both send-message and delete-message actions. Consume it before D1 authorization reads for supported actions.
+- Ignore unsupported JSON control frames before D1 reads, while retaining live permission checks for supported chat actions.
+- Reject invalid delete-message identifiers (blank, non-string or longer than 128 characters).
+
+## Chat transport byte-limit enforcement
+
+- Reject known oversized REST Content-Length values before reading; then independently cap the actual streamed Request.body at 16 KiB and cancel immediately when it crosses the limit.
+- Count WebSocket binary frames using their original ArrayBuffer or ArrayBufferView byte length before UTF-8 decoding.
+- Keep malformed/unreadable REST payloads as explicit input errors; do not silently convert a truncated body into a valid message.
+- Keep the existing Worker IP throttle ahead of WebSocket upgrades and the Durable Object per-user/per-group action quota as independent controls.
+
+## Phase 2 — durable sync and realtime contracts
+
+### Schedule and votes
+- Validate day/slot positions as integers (0–6 and 1–12) in a shared Worker validator for single, batch and proposal writes.
+- Reject unknown vote values. Legacy schedule votes accept only `FOR`/`AGAINST`; unified decision votes accept only numeric 1/0.
+- D1 migration 0033 adds insert/update triggers for schedule slot and proposal bounds. Commit exists; database rollout is a separate authorized operation.
+
+### WebSocket session lifecycle
+- Gate callbacks with both session generation and socket-attempt generation. A callback from an old socket/group may not mutate status, dispatch messages or trigger reconnect for a newer selection.
+- Apply retry only to transient/network close/failure classes while the current group session remains active. Exponential backoff begins at 1 second, caps at 30 seconds, and resets after a successful open.
+- Repository history refresh is scoped to its connection generation. Switching groups, leaving chat or logging out invalidates the generation; logout disconnects before waiting for Outbox shutdown.
+
+### Outbox and snapshots
+- Automatic drains select only `PENDING`. `FAILED` is terminal until an explicit retry resets attempts/lastAttemptAt/error.
+- Claim only `PENDING`; order by `createdAt,id`; preserve per-(entityType, entityId) ordering so a later mutation cannot pass an earlier retry/backoff/in-flight operation.
+- Use UUIDs for new Outbox IDs, including mutations created directly by the repository.
+- Validate a server snapshot before replacing local data. Preserve local PENDING/SYNCING/FAILED rows and prefer the local pending version on an ID collision.
+- Keep the settings retry affordance connected to the explicit retry API, not merely to a generic automatic drain.
+
+P2-32 covers PDF reader toolbar layout and touch targets only; it does not alter PDF extraction, page-curl rendering, zoom/pan gestures, or reading-state persistence.
+
+
+## Phase 3 — PDF rendering and local book storage (2026-11-15)
+
+- PDF render dimensions must preserve aspect ratio and fit within requested target bounds; do not force minimum upscaling for thumbnails.
+- Bitmap LRU cache is bounded to one eighth of the app heap and at most 64 MiB. Renderer close is serialized with page rendering, and a failed PdfRenderer construction closes its file descriptor.
+- Store downloads in a stable .pdf.part file. Resume only with a persisted strong ETag or Last-Modified validator and a 206 Content-Range whose start equals the existing byte count; require the returned validator to match before appending. A 200 response restarts from byte zero.
+- Check free space before and during writes, fsync partial output, verify the PDF header and PdfRenderer page count, then promote by same-directory rename. Preserve the previous damaged file as a recovery artifact.
+- Include partial, validator and corrupt artifacts in book storage accounting and explicit book deletion. Ordinary logout retains shared book downloads.
+- Long-book and real HTTP range/low-storage acceptance is deferred to Phase 5.
+
+
+## Phase 3 — reminder lifecycle (2026-11-15)
+
+- Summary notifications update when corresponding Room records exist. Cancel a stable summary ID only when the relevant snapshot is empty and trusted, or the user disables that notification preference.
+- Sync calls return SyncResult; when auto-sync is enabled, all required refreshes must be Success before an empty Room result can clear an existing reminder. Offline/Error and DAO read exceptions retain the existing notification.
+- Exclude DELETE_PENDING homework and completed or DELETE_PENDING exams from summaries.
+- One-off reminder alarms must re-read Room at firing time and verify item state, current group membership, completion, date and preferences. Do not display stale text from broadcast extras.
+- Cancel PendingIntent using the exact original action to identify the scheduled alarm.
+- Actual Android notification delivery and network-failure acceptance remains deferred to Phase 5.
+
+
+## Phase 3 automated closure checkpoint — 2026-11-15
+
+- Code checkpoint: `df1cca02c0e0fda33e58f20dae0960c9bdf2f0f9`.
+- Server CI [43734220778](https://github.com/majd7772233-a11y/Tanweer/actions/runs/43734220778): typecheck, dependency baseline, unit/integration tests and Wrangler bundle validation passed.
+- Android CI [43734220722](https://github.com/majd7772233-a11y/Tanweer/actions/runs/43734220722): unit tests and Debug APK assembly/upload passed; signed Release steps were skipped.
+- The three Phase 3 work areas are implemented: TNR-006 student notebook atomic/recoverable persistence; TNR-007 bounded PDF rendering and validator-backed partial downloads; TNR-009 trustworthy reminder reconciliation and fresh alarm validation.
+- Device/Staging tests are intentionally held for Phase 5. CI does not replace physical acceptance.
+- Five phases total; Phases 4 and 5 remain.
+
+
+## P2-46 / P2-47 / P2-48 — verified implementation checkpoint
+
+- Code SHA: fc36594c711521f2d20c3bbe24e8977d8308671f.
+- Hub search: ExtraSectionsHubSearchPolicy normalizes query and keywords with Locale.ROOT. The original query is not rewritten. Section and role-card visibility are evaluated together; no empty category groups are rendered; HubSearchEmptyState exposes a clear action. LibraryScreen's confirmed-snapshot empty state and filter-empty reset behavior were already present and remain unchanged.
+- Homework summary: HomeworkTaskTypePolicy.summarize is the shared counting boundary for all items and due-today items. HOMEWORK, TASK and UNKNOWN remain distinct.
+- Exam row: pre-truncation has been removed from notes and chapter labels. Compose uses its existing one-line ellipsis while the detail sheet retains full text. Existing sticky footer and book routing are preserved.
+- Android CI run 45815000928 passed unit tests, Staging Debug assembly and Debug artifact upload. Artifact 15114707135 SHA-256 850b9bc592faebda80f3650dacd852dc8ed5e9b54879fb9555ab5480e9ffdeb3.
+- Server CI run 45815000929 passed dependency baseline, TypeScript, tests and Wrangler bundle validation.
+- No production/staging deployments or D1 mutations were performed. Physical-device visual/TalkBack acceptance remains Phase 5.

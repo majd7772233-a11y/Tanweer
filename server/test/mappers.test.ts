@@ -29,6 +29,13 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
     expect((mapped as any).member_count).toBeUndefined();
   });
 
+  it('fails closed for unknown group visibility without rewriting valid private/public values', () => {
+    expect(mapGroup({ id: 'legacy', type: 'OPTIONAL' }).visibility).toBe('PRIVATE');
+    expect(mapGroup({ id: 'bad', type: 'OPTIONAL', visibility: 'UNKNOWN' }).visibility).toBe('PRIVATE');
+    expect(mapGroup({ id: 'private', type: 'OPTIONAL', visibility: ' private ' }).visibility).toBe('PRIVATE');
+    expect(mapGroup({ id: 'public', type: 'OPTIONAL', visibility: 'public' }).visibility).toBe('PUBLIC');
+  });
+
   it('maps ScheduleSlot correctly', () => {
     const raw = {
       id: 'slot_1',
@@ -66,6 +73,8 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
       subject_icon: '⚡',
       color_hex: '#7C4DFF',
       is_completed: 1,
+      is_official: 1,
+      created_by: 'exam_owner_1',
       created_at: 1700000000000,
     };
     const mapped = mapHomework(raw);
@@ -74,13 +83,53 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
     expect(mapped.dueDate).toBe('2026-10-01');
     expect(mapped.pageNumbers).toBe('45');
     expect(mapped.isCompleted).toBe(true);
+    expect(mapped.isOfficial).toBe(true);
+    expect(mapped.createdBy).toBe("exam_owner_1");
     expect((mapped as any).group_id).toBeUndefined();
   });
 
+  it('normalizes legacy QUIZ exams to the supported MONTHLY category and maps official status', () => {
+    const legacyQuiz = mapExam({
+      id: 'exam_legacy_quiz',
+      group_id: 'grp_1',
+      exam_date: '2026-10-15',
+      subject_id: 'math',
+      title: 'اختبار قديم',
+      exam_type: 'QUIZ',
+      is_official: 1,
+      created_by: 'exam_owner_1',
+      created_at: 1700000000000,
+    });
+
+    expect(legacyQuiz.examType).toBe('MONTHLY');
+    expect(legacyQuiz.isOfficial).toBe(true);
+    expect(legacyQuiz.createdBy).toBe('exam_owner_1');
+    expect((legacyQuiz as any).exam_type).toBeUndefined();
+
+    expect(mapExam({ exam_type: 'ORAL' }).examType).toBe('ORAL');
+    expect(mapExam({ exam_type: 'MIDTERM' }).examType).toBe('MIDTERM');
+    expect(mapExam({ exam_type: 'FINAL' }).examType).toBe('FINAL');
+  });
+
+  it('preserves the event creator ID for owner-only client actions', () => {
+    const mapped = mapSchoolEvent({
+      id: 'evt_owner_1',
+      group_id: 'class_10_A',
+      created_by: 'usr_event_owner_7',
+      event_date: '2026-11-19',
+      title: 'فعالية المنشئ',
+      category: 'ACTIVITY',
+      created_at: 1700000000000,
+    });
+
+    expect(mapped.createdBy).toBe('usr_event_owner_7');
+    expect((mapped as any).created_by).toBeUndefined();
+  });
   it('maps Content & Media items correctly', () => {
     const rawContent = {
       id: 'cnt_123',
       group_id: 'grp_1',
+      created_by: 'usr_author_123',
       study_date: '2026-09-30',
       subject_id: 'chemistry',
       type: 'LESSON',
@@ -102,17 +151,47 @@ describe('Server-to-Android Mappers (snake_case -> camelCase Contract)', () => {
         url: 'https://tanweer.magd.workers.dev/api/v1/media/med_1',
         mime_type: 'image/jpeg',
         file_size: 450000,
+        checksum: 'sha256:lesson-page-1',
       },
     ];
     const mapped = mapContent(rawContent, rawMedia);
     expect(mapped.groupId).toBe('grp_1');
+    expect(mapped.createdBy).toBe('usr_author_123');
     expect(mapped.authorGradeSection).toBe('أول ثانوي — أ');
     expect(mapped.viewsCount).toBe(15);
     expect(mapped.usefulCount).toBe(8);
     expect(mapped.media.length).toBe(1);
     expect(mapped.media[0].pageOrder).toBe(1);
     expect(mapped.media[0].fileSize).toBe(450000);
+    expect(mapped.media[0].checksum).toBe('sha256:lesson-page-1');
     expect((mapped as any).author_grade_section).toBeUndefined();
+  });
+
+  it('preserves the verified-teacher-answer marker in the issue comment contract', () => {
+    const teacherAnswer = mapIssueComment({
+      id: 'comment_teacher',
+      issue_id: 'issue_1',
+      user_id: 'teacher_1',
+      author_name: 'معلم المادة',
+      comment: 'هذا هو الحل الصحيح',
+      is_best_answer: 0,
+      is_teacher_answer: 1,
+      created_at: 1700000000000,
+    });
+    const studentComment = mapIssueComment({
+      id: 'comment_student',
+      issue_id: 'issue_1',
+      user_id: 'student_1',
+      author_name: 'طالب',
+      comment: 'هل يمكن التوضيح؟',
+      is_best_answer: 0,
+      is_teacher_answer: 0,
+      created_at: 1700000001000,
+    });
+
+    expect(teacherAnswer.isTeacherAnswer).toBe(true);
+    expect(studentComment.isTeacherAnswer).toBe(false);
+    expect((teacherAnswer as any).is_teacher_answer).toBeUndefined();
   });
 
   it('maps Chat message correctly', () => {

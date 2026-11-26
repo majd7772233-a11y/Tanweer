@@ -1,14 +1,21 @@
 package com.magd.tanweer.data.sync
 
+import androidx.room.withTransaction
 import android.content.Context
 import android.util.Log
 import com.magd.tanweer.data.local.OutboxDao
 import com.magd.tanweer.data.local.OutboxEntity
 import com.magd.tanweer.data.local.TanweerDatabase
 import com.magd.tanweer.data.remote.NetworkModule
+import com.magd.tanweer.data.remote.PermanentHttpFailureException
 import com.magd.tanweer.data.remote.PostMessageRequest
 import com.magd.tanweer.data.remote.TanweerApiService
+import com.magd.tanweer.data.remote.isRetryableHttpStatus
 import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -16,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
+import java.util.UUID
 
 data class SyncErrorInfo(
     val operation: String,
@@ -38,6 +46,7 @@ class UnifiedMutationQueue private constructor(
 
     private val _isDraining = MutableStateFlow(false)
     val isDraining: StateFlow<Boolean> = _isDraining.asStateFlow()
+    private val drainMutex = Mutex()
 
     private val _syncErrors = MutableSharedFlow<SyncErrorInfo>(extraBufferCapacity = 64)
     val syncErrors: SharedFlow<SyncErrorInfo> = _syncErrors.asSharedFlow()
@@ -48,7 +57,7 @@ class UnifiedMutationQueue private constructor(
     var isAutoSyncEnabled: Boolean = true
 
     @Volatile
-    var isDrainAllowed: Boolean = true
+    var isDrainAllowed: Boolean = false
 
     var onRetryHomework: (suspend (String) -> Result<Unit>)? = null
     var onRetryContent: (suspend (String) -> Result<Unit>)? = null
@@ -88,6 +97,20 @@ class UnifiedMutationQueue private constructor(
     fun stop() {
         periodicJob?.cancel()
         periodicJob = null
+        _isDraining.value = false
+    }
+
+    suspend fun stopAndAwait() {
+        val oldScope: CoroutineScope
+        synchronized(this) {
+            isDrainAllowed = false
+            periodicJob?.cancel()
+            periodicJob = null
+            oldScope = scope
+            scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        }
+        oldScope.coroutineContext[Job]?.cancelAndJoin()
+        drainMutex.withLock { /* wait for an external drain */ }
         _isDraining.value = false
     }
 
@@ -141,15 +164,16 @@ class UnifiedMutationQueue private constructor(
         operation: String,
         payloadJson: String
     ): OutboxEntity = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
         val outboxItem = OutboxEntity(
-            id = "ob_${entityType.lowercase()}_${entityId}_${System.currentTimeMillis()}",
+            id = "ob_${entityType.lowercase()}_${entityId}_${UUID.randomUUID()}",
             entityType = entityType,
             entityId = entityId,
             operation = operation,
             payloadJson = payloadJson,
             status = "PENDING",
             attempts = 0,
-            createdAt = System.currentTimeMillis()
+            createdAt = now
         )
         outboxDao.insertOutbox(outboxItem)
         if (isAutoSyncEnabled) {
@@ -165,55 +189,94 @@ class UnifiedMutationQueue private constructor(
     }
 
     /**
+     * FAILED mutations are terminal for automatic drains. A user-initiated retry
+     * explicitly resets their retry budget and returns them to the PENDING queue.
+     */
+    suspend fun retryFailedMutations(entityId: String? = null): Int = withContext(Dispatchers.IO) {
+        if (entityId != null && entityId.isBlank()) return@withContext 0
+        val failedExamCreates = outboxDao.getFailedExamCreateItems(entityId)
+        val requeued = outboxDao.requeueFailedItems(entityId)
+        if (requeued > 0) {
+            failedExamCreates.distinctBy { it.entityId }.forEach { failed ->
+                db.examDao().updateSyncStatus(failed.entityId, "PENDING")
+            }
+            triggerDrain()
+        }
+        requeued
+    }
+    suspend fun retryFailedExamCreate(entityId: String): Int = withContext(Dispatchers.IO) {
+        if (entityId.isBlank()) return@withContext 0
+
+        val requeued = db.withTransaction {
+            val count = outboxDao.requeueFailedExamCreate(entityId)
+            if (count > 0) {
+                db.examDao().updateSyncStatus(entityId, "PENDING")
+            }
+            count
+        }
+
+        if (requeued > 0) triggerDrain()
+        requeued
+    }
+    /**
      * Drains all pending items in the outbox queue using unified execution and atomic reservation.
      */
     suspend fun drainQueue(): Int = withContext(Dispatchers.IO) {
-        if (!isDrainAllowed) {
-            Log.d("UnifiedMutationQueue", "Drain blocked: awaiting data_generation verification")
-            return@withContext 0
-        }
-        if (_isDraining.value) return@withContext 0
-        _isDraining.value = true
-        var processedCount = 0
-
-        try {
-            // Recover any items that were reserved in SYNCING state by an interrupted worker
-            // and exceeded the safe 60-second lease window.
-            outboxDao.recoverStuckSyncingItems(now = System.currentTimeMillis(), timeoutMs = 60_000L)
-
-            val pendingItems = outboxDao.getPendingItemsSync()
-            for (rawItem in pendingItems) {
-                val item = normalizeLegacyOperation(rawItem)
-
-                // Exponential backoff check: 2s, 4s, 8s, 16s, max 60s
-                val backoffMs = (1000L * (1 shl item.attempts.coerceAtMost(5))).coerceIn(2000L, 60_000L)
-                val now = System.currentTimeMillis()
-                if (item.attempts > 0 && (now - item.lastAttemptAt < backoffMs)) {
-                    continue // Skip until backoff window elapses
-                }
-
-                // Atomic reservation: only proceed if this worker successfully claims the item
-                val claimed = outboxDao.claimPendingItem(item.id, now)
-                if (claimed <= 0) {
-                    continue // Already claimed by concurrent worker
-                }
-
-                val success = executeMutation(item)
-                if (success) processedCount++
+        drainMutex.withLock {
+            if (!isDrainAllowed) {
+                Log.d("UnifiedMutationQueue", "Drain blocked: awaiting data_generation verification")
+                return@withLock 0
             }
-        } catch (e: Exception) {
-            Log.e("UnifiedMutationQueue", "Error during outbox drain", e)
-            _syncErrors.emit(
-                SyncErrorInfo(
-                    operation = "DRAIN_QUEUE",
-                    entityId = "all",
-                    message = e.localizedMessage ?: "حدث خطأ أثناء مزامنة البيانات غير المعلقة"
+            if (_isDraining.value) return@withLock 0
+            _isDraining.value = true
+            var processedCount = 0
+            try {
+                outboxDao.recoverStuckSyncingItems(now = System.currentTimeMillis(), timeoutMs = 60_000L)
+                val pendingItems = outboxDao.getPendingItemsSync()
+                val blockedEntities = mutableSetOf<String>()
+                for (rawItem in pendingItems) {
+                    if (!isDrainAllowed) break
+                    val currentItem = outboxDao.getOutboxItemById(rawItem.id) ?: continue
+                    val item = normalizeLegacyOperation(currentItem)
+                    val entityKey = if (item.entityId.isNotBlank()) "${item.entityType}:${item.entityId}" else null
+
+                    // Mutations for one entity are ordered within its own domain. An
+                    // earlier retry/backoff or in-flight claim blocks later mutations
+                    // for the same entity type and ID, without blocking another domain.
+                    if (entityKey != null && entityKey in blockedEntities) continue
+
+                    val backoffMs = (1000L * (1 shl item.attempts.coerceAtMost(5))).coerceIn(2000L, 60_000L)
+                    val now = System.currentTimeMillis()
+                    if (item.attempts > 0 && (now - item.lastAttemptAt < backoffMs)) {
+                        if (entityKey != null) blockedEntities.add(entityKey)
+                        continue
+                    }
+                    if (outboxDao.claimPendingItem(item.id, now) <= 0) {
+                        if (entityKey != null) blockedEntities.add(entityKey)
+                        continue
+                    }
+                    if (executeMutation(item)) {
+                        processedCount++
+                    } else if (entityKey != null) {
+                        blockedEntities.add(entityKey)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("UnifiedMutationQueue", "Error during outbox drain", e)
+                _syncErrors.emit(
+                    SyncErrorInfo(
+                        operation = "DRAIN_QUEUE",
+                        entityId = "all",
+                        message = e.localizedMessage ?: "حدث خطأ أثناء مزامنة البيانات غير المعلقة"
+                    )
                 )
-            )
-        } finally {
-            _isDraining.value = false
+            } finally {
+                _isDraining.value = false
+            }
+            processedCount
         }
-        processedCount
     }
 
     private suspend fun executeMutation(item: OutboxEntity): Boolean {
@@ -224,7 +287,7 @@ class UnifiedMutationQueue private constructor(
                     val text = obj.optString("text", "")
                     val groupId = obj.optString("groupId", "")
                     val res = api.postGroupMessage(groupId, PostMessageRequest(id = item.entityId, text = text))
-                    if (res.isSuccessful) {
+                    if (res.isSuccessful && res.body()?.confirmsMessage(item.entityId, groupId, text) == true) {
                         db.chatDao().updateMessageStatus(item.entityId, "SENT")
                         outboxDao.deleteOutbox(item.id)
                         true
@@ -241,8 +304,16 @@ class UnifiedMutationQueue private constructor(
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, res.exceptionOrNull()?.message ?: "فشل مزامنة الواجب مع الخادم")
-                            false
+                            val failure = res.exceptionOrNull()
+                            if (failure is PermanentHttpFailureException) {
+                                handleMutationFailure(item, failure.message ?: "رفض الخادم مزامنة الواجب")
+                                outboxDao.deleteOutbox(item.id)
+                                db.homeworkDao().updateSyncStatus(item.entityId, "FAILED")
+                                true
+                            } else {
+                                handleMutationFailure(item, failure?.message ?: "فشل مزامنة الواجب مع الخادم")
+                                false
+                            }
                         }
                     } else {
                         handleMutationFailure(item, "محرك رفع الواجبات غير مهيأ بعد")
@@ -257,8 +328,16 @@ class UnifiedMutationQueue private constructor(
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, res.exceptionOrNull()?.message ?: "فشل مزامنة الدرس مع الخادم")
-                            false
+                            val failure = res.exceptionOrNull()
+                            if (failure is PermanentHttpFailureException) {
+                                handleMutationFailure(item, failure.message ?: "رفض الخادم مزامنة الدرس")
+                                outboxDao.deleteOutbox(item.id)
+                                db.contentDao().updateSyncStatus(item.entityId, "FAILED")
+                                true
+                            } else {
+                                handleMutationFailure(item, failure?.message ?: "فشل مزامنة الدرس مع الخادم")
+                                false
+                            }
                         }
                     } else {
                         handleMutationFailure(item, "محرك رفع الدروس غير مهيأ بعد")
@@ -273,7 +352,7 @@ class UnifiedMutationQueue private constructor(
                     if (res.isSuccessful || res.code() == 404) {
                         outboxDao.deleteOutbox(item.id)
                         true
-                    } else if (res.code() in listOf(401, 403)) {
+                    } else if (!isRetryableHttpStatus(res.code())) {
                         val currentUserId = db.userDao().getUserSync()?.id ?: ""
                         if (currentUserId.isNotBlank() && isCompleted != null) {
                             if (isCompleted) {
@@ -282,6 +361,7 @@ class UnifiedMutationQueue private constructor(
                                 db.homeworkDao().insertCompletion(com.magd.tanweer.data.local.HomeworkCompletionEntity(homeworkId = item.entityId, userId = currentUserId))
                             }
                         }
+                        handleMutationFailure(item, "رفض الخادم تغيير حالة الواجب (HTTP __CODE__)".replace("__CODE__", res.code().toString()))
                         outboxDao.deleteOutbox(item.id)
                         false
                     } else {
@@ -300,10 +380,11 @@ class UnifiedMutationQueue private constructor(
                         }
                         outboxDao.deleteOutbox(item.id)
                         true
-                    } else if (res.code() in listOf(401, 403)) {
+                    } else if (!isRetryableHttpStatus(res.code())) {
                         if (isCompleted != null) {
                             db.examDao().updateExamCompletion(item.entityId, !isCompleted)
                         }
+                        handleMutationFailure(item, "رفض الخادم تغيير حالة الاختبار (HTTP __CODE__)".replace("__CODE__", res.code().toString()))
                         outboxDao.deleteOutbox(item.id)
                         false
                     } else {
@@ -322,7 +403,8 @@ class UnifiedMutationQueue private constructor(
                             title = ex.title,
                             requiredChapters = ex.requiredChapters,
                             notes = ex.notes,
-                            examType = ex.examType
+                            examType = ex.examType,
+                            isOfficial = ex.isOfficial
                         )
                     } else if (item.payloadJson.isNotBlank() && item.payloadJson != "{}") {
                         try {
@@ -335,7 +417,8 @@ class UnifiedMutationQueue private constructor(
                                 title = obj.optString("title", ""),
                                 requiredChapters = obj.optString("requiredChapters", null),
                                 notes = obj.optString("notes", null),
-                                examType = obj.optString("examType", "MONTHLY")
+                                examType = obj.optString("examType", "MONTHLY"),
+                                isOfficial = obj.optBoolean("isOfficial", false)
                             )
                         } catch (_: Exception) { null }
                     } else {
@@ -344,25 +427,35 @@ class UnifiedMutationQueue private constructor(
 
                     if (req != null && req.groupId.isNotBlank() && req.title.isNotBlank()) {
                         val res = api.createExam(req)
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             val serverId = res.body()?.examId ?: res.body()?.id
-                            if (serverId != null && serverId != item.entityId) {
+                            val resolvedId = serverId?.takeIf { it.isNotBlank() } ?: item.entityId
+                            if (resolvedId != item.entityId) {
                                 if (ex != null) {
-                                    val updated = ex.copy(id = serverId, syncStatus = "SYNCED")
-                                    db.examDao().replaceExamId(ex.id, updated)
+                                    db.examDao().replaceExamId(ex.id, ex.copy(id = resolvedId))
                                 }
-                            } else {
-                                db.examDao().updateSyncStatus(item.entityId, "SYNCED")
+                                outboxDao.updateEntityId(item.entityId, resolvedId)
                             }
+                            val deletePending = outboxDao.getPendingMutation(resolvedId, "EXAM_DELETE") != null
+                            db.examDao().updateSyncStatus(
+                                resolvedId,
+                                if (deletePending) "DELETE_PENDING" else "SYNCED"
+                            )
                             outboxDao.deleteOutbox(item.id)
+                            true
+                        } else if (!isRetryableHttpStatus(res.code())) {
+                            val body = res.body()
+                            val message = body?.error?.message ?: body?.message
+                                ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ الاختبار (success=false)" else "رفض الخادم رفع الاختبار (${res.code()})"
+                            markMutationPermanentlyFailed(item, message)
                             true
                         } else {
                             handleMutationFailure(item, "فشل رفع الاختبار إلى الخادم (${res.code()})")
                             false
                         }
                     } else {
-                        handleMutationFailure(item, "تعذر العثور على بيانات الاختبار محلياً (id: ${item.entityId})")
-                        false
+                        markMutationPermanentlyFailed(item, "تعذر العثور على بيانات الاختبار محلياً (id: ${item.entityId})")
+                        true
                     }
                 }
                 "EVENT_CREATE" -> {
@@ -380,17 +473,26 @@ class UnifiedMutationQueue private constructor(
                                 location = ev.location
                             )
                         )
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             db.eventDao().updateSyncStatus(ev.id, "SYNCED")
                             outboxDao.deleteOutbox(item.id)
                             true
+                        } else if (!isRetryableHttpStatus(res.code())) {
+                            val body = res.body()
+                            val message = body?.error?.message ?: body?.message
+                                ?: if (res.isSuccessful) "الخادم لم يؤكد نشر الفعالية (success=false)" else "رفض الخادم إنشاء الفعالية (HTTP ${res.code()})"
+                            handleMutationFailure(item, message)
+                            outboxDao.deleteOutbox(item.id)
+                            db.eventDao().updateSyncStatus(ev.id, "FAILED")
+                            true
                         } else {
-                            handleMutationFailure(item, "فشل رفع الفعالية إلى الخادم (${res.code()})")
+                            handleMutationFailure(item, "فشل رفع الفعالية إلى الخادم (HTTP __CODE__)".replace("__CODE__", res.code().toString()))
                             false
                         }
                     } else {
-                        handleMutationFailure(item, "تعذر العثور على الفعالية محلياً للمزامنة (id: ${item.entityId})")
-                        false
+                        handleMutationFailure(item, "تعذر العثور على الفعالية محلياً للمزامنة (id: __ID__)".replace("__ID__", item.entityId))
+                        outboxDao.deleteOutbox(item.id)
+                        true
                     }
                 }
                 "ISSUE_CREATE" -> {
@@ -407,12 +509,12 @@ class UnifiedMutationQueue private constructor(
                                 description = issue.description
                             )
                         )
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             db.issueDao().updateSyncStatus(issue.id, "SYNCED")
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, "فشل رفع السؤال إلى الخادم (${res.code()})")
+                            handleMutationFailure(item, res.body()?.error?.message ?: res.body()?.message ?: if (res.isSuccessful) "الخادم لم يؤكد نشر السؤال (success=false)" else "فشل رفع السؤال إلى الخادم (${res.code()})")
                             false
                         }
                     } else {
@@ -421,40 +523,58 @@ class UnifiedMutationQueue private constructor(
                     }
                 }
                 "ISSUE_COMMENT", "ISSUE_COMMENT_CREATE" -> {
-                    val comment = db.issueDao().getCommentById(item.entityId)
-                    if (comment != null) {
-                        val res = api.addIssueComment(
-                            issueId = comment.issueId,
-                            req = com.magd.tanweer.data.remote.AddCommentRequest(id = comment.id, comment = comment.comment)
-                        )
-                        if (res.isSuccessful) {
-                            db.issueDao().updateCommentSyncStatus(comment.id, "SYNCED")
+                    IssueDataSyncCoordinator.mutex.withLock {
+                        val comment = db.issueDao().getCommentById(item.entityId)
+                        val issueId: String
+                        val request: com.magd.tanweer.data.remote.AddCommentRequest
+                        if (comment != null) {
+                            issueId = comment.issueId
+                            request = com.magd.tanweer.data.remote.AddCommentRequest(
+                                id = comment.id,
+                                comment = comment.comment
+                            )
+                        } else {
+                            val payload = JSONObject(item.payloadJson)
+                            issueId = payload.optString("issueId", "")
+                            val commentText = payload.optString("comment", "")
+                            if (issueId.isBlank() || commentText.isBlank()) {
+                                handleMutationFailure(item, "تعذر قراءة بيانات التعليق للمزامنة")
+                                return@withLock false
+                            }
+                            request = com.magd.tanweer.data.remote.AddCommentRequest(
+                                id = item.entityId,
+                                comment = commentText
+                            )
+                        }
+
+                        val response = api.addIssueComment(issueId, request)
+                        val body = response.body()
+                        if (response.isSuccessful && body?.success == true) {
+                            db.withTransaction {
+                                if (comment != null) {
+                                    db.issueDao().confirmCommentSync(
+                                        comment.id,
+                                        body.isTeacherAnswer == true
+                                    )
+                                }
+                                db.issueDao().markIssueInDiscussion(issueId)
+                                db.issueDao().reconcileIssueCommentsCount(issueId)
+                            }
+                            // The ACK owns the write. Details refresh is best effort, but it
+                            // shares the lock and reconciler so it cannot race a screen refresh.
+                            IssueDataSyncCoordinator.refreshIssueDetailsLocked(db, api, issueId)
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, "فشل إرسال التعليق (${res.code()})")
-                            false
-                        }
-                    } else {
-                        try {
-                            val obj = JSONObject(item.payloadJson)
-                            val issueId = obj.optString("issueId", "")
-                            val commentText = obj.optString("comment", "")
-                            if (issueId.isNotBlank() && commentText.isNotBlank()) {
-                                val res = api.addIssueComment(issueId, com.magd.tanweer.data.remote.AddCommentRequest(id = item.entityId, comment = commentText))
-                                if (res.isSuccessful) {
-                                    outboxDao.deleteOutbox(item.id)
-                                    true
-                                } else {
-                                    handleMutationFailure(item, "فشل إرسال التعليق (${res.code()})")
-                                    false
-                                }
-                            } else {
-                                handleMutationFailure(item, "تعذر قراءة بيانات التعليق للمزامنة")
-                                false
-                            }
-                        } catch (_: Exception) {
-                            handleMutationFailure(item, "صيغة بيانات التعليق غير صالحة")
+                            handleMutationFailure(
+                                item,
+                                body?.error?.message ?: body?.message
+                                    ?: if (response.isSuccessful) {
+                                        "الخادم لم يؤكد إرسال التعليق (success=false)"
+                                    } else {
+                                        "فشل إرسال التعليق (HTTP " + response.code() + ")"
+                                    }
+                            )
                             false
                         }
                     }
@@ -471,11 +591,11 @@ class UnifiedMutationQueue private constructor(
                                 reason = corr.reason
                             )
                         )
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, "فشل رفع طلب التصحيح (${res.code()})")
+                            handleMutationFailure(item, res.body()?.error?.message ?: res.body()?.message ?: if (res.isSuccessful) "الخادم لم يؤكد استلام طلب التصحيح (success=false)" else "فشل رفع طلب التصحيح (${res.code()})")
                             false
                         }
                     } else {
@@ -484,13 +604,55 @@ class UnifiedMutationQueue private constructor(
                     }
                 }
                 "EXAM_DELETE" -> {
-                    val res = api.deleteExam(item.entityId)
-                    if (res.isSuccessful || res.code() == 404) {
-                        outboxDao.deleteOutbox(item.id)
-                        true
-                    } else {
-                        handleMutationFailure(item, "فشل حذف الامتحان من الخادم (${res.code()})")
-                        false
+                    val pendingCreate = outboxDao.getPendingMutation(item.entityId, "EXAM_CREATE")
+                    val pendingToggle = outboxDao.getPendingMutation(item.entityId, "EXAM_TOGGLE")
+
+                    val createStillActive = when {
+                        pendingCreate?.status == "SYNCING" -> true
+                        pendingCreate != null -> {
+                            outboxDao.deleteUnclaimedMutation(item.entityId, "EXAM_CREATE")
+                            outboxDao.getPendingMutation(item.entityId, "EXAM_CREATE") != null
+                        }
+                        else -> false
+                    }
+
+                    when {
+                        createStillActive -> {
+                            handleMutationFailure(item, "تأجيل حذف الاختبار حتى يكتمل رفعه إلى الخادم")
+                            false
+                        }
+                        pendingToggle?.status == "SYNCING" -> {
+                            handleMutationFailure(item, "تأجيل حذف الاختبار حتى تكتمل مزامنة حالة المراجعة")
+                            false
+                        }
+                        else -> {
+                            if (pendingToggle != null) {
+                                outboxDao.deleteOutbox(pendingToggle.id)
+                            }
+                            val res = api.deleteExam(item.entityId)
+                            when {
+                                res.isSuccessful || res.code() == 404 -> {
+                                    db.examDao().deleteExamById(item.entityId)
+                                    outboxDao.deleteByEntityId(item.entityId)
+                                    true
+                                }
+                                res.code() in 400..499 && res.code() !in listOf(408, 429) -> {
+                                    db.examDao().updateSyncStatus(item.entityId, "SYNCED")
+                                    val message = if (res.code() == 401 || res.code() == 403) {
+                                        "لا تملك صلاحية حذف هذا الاختبار من الخادم (${res.code()})"
+                                    } else {
+                                        "رفض الخادم حذف الاختبار (${res.code()})"
+                                    }
+                                    handleMutationFailure(item, message)
+                                    outboxDao.deleteOutbox(item.id)
+                                    true
+                                }
+                                else -> {
+                                    handleMutationFailure(item, "فشل حذف الاختبار من الخادم (${res.code()})")
+                                    false
+                                }
+                            }
+                        }
                     }
                 }
                 "SCHEDULE_SLOT_DELETE" -> {
@@ -563,14 +725,14 @@ class UnifiedMutationQueue private constructor(
 
                     if (req != null && gId.isNotBlank()) {
                         val res = api.createScheduleSlot(groupId = gId, req = req)
-                        if (res.isSuccessful) {
+                        if (res.isSuccessful && res.body()?.success == true) {
                             if (slot != null) {
                                 db.scheduleDao().insertSlots(listOf(slot.copy(syncStatus = "SYNCED")))
                             }
                             outboxDao.deleteOutbox(item.id)
                             true
                         } else {
-                            handleMutationFailure(item, "فشل حفظ الحصة في الخادم (${res.code()})")
+                            handleMutationFailure(item, res.body()?.error?.message ?: res.body()?.message ?: if (res.isSuccessful) "الخادم لم يؤكد حفظ الحصة (success=false)" else "فشل حفظ الحصة في الخادم (${res.code()})")
                             false
                         }
                     } else {
@@ -592,10 +754,42 @@ class UnifiedMutationQueue private constructor(
         }
     }
 
+    private suspend fun markMutationPermanentlyFailed(item: OutboxEntity, errorMsg: String) {
+        db.withTransaction {
+            outboxDao.updateOutboxStatus(
+                id = item.id,
+                status = "FAILED",
+                now = System.currentTimeMillis(),
+                error = errorMsg
+            )
+            when (item.entityType) {
+                "HOMEWORK_UPLOAD", "HOMEWORK_CREATE" -> db.homeworkDao().updateSyncStatus(item.entityId, "FAILED")
+                "CONTENT_UPLOAD", "LESSON_CREATE" -> db.contentDao().updateSyncStatus(item.entityId, "FAILED")
+                "EXAM_CREATE" -> db.examDao().updateSyncStatus(item.entityId, "FAILED")
+                "EVENT_CREATE" -> db.eventDao().updateSyncStatus(item.entityId, "FAILED")
+            }
+        }
+        _syncErrors.emit(
+            SyncErrorInfo(
+                operation = item.operation,
+                entityId = item.entityId,
+                message = errorMsg
+            )
+        )
+    }
     private suspend fun handleMutationFailure(item: OutboxEntity, errorMsg: String) {
         val nextAttempts = item.attempts + 1
         val status = if (nextAttempts >= 5) "FAILED" else "PENDING"
         outboxDao.updateOutboxStatus(item.id, status = status, now = System.currentTimeMillis(), error = errorMsg)
+
+        if (status == "FAILED") {
+            when (item.entityType) {
+                "HOMEWORK_UPLOAD", "HOMEWORK_CREATE" -> db.homeworkDao().updateSyncStatus(item.entityId, "FAILED")
+                "CONTENT_UPLOAD", "LESSON_CREATE" -> db.contentDao().updateSyncStatus(item.entityId, "FAILED")
+                "EXAM_CREATE" -> db.examDao().updateSyncStatus(item.entityId, "FAILED")
+                "EVENT_CREATE" -> db.eventDao().updateSyncStatus(item.entityId, "FAILED")
+            }
+        }
 
         if (item.entityType == "CHAT_MESSAGE") {
             db.chatDao().updateMessageStatus(item.entityId, "FAILED")
@@ -623,7 +817,7 @@ class UnifiedMutationQueue private constructor(
                 // If message has exceeded 15s in SENDING, try fallback HTTP send or mark as FAILED
                 try {
                     val res = api.postGroupMessage(msg.groupId, PostMessageRequest(id = msg.id, text = msg.text))
-                    if (res.isSuccessful) {
+                    if (res.isSuccessful && res.body()?.confirmsMessage(msg.id, msg.groupId, msg.text) == true) {
                         db.chatDao().updateMessageStatus(msg.id, "SENT")
                     } else {
                         db.chatDao().updateMessageStatus(msg.id, "FAILED")

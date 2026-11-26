@@ -23,16 +23,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.R
 import com.magd.tanweer.data.model.*
 import com.magd.tanweer.ui.SubScreen
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
+import com.magd.tanweer.util.HomeworkTaskKind
+import com.magd.tanweer.util.HomeworkTaskTypePolicy
 import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
 import java.util.*
@@ -45,10 +50,29 @@ fun CalendarScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
-
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
+    val calendarSyncState by viewModel.calendarSyncState.collectAsStateWithLifecycle()
+    val calendarSyncMonthScope by viewModel.calendarSyncMonthScope.collectAsStateWithLifecycle()
     var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     var selectedDateStr by remember { mutableStateOf(TanweerViewModel.getTodayDateString()) }
     var showAddActionSheet by remember { mutableStateOf(false) }
+    val monthQueryFormat = remember { SimpleDateFormat("yyyy-MM", Locale.US) }
+    val currentCalendarMonth = remember(currentCalendar.timeInMillis) { monthQueryFormat.format(currentCalendar.time) }
+    val scopedCalendarSyncState = syncStateForScope(calendarSyncState, groupSyncScopeIds[GroupSyncSource.CALENDAR], activeGroupId)
+    val hasCalendarSnapshot = hasAuthoritativeCalendarMonthSnapshot(scopedCalendarSyncState, calendarSyncMonthScope, currentCalendarMonth)
+
+    val dayDetailsSyncState by viewModel.dayDetailsSyncState.collectAsStateWithLifecycle()
+    val dayDetailsSyncGroupId by viewModel.dayDetailsSyncGroupId.collectAsStateWithLifecycle()
+    val dayDetailsSyncDate by viewModel.dayDetailsSyncDate.collectAsStateWithLifecycle()
+    val scopedDayDetailsSyncState = syncStateForDayScope(
+        dayDetailsSyncState,
+        dayDetailsSyncGroupId,
+        dayDetailsSyncDate,
+        activeGroupId,
+        selectedDateStr,
+    )
+    val hasDayDetailsSnapshot = hasAuthoritativeSnapshot(scopedDayDetailsSyncState)
+    val hasConfirmedEmptyDay = shouldShowConfirmedCalendarEmpty(hasCalendarSnapshot, hasDayDetailsSnapshot)
 
     var showAddHolidayDialog by remember { mutableStateOf(false) }
     var holidayTitle by remember { mutableStateOf("") }
@@ -64,7 +88,6 @@ fun CalendarScreen(
 
     val monthYearFormat = remember { SimpleDateFormat("MMMM yyyy", Locale("ar")) }
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
-    val monthQueryFormat = remember { SimpleDateFormat("yyyy-MM", Locale.US) }
 
     LaunchedEffect(activeGroupId, currentCalendar.timeInMillis) {
         if (activeGroupId.isNotBlank()) {
@@ -79,6 +102,18 @@ fun CalendarScreen(
         }
     }
 
+    fun changeCalendarMonth(monthOffset: Int) {
+        val next = currentCalendar.clone() as Calendar
+        next.set(Calendar.DAY_OF_MONTH, 1)
+        next.add(Calendar.MONTH, monthOffset)
+        currentCalendar = next
+
+        val targetMonth = monthQueryFormat.format(next.time)
+        val nextSelectedDate = CalendarMonthPolicy.resolveSelectedDate(selectedDateStr, targetMonth)
+        selectedDateStr = nextSelectedDate
+        viewModel.setSelectedDate(nextSelectedDate)
+    }
+
     // Day content queries
     val dayContents by viewModel.repository.getDayContents(activeGroupId, selectedDateStr)
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -89,22 +124,54 @@ fun CalendarScreen(
     val homeworks by viewModel.repository.getHomeworks(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
-    val dayHomeworks = remember(homeworks, selectedDateStr) {
+    val dayAssignments = remember(homeworks, selectedDateStr) {
         homeworks.filter { it.studyDate == selectedDateStr || it.dueDate == selectedDateStr }
     }
-
+    val calendarHomeworkCount = remember(homeworks, currentCalendarMonth) {
+        CalendarMonthPolicy.countItemsInMonth(
+            homeworks.filter { HomeworkTaskTypePolicy.isHomework(it.taskType) },
+            currentCalendarMonth
+        ) { listOf(it.studyDate, it.dueDate) }
+    }
+    val calendarProjectCount = remember(homeworks, currentCalendarMonth) {
+        CalendarMonthPolicy.countItemsInMonth(
+            homeworks.filter { HomeworkTaskTypePolicy.isTask(it.taskType) },
+            currentCalendarMonth
+        ) { listOf(it.studyDate, it.dueDate) }
+    }
+    val calendarOtherAssignmentCount = remember(homeworks, currentCalendarMonth) {
+        CalendarMonthPolicy.countItemsInMonth(
+            homeworks.filter {
+                HomeworkTaskTypePolicy.classify(it.taskType) == HomeworkTaskKind.UNKNOWN
+            },
+            currentCalendarMonth
+        ) { listOf(it.studyDate, it.dueDate) }
+    }
     val exams by viewModel.repository.getExams(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
-
+    val calendarExamCount = remember(exams, currentCalendarMonth) {
+        CalendarMonthPolicy.countItemsInMonth(exams, currentCalendarMonth) { listOf(it.examDate) }
+    }
     val dayExams = remember(exams, selectedDateStr) {
         exams.filter { it.examDate == selectedDateStr }
     }
 
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
-
+    val calendarEventCount = remember(events, currentCalendarMonth) {
+        CalendarMonthPolicy.countItemsInMonth(events, currentCalendarMonth) { listOf(it.eventDate) }
+    }
     val dayEvents = remember(events, selectedDateStr) {
         events.filter { it.eventDate == selectedDateStr }
+    }
+
+    val daySummary = remember(dayContents, dayExams, dayAssignments, dayEvents) {
+        buildCalendarDaySummary(
+            lessonCount = dayContents.size,
+            examCount = dayExams.size,
+            assignmentCount = dayAssignments.size,
+            eventCount = dayEvents.size
+        )
     }
 
     // Days in current month
@@ -133,7 +200,18 @@ fun CalendarScreen(
                     isToday = (dStr == todayStr),
                     hasLesson = allContents.any { it.studyDate == dStr },
                     hasExam = exams.any { it.examDate == dStr },
-                    hasHomework = homeworks.any { it.studyDate == dStr || it.dueDate == dStr },
+                    hasHomework = homeworks.any {
+                        HomeworkTaskTypePolicy.isHomework(it.taskType) &&
+                            (it.studyDate == dStr || it.dueDate == dStr)
+                    },
+                    hasTask = homeworks.any {
+                        HomeworkTaskTypePolicy.isTask(it.taskType) &&
+                            (it.studyDate == dStr || it.dueDate == dStr)
+                    },
+                    hasOtherAssignment = homeworks.any {
+                        HomeworkTaskTypePolicy.classify(it.taskType) == HomeworkTaskKind.UNKNOWN &&
+                            (it.studyDate == dStr || it.dueDate == dStr)
+                    },
                     hasEvent = events.any { it.eventDate == dStr },
                     hasHoliday = events.any { it.eventDate == dStr && it.category == "HOLIDAY" }
                 )
@@ -150,6 +228,16 @@ fun CalendarScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        if ((dayContents.isNotEmpty() || dayAssignments.isNotEmpty() || dayExams.isNotEmpty() || dayEvents.isNotEmpty()) &&
+            (scopedDayDetailsSyncState is SyncState.Error || scopedDayDetailsSyncState is SyncState.OfflineCached)) {
+            item {
+                SyncStatusBar(
+                    syncState = scopedDayDetailsSyncState,
+                    onRefresh = { viewModel.syncDayDetails(activeGroupId, selectedDateStr) }
+                )
+            }
+        }
+
         // Month Navigation Bar
         item {
             GlassCard(
@@ -161,11 +249,7 @@ fun CalendarScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = {
-                        val next = currentCalendar.clone() as Calendar
-                        next.add(Calendar.MONTH, -1)
-                        currentCalendar = next
-                    }) {
+                    IconButton(onClick = { changeCalendarMonth(-1) }) {
                         Icon(
                             Icons.AutoMirrored.Filled.KeyboardArrowRight,
                             contentDescription = "الشهر السابق",
@@ -176,22 +260,18 @@ fun CalendarScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = monthYearFormat.format(currentCalendar.time),
-                            fontSize = 17.sp,
+                            fontSize = tanweerTextSize(17f),
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
                         Text(
                             text = "التقويم الدراسي الزجاجي",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary
                         )
                     }
 
-                    IconButton(onClick = {
-                        val next = currentCalendar.clone() as Calendar
-                        next.add(Calendar.MONTH, 1)
-                        currentCalendar = next
-                    }) {
+                    IconButton(onClick = { changeCalendarMonth(1) }) {
                         Icon(
                             Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                             contentDescription = "الشهر التالي",
@@ -209,9 +289,6 @@ fun CalendarScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 val curMonthPrefix = remember(currentCalendar.timeInMillis) { monthQueryFormat.format(currentCalendar.time) }
-                val monthLessons = remember(allContents, curMonthPrefix) {
-                    allContents.count { it.studyDate?.startsWith(curMonthPrefix) == true }
-                }
 
                 Box(
                     modifier = Modifier
@@ -222,7 +299,7 @@ fun CalendarScreen(
                         .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("📖 $monthLessons دروس", fontSize = 11.sp, color = EmeraldGreen, fontWeight = FontWeight.Bold)
+                    Text("📖 تفاصيل الدروس", fontSize = tanweerTextSize(11f), color = EmeraldGreen, fontWeight = FontWeight.Bold)
                 }
 
                 Box(
@@ -234,7 +311,7 @@ fun CalendarScreen(
                         .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("🔴 ${exams.size} اختبارات", fontSize = 11.sp, color = RubyRed, fontWeight = FontWeight.Bold)
+                    Text("🔴 ${if (hasCalendarSnapshot) calendarExamCount.toString() else "—"} اختبارات", fontSize = tanweerTextSize(11f), color = RubyRed, fontWeight = FontWeight.Bold)
                 }
 
                 Box(
@@ -246,7 +323,27 @@ fun CalendarScreen(
                         .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("📝 ${homeworks.size} واجبات", fontSize = 11.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = if (hasCalendarSnapshot) stringResource(R.string.calendar_count_homework, calendarHomeworkCount) else "—",
+                            fontSize = tanweerTextSize(10f),
+                            color = WarmAmber,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (hasCalendarSnapshot) stringResource(R.string.calendar_count_projects, calendarProjectCount) else "—",
+                            fontSize = tanweerTextSize(10f),
+                            color = PurpleAccent,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (hasCalendarSnapshot && calendarOtherAssignmentCount > 0) {
+                            Text(
+                                text = stringResource(R.string.calendar_count_other_assignments, calendarOtherAssignmentCount),
+                                fontSize = tanweerTextSize(9f),
+                                color = TextMuted
+                            )
+                        }
+                    }
                 }
 
                 Box(
@@ -260,8 +357,8 @@ fun CalendarScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("🎪 ${events.size} فعاليات", fontSize = 11.sp, color = PurpleAccent, fontWeight = FontWeight.Bold)
-                        Text("‹", fontSize = 13.sp, color = PurpleAccent)
+                        Text("🎪 ${if (hasCalendarSnapshot) calendarEventCount.toString() else "—"} فعاليات", fontSize = tanweerTextSize(11f), color = PurpleAccent, fontWeight = FontWeight.Bold)
+                        Text("‹", fontSize = tanweerTextSize(13f), color = PurpleAccent)
                     }
                 }
             }
@@ -276,7 +373,7 @@ fun CalendarScreen(
                 listOf("أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت").forEach { name ->
                     Text(
                         text = name,
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         fontWeight = FontWeight.Bold,
                         color = if (name == "جمعة" || name == "سبت") TextMuted else CyanAccent,
                         textAlign = TextAlign.Center,
@@ -337,7 +434,7 @@ fun CalendarScreen(
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
                                         text = item.dayNumber.toString(),
-                                        fontSize = 13.sp,
+                                        fontSize = tanweerTextSize(13f),
                                         fontWeight = if (isSelected || item.isToday || item.hasHoliday) FontWeight.Bold else FontWeight.Normal,
                                         color = when {
                                             isSelected -> TextOnAccent
@@ -383,6 +480,22 @@ fun CalendarScreen(
                                                     .background(WarmAmber)
                                             )
                                         }
+                                        if (item.hasTask) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(4.dp)
+                                                    .clip(CircleShape)
+                                                    .background(PurpleAccent)
+                                            )
+                                        }
+                                        if (item.hasOtherAssignment) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(4.dp)
+                                                    .clip(CircleShape)
+                                                    .background(TextMuted)
+                                            )
+                                        }
                                         if (item.hasEvent && !item.hasHoliday) {
                                             Box(
                                                 modifier = Modifier
@@ -412,15 +525,32 @@ fun CalendarScreen(
                 Column {
                     Text(
                         text = "📖 تفاصيل: ${TanweerViewModel.getFormattedArabicDate(selectedDateStr)}",
-                        fontSize = 15.sp,
+                        fontSize = tanweerTextSize(15f),
                         fontWeight = FontWeight.Bold,
                         color = CyanAccent
                     )
                     Text(
-                        text = "يمكنك توثيق الدروس والواجبات لهذا التاريخ في أي وقت",
-                        fontSize = 11.sp,
+                        text = stringResource(R.string.calendar_day_add_description),
+                        fontSize = tanweerTextSize(11f),
                         color = TextSecondary
                     )
+                    if (daySummary.totalCount > 0) {
+                        Text(
+                            text = stringResource(R.string.calendar_day_item_count, daySummary.totalCount),
+                            fontSize = tanweerTextSize(11f),
+                            fontWeight = FontWeight.SemiBold,
+                            color = CyanAccent,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    if (daySummary.shouldShowContinuationHint) {
+                        Text(
+                            text = stringResource(R.string.calendar_day_scroll_hint),
+                            fontSize = tanweerTextSize(10f),
+                            color = TextMuted,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
 
                 GlassButton(
@@ -451,7 +581,7 @@ fun CalendarScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("🌴", fontSize = 32.sp)
+                        Text("🌴", fontSize = tanweerTextSize(32f))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -459,7 +589,7 @@ fun CalendarScreen(
                             ) {
                                 Text(
                                     text = "إجازة مدرسية رسمية",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = EmeraldGreen
                                 )
@@ -472,7 +602,7 @@ fun CalendarScreen(
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = selectedDayHoliday.title,
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextPrimary
                             )
@@ -480,7 +610,7 @@ fun CalendarScreen(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "المبرر الإداري: ${selectedDayHoliday.description}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextSecondary
                                 )
                             }
@@ -507,26 +637,26 @@ fun CalendarScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("🔴", fontSize = 16.sp)
+                                Text("🔴", fontSize = tanweerTextSize(16f))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "اختبار ${exam.subjectName}: ${exam.title}",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                             }
                             if (!exam.requiredChapters.isNullOrBlank()) {
                                 Text(
-                                    text = "الفصول المقررة: ${exam.requiredChapters}",
-                                    fontSize = 12.sp,
+                                    text = "الفصول المقررة: ${localizedChapterListLabel(exam.requiredChapters)}",
+                                    fontSize = tanweerTextSize(12f),
                                     color = RubyRed,
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
                             }
                             Text(
                                 text = "اضغط لعرض تفاصيل ومقرر الاختبار 🔍",
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 color = TextMuted,
                                 modifier = Modifier.padding(top = 2.dp)
                             )
@@ -537,14 +667,30 @@ fun CalendarScreen(
             }
         }
 
-        // Selected Day Homeworks
-        if (dayHomeworks.isNotEmpty()) {
-            items(dayHomeworks) { hw ->
+        // Selected Day Assignments: distinguish HOMEWORK, TASK projects and unknown types.
+        if (dayAssignments.isNotEmpty()) {
+            items(dayAssignments, key = { it.id }) { hw ->
+                val taskKind = HomeworkTaskTypePolicy.classify(hw.taskType)
+                val typeLabel = when (taskKind) {
+                    HomeworkTaskKind.HOMEWORK -> R.string.homework_type_label_homework
+                    HomeworkTaskKind.TASK -> R.string.homework_type_label_project
+                    HomeworkTaskKind.UNKNOWN -> R.string.homework_type_label_other
+                }
+                val typeColor = when (taskKind) {
+                    HomeworkTaskKind.HOMEWORK -> WarmAmber
+                    HomeworkTaskKind.TASK -> PurpleAccent
+                    HomeworkTaskKind.UNKNOWN -> TextMuted
+                }
+                val typeIcon = when (taskKind) {
+                    HomeworkTaskKind.HOMEWORK -> "📝"
+                    HomeworkTaskKind.TASK -> "🎯"
+                    HomeworkTaskKind.UNKNOWN -> "📌"
+                }
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { activeViewingHomework = hw },
-                    borderColor = WarmAmber.copy(alpha = 0.4f),
+                    borderColor = typeColor.copy(alpha = 0.4f),
                     backgroundColor = GlassSurface
                 ) {
                     Row(
@@ -554,19 +700,19 @@ fun CalendarScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "📝 واجب ${hw.subjectName}: ${hw.title}",
-                                fontSize = 14.sp,
+                                text = "$typeIcon ${stringResource(typeLabel)} ${hw.subjectName}: ${hw.title}",
+                                fontSize = tanweerTextSize(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                             Text(
-                                text = "موعد التسليم: ${hw.dueDate}",
-                                fontSize = 12.sp,
-                                color = WarmAmber
+                                text = stringResource(R.string.calendar_assignment_due_date, hw.dueDate),
+                                fontSize = tanweerTextSize(12f),
+                                color = typeColor
                             )
                             Text(
-                                text = "اضغط لعرض تفاصيل الواجب والمرفقات 🔍",
-                                fontSize = 10.sp,
+                                text = stringResource(R.string.calendar_assignment_details_hint),
+                                fontSize = tanweerTextSize(10f),
                                 color = TextMuted,
                                 modifier = Modifier.padding(top = 2.dp)
                             )
@@ -609,12 +755,12 @@ fun CalendarScreen(
                                         "WORKSHOP" -> "💡"
                                         else -> "🎪"
                                     },
-                                    fontSize = 16.sp
+                                    fontSize = tanweerTextSize(16f)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "فعالية: ${ev.title}",
-                                    fontSize = 14.sp,
+                                    fontSize = tanweerTextSize(14f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
@@ -622,7 +768,7 @@ fun CalendarScreen(
                             if (!ev.description.isNullOrBlank()) {
                                 Text(
                                     text = ev.description,
-                                    fontSize = 12.sp,
+                                    fontSize = tanweerTextSize(12f),
                                     color = TextSecondary,
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
@@ -630,14 +776,14 @@ fun CalendarScreen(
                             if (!ev.location.isNullOrBlank() || !ev.timeStr.isNullOrBlank()) {
                                 Text(
                                     text = "${ev.timeStr?.let { "⏰ $it " } ?: ""}${ev.location?.let { "📍 $it" } ?: ""}",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = PurpleAccent,
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
                             }
                             Text(
                                 text = "اضغط لعرض تفاصيل الفعالية 🔍",
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 color = TextMuted,
                                 modifier = Modifier.padding(top = 2.dp)
                             )
@@ -664,7 +810,7 @@ fun CalendarScreen(
                         ) {
                             Text(
                                 text = "${content.subjectIcon} درس ${content.subjectName}: ${content.title}",
-                                fontSize = 14.sp,
+                                fontSize = tanweerTextSize(14f),
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
@@ -673,7 +819,7 @@ fun CalendarScreen(
                         if (!content.description.isNullOrBlank()) {
                             Text(
                                 text = content.description,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 color = TextSecondary,
                                 modifier = Modifier.padding(top = 4.dp)
                             )
@@ -687,12 +833,12 @@ fun CalendarScreen(
                         ) {
                             Text(
                                 text = "بواسطة: ${content.authorName} (${content.authorGradeSection})",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = CyanAccent
                             )
                             Text(
                                 text = "📖 اضغط لفتح الصور والنقل للدفتر",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = CyanAccent,
                                 fontWeight = FontWeight.Bold
                             )
@@ -700,173 +846,76 @@ fun CalendarScreen(
                     }
                 }
             }
-        } else if (dayExams.isEmpty() && dayHomeworks.isEmpty() && dayEvents.isEmpty()) {
+        } else if (dayExams.isEmpty() && dayAssignments.isEmpty() && dayEvents.isEmpty()) {
             item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface.copy(alpha = 0.4f)
-                ) {
-                    Text(
-                        text = "لا توجد منشورات أو واجبات أو فعاليات مسجلة لهذا اليوم حتى الآن. يمكنك إضافة وتوثيق الحصة بالضغط على زر الإضافة أعلاه.",
-                        fontSize = 13.sp,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp)
-                    )
+                if (hasConfirmedEmptyDay) {
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = GlassSurface.copy(alpha = 0.4f)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.calendar_empty_day_message),
+                            fontSize = tanweerTextSize(13f),
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp)
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PendingSyncEmptyState(
+                            dataLabel = stringResource(com.magd.tanweer.R.string.calendar_day_details_label, selectedDateStr),
+                            syncState = aggregateSyncStates(listOf(scopedCalendarSyncState, scopedDayDetailsSyncState))
+                        )
+                        TextButton(
+                            onClick = {
+                                viewModel.syncCalendarMonth(activeGroupId, monthQueryFormat.format(currentCalendar.time), isRefresh = true)
+                                viewModel.syncDayDetails(activeGroupId, selectedDateStr)
+                            }
+                        ) {
+                            Text(stringResource(com.magd.tanweer.R.string.calendar_retry_day_sync), color = CyanAccent)
+                        }
+                    }
                 }
             }
         }
     }
 
     if (showAddActionSheet) {
-        ModalBottomSheet(
+        CalendarAddActionSheet(
+            dateLabel = TanweerViewModel.getFormattedArabicDate(selectedDateStr),
+            canDeclareSchoolHoliday = currentUser?.role in listOf("TEACHER", "ADMIN"),
             onDismissRequest = { showAddActionSheet = false },
-            containerColor = MidnightSurface,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = CyanAccent) }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .padding(bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "➕ إضافة وتوثيق ليوم: ${TanweerViewModel.getFormattedArabicDate(selectedDateStr)}",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = CyanAccent
-                )
-                Text(
-                    text = "اختر نوع النشاط الذي ترغب في إضافته أو توثيقه لهذا التاريخ:",
-                    fontSize = 12.sp,
-                    color = TextSecondary
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface,
-                    onClick = {
-                        showAddActionSheet = false
-                        viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.openUploadDialog()
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text("📷", fontSize = 24.sp)
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("توثيق درس للشعبة", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("التقاط صور السبورة ومشاركتها مع زملاء الصف", fontSize = 11.sp, color = TextSecondary)
-                        }
-                        GlassPill(text = "درس", color = CyanAccent, bgColor = CyanGlow)
-                    }
-                }
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface,
-                    onClick = {
-                        showAddActionSheet = false
-                        viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.openAddHomeworkDialog(selectedDateStr)
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text("📝", fontSize = 24.sp)
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("إضافة واجب أو تكليف مدرسي", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تسجيل الواجب المطلوب وتاريخ التسليم المعتمد", fontSize = 11.sp, color = TextSecondary)
-                        }
-                        GlassPill(text = "واجب", color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.15f))
-                    }
-                }
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface,
-                    onClick = {
-                        showAddActionSheet = false
-                        viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.openAddExamDialog(selectedDateStr)
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text("📑", fontSize = 24.sp)
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("إضافة اختبار أو تسميع دوري", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تحديد موعد الاختبار والفصول المقررة", fontSize = 11.sp, color = TextSecondary)
-                        }
-                        GlassPill(text = "اختبار", color = RubyRed, bgColor = RubyRed.copy(alpha = 0.15f))
-                    }
-                }
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = GlassSurface,
-                    onClick = {
-                        showAddActionSheet = false
-                        viewModel.setSelectedDate(selectedDateStr)
-                        viewModel.openAddEventDialog(selectedDateStr)
-                    }
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text("🎪", fontSize = 24.sp)
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("إضافة فعالية أو مناسبة مدرسية", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("تسجيل مسابقة، عطلة، أو نشاط صفي تفاعلي", fontSize = 11.sp, color = TextSecondary)
-                        }
-                        GlassPill(text = "فعالية", color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
-                    }
-                }
-
-                if (currentUser?.role in listOf("TEACHER", "ADMIN")) {
-                    GlassCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        backgroundColor = GlassSurface,
-                        onClick = {
-                            showAddActionSheet = false
-                            holidayTitle = ""
-                            holidayReason = ""
-                            holidayError = null
-                            showAddHolidayDialog = true
-                        }
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text("🌴", fontSize = 24.sp)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("إعلان إجازة مدرسية رسمية", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
-                                Text("تعيين هذا اليوم كإجازة مع توثيق السبب والمبرر الإلزامي", fontSize = 11.sp, color = TextSecondary)
-                            }
-                            GlassPill(text = "إجازة", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
-                        }
-                    }
-                }
+            onAddLesson = {
+                showAddActionSheet = false
+                viewModel.setSelectedDate(selectedDateStr)
+                viewModel.openUploadDialog()
+            },
+            onAddHomework = {
+                showAddActionSheet = false
+                viewModel.setSelectedDate(selectedDateStr)
+                viewModel.openAddHomeworkDialog(selectedDateStr)
+            },
+            onAddExam = {
+                showAddActionSheet = false
+                viewModel.setSelectedDate(selectedDateStr)
+                viewModel.openAddExamDialog(selectedDateStr)
+            },
+            onAddEvent = {
+                showAddActionSheet = false
+                viewModel.setSelectedDate(selectedDateStr)
+                viewModel.openAddEventDialog(selectedDateStr)
+            },
+            onDeclareSchoolHoliday = {
+                showAddActionSheet = false
+                holidayTitle = ""
+                holidayReason = ""
+                holidayError = null
+                showAddHolidayDialog = true
             }
-        }
+        )
     }
 
     if (showAddHolidayDialog) {
@@ -874,8 +923,8 @@ fun CalendarScreen(
             onDismissRequest = { if (!isSubmittingHoliday) showAddHolidayDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("🌴", fontSize = 22.sp)
-                    Text("إعلان إجازة مدرسية رسمية", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("🌴", fontSize = tanweerTextSize(22f))
+                    Text("إعلان إجازة مدرسية رسمية", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             },
             text = {
@@ -885,7 +934,7 @@ fun CalendarScreen(
                 ) {
                     Text(
                         text = "التاريخ: ${TanweerViewModel.getFormattedArabicDate(selectedDateStr)} ($selectedDateStr)",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         color = CyanAccent
                     )
 
@@ -915,10 +964,10 @@ fun CalendarScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column {
-                            Text("نطاق الإجازة", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("نطاق الإجازة", fontSize = tanweerTextSize(13f), fontWeight = FontWeight.Bold, color = TextPrimary)
                             Text(
                                 if (isSchoolWideHoliday) "كامل المدرسة (جميع الشعب والمراحل)" else "شعبتي الحالية فقط",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                         }
@@ -932,7 +981,7 @@ fun CalendarScreen(
                         Text(
                             text = holidayError ?: "",
                             color = RubyRed,
-                            fontSize = 12.sp
+                            fontSize = tanweerTextSize(12f)
                         )
                     }
                 }
@@ -995,15 +1044,26 @@ fun CalendarScreen(
         )
     }
 
-    // 2. Homework Modal (TA-13)
+    // 2. Assignment Modal (HOMEWORK / TASK)
     activeViewingHomework?.let { hw ->
+        val taskKind = HomeworkTaskTypePolicy.classify(hw.taskType)
+        val typeLabel = when (taskKind) {
+            HomeworkTaskKind.HOMEWORK -> R.string.homework_type_label_homework
+            HomeworkTaskKind.TASK -> R.string.homework_type_label_project
+            HomeworkTaskKind.UNKNOWN -> R.string.homework_type_label_other
+        }
+        val typeColor = when (taskKind) {
+            HomeworkTaskKind.HOMEWORK -> WarmAmber
+            HomeworkTaskKind.TASK -> PurpleAccent
+            HomeworkTaskKind.UNKNOWN -> TextMuted
+        }
         Dialog(onDismissRequest = { activeViewingHomework = null }) {
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
                 backgroundColor = MidnightSurface,
-                borderColor = WarmAmber
+                borderColor = typeColor
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -1014,26 +1074,29 @@ fun CalendarScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        GlassPill(text = hw.subjectName, color = WarmAmber, bgColor = WarmAmber.copy(alpha = 0.15f))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            GlassPill(text = hw.subjectName, color = typeColor, bgColor = typeColor.copy(alpha = 0.15f))
+                            GlassPill(text = stringResource(typeLabel), color = typeColor, bgColor = typeColor.copy(alpha = 0.15f))
+                        }
                         IconButton(onClick = { activeViewingHomework = null }) {
                             Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextSecondary)
                         }
                     }
 
-                    Text(text = hw.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                    Text(text = "📅 تاريخ الطرح: ${hw.studyDate} • الاستحقاق: ${hw.dueDate}", fontSize = 11.sp, color = TextSecondary)
+                    Text(text = hw.title, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Black, color = TextPrimary)
+                    Text(text = "📅 تاريخ الطرح: ${hw.studyDate} • الاستحقاق: ${hw.dueDate}", fontSize = tanweerTextSize(11f), color = TextSecondary)
 
                     if (!hw.details.isNullOrBlank()) {
-                        Text(text = hw.details, fontSize = 13.sp, color = TextPrimary, lineHeight = 18.sp)
+                        Text(text = hw.details, fontSize = tanweerTextSize(13f), color = TextPrimary, lineHeight = tanweerLineHeight(18f))
                     }
 
                     if (!hw.pageNumbers.isNullOrBlank() || !hw.questionNumbers.isNullOrBlank()) {
-                        Text(text = "📖 الصفحات: ${hw.pageNumbers ?: "—"} • الأسئلة: ${hw.questionNumbers ?: "—"}", fontSize = 12.sp, color = CyanAccent)
+                        Text(text = "📖 الصفحات: ${hw.pageNumbers ?: "—"} • الأسئلة: ${hw.questionNumbers ?: "—"}", fontSize = tanweerTextSize(12f), color = CyanAccent)
                     }
 
                     if (hw.mediaUrls.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = "المرفقات (${hw.mediaUrls.size}):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text(text = "المرفقات (${hw.mediaUrls.size}):", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = TextPrimary)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1041,7 +1104,7 @@ fun CalendarScreen(
                             hw.mediaUrls.take(3).forEach { url ->
                                 AsyncImage(
                                     model = url,
-                                    contentDescription = "مرفق الواجب",
+                                    contentDescription = stringResource(R.string.calendar_assignment_attachment),
                                     modifier = Modifier
                                         .size(70.dp)
                                         .clip(RoundedCornerShape(8.dp))
@@ -1059,9 +1122,13 @@ fun CalendarScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (hw.isCompleted) "تم إنجاز هذا الواجب ✓" else "الواجب غير منجز بعد",
-                            fontSize = 12.sp,
-                            color = if (hw.isCompleted) EmeraldGreen else WarmAmber,
+                            text = if (hw.isCompleted) {
+                                stringResource(R.string.calendar_assignment_completed, stringResource(typeLabel))
+                            } else {
+                                stringResource(R.string.calendar_assignment_not_completed, stringResource(typeLabel))
+                            },
+                            fontSize = tanweerTextSize(12f),
+                            color = if (hw.isCompleted) EmeraldGreen else typeColor,
                             fontWeight = FontWeight.Bold
                         )
                         GlassButton(
@@ -1099,21 +1166,21 @@ fun CalendarScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             GlassPill(text = exam.subjectName, color = RubyRed, bgColor = RubyRed.copy(alpha = 0.15f))
-                            GlassPill(text = exam.examType, color = CyanAccent, bgColor = CyanAccent.copy(alpha = 0.15f))
+                            GlassPill(text = localizedExamTypeLabel(exam.examType), color = CyanAccent, bgColor = CyanAccent.copy(alpha = 0.15f))
                         }
                         IconButton(onClick = { activeViewingExam = null }) {
                             Icon(Icons.Default.Close, contentDescription = "إغلاق", tint = TextSecondary)
                         }
                     }
 
-                    Text(text = exam.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                    Text(text = "📅 موعد الاختبار: ${exam.examDate}", fontSize = 12.sp, color = WarmAmber, fontWeight = FontWeight.Bold)
+                    Text(text = exam.title, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Black, color = TextPrimary)
+                    Text(text = "📅 موعد الاختبار: ${exam.examDate}", fontSize = tanweerTextSize(12f), color = WarmAmber, fontWeight = FontWeight.Bold)
 
                     if (!exam.requiredChapters.isNullOrBlank()) {
-                        Text(text = "الفصول والمقرر: ${exam.requiredChapters}", fontSize = 13.sp, color = CyanAccent)
+                        Text(text = "الفصول والمقرر: ${localizedChapterListLabel(exam.requiredChapters)}", fontSize = tanweerTextSize(13f), color = CyanAccent)
                     }
                     if (!exam.notes.isNullOrBlank()) {
-                        Text(text = "ملاحظات: ${exam.notes}", fontSize = 12.sp, color = TextSecondary)
+                        Text(text = "ملاحظات: ${exam.notes}", fontSize = tanweerTextSize(12f), color = TextSecondary)
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
@@ -1125,7 +1192,7 @@ fun CalendarScreen(
                     ) {
                         Text(
                             text = if (exam.isCompleted) "تمت المذاكرة بالكامل ✓" else "مطلوب المذاكرة",
-                            fontSize = 12.sp,
+                            fontSize = tanweerTextSize(12f),
                             color = if (exam.isCompleted) EmeraldGreen else RubyRed,
                             fontWeight = FontWeight.Bold
                         )
@@ -1163,7 +1230,7 @@ fun CalendarScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            GlassPill(text = event.category, color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
+                            GlassPill(text = localizedEventCategoryLabel(event.category), color = PurpleAccent, bgColor = PurpleAccent.copy(alpha = 0.15f))
                             if (event.groupId == "all") {
                                 GlassPill(text = "كامل المدرسة 🏫", color = EmeraldGreen, bgColor = EmeraldGreen.copy(alpha = 0.15f))
                             }
@@ -1173,14 +1240,14 @@ fun CalendarScreen(
                         }
                     }
 
-                    Text(text = event.title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                    Text(text = "📅 التاريخ: ${event.eventDate} ${event.timeStr?.let { "• $it" } ?: ""}", fontSize = 11.sp, color = TextSecondary)
+                    Text(text = event.title, fontSize = tanweerTextSize(18f), fontWeight = FontWeight.Black, color = TextPrimary)
+                    Text(text = "📅 التاريخ: ${event.eventDate} ${event.timeStr?.let { "• $it" } ?: ""}", fontSize = tanweerTextSize(11f), color = TextSecondary)
 
                     if (!event.location.isNullOrBlank()) {
-                        Text(text = "📍 المكان: ${event.location}", fontSize = 13.sp, color = CyanAccent, fontWeight = FontWeight.Bold)
+                        Text(text = "📍 المكان: ${event.location}", fontSize = tanweerTextSize(13f), color = CyanAccent, fontWeight = FontWeight.Bold)
                     }
                     if (!event.description.isNullOrBlank()) {
-                        Text(text = event.description, fontSize = 13.sp, color = TextPrimary, lineHeight = 18.sp)
+                        Text(text = event.description, fontSize = tanweerTextSize(13f), color = TextPrimary, lineHeight = tanweerLineHeight(18f))
                     }
                 }
             }
@@ -1196,6 +1263,8 @@ data class CalendarDayItem(
     val hasLesson: Boolean = false,
     val hasExam: Boolean = false,
     val hasHomework: Boolean = false,
+    val hasTask: Boolean = false,
+    val hasOtherAssignment: Boolean = false,
     val hasEvent: Boolean = false,
     val hasHoliday: Boolean = false
 )

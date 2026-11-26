@@ -4,6 +4,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 
 // =========================================================================
@@ -13,56 +14,56 @@ import androidx.compose.ui.unit.sp
 
 object TanweerTypographyTokens {
     // Standard Base Scale Sizes
-    val SizeHero = 28.sp
-    val SizeHeadline = 22.sp
-    val SizeHeader = 20.sp
-    val SizeTitle = 16.sp
-    val SizeSubTitle = 14.sp
+    val SizeHero = 18.sp
+    val SizeHeadline = 16.sp
+    val SizeHeader = 16.sp
+    val SizeTitle = 15.sp
+    val SizeSubTitle = 13.sp
     val SizeBase = 12.sp
     val SizeCaption = 11.sp
     val SizeMeta = 10.sp
-    val SizeBadge = 9.sp
+    val SizeBadge = 10.sp
 
     val DisplayHero = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Black,
-        fontSize = 28.sp,
-        lineHeight = 34.sp
+        fontSize = 18.sp,
+        lineHeight = 22.sp
     )
 
     val HeadlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Black,
-        fontSize = 22.sp,
-        lineHeight = 28.sp
+        fontSize = 16.sp,
+        lineHeight = 20.sp
     )
 
     val HeadlineMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 20.sp,
-        lineHeight = 26.sp
+        fontSize = 16.sp,
+        lineHeight = 20.sp
     )
 
     val TitleLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 18.sp,
-        lineHeight = 24.sp
+        fontSize = 15.sp,
+        lineHeight = 19.sp
     )
 
     val TitleMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 16.sp,
-        lineHeight = 22.sp
+        fontSize = 14.sp,
+        lineHeight = 18.sp
     )
 
     val TitleSmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 14.sp,
-        lineHeight = 20.sp
+        fontSize = 13.sp,
+        lineHeight = 17.sp
     )
 
     val BodyLarge = TextStyle(
@@ -76,7 +77,7 @@ object TanweerTypographyTokens {
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
-        lineHeight = 17.sp
+        lineHeight = 16.sp
     )
 
     val BodySmall = TextStyle(
@@ -144,3 +145,31 @@ object AppTypography {
     val Hint: TextStyle get() = TanweerTypographyTokens.BodySmall
     val Chip: TextStyle get() = TanweerTypographyTokens.LabelMedium
 }
+
+
+/**
+ * Keeps persisted legacy font settings aligned with the supported 12/14/16sp presets.
+ * Old 11sp values fall back to 12sp; old 18sp values fall back to 16sp.
+ */
+fun normalizeTanweerFontScale(scale: Float): Float {
+    val safeScale = if (scale.isFinite()) scale else 1f
+    return listOf(1f, 14f / 12f, 16f / 12f)
+        .minByOrNull { kotlin.math.abs(it - safeScale) }
+        ?: 1f
+}
+
+/**
+ * Maps screen-specific sizes to Tanweer's shared typography roles.
+ * User-selected font size is applied once by TanweerTheme's LocalDensity.
+ * Main titles use only a modest 18sp emphasis over the 12/14/16sp content scale.
+ */
+fun tanweerTextSize(sourceSp: Float): TextUnit = when {
+    sourceSp <= 10f -> 10.sp
+    sourceSp <= 12.5f -> 12.sp
+    sourceSp <= 15.5f -> 14.sp
+    sourceSp <= 22.5f -> 16.sp
+    else -> 18.sp
+}
+
+fun tanweerLineHeight(sourceSp: Float): TextUnit =
+    (tanweerTextSize(sourceSp).value + 3f).sp

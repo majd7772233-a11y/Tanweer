@@ -40,7 +40,7 @@ export async function handleGetCalendarOverview(
 
   // 3. Full Events for the calendar
   const events = await env.DB.prepare(
-    `SELECT id, group_id, event_date, time_str, title, description, category, location, created_at
+    `SELECT id, group_id, event_date, time_str, title, description, category, location, created_by, created_at
      FROM events
      WHERE (group_id = ? OR group_id = 'all') AND event_date LIKE ?
      ORDER BY event_date ASC`
@@ -90,7 +90,7 @@ export async function handleGetDayDetail(
   const contentList = [];
   for (const c of (contents.results as any[])) {
     const media = await env.DB.prepare(
-      `SELECT id, page_order, url, mime_type, file_size FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
+      `SELECT id, page_order, url, mime_type, file_size, checksum FROM content_media WHERE content_id = ? ORDER BY page_order ASC`
     ).bind(c.id).all();
     contentList.push(mapContent(c, media.results || []));
   }
@@ -119,7 +119,7 @@ export async function handleGetDayDetail(
   ).bind(user.userId, groupId, date).all();
 
   const events = await env.DB.prepare(
-    `SELECT id, group_id, event_date, time_str, title, description, category, location, created_at
+    `SELECT id, group_id, event_date, time_str, title, description, category, location, created_by, created_at
      FROM events
      WHERE (group_id = ? OR group_id = 'all') AND event_date = ?`
   ).bind(groupId, date).all();

@@ -1,12 +1,28 @@
 plugins {
   alias(libs.plugins.android.application)
+  alias(libs.plugins.kotlin.android)
+  alias(libs.plugins.kotlin.kapt)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.google.devtools.ksp)
+  alias(libs.plugins.moshix)
+}
+
+moshi {
+  applyMoshiDependency.set(false)
+}
+
+kotlin {
+  compilerOptions {
+    jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+  }
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KaptGenerateStubs>().configureEach {
+  compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
 }
 
 android {
   namespace = "com.magd.tanweer"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 36
 
   defaultConfig {
     applicationId = "com.magd.tanweer"
@@ -16,6 +32,22 @@ android {
     versionName = "1.2.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+  }
+
+  flavorDimensions += "environment"
+
+  productFlavors {
+    create("production") {
+      dimension = "environment"
+      buildConfigField("String", "API_BASE_URL", "\"https://tanweer.magd.workers.dev/\"")
+    }
+
+    create("staging") {
+      dimension = "environment"
+      applicationIdSuffix = ".staging"
+      versionNameSuffix = "-staging"
+      buildConfigField("String", "API_BASE_URL", "\"https://tanweer-staging.magd.workers.dev/\"")
+    }
   }
 
   signingConfigs {
@@ -33,12 +65,6 @@ android {
         keyPassword = System.getenv("KEY_PASSWORD")
     }
 
-    create("debugConfig") {
-        storeFile = file("${rootDir}/debug.keystore")
-        storePassword = "android"
-        keyAlias = "androiddebugkey"
-        keyPassword = "android"
-    }
   }
 
   buildTypes {
@@ -48,17 +74,30 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    // Use the Android Gradle Plugin's generated default debug keystore.
+    // Do not depend on a private/untracked keystore file in the repository.
+    debug {}
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
   }
+
   buildFeatures {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        // Robolectric downloads android-all directly via HttpURLConnection,
+        // so point it at Maven Central's canonical endpoint instead of repo1.
+        it.systemProperty("robolectric.dependency.repo.id", "mavenCentral")
+        it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
@@ -104,6 +143,5 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-  "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
+  kapt(libs.androidx.room.compiler)
 }

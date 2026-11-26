@@ -1,6 +1,7 @@
 package com.magd.tanweer.ui.screens
 
 import android.widget.Toast
+import com.magd.tanweer.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -24,6 +25,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,8 +34,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.magd.tanweer.data.model.BookItem
 import com.magd.tanweer.data.model.SchoolHierarchy
+import com.magd.tanweer.data.model.SyncState
 import com.magd.tanweer.data.pdf.PdfBookManager
 import com.magd.tanweer.ui.TanweerViewModel
+import com.magd.tanweer.util.LibrarySubjectFilterPolicy
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +59,9 @@ fun LibraryScreen(
     val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val isSyncing by viewModel.isSyncingBooks.collectAsStateWithLifecycle()
+    val librarySyncState by viewModel.librarySyncState.collectAsStateWithLifecycle()
+    val librarySyncGradeId by viewModel.librarySyncGradeId.collectAsStateWithLifecycle()
+    val libraryNavigationRequest by viewModel.libraryNavigationRequest.collectAsStateWithLifecycle()
     val pdfManager = remember { PdfBookManager(context) }
 
     var selectedGradeId by remember(currentUser?.gradeId) { mutableIntStateOf(currentUser?.gradeId ?: 10) }
@@ -66,11 +73,24 @@ fun LibraryScreen(
     }
     var searchQuery by remember { mutableStateOf("") }
     var selectedSubjectFilter by remember { mutableStateOf<String?>(null) }
+    var includeSubSubjects by remember { mutableStateOf(false) }
     // DEFAULT VIEW MODE IS WOODEN BOOKSHELF AS REQUESTED
     var currentViewMode by remember { mutableStateOf(LibraryViewMode.WOODEN_SHELF) }
     var isViewModeSheetOpen by remember { mutableStateOf(false) }
     var isStorageSheetOpen by remember { mutableStateOf(false) }
     var selectedBookForDetail by remember { mutableStateOf<BookItem?>(null) }
+
+    LaunchedEffect(libraryNavigationRequest?.requestId) {
+        val request = libraryNavigationRequest ?: return@LaunchedEffect
+        selectedGradeId = request.gradeId
+        searchQuery = ""
+        selectedSubjectFilter = request.subjectId?.let(LibrarySubjectFilterPolicy::canonicalSubjectId)
+        includeSubSubjects = false
+        if (request.gradeId != (currentUser?.gradeId ?: 10)) {
+            viewModel.syncBooks(request.gradeId, isRefresh = true)
+        }
+        viewModel.consumeLibraryNavigationRequest(request.requestId)
+    }
 
     // Fetch all books
     val allBooks by viewModel.repository.getAllBooks().collectAsStateWithLifecycle(initialValue = emptyList())
@@ -122,21 +142,42 @@ fun LibraryScreen(
         allBooks.filter { it.gradeId == selectedGradeId }.distinctBy { it.id }
     }
 
-    val filteredBooks = remember(gradeBooks, searchQuery, selectedSubjectFilter) {
+    val filteredBooks = remember(gradeBooks, searchQuery, selectedSubjectFilter, includeSubSubjects) {
         gradeBooks.filter { book ->
             val matchesSearch = searchQuery.isBlank() ||
                     book.title.contains(searchQuery, ignoreCase = true) ||
                     book.subjectName.contains(searchQuery, ignoreCase = true)
-            val matchesSubject = selectedSubjectFilter == null || book.subjectId.contains(selectedSubjectFilter!!, ignoreCase = true)
+            val matchesSubject = selectedSubjectFilter?.let { selectedId ->
+                LibrarySubjectFilterPolicy.matches(
+                    bookSubjectId = book.subjectId,
+                    selectedSubjectId = selectedId,
+                    includeSubSubjects = includeSubSubjects
+                )
+            } ?: true
             matchesSearch && matchesSubject
         }
     }
 
     val distinctSubjects = remember(gradeBooks) {
-        gradeBooks.map { it.subjectId to it.subjectName }.distinctBy { it.first }
+        gradeBooks
+            .groupBy { LibrarySubjectFilterPolicy.canonicalSubjectId(it.subjectId) }
+            .map { (subjectId, books) -> subjectId to books.first().subjectName }
+    }
+    val availableSubjectIds = remember(gradeBooks) { gradeBooks.map { it.subjectId } }
+    val availableSubSubjectBookCount = remember(gradeBooks, selectedSubjectFilter) {
+        selectedSubjectFilter?.let {
+            LibrarySubjectFilterPolicy.countAvailableSubSubjectBooks(it, availableSubjectIds)
+        } ?: 0
     }
 
     val currentGradeName = SchoolHierarchy.getGradeName(selectedGradeId)
+    val hasConfirmedEmptyGrade = shouldShowConfirmedGradeEmptyState(
+        selectedGradeId = selectedGradeId,
+        syncedGradeId = librarySyncGradeId,
+        bookCount = gradeBooks.size,
+        syncState = librarySyncState,
+    )
+    val selectedGradeSyncState = if (librarySyncGradeId == selectedGradeId) librarySyncState else SyncState.Idle
 
     Box(
         modifier = Modifier
@@ -160,20 +201,20 @@ fun LibraryScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "📚 مكتبة الكتب والمناهج",
-                            fontSize = 19.sp,
+                            fontSize = tanweerTextSize(19f),
                             fontWeight = FontWeight.Black,
                             color = CyanAccent
                         )
                         Text(
                             text = "${gradeBooks.size} كتاباً معتمداً لـ $currentGradeName (إجمالي المناهج: ${distinctAllBooks.size})",
-                            fontSize = 11.sp,
+                            fontSize = tanweerTextSize(11f),
                             color = TextSecondary,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                         if (!storedReleaseTag.isNullOrBlank()) {
                             Text(
                                 text = "🏷️ إصدار المناهج المعتمد: $storedReleaseTag",
-                                fontSize = 10.sp,
+                                fontSize = tanweerTextSize(10f),
                                 color = CyanAccent.copy(alpha = 0.85f),
                                 fontWeight = FontWeight.Medium
                             )
@@ -191,10 +232,10 @@ fun LibraryScreen(
                                 .padding(horizontal = 9.dp, vertical = 7.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(text = "💾", fontSize = 13.sp)
+                                Text(text = "💾", fontSize = tanweerTextSize(13f))
                                 Text(
                                     text = "التخزين",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextPrimary
                                 )
                             }
@@ -210,10 +251,10 @@ fun LibraryScreen(
                                 .padding(horizontal = 10.dp, vertical = 7.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(text = currentViewMode.icon, fontSize = 14.sp)
+                                Text(text = currentViewMode.icon, fontSize = tanweerTextSize(14f))
                                 Text(
                                     text = currentViewMode.title,
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     fontWeight = FontWeight.Bold,
                                     color = CyanAccent
                                 )
@@ -246,7 +287,7 @@ fun LibraryScreen(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "اختر الصف الدراسي لتصفح كتبه:",
-                        fontSize = 12.sp,
+                        fontSize = tanweerTextSize(12f),
                         color = TextSecondary,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(bottom = 6.dp)
@@ -268,8 +309,17 @@ fun LibraryScreen(
                                         RoundedCornerShape(14.dp)
                                     )
                                     .clickable {
-                                        selectedGradeId = gid
-                                        selectedSubjectFilter = null
+                                        if (selectedGradeId != gid) {
+                                            selectedGradeId = gid
+                                            selectedSubjectFilter = null
+                                            includeSubSubjects = false
+                                            viewModel.syncBooks(
+                                                gradeId = gid,
+                                                onResult = { success, message ->
+                                                    if (!success) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                        }
                                     }
                                     .padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
@@ -279,7 +329,7 @@ fun LibraryScreen(
                                 ) {
                                     Text(
                                         text = gName,
-                                        fontSize = 12.sp,
+                                        fontSize = tanweerTextSize(12f),
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                         color = if (isSelected) CyanAccent else TextPrimary
                                     )
@@ -291,7 +341,7 @@ fun LibraryScreen(
                                     ) {
                                         Text(
                                             text = "$count",
-                                            fontSize = 10.sp,
+                                            fontSize = tanweerTextSize(10f),
                                             fontWeight = FontWeight.Bold,
                                             color = if (isSelected) TextOnAccent else TextSecondary
                                         )
@@ -324,7 +374,10 @@ fun LibraryScreen(
                             item {
                                 FilterChip(
                                     selected = selectedSubjectFilter == null,
-                                    onClick = { selectedSubjectFilter = null },
+                                    onClick = {
+                                        selectedSubjectFilter = null
+                                        includeSubSubjects = false
+                                    },
                                     label = { Text("جميع المواد (${gradeBooks.size})") },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = CyanAccent,
@@ -333,11 +386,14 @@ fun LibraryScreen(
                                 )
                             }
                             items(distinctSubjects) { (subId, subName) ->
-                                val count = gradeBooks.count { it.subjectId == subId }
+                                val count = gradeBooks.count {
+                                    LibrarySubjectFilterPolicy.matches(it.subjectId, subId)
+                                }
                                 FilterChip(
                                     selected = selectedSubjectFilter == subId,
                                     onClick = {
                                         selectedSubjectFilter = if (selectedSubjectFilter == subId) null else subId
+                                        includeSubSubjects = false
                                     },
                                     label = { Text("$subName ($count)") },
                                     colors = FilterChipDefaults.filterChipColors(
@@ -347,6 +403,27 @@ fun LibraryScreen(
                                 )
                             }
                         }
+                    }
+                }
+
+                if (selectedSubjectFilter != null && availableSubSubjectBookCount > 0) {
+                    item {
+                        FilterChip(
+                            selected = includeSubSubjects,
+                            onClick = { includeSubSubjects = !includeSubSubjects },
+                            label = {
+                                Text(
+                                    stringResource(
+                                        R.string.library_include_subsubjects,
+                                        availableSubSubjectBookCount
+                                    )
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = CyanAccent,
+                                selectedLabelColor = TextOnAccent
+                            )
+                        )
                     }
                 }
             }
@@ -365,14 +442,20 @@ fun LibraryScreen(
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = "جاري الاتصال بـ GitHub Releases وفحص ملفات المناهج والكتب...",
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 color = TextSecondary
                             )
                         }
                     }
                 }
             }
-            // Empty State for Grade without Books
+            // Empty catalogue claims require a successful snapshot for this exact grade.
+            else if (gradeBooks.isEmpty() && !hasConfirmedEmptyGrade) {
+                item {
+                    PendingSyncEmptyState(dataLabel = "كتب $currentGradeName", syncState = selectedGradeSyncState)
+                }
+            }
+            // Confirmed empty state for the selected grade
             else if (gradeBooks.isEmpty()) {
                 item {
                     EmptyGradeBooksView(
@@ -383,6 +466,32 @@ fun LibraryScreen(
                             }
                         }
                     )
+                }
+            }
+            // A subject/search filter may be narrower than a non-empty grade catalogue.
+            else if (filteredBooks.isEmpty()) {
+                item {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.library_no_matching_books),
+                                color = TextSecondary,
+                                fontSize = tanweerTextSize(13f),
+                                textAlign = TextAlign.Center
+                            )
+                            TextButton(onClick = {
+                                selectedSubjectFilter = null
+                                includeSubSubjects = false
+                                searchQuery = ""
+                            }) {
+                                Text(stringResource(R.string.library_show_all_books), color = CyanAccent)
+                            }
+                        }
+                    }
                 }
             }
             // Render Books based on Current View Mode (Default: Wooden Shelf)
@@ -470,7 +579,7 @@ fun LibraryScreen(
                 ) {
                     Text(
                         text = "🎨 طريقة عرض المكتبة:",
-                        fontSize = 16.sp,
+                        fontSize = tanweerTextSize(16f),
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
@@ -504,18 +613,18 @@ fun LibraryScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text(text = mode.icon, fontSize = 24.sp)
+                                    Text(text = mode.icon, fontSize = tanweerTextSize(24f))
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column {
                                         Text(
                                             text = mode.title,
-                                            fontSize = 14.sp,
+                                            fontSize = tanweerTextSize(14f),
                                             fontWeight = FontWeight.Bold,
                                             color = if (isSelected) CyanAccent else TextPrimary
                                         )
                                         Text(
                                             text = mode.desc,
-                                            fontSize = 11.sp,
+                                            fontSize = tanweerTextSize(11f),
                                             color = TextSecondary,
                                             maxLines = 2
                                         )
@@ -571,17 +680,17 @@ fun LibraryScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("💾", fontSize = 22.sp)
+                            Text("💾", fontSize = tanweerTextSize(22f))
                             Column {
                                 Text(
                                     text = "إدارة تخزين ومساحة الكتب",
-                                    fontSize = 16.sp,
+                                    fontSize = tanweerTextSize(16f),
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                                 Text(
                                     text = "${downloadedBooks.size} كتب محملة أوفلاين على الجهاز",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = TextSecondary
                                 )
                             }
@@ -592,7 +701,7 @@ fun LibraryScreen(
                                 onClick = { confirmDeleteAll = true },
                                 colors = ButtonDefaults.textButtonColors(contentColor = RubyRed)
                             ) {
-                                Text("حذف الكل 🗑️", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("حذف الكل 🗑️", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -609,10 +718,10 @@ fun LibraryScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
-                                Text("المساحة الإجمالية المستهلكة", fontSize = 12.sp, color = TextSecondary)
+                                Text("المساحة الإجمالية المستهلكة", fontSize = tanweerTextSize(12f), color = TextSecondary)
                                 Text(
                                     text = pdfManager.formatFileSize(totalBytes),
-                                    fontSize = 20.sp,
+                                    fontSize = tanweerTextSize(20f),
                                     fontWeight = FontWeight.Black,
                                     color = CyanAccent
                                 )
@@ -625,7 +734,7 @@ fun LibraryScreen(
                             ) {
                                 Text(
                                     text = if (totalBytes > 0) "تخزين محلي آمن 📂" else "لا توجد ملفات محملة",
-                                    fontSize = 11.sp,
+                                    fontSize = tanweerTextSize(11f),
                                     color = CyanAccent,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -640,16 +749,16 @@ fun LibraryScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("ترتيب:", fontSize = 11.sp, color = TextSecondary)
+                            Text("ترتيب:", fontSize = tanweerTextSize(11f), color = TextSecondary)
                             FilterChip(
                                 selected = storageSortBy == "SIZE",
                                 onClick = { storageSortBy = "SIZE" },
-                                label = { Text("الأكبر حجماً", fontSize = 11.sp) }
+                                label = { Text("الأكبر حجماً", fontSize = tanweerTextSize(11f)) }
                             )
                             FilterChip(
                                 selected = storageSortBy == "NAME",
                                 onClick = { storageSortBy = "NAME" },
-                                label = { Text("أبجدياً", fontSize = 11.sp) }
+                                label = { Text("أبجدياً", fontSize = tanweerTextSize(11f)) }
                             )
                         }
                     }
@@ -664,7 +773,7 @@ fun LibraryScreen(
                         ) {
                             Text(
                                 text = "لم تقم بتحميل أي كتب للقراءة بدون إنترنت بعد.",
-                                fontSize = 13.sp,
+                                fontSize = tanweerTextSize(13f),
                                 color = TextSecondary
                             )
                         }
@@ -691,17 +800,17 @@ fun LibraryScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
-                                            Text("📕", fontSize = 20.sp)
+                                            Text("📕", fontSize = tanweerTextSize(20f))
                                             Column {
                                                 Text(
                                                     text = b.title,
-                                                    fontSize = 13.sp,
+                                                    fontSize = tanweerTextSize(13f),
                                                     fontWeight = FontWeight.Bold,
                                                     color = TextPrimary
                                                 )
                                                 Text(
                                                     text = "${b.subjectName} • ${pdfManager.formatFileSize(fileSize)}",
-                                                    fontSize = 11.sp,
+                                                    fontSize = tanweerTextSize(11f),
                                                     color = TextSecondary
                                                 )
                                             }
@@ -738,7 +847,7 @@ fun LibraryScreen(
                 val b = bookToDelete!!
                 AlertDialog(
                     onDismissRequest = { bookToDelete = null },
-                    title = { Text("حذف الكتاب من الجهاز؟", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                    title = { Text("حذف الكتاب من الجهاز؟", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold) },
                     text = { Text("هل تريد حذف ملف PDF لكتاب (${b.title}) لتوفير مساحة؟ يمكنك إعادة تحميله لاحقاً في أي وقت.") },
                     confirmButton = {
                         Button(
@@ -763,7 +872,7 @@ fun LibraryScreen(
             if (confirmDeleteAll) {
                 AlertDialog(
                     onDismissRequest = { confirmDeleteAll = false },
-                    title = { Text("حذف جميع الكتب المحملة؟", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                    title = { Text("حذف جميع الكتب المحملة؟", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Bold) },
                     text = { Text("سيتم حذف جميع ملفات PDF المخزنة محلياً (${downloadedBooks.size} كتب) وإفراغ مساحة ${pdfManager.formatFileSize(totalBytes)}. هل أنت متأكد؟") },
                     confirmButton = {
                         Button(
@@ -788,45 +897,33 @@ fun LibraryScreen(
             val book = selectedBookForDetail!!
             val isDownloaded = downloadedBooksMap[book.id] == true
 
-            ModalBottomSheet(
+            BookDetailsModal(
                 onDismissRequest = { selectedBookForDetail = null },
-                containerColor = MidnightSurface,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = CyanAccent) }
+                dismissContentDescription = stringResource(R.string.library_book_details_dismiss)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Canvas3DBookCard(
-                        book = book,
-                        isDownloaded = isDownloaded,
-                        onDownload = {
-                            selectedBookForDetail = null
-                            viewModel.openBookInPdfReader(book)
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        GlassButton(
-                            text = if (isDownloaded) "فتح ومطالعة الكتاب 📖" else "تحميل وقراءة الآن ⬇️",
-                            icon = if (isDownloaded) Icons.Default.MenuBook else Icons.Default.CloudDownload,
-                            color = if (isDownloaded) EmeraldGreen else CyanAccent,
-                            textColor = TextOnAccent,
-                            onClick = {
-                                selectedBookForDetail = null
-                                viewModel.openBookInPdfReader(book)
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
+                Canvas3DBookCard(
+                    book = book,
+                    isDownloaded = isDownloaded,
+                    onDownload = {
+                        selectedBookForDetail = null
+                        viewModel.openBookInPdfReader(book)
                     }
-                }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                GlassButton(
+                    text = if (isDownloaded) "فتح ومطالعة الكتاب 📖" else "تحميل وقراءة الآن ⬇️",
+                    icon = if (isDownloaded) Icons.Default.MenuBook else Icons.Default.CloudDownload,
+                    color = if (isDownloaded) EmeraldGreen else CyanAccent,
+                    textColor = TextOnAccent,
+                    onClick = {
+                        selectedBookForDetail = null
+                        viewModel.openBookInPdfReader(book)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "book_details_open_button"
+                )
             }
         }
     }
@@ -863,7 +960,7 @@ fun ListViewBookItem(
                     .border(1.dp, primaryColor.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = book.subjectIcon.ifEmpty { "📕" }, fontSize = 24.sp)
+                Text(text = book.subjectIcon.ifEmpty { "📕" }, fontSize = tanweerTextSize(24f))
             }
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -871,7 +968,7 @@ fun ListViewBookItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = book.title,
-                    fontSize = 14.sp,
+                    fontSize = tanweerTextSize(14f),
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
                     maxLines = 1,
@@ -882,11 +979,11 @@ fun ListViewBookItem(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.padding(top = 4.dp)
                 ) {
-                    Text(text = book.subjectName, fontSize = 12.sp, color = primaryColor)
-                    Text(text = "•", fontSize = 12.sp, color = TextMuted)
+                    Text(text = book.subjectName, fontSize = tanweerTextSize(12f), color = primaryColor)
+                    Text(text = "•", fontSize = tanweerTextSize(12f), color = TextMuted)
                     Text(
                         text = if (isDownloaded) "محمل أوفلاين ✅" else "${book.fileSizeMb} MB",
-                        fontSize = 11.sp,
+                        fontSize = tanweerTextSize(11f),
                         color = if (isDownloaded) EmeraldGreen else TextSecondary,
                         fontWeight = if (isDownloaded) FontWeight.Bold else FontWeight.Normal
                     )
@@ -1013,7 +1110,7 @@ fun ScatteredDeskView(
     ) {
         Text(
             text = "📐 طاولة المذاكرة الحرة (انقر على أي كتاب لفتحه مباشرة):",
-            fontSize = 12.sp,
+            fontSize = tanweerTextSize(12f),
             color = TextSecondary,
             fontWeight = FontWeight.Medium
         )
@@ -1093,7 +1190,7 @@ fun CoverFlow3DView(
 
                 Text(
                     text = "${activeIndex + 1} / ${books.size}",
-                    fontSize = 13.sp,
+                    fontSize = tanweerTextSize(13f),
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
@@ -1134,14 +1231,14 @@ fun EmptyGradeBooksView(
                     .border(1.5.dp, WarmAmber, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "📖", fontSize = 42.sp)
+                Text(text = "📖", fontSize = tanweerTextSize(42f))
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
                 text = "لا توجد كتب لـ $gradeName حالياً",
-                fontSize = 16.sp,
+                fontSize = tanweerTextSize(16f),
                 fontWeight = FontWeight.Bold,
                 color = WarmAmber,
                 textAlign = TextAlign.Center

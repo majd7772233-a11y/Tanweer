@@ -10,6 +10,13 @@ export function mapGroup(r: any, defaultRole = 'MEMBER') {
     icon: r.icon ?? null,
     role: sanitizePublicRole(rawRole),
     memberCount: Number(r.member_count ?? r.memberCount ?? 1),
+    // Unknown/missing visibility must never be promoted to PUBLIC by a mapper default.
+    visibility: (() => {
+      const value = typeof r.visibility === 'string' ? r.visibility.trim().toUpperCase() : '';
+      return value === 'PUBLIC' || value === 'PRIVATE' ? value : 'PRIVATE';
+    })(),
+    chatPolicy: (r.chat_policy || r.chatPolicy || 'MEMBERS').toUpperCase(),
+    membershipStatus: r.membership_status ?? r.membershipStatus ?? null,
   };
 }
 
@@ -39,6 +46,7 @@ export function mapHomework(r: any) {
     pageNumbers: r.page_numbers ?? r.pageNumbers ?? null,
     questionNumbers: r.question_numbers ?? r.questionNumbers ?? null,
     taskType: r.task_type ?? r.taskType ?? 'HOMEWORK',
+    createdBy: r.created_by ?? r.createdBy ?? '',
     subjectName: r.subject_name ?? r.subjectName ?? '',
     subjectIcon: r.subject_icon ?? r.subjectIcon ?? '📝',
     colorHex: r.color_hex ?? r.colorHex ?? '#00E5FF',
@@ -53,12 +61,14 @@ export function mapHomework(r: any) {
       }
       return [];
     })(),
+    isOfficial: Boolean(r.is_official ?? r.isOfficial ?? false),
     isCompleted: Boolean(r.is_completed ?? r.isCompleted ?? false),
     createdAt: Number(r.created_at ?? r.createdAt ?? Date.now()),
   };
 }
 
 export function mapExam(r: any) {
+  const rawExamType = r.exam_type ?? r.examType ?? 'MONTHLY';
   return {
     id: r.id,
     groupId: r.group_id ?? r.groupId,
@@ -70,23 +80,29 @@ export function mapExam(r: any) {
     subjectName: r.subject_name ?? r.subjectName ?? '',
     subjectIcon: r.subject_icon ?? r.subjectIcon ?? '🔴',
     colorHex: r.color_hex ?? r.colorHex ?? '#FF3366',
-    examType: r.exam_type ?? r.examType ?? 'MONTHLY',
+    // QUIZ was retired; keep legacy rows visible under the supported MONTHLY category.
+    examType: rawExamType === 'QUIZ' ? 'MONTHLY' : rawExamType,
     isOfficial: Boolean(r.is_official ?? r.isOfficial ?? false),
+    createdBy: r.created_by ?? r.createdBy ?? '',
     isCompleted: Boolean(r.is_completed ?? r.isCompleted ?? false),
     createdAt: Number(r.created_at ?? r.createdAt ?? Date.now()),
   };
 }
 
 export function mapSchoolEvent(r: any) {
+  const groupId = r.group_id ?? r.groupId;
   return {
     id: r.id,
-    groupId: r.group_id ?? r.groupId,
+    groupId,
     eventDate: r.event_date ?? r.eventDate,
     timeStr: r.time_str ?? r.timeStr ?? null,
     title: r.title,
     description: r.description ?? null,
     category: r.category ?? 'ACTIVITY',
     location: r.location ?? null,
+    sourceName: r.source_name ?? r.created_by_name ?? (groupId === 'all' ? 'إدارة المدرسة' : null),
+    createdBy: r.created_by ?? r.createdBy ?? '',
+    isOfficial: Boolean(r.is_official ?? r.isOfficial ?? false),
     createdAt: Number(r.created_at ?? r.createdAt ?? Date.now()),
   };
 }
@@ -115,6 +131,7 @@ export function mapContent(r: any, media: any[] = []) {
       url: m.url,
       mimeType: m.mime_type ?? m.mimeType ?? 'image/jpeg',
       fileSize: Number(m.file_size ?? m.fileSize ?? 0),
+      checksum: m.checksum ?? null,
     })),
   };
 }
@@ -146,6 +163,7 @@ export function mapIssueComment(r: any) {
     authorName: r.author_name ?? r.authorName ?? '',
     comment: r.comment,
     isBestAnswer: Boolean(r.is_best_answer ?? r.isBestAnswer ?? false),
+    isTeacherAnswer: Boolean(r.is_teacher_answer ?? r.isTeacherAnswer ?? false),
     createdAt: Number(r.created_at ?? r.createdAt ?? Date.now()),
   };
 }

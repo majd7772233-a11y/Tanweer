@@ -1,12 +1,20 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import * as ts from 'typescript';
 import {
   verifyOwnerAuth,
+  handleExecuteSql,
   handlePreviewPurge,
   handleGetDashboardHomeworkDetail,
   handleTogglePinDashboardContent,
   handleGetDashboardExams,
   handleGetDashboardChatMessages,
   handleGetDashboardSchedules,
+  handleGetDashboardContentDetail,
+  handleGetDashboardDecisions,
+  handleDashboardCreateHoliday,
+  handleGetDashboardUsers,
+  renderDashboardHtml,
+  renderLoginHtml,
 } from '../src/services/dashboard';
 import { Env } from '../src/env';
 import { hashString } from '../src/lib/crypto';
@@ -18,6 +26,9 @@ class TestMockDb {
     homework_media: [],
     exams: [],
     contents: [],
+    content_media: [],
+    community_decisions: [],
+    events: [],
     chat_messages: [],
     schedule_slots: [],
     groups: [],
@@ -64,7 +75,14 @@ class TestMockDb {
       return [];
     }
 
-    if (/^SELECT COUNT\(\*\)/i.test(trimmed)) {
+    if (/^SELECT COUNT\\(\\*\\)/i.test(trimmed)) {
+      if (/FROM users/i.test(trimmed)) {
+        let rows = this.tables.users;
+        if (/role != 'SYSTEM_OWNER'/i.test(trimmed)) rows = rows.filter(row => row.role !== 'SYSTEM_OWNER');
+        if (/role = 'SYSTEM_OWNER'/i.test(trimmed)) rows = rows.filter(row => row.role === 'SYSTEM_OWNER');
+        if (/status = 'DISABLED'/i.test(trimmed)) rows = rows.filter(row => row.status === 'DISABLED');
+        return [{ total: rows.length, count: rows.length }];
+      }
       if (/FROM contents/i.test(trimmed)) return [{ total: this.tables.contents.length, count: this.tables.contents.length }];
       if (/FROM homeworks/i.test(trimmed)) return [{ total: this.tables.homeworks.length, count: this.tables.homeworks.length }];
       if (/FROM exams/i.test(trimmed)) return [{ total: this.tables.exams.length, count: this.tables.exams.length }];
@@ -72,6 +90,49 @@ class TestMockDb {
       return [{ total: 0, count: 0 }];
     }
 
+    if (/^SELECT id, phone_number, full_name, grade_id, section_id, role/i.test(trimmed) && /FROM users/i.test(trimmed)) {
+      return this.tables.users.filter(row => row.role !== 'SYSTEM_OWNER');
+    }
+
+    if (trimmed.includes('FROM contents c') && trimmed.includes('WHERE c.id = ?')) {
+      const row = this.tables.contents.find(item => item.id === params[0]);
+      if (!row) return [];
+      const author = this.tables.users.find(item => item.id === row.created_by);
+      const group = this.tables.groups.find(item => item.id === row.group_id);
+      const subject = this.tables.subjects.find(item => item.id === row.subject_id);
+      return [{
+        ...row,
+        author_name: author?.full_name || null,
+        author_phone: author?.phone_number || null,
+        group_name: group?.name || null,
+        subject_name: subject?.name_ar || subject?.id || null,
+      }];
+    }
+
+    if (/FROM content_media/i.test(trimmed)) {
+      return this.tables.content_media.filter(item => item.content_id === params[0]);
+    }
+
+    if (/FROM community_decisions cd/i.test(trimmed)) {
+      if (/cd\\.created_by/i.test(trimmed)) throw new Error('community_decisions.created_by does not exist');
+      return this.tables.community_decisions.map(item => {
+        const author = this.tables.users.find(user => user.id === item.requested_by);
+        const group = this.tables.groups.find(entry => entry.id === item.group_id);
+        return { ...item, creator_name: author?.full_name || item.requester_name || null, group_name: group?.name || null };
+      });
+    }
+
+    if (/^INSERT INTO events/i.test(trimmed)) {
+      const actor = this.tables.users.find(user => user.id === params[5]);
+      const group = this.tables.groups.find(item => item.id === params[1]);
+      if (!actor || !group) throw new Error('FOREIGN KEY constraint failed');
+      this.tables.events.push({
+        id: params[0], group_id: params[1], event_date: params[2], title: params[3],
+        description: params[4], category: 'HOLIDAY', created_by: params[5],
+        created_at: params[6], is_official: 1,
+      });
+      return [];
+    }
     if (/FROM homeworks h/i.test(trimmed) && /WHERE h\.id = \?/i.test(trimmed)) {
       const h = this.tables.homeworks.find(row => row.id === params[0]);
       if (!h) return [];
@@ -140,6 +201,14 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
 
   beforeEach(() => {
     db = new TestMockDb();
+    db.tables.users.push({
+      id: 'SYSTEM_OWNER',
+      phone_number: '__TANWEER_INTERNAL_SYSTEM_ACTOR__',
+      password_hash: '!SYSTEM_ACCOUNT_LOGIN_DISABLED!',
+      full_name: 'مستخدم النظام الداخلي',
+      role: 'SYSTEM_OWNER',
+    });
+    db.tables.groups.push({ id: 'all', name: 'كامل المدرسة' });
     env = {
       DB: db as any,
       TANWEER_OWNER_SECRET: 'master_secret_12345',
@@ -299,5 +368,458 @@ describe('Dashboard Server Fixes (D-01 to D-07)', () => {
       const auth = await verifyOwnerAuth(req, env);
       expect(auth.isOwner).toBe(true);
     });
+  });
+  describe('D-08: Dashboard detail SQL and decisions', () => {
+    it('loads lesson details using the actual subjects.name_ar column', async () => {
+      db.tables.users.push({ id: 'teacher1', full_name: 'أحمد', phone_number: '771234567' });
+      db.tables.groups.push({ id: 'g1', name: 'الشعبة أ' });
+      db.tables.subjects.push({ id: 'physics', name_ar: 'الفيزياء' });
+      db.tables.contents.push({
+        id: 'c1', group_id: 'g1', study_date: '2026-11-01', subject_id: 'physics',
+        created_by: 'teacher1', title: 'الحركة', description: 'شرح الدرس',
+        type: 'LESSON', views_count: 2, useful_count: 1, is_pinned: 0, created_at: 1,
+      });
+      db.tables.content_media.push({
+        id: 'media1', content_id: 'c1', page_order: 1, object_key: '',
+        url: 'https://tanweer.magd.workers.dev/api/v1/media/blob1', mime_type: 'image/jpeg', file_size: 100,
+        checksum: null, is_primary: 1, created_at: 1,
+      });
+
+      const response = await handleGetDashboardContentDetail('c1', env);
+      expect(response.status).toBe(200);
+      const data = await response.json() as any;
+      expect(data.success).toBe(true);
+      expect(data.content.subject_name).toBe('الفيزياء');
+      expect(data.media).toHaveLength(1);
+      expect(data.media[0].objectKey).toBe('blob1');
+      expect(data.media[0].previewUrl).toBe('/api/dashboard/media/blob1');
+    });
+
+    it('resolves decision creators through requested_by and requester_name', async () => {
+      db.tables.users.push({ id: 'teacher1', full_name: 'أحمد', phone_number: '771234567' });
+      db.tables.groups.push({ id: 'g1', name: 'الشعبة أ' });
+      db.tables.community_decisions.push({
+        id: 'decision1', group_id: 'g1', requested_by: 'teacher1',
+        requester_name: 'اسم مقدم الطلب', title: 'قرار اختبار', created_at: 1,
+      });
+
+      const response = await handleGetDashboardDecisions(env);
+      expect(response.status).toBe(200);
+      const data = await response.json() as any;
+      expect(data.decisions[0].creator_name).toBe('أحمد');
+      expect(data.decisions[0].group_name).toBe('الشعبة أ');
+    });
+  });
+
+  describe('D-09: System owner principal and owner-created holidays', () => {
+    it('creates an official holiday using the internal SYSTEM_OWNER principal', async () => {
+      const request = new Request('http://localhost/api/dashboard/holidays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'إجازة اختبار',
+          eventDate: '2026-11-10',
+          description: 'اختبار إنشاء الإجازة الرسمية',
+          groupId: 'all',
+          isSchoolWide: true,
+        }),
+      });
+
+      const response = await handleDashboardCreateHoliday(request, 'SYSTEM_OWNER', env);
+      expect(response.status).toBe(200);
+      expect(db.tables.events).toHaveLength(1);
+      expect(db.tables.events[0].created_by).toBe('SYSTEM_OWNER');
+    });
+
+    it('keeps the internal principal out of the owner-managed user list', async () => {
+      db.tables.users.push({ id: 'student1', phone_number: '771234568', full_name: 'طالب', role: 'STUDENT' });
+      const request = new Request('http://localhost/api/dashboard/users');
+      const response = await handleGetDashboardUsers(request, env);
+      expect(response.status).toBe(200);
+      const data = await response.json() as any;
+      expect(data.users.map((user: any) => user.id)).toEqual(['student1']);
+      expect(data.users.some((user: any) => user.id === 'SYSTEM_OWNER')).toBe(false);
+    });
+  });
+
+  describe('D-10: Dashboard HTML and JavaScript DOM contract', () => {
+    it('keeps homework and purge JavaScript element references aligned with rendered HTML', async () => {
+      const response = renderDashboardHtml();
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+      const ids = new Set(Array.from(html.matchAll(/\bid=["']([^"']+)["']/g)).map(match => match[1]));
+      const references = Array.from(script.matchAll(/getElementById\(["']([^"']+)["']\)/g)).map(match => match[1]);
+      const criticalReferences = references.filter(id => /^(hd|hwModal|purge|acad)/.test(id));
+      const missing = criticalReferences.filter(id => !ids.has(id));
+
+      expect(missing).toEqual([]);
+      expect(script).toContain('function toggleMobileMenu()');
+      expect(script).not.toContain("getElementById('hwModalTitle')");
+      expect(script).not.toContain("getElementById('purgeModalSecretInput')");
+    });
+  });
+  
+  describe('D-11: Dashboard inline JavaScript syntax', () => {
+    it('renders a JavaScript block that the browser can parse before wiring any controls', async () => {
+      const response = renderDashboardHtml();
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+
+      expect(script).toBeDefined();
+      const parsed = ts.transpileModule(script!, {
+        compilerOptions: { target: ts.ScriptTarget.ES2022 },
+        reportDiagnostics: true,
+      });
+      const syntaxDiagnostics = (parsed.diagnostics || []).map(diagnostic => {
+        const position = diagnostic.file?.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
+        const location = position ? `L${position.line + 1}:C${position.character + 1}` : 'unknown location';
+        return `${location} ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`;
+      });
+
+      const diagnosticContext = (parsed.diagnostics || []).map(diagnostic => {
+        const position = diagnostic.file?.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
+        if (!position) return ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+        const lines = script!.split('\n');
+        const start = Math.max(0, position.line - 1);
+        const end = Math.min(lines.length, position.line + 2);
+        const context = lines.slice(start, end).map((line, index) => `${start + index + 1}: ${line}`).join('\n');
+        return `L${position.line + 1}:C${position.character + 1}\n${context}`;
+      }).join('\n');
+      expect(syntaxDiagnostics, diagnosticContext).toEqual([]);
+      expect(() => new Function(script!)).not.toThrow();
+    });
+  });
+
+});
+
+
+describe('SQL Studio response and DOM contract', () => {
+  function createSqlEnv(selectRows: Record<string, unknown>[] = [
+    { id: 1, full_name: 'طالب تجريبي' },
+    { id: 2, full_name: 'طالبة تجريبيّة' },
+  ]): Env {
+    const DB = {
+      prepare(sql: string) {
+        const statement: any = {
+          bind(..._params: unknown[]) {
+            return statement;
+          },
+          async all() {
+            if (sql.includes('invalid_column')) {
+              throw new Error('no such column: invalid_column');
+            }
+            return { results: selectRows };
+          },
+          async run() {
+            return { success: true, meta: { changes: /^\s*UPDATE/i.test(sql) ? 2 : 1 } };
+          },
+        };
+        return statement;
+      },
+    };
+    return { DB } as unknown as Env;
+  }
+
+  function sqlRequest(query: string): Request {
+    return new Request('https://tanweer.test/api/dashboard/sql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+  }
+
+  it('returns SELECT rows and the authoritative rowCount field', async () => {
+    const response = await handleExecuteSql(
+      sqlRequest('SELECT id, full_name FROM users'),
+      'owner-test',
+      createSqlEnv(),
+    );
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      success: true,
+      type: 'SELECT',
+      rowCount: 2,
+      data: [
+        { id: 1, full_name: 'طالب تجريبي' },
+        { id: 2, full_name: 'طالبة تجريبيّة' },
+      ],
+    });
+  });
+
+  it('keeps an empty SELECT distinguishable from a failed query', async () => {
+    const response = await handleExecuteSql(
+      sqlRequest('SELECT id FROM users WHERE id = -1'),
+      'owner-test',
+      createSqlEnv([]),
+    );
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ success: true, type: 'SELECT', rowCount: 0, data: [] });
+  });
+
+  it('returns mutation row counts through meta.changes', async () => {
+    const response = await handleExecuteSql(
+      sqlRequest("UPDATE users SET status = 'ACTIVE'"),
+      'owner-test',
+      createSqlEnv(),
+    );
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.type).toBe('MUTATION');
+    expect(body.meta.changes).toBe(2);
+  });
+
+  it('returns the actual D1 error through error when SQL is invalid', async () => {
+    const response = await handleExecuteSql(
+      sqlRequest('SELECT invalid_column FROM users'),
+      'owner-test',
+      createSqlEnv(),
+    );
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('invalid_column');
+  });
+
+  it('connects the SQL script to the actual accessible input and output elements', async () => {
+    const response = renderDashboardHtml();
+    const html = await response.text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+
+    expect(html).toContain('id="sqlQuery"');
+    expect(html).toContain('id="sqlResult"');
+    expect(html).toContain('aria-label="استعلام SQL"');
+    expect(html).toContain('aria-live="polite"');
+    expect(script).toContain("getElementById('sqlQuery')");
+    expect(script).toContain("getElementById('sqlResult')");
+    expect(script).toContain("data.type === 'MUTATION'");
+    expect(script).toContain("data.type !== 'SELECT'");
+    expect(script).toContain('data.meta?.changes');
+    expect(script).toContain('data.rowCount');
+    expect(script).toContain('data?.error');
+    expect(script).not.toContain('sqlQueryInput');
+    expect(script).not.toContain('sqlConsoleOutput');
+    expect(script).not.toContain('data.isMutation');
+    expect(script).not.toContain('data.results || data.rows');
+  });
+});
+
+
+describe('Owner Dashboard responsive navigation and accessible controls', () => {
+  it('keeps mobile layout breakpoints and announces mobile navigation state', async () => {
+    const response = renderDashboardHtml();
+    const html = await response.text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+
+    expect(html).toContain('@media (max-width: 900px)');
+    expect(html).toContain('@media (max-width: 500px)');
+    expect(html).toContain('aria-controls="dashboardNav"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(script).toContain("menuButton.setAttribute('aria-expanded', String(isOpen))");
+    expect(script).toContain("menuButton.setAttribute('aria-label', isOpen ? 'إغلاق قائمة التنقل' : 'فتح قائمة التنقل')");
+  });
+
+  it('gives primary search, filter and destructive-action fields accessible names', async () => {
+    const response = renderDashboardHtml();
+    const html = await response.text();
+
+    const accessibleIds = [
+      'userSearch',
+      'userRoleFilter',
+      'userStatusFilter',
+      'requestStatusFilter',
+      'contentSearchInput',
+      'homeworkSearchInput',
+      'examSearchInput',
+      'eventSearch',
+      'scheduleGroupFilter',
+      'chatGroupFilter',
+      'chatOrderFilter',
+      'chatSearchInput',
+      'modalNewRole',
+      'modalRoleReason',
+      'purgeStage1Secret',
+      'purgeConfirmYesInput',
+    ];
+    for (const id of accessibleIds) {
+      const elementStart = html.indexOf('id="' + id + '"');
+      expect(elementStart, 'missing control ' + id).toBeGreaterThanOrEqual(0);
+      const element = html.slice(elementStart, html.indexOf('>', elementStart) + 1);
+      expect(element, 'control has no accessible name: ' + id).toMatch(/aria-label=/);
+    }
+
+    expect(html).toContain('<label for="holidayTitle">');
+    expect(html).toContain('<label for="holidayDate">');
+    expect(html).toContain('<label for="holidayGroupId">');
+    expect(html).toContain('<label for="holidayReason">');
+  });
+});
+
+
+describe('Owner Dashboard keyboard navigation semantics', () => {
+  it('renders every sidebar destination as a semantic, focusable button', async () => {
+    const response = renderDashboardHtml();
+    const html = await response.text();
+    const navStart = html.indexOf('<nav class="nav-links" id="dashboardNav">');
+    const navEnd = html.indexOf('</nav>', navStart);
+    const nav = html.slice(navStart, navEnd + 6);
+    const buttons = nav.match(/<button type="button" class="nav-item/g) || [];
+
+    expect(buttons).toHaveLength(17);
+    expect(nav).not.toContain('<div class="nav-item');
+    expect(nav).toContain('data-tab="overview"');
+    expect(nav).toContain('aria-controls="tab-overview"');
+    expect(nav).toContain('aria-current="page"');
+    expect(html).toContain('.nav-item:focus-visible');
+    expect(html).toContain('outline: 2px solid var(--cyan)');
+  });
+
+  it('updates the active navigation announcement when changing sections', async () => {
+    const response = renderDashboardHtml();
+    const html = await response.text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+
+    expect(script).toContain("el.removeAttribute('aria-current')");
+    expect(script).toContain("el.dataset.tab === tabId");
+    expect(script).toContain("activeNav.setAttribute('aria-current', 'page')");
+  });
+});
+
+
+describe('Owner Dashboard authoritative loading and empty states', () => {
+  it('separates failed user-list requests from a confirmed empty search', async () => {
+    const html = await (await renderDashboardHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    expect(script).toContain('function renderDashboardTableError');
+    expect(script).toContain('function renderDashboardTableEmpty');
+    expect(script).toContain("renderDashboardTableError(tbody, 7, data, 'تعذر تحميل حسابات المستخدمين', 'loadUsers')");
+    expect(script).toContain('if (data.users.length === 0)');
+    expect(script).toContain('لا توجد حسابات مطابقة لعبارة البحث.');
+    expect(script).not.toContain('if (!data.success || !data.users.length)');
+  });
+
+  it('marks old overview numbers as last-confirmed when statistics refresh fails', async () => {
+    const html = await (await renderDashboardHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    expect(html).toContain('id="overviewLoadNotice"');
+    expect(script).toContain('showOverviewLoadNotice');
+    expect(script).toContain('الأرقام الظاهرة — إن وُجدت — هي آخر لقطة مؤكدة');
+    expect(script).not.toContain('if (!data.success) return;');
+  });
+
+  it('shows group-filter failures rather than silently hiding them', async () => {
+    const html = await (await renderDashboardHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    expect(script).toContain('function setDashboardSelectError');
+    expect(script).toContain('setDashboardSelectError(groupFilter');
+    expect(script).toContain('setDashboardSelectError(sel');
+    expect(script).not.toContain('catch (e) {}');
+  });
+});
+
+
+describe('Owner Dashboard mutation acknowledgement', () => {
+  it('does not announce account or session mutation success without server acknowledgement', async () => {
+    const html = await (await renderDashboardHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    const guarded = [
+      'async function disableUser',
+      'async function enableUser',
+      'async function revokeSessions',
+      'async function revokeSingleSession',
+      'async function revokeUserAllSessionsFromModal',
+      'async function rejectRequest'
+    ];
+    for (const marker of guarded) {
+      const start = script.indexOf(marker);
+      expect(start).toBeGreaterThanOrEqual(0);
+      const tail = script.slice(start, start + 1800);
+      expect(tail).toContain('dashboardMutationSucceeded(res, data)');
+    }
+    expect(script).toContain('function dashboardMutationSucceeded(response, data)');
+    expect(script).toContain("dashboardMutationFailureMessage(res, data, 'تعذر تجميد الحساب')");
+    expect(script).toContain("dashboardMutationFailureMessage(res, data, 'تعذر رفض طلب الترقية')");
+  });
+});
+
+describe('Owner Dashboard mutation acknowledgement coverage', () => {
+  async function dashboardScript() {
+    const html = await (await renderDashboardHtml()).text();
+    return html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+  }
+
+  it('requires HTTP success and an explicit API success flag for every owner mutation', async () => {
+    const script = await dashboardScript();
+    expect(script).toContain('return response?.ok === true && data?.success === true;');
+
+    const actions = [
+      'reissueUserCredentialsFromModal',
+      'revokeUserRecoveryCodeFromModal',
+      'submitRoleChange',
+      'approveRequest',
+      'togglePinContent',
+      'deleteHomework',
+      'deleteExam',
+      'submitCreateHoliday',
+      'deleteHoliday',
+      'resetSchedule',
+      'applyDecision',
+      'rejectDecision',
+      'deleteChatMessage',
+      'submitPurgeStage1',
+      'executePurgeFinal'
+    ];
+
+    for (const name of actions) {
+      const start = script.indexOf('async function ' + name + '(');
+      expect(start, 'missing owner action ' + name).toBeGreaterThanOrEqual(0);
+      const next = script.indexOf('\n    async function ', start + 1);
+      const action = script.slice(start, next >= 0 ? next : script.length);
+      expect(action, name + ' must validate both acknowledgement layers')
+        .toContain('dashboardMutationSucceeded(res, data)');
+    }
+  });
+
+  it('does not immediately retry a system purge when the server outcome is uncertain', async () => {
+    const script = await dashboardScript();
+    const start = script.indexOf('async function executePurgeFinal()');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const next = script.indexOf('\n    async function logout()', start + 1);
+    const action = script.slice(start, next >= 0 ? next : script.length);
+    expect(action).toContain('const confirmationUncertain = !res.ok && res.status >= 500');
+    expect(action).toContain('!Array.isArray(data.tablesPurged)');
+    expect(action).toContain('currentPurgeSecret = \'\';');
+    const catchStart = action.lastIndexOf('} catch (e) {');
+    expect(catchStart).toBeGreaterThanOrEqual(0);
+    expect(action.slice(catchStart)).not.toContain('execBtn.disabled = false');
+  });
+});
+describe('Owner Dashboard weekly schedule snapshot feedback', () => {
+  it('does not render an empty weekly grid from a failed or malformed response', async () => {
+    const html = await (await renderDashboardHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    const start = script.indexOf('async function viewWeeklyGrid(');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const next = script.indexOf('\n    function closeWeeklyGrid()', start + 1);
+    const action = script.slice(start, next >= 0 ? next : script.length);
+
+    expect(action).toContain('!res.ok || data?.success !== true || !Array.isArray(data.slots)');
+    expect(action).toContain('renderLoadError(message)');
+    expect(action).toContain("retry.addEventListener('click', () => viewWeeklyGrid(groupId, groupName))");
+    expect(action).not.toContain('const slots = data.slots || []');
+  });
+
+  it('only navigates into the owner dashboard after an HTTP-confirmed login response', async () => {
+    const html = await (await renderLoginHtml()).text();
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
+    expect(script).toContain('if (res.ok && data?.success === true)');
   });
 });

@@ -31,6 +31,28 @@ object ArabicSearchEngine {
         return normalizedText.split(" ").filter { it.isNotBlank() && it.length > 1 }
     }
 
+    /**
+     * Identifiers such as QA_HW_20261119_A must be matched by every segment.
+     * Only compact, delimiter-separated alphanumeric queries with a numeric
+     * segment are treated as IDs; ordinary natural-language queries keep the
+     * existing partial-token relevance behavior.
+     */
+    private fun structuredIdentifierTokens(query: String, normalizedQuery: String): List<String> {
+        val rawQuery = query.trim()
+        if (rawQuery.isEmpty() || rawQuery.any(Char::isWhitespace)) return emptyList()
+
+        val segments = rawQuery.split(Regex("[_-]"))
+        if (segments.size < 3 ||
+            segments.any { !it.matches(Regex("[A-Za-z0-9]+")) } ||
+            segments.none { segment -> segment.any(Char::isDigit) }
+        ) {
+            return emptyList()
+        }
+
+        // Keep one-character and numeric segments; they are meaningful in IDs.
+        return normalizedQuery.split(" ").filter { it.isNotBlank() }
+    }
+
     fun calculateRelevance(
         query: String,
         title: String,
@@ -41,13 +63,36 @@ object ArabicSearchEngine {
         val qNorm = normalize(query)
         if (qNorm.isBlank()) return 1
 
+        val identifierTokens = structuredIdentifierTokens(query, qNorm)
         val qTokens = tokenize(qNorm)
-        if (qTokens.isEmpty()) return 0
+        if (qTokens.isEmpty() && identifierTokens.isEmpty()) return 0
 
         val tNorm = normalize(title)
         val sNorm = normalize(subject)
         val bNorm = normalize(body)
         val eNorm = normalize(extra)
+
+        if (identifierTokens.isNotEmpty()) {
+            val candidateTokens = listOf(tNorm, sNorm, bNorm, eNorm)
+                .asSequence()
+                .flatMap { it.split(" ").asSequence() }
+                .filter { it.isNotBlank() }
+                .toSet()
+
+            // A structured ID is not a natural-language bag-of-words query:
+            // every segment must exist as a complete token in the record.
+            if (!candidateTokens.containsAll(identifierTokens)) return 0
+
+            // Prefer a complete, contiguous ID occurrence while still allowing
+            // fields to contain the complete set of segments in separate places.
+            return when {
+                tNorm.contains(qNorm) -> 500
+                sNorm.contains(qNorm) -> 450
+                bNorm.contains(qNorm) -> 400
+                eNorm.contains(qNorm) -> 350
+                else -> 300
+            }
+        }
 
         var score = 0
 

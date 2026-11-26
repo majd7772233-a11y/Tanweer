@@ -6,6 +6,8 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -17,18 +19,23 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.magd.tanweer.R
 import com.magd.tanweer.data.model.SchoolEventItem
 import com.magd.tanweer.ui.SubScreen
+import com.magd.tanweer.ui.GroupSyncSource
 import com.magd.tanweer.ui.TanweerViewModel
 import com.magd.tanweer.ui.components.*
 import com.magd.tanweer.ui.theme.*
@@ -38,30 +45,31 @@ fun EventsScreen(
     viewModel: TanweerViewModel
 ) {
     val context = LocalContext.current
-    BackHandler {
-        viewModel.navigateBack()
-    }
-
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val selectedGroupId by viewModel.selectedGroupId.collectAsStateWithLifecycle()
     val activeGroupId = selectedGroupId.ifEmpty { currentUser?.defaultGroupId ?: "" }
+    val groupSyncScopeIds by viewModel.groupSyncScopeIds.collectAsStateWithLifecycle()
 
     val events by viewModel.repository.getEvents(activeGroupId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
-
-    LaunchedEffect(activeGroupId) {
-        if (activeGroupId.isNotBlank()) {
-            viewModel.repository.syncEvents(activeGroupId)
-        }
-    }
+    val eventsSyncState by viewModel.eventsSyncState.collectAsStateWithLifecycle()
+    val scopedEventsSyncState = syncStateForScope(eventsSyncState, groupSyncScopeIds[GroupSyncSource.EVENTS], activeGroupId)
+    val hasEventsSnapshot = events.isNotEmpty() || hasAuthoritativeSnapshot(scopedEventsSyncState)
 
     val todayStr = remember { TanweerViewModel.getTodayDateString() }
 
     var selectedCategory by remember { mutableStateOf("ALL") }
     val isAddEventModalOpenFromVm by viewModel.isAddEventModalOpen.collectAsStateWithLifecycle()
     val initialEventDateFromVm by viewModel.initialEventDate.collectAsStateWithLifecycle()
-    var isLocalAddDialog by remember { mutableStateOf(false) }
+    var isLocalAddDialog by rememberSaveable { mutableStateOf(false) }
     val showAddDialog = isLocalAddDialog || isAddEventModalOpenFromVm
+    BackHandler(enabled = !showAddDialog) {
+        viewModel.navigateBack()
+    }
+    var selectedEvent by remember { mutableStateOf<SchoolEventItem?>(null) }
+    var editingEvent by remember { mutableStateOf<SchoolEventItem?>(null) }
+    var deletingEvent by remember { mutableStateOf<SchoolEventItem?>(null) }
+    var isEventMutationInProgress by remember { mutableStateOf(false) }
     var activeTab by remember { mutableIntStateOf(0) } // 0 = قادمة, 1 = أرشيف سابقة
 
     val categories = listOf(
@@ -70,6 +78,7 @@ fun EventsScreen(
         "CELEBRATION" to "مناسبات واحتفالات 🎉",
         "HOLIDAY" to "عطل وإجازات 🏖️",
         "WORKSHOP" to "ورش ومراجعات 💡",
+        "ANNOUNCEMENT" to "تعاميم رسمية 📢",
         "GENERAL" to "عام 📌"
     )
 
@@ -134,13 +143,13 @@ fun EventsScreen(
                         Column {
                             Text(
                                 text = "الفعاليات والأنشطة المدرسية 🎪",
-                                fontSize = 18.sp,
+                                fontSize = tanweerTextSize(18f),
                                 fontWeight = FontWeight.Black,
                                 color = CyanAccent
                             )
                             Text(
                                 text = "المسابقات، المناسبات، الإجازات وورش العمل",
-                                fontSize = 11.sp,
+                                fontSize = tanweerTextSize(11f),
                                 color = TextSecondary
                             )
                         }
@@ -176,8 +185,8 @@ fun EventsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "الفعاليات القادمة (${events.count { it.eventDate >= todayStr }}) ⏳",
-                            fontSize = 12.sp,
+                            text = if (hasEventsSnapshot) "الفعاليات القادمة (${events.count { it.eventDate >= todayStr }}) ⏳" else "الفعاليات القادمة ⏳",
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = if (activeTab == 0) FontWeight.Bold else FontWeight.Normal,
                             color = if (activeTab == 0) PurpleAccent else TextSecondary
                         )
@@ -194,8 +203,8 @@ fun EventsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "الأرشيف والسابقات (${events.count { it.eventDate < todayStr }}) 📦",
-                            fontSize = 12.sp,
+                            text = if (hasEventsSnapshot) "الأرشيف والسابقات (${events.count { it.eventDate < todayStr }}) 📦" else "الأرشيف والسابقات 📦",
+                            fontSize = tanweerTextSize(12f),
                             fontWeight = if (activeTab == 1) FontWeight.Bold else FontWeight.Normal,
                             color = if (activeTab == 1) CyanAccent else TextSecondary
                         )
@@ -225,7 +234,7 @@ fun EventsScreen(
                         ) {
                             Text(
                                 text = catLabel,
-                                fontSize = 12.sp,
+                                fontSize = tanweerTextSize(12f),
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) PurpleAccent else TextSecondary
                             )
@@ -237,20 +246,34 @@ fun EventsScreen(
             // Events List or Empty State
             if (filteredEvents.isEmpty()) {
                 item {
-                    EmptyStateGlass(
-                        title = if (activeTab == 0) "لا توجد فعاليات قادمة مجدولة" else "لا توجد فعاليات سابقة",
-                        subtitle = "يمكن لأي عضو في الشعبة أو المدرسة إضافة وتوثيق فعالية جديدة ليراها الجميع في التقويم وصفحة الفعاليات.",
-                        icon = "🎪",
-                        actionButtonText = "إضافة فعالية للشعبة",
-                        onActionClick = { isLocalAddDialog = true }
-                    )
+                    if (hasEventsSnapshot) {
+                        EmptyStateGlass(
+                            title = if (events.isEmpty()) {
+                                if (activeTab == 0) "لا توجد فعاليات قادمة مجدولة" else "لا توجد فعاليات سابقة"
+                            } else {
+                                "لا توجد فعاليات تطابق التصفية الحالية"
+                            },
+                            subtitle = "يمكن لأي عضو في الشعبة أو المدرسة إضافة وتوثيق فعالية جديدة ليراها الجميع في التقويم وصفحة الفعاليات.",
+                            icon = "🎪",
+                            actionButtonText = if (events.isEmpty()) "إضافة فعالية للشعبة" else "عرض جميع الفعاليات",
+                            onActionClick = {
+                                if (events.isEmpty()) isLocalAddDialog = true
+                                else {
+                                    selectedCategory = "ALL"
+                                    activeTab = 0
+                                }
+                            }
+                        )
+                    } else {
+                        PendingSyncEmptyState(dataLabel = "الفعاليات", syncState = scopedEventsSyncState)
+                    }
                 }
             } else {
                 items(filteredEvents, key = { it.id }) { event ->
                     val isToday = event.eventDate == todayStr
 
                     GlassCard(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().clickable { selectedEvent = event },
                         borderColor = if (isToday) EmeraldGreen else PurpleAccent.copy(alpha = 0.4f),
                         backgroundColor = GlassSurface
                     ) {
@@ -270,20 +293,21 @@ fun EventsScreen(
                                             "CELEBRATION" -> "🎉"
                                             "HOLIDAY" -> "🏖️"
                                             "WORKSHOP" -> "💡"
+                                            "ANNOUNCEMENT" -> "📢"
                                             else -> "📌"
                                         },
-                                        fontSize = 20.sp
+                                        fontSize = tanweerTextSize(20f)
                                     )
                                     Column {
                                         Text(
                                             text = event.title,
-                                            fontSize = 15.sp,
+                                            fontSize = tanweerTextSize(15f),
                                             fontWeight = FontWeight.Bold,
                                             color = TextPrimary
                                         )
                                         Text(
                                             text = "التاريخ: ${event.eventDate} ${event.timeStr?.let { "• $it" } ?: ""}",
-                                            fontSize = 12.sp,
+                                            fontSize = tanweerTextSize(12f),
                                             color = if (isToday) EmeraldGreen else CyanAccent,
                                             fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal
                                         )
@@ -291,24 +315,38 @@ fun EventsScreen(
                                 }
 
                                 GlassPill(
-                                    text = if (isToday) "اليوم! 🔥" else when (event.category.uppercase()) {
-                                        "ACTIVITY" -> "نشاط 🏆"
-                                        "CELEBRATION" -> "مناسبة 🎉"
-                                        "HOLIDAY" -> "إجازة 🏖️"
-                                        "WORKSHOP" -> "ورشة 💡"
-                                        else -> "فعالية 📌"
-                                    },
+                                    text = if (isToday) "اليوم! 🔥" else localizedEventCategoryLabel(event.category),
                                     color = if (isToday) EmeraldGreen else PurpleAccent,
                                     bgColor = if (isToday) EmeraldGreen.copy(alpha = 0.15f) else PurpleAccent.copy(alpha = 0.15f)
                                 )
                             }
 
+                            if (event.isOfficial || event.category.equals("ANNOUNCEMENT", ignoreCase = true)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    GlassPill(
+                                        text = "صادر عن ${event.sourceName ?: "إدارة المدرسة"}",
+                                        color = WarmAmber,
+                                        bgColor = AmberGlow
+                                    )
+                                    Text(
+                                        text = "رسمي ✓",
+                                        fontSize = tanweerTextSize(10f),
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldGreen
+                                    )
+                                }
+                            }
+
                             if (!event.description.isNullOrBlank()) {
                                 Text(
                                     text = event.description,
-                                    fontSize = 13.sp,
+                                    fontSize = tanweerTextSize(13f),
                                     color = TextSecondary,
-                                    lineHeight = 18.sp
+                                    lineHeight = tanweerLineHeight(18f)
                                 )
                             }
 
@@ -325,11 +363,17 @@ fun EventsScreen(
                                     )
                                     Text(
                                         text = "المكان: ${event.location}",
-                                        fontSize = 11.sp,
+                                        fontSize = tanweerTextSize(11f),
                                         color = WarmAmber
                                     )
                                 }
                             }
+
+                            Text(
+                                text = stringResource(R.string.event_open_details_hint),
+                                fontSize = tanweerTextSize(10f),
+                                color = CyanAccent.copy(alpha = 0.75f)
+                            )
                         }
                     }
                 }
@@ -339,144 +383,168 @@ fun EventsScreen(
 
     // Add Event Dialog
     if (showAddDialog) {
-        var title by remember { mutableStateOf("") }
-        var category by remember { mutableStateOf("ACTIVITY") }
-        var eventDate by remember(initialEventDateFromVm) { mutableStateOf(initialEventDateFromVm ?: todayStr) }
-        var timeStr by remember { mutableStateOf("") }
-        var location by remember { mutableStateOf("") }
-        var description by remember { mutableStateOf("") }
+        var title by rememberSaveable { mutableStateOf("") }
+        var category by rememberSaveable { mutableStateOf("ACTIVITY") }
+        var eventDate by rememberSaveable {
+            mutableStateOf(initialEventDateFromVm ?: todayStr)
+        }
+        var timeStr by rememberSaveable { mutableStateOf("") }
+        var location by rememberSaveable { mutableStateOf("") }
+        var description by rememberSaveable { mutableStateOf("") }
+        var isSavingEvent by remember { mutableStateOf(false) }
 
         val dismissDialog = {
-            isLocalAddDialog = false
-            viewModel.closeAddEventDialog()
+            if (!isSavingEvent) {
+                isLocalAddDialog = false
+                viewModel.closeAddEventDialog()
+            }
         }
 
-        Dialog(onDismissRequest = dismissDialog) {
+        KeyboardAwareFormDialog(
+            onDismissRequest = dismissDialog,
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .fillMaxHeight(0.92f)
                     .padding(8.dp),
                 borderColor = PurpleAccent,
                 backgroundColor = MidnightSurface
             ) {
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "🎪 إضافة فعالية أو مناسبة جديدة",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = CyanAccent
-                    )
+                    KeyboardAwareFormScrollColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "🎪 إضافة فعالية أو مناسبة جديدة",
+                            fontSize = tanweerTextSize(16f),
+                            fontWeight = FontWeight.Bold,
+                            color = CyanAccent
+                        )
 
-                    OutlinedTextField(
-                        value = title,
-                        onValueChange = { title = it },
-                        label = { Text("عنوان الفعالية *", fontSize = 12.sp) },
-                        placeholder = { Text("مثال: معرض العلوم السنوي", fontSize = 12.sp) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        singleLine = true
-                    )
+                        OutlinedTextField(
+                            value = title,
+                            onValueChange = { title = it },
+                            label = { Text("عنوان الفعالية *", fontSize = tanweerTextSize(12f)) },
+                            placeholder = { Text("مثال: معرض العلوم السنوي", fontSize = tanweerTextSize(12f)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
 
-                    // Category dropdown / selector
-                    Column {
-                        Text("التصنيف:", fontSize = 11.sp, color = TextSecondary)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            listOf(
-                                "ACTIVITY" to "نشاط",
-                                "CELEBRATION" to "احتفال",
-                                "HOLIDAY" to "عطلة",
-                                "WORKSHOP" to "ورشة"
-                            ).forEach { (catKey, catName) ->
-                                val isCat = category == catKey
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isCat) PurpleAccent.copy(alpha = 0.3f) else GlassSurface)
-                                        .border(1.dp, if (isCat) PurpleAccent else GlassBorderSubtle, RoundedCornerShape(8.dp))
-                                        .clickable { category = catKey }
-                                        .padding(vertical = 6.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = catName,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (isCat) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isCat) PurpleAccent else TextSecondary
-                                    )
+                        Column {
+                            Text("التصنيف:", fontSize = tanweerTextSize(11f), color = TextSecondary)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(
+                                    "ACTIVITY" to "نشاط",
+                                    "CELEBRATION" to "احتفال",
+                                    "HOLIDAY" to "عطلة",
+                                    "WORKSHOP" to "ورشة"
+                                ).forEach { (catKey, catName) ->
+                                    val isCat = category == catKey
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isCat) PurpleAccent.copy(alpha = 0.3f) else GlassSurface)
+                                            .border(1.dp, if (isCat) PurpleAccent else GlassBorderSubtle, RoundedCornerShape(8.dp))
+                                            .clickable { category = catKey }
+                                            .padding(vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = catName,
+                                            fontSize = tanweerTextSize(11f),
+                                            fontWeight = if (isCat) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isCat) PurpleAccent else TextSecondary
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = eventDate,
+                                onValueChange = { eventDate = it },
+                                label = { Text("التاريخ (YYYY-MM-DD) *", fontSize = tanweerTextSize(11f)) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                singleLine = true
+                            )
+
+                            OutlinedTextField(
+                                value = timeStr,
+                                onValueChange = { timeStr = it },
+                                label = { Text("الوقت (اختياري)", fontSize = tanweerTextSize(11f)) },
+                                placeholder = { Text("09:00 ص", fontSize = tanweerTextSize(11f)) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                singleLine = true
+                            )
+                        }
+
                         OutlinedTextField(
-                            value = eventDate,
-                            onValueChange = { eventDate = it },
-                            label = { Text("التاريخ (YYYY-MM-DD) *", fontSize = 11.sp) },
-                            modifier = Modifier.weight(1f),
+                            value = location,
+                            onValueChange = { location = it },
+                            label = { Text("المكان / القاعة (اختياري)", fontSize = tanweerTextSize(12f)) },
+                            placeholder = { Text("مسرح المدرسة / القاعة الرياضية", fontSize = tanweerTextSize(12f)) },
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             singleLine = true
                         )
 
                         OutlinedTextField(
-                            value = timeStr,
-                            onValueChange = { timeStr = it },
-                            label = { Text("الوقت (اختياري)", fontSize = 11.sp) },
-                            placeholder = { Text("09:00 ص", fontSize = 11.sp) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            singleLine = true
+                            value = description,
+                            onValueChange = { description = it },
+                            label = { Text("تفاصيل وملاحظات الفعالية", fontSize = tanweerTextSize(12f)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 2,
+                            maxLines = 4,
+                            shape = RoundedCornerShape(12.dp)
                         )
                     }
-
-                    OutlinedTextField(
-                        value = location,
-                        onValueChange = { location = it },
-                        label = { Text("المكان / القاعة (اختياري)", fontSize = 12.sp) },
-                        placeholder = { Text("مسرح المدرسة / القاعة الرياضية", fontSize = 12.sp) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        singleLine = true
-                    )
-
-                    OutlinedTextField(
-                        value = description,
-                        onValueChange = { description = it },
-                        label = { Text("تفاصيل وملاحظات الفعالية", fontSize = 12.sp) },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 2,
-                        maxLines = 4,
-                        shape = RoundedCornerShape(12.dp)
-                    )
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.End
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(onClick = dismissDialog) {
+                        TextButton(
+                            enabled = !isSavingEvent,
+                            onClick = dismissDialog
+                        ) {
                             Text("إلغاء", color = TextSecondary)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
+                            enabled = title.isNotBlank() && eventDate.isNotBlank() && !isSavingEvent,
                             onClick = {
-                                if (title.isBlank() || eventDate.isBlank()) {
+                                if (title.isBlank() || eventDate.isBlank() || isSavingEvent) {
                                     Toast.makeText(context, "يرجى كتابة عنوان الفعالية وتاريخها", Toast.LENGTH_SHORT).show()
                                     return@Button
                                 }
+                                isSavingEvent = true
                                 viewModel.addEvent(
                                     title = title.trim(),
                                     description = description.trim().ifBlank { null },
@@ -487,10 +555,12 @@ fun EventsScreen(
                                     onResult = { res ->
                                         res.fold(
                                             onSuccess = { addRes ->
+                                                isSavingEvent = false
                                                 Toast.makeText(context, addRes.message, Toast.LENGTH_SHORT).show()
                                                 dismissDialog()
                                             },
                                             onFailure = { error ->
+                                                isSavingEvent = false
                                                 val err = error.message ?: "حدث خطأ أثناء حفظ الفعالية"
                                                 Toast.makeText(context, "تعذر إضافة الفعالية: $err", Toast.LENGTH_LONG).show()
                                             }
@@ -501,8 +571,282 @@ fun EventsScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("نشر الفعالية ✨", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (isSavingEvent) "جارٍ النشر..." else "نشر الفعالية ✨",
+                                color = TextOnAccent,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
+                    }
+                }
+            }
+        }
+    }
+    selectedEvent?.let { event ->
+        EventDetailsDialog(
+            event = event,
+            canEdit = EventOwnershipPolicy.canEdit(event, currentUser?.id.orEmpty(), currentUser?.role.orEmpty()),
+            canDelete = EventOwnershipPolicy.canDelete(event, currentUser?.id.orEmpty(), currentUser?.role.orEmpty()),
+            onDismiss = { selectedEvent = null },
+            onEdit = {
+                selectedEvent = null
+                editingEvent = event
+            },
+            onDelete = {
+                selectedEvent = null
+                deletingEvent = event
+            }
+        )
+    }
+    editingEvent?.let { event ->
+        EventEditDialog(
+            event = event,
+            isSaving = isEventMutationInProgress,
+            onDismiss = { if (!isEventMutationInProgress) editingEvent = null },
+            onSave = { eventDate, timeStr, title, description, location ->
+                isEventMutationInProgress = true
+                viewModel.updateEvent(
+                    eventId = event.id,
+                    previousEventDate = event.eventDate,
+                    eventDate = eventDate,
+                    timeStr = timeStr,
+                    title = title,
+                    description = description,
+                    location = location
+                ) { result ->
+                    isEventMutationInProgress = false
+                    result.fold(
+                        onSuccess = {
+                            editingEvent = null
+                            Toast.makeText(context, context.getString(R.string.event_updated_success), Toast.LENGTH_SHORT).show()
+                        },
+                        onFailure = { error ->
+                            val detail = error.message ?: context.getString(R.string.event_update_failed)
+                            Toast.makeText(context, "${context.getString(R.string.event_update_failed)}: $detail", Toast.LENGTH_LONG).show()
+                        }
+                    )
+                }
+            }
+        )
+    }
+    deletingEvent?.let { event ->
+        AlertDialog(
+            onDismissRequest = { if (!isEventMutationInProgress) deletingEvent = null },
+            title = { Text(stringResource(R.string.event_delete_confirm_title)) },
+            text = { Text(stringResource(R.string.event_delete_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    enabled = !isEventMutationInProgress,
+                    onClick = {
+                        isEventMutationInProgress = true
+                        viewModel.deleteEvent(event.id, event.eventDate) { result ->
+                            isEventMutationInProgress = false
+                            result.fold(
+                                onSuccess = {
+                                    deletingEvent = null
+                                    Toast.makeText(context, context.getString(R.string.event_deleted_success), Toast.LENGTH_SHORT).show()
+                                },
+                                onFailure = { error ->
+                                    val detail = error.message ?: context.getString(R.string.event_delete_failed)
+                                    Toast.makeText(context, "${context.getString(R.string.event_delete_failed)}: $detail", Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        }
+                    }
+                ) {
+                    Text(stringResource(R.string.event_delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isEventMutationInProgress,
+                    onClick = { deletingEvent = null }
+                ) {
+                    Text(stringResource(R.string.event_close))
+                }
+            }
+        )
+    }
+}
+@Composable
+private fun EventDetailsDialog(
+    event: SchoolEventItem,
+    canEdit: Boolean,
+    canDelete: Boolean,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        GlassCard(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            borderColor = PurpleAccent,
+            backgroundColor = MidnightSurface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 580.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.event_details_title),
+                    fontSize = tanweerTextSize(16f),
+                    fontWeight = FontWeight.Bold,
+                    color = CyanAccent
+                )
+                Text(
+                    text = event.title,
+                    fontSize = tanweerTextSize(18f),
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                EventDetailLine(stringResource(R.string.event_details_category), localizedEventCategoryLabel(event.category))
+                EventDetailLine(stringResource(R.string.event_details_date), event.eventDate)
+                event.timeStr?.takeIf { it.isNotBlank() }?.let {
+                    EventDetailLine(stringResource(R.string.event_details_time), it)
+                }
+                event.location?.takeIf { it.isNotBlank() }?.let {
+                    EventDetailLine(stringResource(R.string.event_details_location), it)
+                }
+                event.description?.takeIf { it.isNotBlank() }?.let {
+                    EventDetailLine(stringResource(R.string.event_details_description), it)
+                }
+                if (event.isOfficial || event.category.equals("ANNOUNCEMENT", ignoreCase = true)) {
+                    GlassPill(
+                        text = "${event.sourceName ?: stringResource(R.string.event_school_admin_name)} • ${stringResource(R.string.event_official_mark)}",
+                        color = WarmAmber,
+                        bgColor = AmberGlow
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.event_close), color = TextSecondary)
+                    }
+                    if (canEdit) {
+                        TextButton(onClick = onEdit) {
+                            Text(stringResource(R.string.event_edit), color = CyanAccent)
+                        }
+                    }
+                    if (canDelete) {
+                        TextButton(onClick = onDelete) {
+                            Text(stringResource(R.string.event_delete), color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EventDetailLine(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(label, fontSize = tanweerTextSize(11f), color = CyanAccent, fontWeight = FontWeight.SemiBold)
+        Text(value, fontSize = tanweerTextSize(13f), color = TextPrimary, lineHeight = tanweerLineHeight(19f))
+    }
+}
+
+@Composable
+private fun EventEditDialog(
+    event: SchoolEventItem,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (eventDate: String, timeStr: String?, title: String, description: String?, location: String?) -> Unit
+) {
+    val context = LocalContext.current
+    var title by remember(event.id) { mutableStateOf(event.title) }
+    var eventDate by remember(event.id) { mutableStateOf(event.eventDate) }
+    var timeStr by remember(event.id) { mutableStateOf(event.timeStr.orEmpty()) }
+    var description by remember(event.id) { mutableStateOf(event.description.orEmpty()) }
+    var location by remember(event.id) { mutableStateOf(event.location.orEmpty()) }
+
+    Dialog(onDismissRequest = { if (!isSaving) onDismiss() }) {
+        GlassCard(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            borderColor = PurpleAccent,
+            backgroundColor = MidnightSurface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 620.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.event_edit_title),
+                    fontSize = tanweerTextSize(16f),
+                    fontWeight = FontWeight.Bold,
+                    color = CyanAccent
+                )
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text(stringResource(R.string.event_title_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = eventDate,
+                    onValueChange = { eventDate = it },
+                    label = { Text(stringResource(R.string.event_date_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = timeStr,
+                    onValueChange = { timeStr = it },
+                    label = { Text(stringResource(R.string.event_time_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = location,
+                    onValueChange = { location = it },
+                    label = { Text(stringResource(R.string.event_location_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text(stringResource(R.string.event_description_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 5
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(enabled = !isSaving, onClick = onDismiss) {
+                        Text(stringResource(R.string.event_close), color = TextSecondary)
+                    }
+                    Button(
+                        enabled = !isSaving,
+                        onClick = {
+                            if (title.isBlank() || eventDate.isBlank()) {
+                                Toast.makeText(context, context.getString(R.string.event_required_fields), Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            onSave(
+                                eventDate.trim(),
+                                timeStr.trim().ifBlank { null },
+                                title.trim(),
+                                description.trim().ifBlank { null },
+                                location.trim().ifBlank { null }
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(stringResource(R.string.event_save_changes), color = TextOnAccent, fontWeight = FontWeight.Bold)
                     }
                 }
             }
