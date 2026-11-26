@@ -1,4 +1,4 @@
-package com.magd.tanweer.ui.screens
+﻿package com.magd.tanweer.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -1751,134 +1752,137 @@ fun ExamDetailModal(
         containerColor = MidnightSurface,
         dragHandle = { BottomSheetDefaults.DragHandle(color = RubyRed) }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = exam.subjectIcon, fontSize = tanweerTextSize(26f))
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(text = "اختبار ${exam.subjectName}", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Black, color = TextPrimary)
-                            ExamTypePill(exam.examType)
-                        }
-                        Text(text = exam.title, fontSize = tanweerTextSize(13f), color = TextSecondary)
-                    }
-                }
-
+        StickyActionSheetLayout(
+            maxHeightFraction = 0.9f,
+            bodyContent = {
                 Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    val dateStatusText = when {
-                        isDatePassed -> R.string.exam_schedule_status_passed
-                        exam.examDate == todayDateStr -> R.string.exam_schedule_status_today
-                        else -> R.string.exam_schedule_status_upcoming
+                    // Header and status remain part of the scrollable details area.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = exam.subjectIcon, fontSize = tanweerTextSize(26f))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(text = "?????? ${exam.subjectName}", fontSize = tanweerTextSize(16f), fontWeight = FontWeight.Black, color = TextPrimary)
+                                    ExamTypePill(exam.examType)
+                                }
+                                Text(text = exam.title, fontSize = tanweerTextSize(13f), color = TextSecondary)
+                            }
+                        }
+
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            val dateStatusText = when {
+                                isDatePassed -> R.string.exam_schedule_status_passed
+                                exam.examDate == todayDateStr -> R.string.exam_schedule_status_today
+                                else -> R.string.exam_schedule_status_upcoming
+                            }
+                            val dateStatusColor = when {
+                                isDatePassed -> WarmAmber
+                                exam.examDate == todayDateStr -> EmeraldGreen
+                                else -> CyanAccent
+                            }
+                            GlassPill(
+                                text = stringResource(dateStatusText),
+                                color = dateStatusColor,
+                                bgColor = dateStatusColor.copy(alpha = 0.15f)
+                            )
+                            GlassPill(
+                                text = stringResource(
+                                    if (isReviewed) R.string.exam_review_status_reviewed else R.string.exam_review_status_not_reviewed
+                                ),
+                                color = if (isReviewed) EmeraldGreen else RubyRed,
+                                bgColor = if (isReviewed) EmeraldGreen.copy(alpha = 0.15f) else RubyRed.copy(alpha = 0.15f)
+                            )
+                        }
                     }
-                    val dateStatusColor = when {
-                        isDatePassed -> WarmAmber
-                        exam.examDate == todayDateStr -> EmeraldGreen
-                        else -> CyanAccent
+
+                    HorizontalDivider(color = GlassBorderSubtle)
+
+                    GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(text = "???? ????????:", fontSize = tanweerTextSize(11f), color = TextSecondary)
+                                Text(text = "$dayName ? ${exam.examDate}", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = WarmAmber)
+                            }
+                            GlassButton(
+                                text = if (exam.isCompleted) "????? ???????? ??" else "??? ???????? ?",
+                                color = if (exam.isCompleted) EmeraldGreen else CyanAccent,
+                                textColor = Color.White,
+                                onClick = onToggleDone,
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            )
+                        }
                     }
-                    GlassPill(
-                        text = stringResource(dateStatusText),
-                        color = dateStatusColor,
-                        bgColor = dateStatusColor.copy(alpha = 0.15f)
-                    )
-                    GlassPill(
-                        text = stringResource(
-                            if (isReviewed) R.string.exam_review_status_reviewed else R.string.exam_review_status_not_reviewed
-                        ),
-                        color = if (isReviewed) EmeraldGreen else RubyRed,
-                        bgColor = if (isReviewed) EmeraldGreen.copy(alpha = 0.15f) else RubyRed.copy(alpha = 0.15f)
-                    )
+
+                    if (!exam.requiredChapters.isNullOrBlank()) {
+                        GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(text = "?????? ?????????? ???????:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
+                                Text(text = localizedChapterListLabel(exam.requiredChapters), fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
+                            }
+                        }
+                    }
+
+                    if (!exam.notes.isNullOrBlank()) {
+                        GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(text = "??????? ??????? ???????:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = WarmAmber)
+                                Text(text = exam.notes, fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
+                            }
+                        }
+                    }
+
+                    if (canEdit) {
+                        GlassOutlinedButton(
+                            text = stringResource(R.string.exam_edit_action),
+                            onClick = onEdit,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
-            }
-
-            HorizontalDivider(color = GlassBorderSubtle)
-
-            // Date and Day Row
-            GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
+            },
+            footerContent = {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .testTag("exam_detail_action_footer"),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column {
-                        Text(text = "موعد الاختبار:", fontSize = tanweerTextSize(11f), color = TextSecondary)
-                        Text(text = "$dayName • ${exam.examDate}", fontSize = tanweerTextSize(14f), fontWeight = FontWeight.Bold, color = WarmAmber)
-                    }
-
-                    // Toggle review completion button (Point 19)
                     GlassButton(
-                        text = if (exam.isCompleted) "إلغاء المراجعة ↩️" else "تمت المراجعة ✓",
-                        color = if (exam.isCompleted) EmeraldGreen else CyanAccent,
+                        text = "????? ??????? ??",
+                        color = WarmAmber,
                         textColor = Color.White,
-                        onClick = onToggleDone,
-                        modifier = Modifier.height(34.dp)
+                        onClick = onScheduleReminder,
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("exam_detail_reminder_action")
+                    )
+
+                    GlassOutlinedButton(
+                        text = bookActionLabel,
+                        onClick = onOpenLibraryBook,
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("exam_detail_book_action")
                     )
                 }
             }
-
-            if (!exam.requiredChapters.isNullOrBlank()) {
-                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(text = "الفصول والموضوعات المقررة:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = CyanAccent)
-                        Text(text = localizedChapterListLabel(exam.requiredChapters), fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
-                    }
-                }
-            }
-
-            if (!exam.notes.isNullOrBlank()) {
-                GlassCard(modifier = Modifier.fillMaxWidth(), backgroundColor = GlassSurface) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(text = "الأستاذ والقاعة المخصصة:", fontSize = tanweerTextSize(12f), fontWeight = FontWeight.Bold, color = WarmAmber)
-                        Text(text = exam.notes, fontSize = tanweerTextSize(13f), color = TextPrimary, modifier = Modifier.padding(top = 4.dp))
-                    }
-                }
-            }
-
-            if (canEdit) {
-                GlassOutlinedButton(
-                    text = stringResource(R.string.exam_edit_action),
-                    onClick = onEdit,
-                    modifier = Modifier.fillMaxWidth().height(42.dp)
-                )
-            }
-
-            // Actions Row: Set Reminder (Point 21) & Open Book
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                GlassButton(
-                    text = "تذكير بالموعد 🔔",
-                    color = WarmAmber,
-                    textColor = Color.White,
-                    onClick = onScheduleReminder,
-                    modifier = Modifier.weight(1f).height(46.dp)
-                )
-
-                GlassOutlinedButton(
-                    text = bookActionLabel,
-                    onClick = onOpenLibraryBook,
-                    modifier = Modifier.weight(1f).height(46.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+        )
     }
 }
 

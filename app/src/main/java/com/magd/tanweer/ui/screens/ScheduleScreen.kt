@@ -1,4 +1,4 @@
-package com.magd.tanweer.ui.screens
+﻿package com.magd.tanweer.ui.screens
 
 import android.widget.Toast
 import androidx.compose.animation.*
@@ -28,6 +28,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -1012,129 +1013,134 @@ fun SubjectPickerSheet(
         containerColor = MidnightSurface,
         dragHandle = { BottomSheetDefaults.DragHandle(color = CyanAccent) }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 18.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // Clean Header: "اختيار مادة"
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "اختيار مادة 📚",
-                        fontSize = tanweerTextSize(18f),
-                        fontWeight = FontWeight.Black,
-                        color = CyanAccent
-                    )
-                    Text(
-                        text = "$dayName • $periodTitle ($startTime - $endTime)",
-                        fontSize = tanweerTextSize(12f),
-                        color = TextSecondary
-                    )
-                }
-            }
-
-            // Grid of Grade Subjects (No Computer, With PE)
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 260.dp)
-            ) {
-                items(gradeSubjects, key = { it.id }) { subj ->
-                    val isSelected = selectedSubject?.id == subj.id
-                    val color = try {
-                        Color(android.graphics.Color.parseColor(subj.colorHex))
-                    } catch (_: Exception) {
-                        CyanAccent
+        StickyActionSheetLayout(
+            maxHeightFraction = 0.9f,
+            bodyContent = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "?????? ???? ??",
+                                fontSize = tanweerTextSize(18f),
+                                fontWeight = FontWeight.Black,
+                                color = CyanAccent
+                            )
+                            Text(
+                                text = "$dayName ? $periodTitle ($startTime - $endTime)",
+                                fontSize = tanweerTextSize(12f),
+                                color = TextSecondary
+                            )
+                        }
                     }
 
-                    Box(
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSelected) color.copy(alpha = 0.25f) else GlassSurface)
-                            .border(1.2.dp, if (isSelected) color else GlassBorderSubtle, RoundedCornerShape(12.dp))
-                            .clickable { selectedSubject = subj }
-                            .padding(10.dp)
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp)
+                            .testTag("schedule_subject_grid")
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(text = subj.icon, fontSize = tanweerTextSize(18f))
-                            Text(
-                                text = subj.name,
-                                fontSize = tanweerTextSize(12f),
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) color else TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (isSelected) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+                        items(gradeSubjects, key = { it.id }) { subj ->
+                            val isSelected = selectedSubject?.id == subj.id
+                            val color = try {
+                                Color(android.graphics.Color.parseColor(subj.colorHex))
+                            } catch (_: Exception) {
+                                CyanAccent
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSelected) color.copy(alpha = 0.25f) else GlassSurface)
+                                    .border(1.2.dp, if (isSelected) color else GlassBorderSubtle, RoundedCornerShape(12.dp))
+                                    .clickable { selectedSubject = subj }
+                                    .padding(10.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(text = subj.icon, fontSize = tanweerTextSize(18f))
+                                    Text(
+                                        text = subj.name,
+                                        fontSize = tanweerTextSize(12f),
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) color else TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (isSelected) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+                                    }
+                                }
                             }
                         }
                     }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        GlassTextField(
+                            value = startTime,
+                            onValueChange = { startTime = it },
+                            label = "??? ?????",
+                            placeholder = "08:00",
+                            modifier = Modifier.weight(1f)
+                        )
+                        GlassTextField(
+                            value = endTime,
+                            onValueChange = { endTime = it },
+                            label = "??? ????????",
+                            placeholder = "08:45",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
-            }
+            },
+            footerContent = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("schedule_subject_action_footer"),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (existingSlot != null) {
+                        GlassOutlinedButton(
+                            text = "????? ???",
+                            onClick = onDelete,
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                        )
+                    }
 
-            // Times
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                GlassTextField(
-                    value = startTime,
-                    onValueChange = { startTime = it },
-                    label = "وقت البدء",
-                    placeholder = "08:00",
-                    modifier = Modifier.weight(1f)
-                )
-                GlassTextField(
-                    value = endTime,
-                    onValueChange = { endTime = it },
-                    label = "وقت الانتهاء",
-                    placeholder = "08:45",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            // Actions
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (existingSlot != null) {
-                    GlassOutlinedButton(
-                        text = "تفريغ 🗑️",
-                        onClick = onDelete,
-                        modifier = Modifier.weight(1f)
+                    GlassButton(
+                        text = if (existingSlot != null) "????? ?????" else "????? ?? ??????",
+                        enabled = selectedSubject != null,
+                        onClick = {
+                            selectedSubject?.let { subject ->
+                                onSave(subject.id, subject.name, subject.icon, subject.colorHex, startTime, endTime)
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(if (existingSlot != null) 2f else 1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("schedule_subject_save_action")
                     )
                 }
-
-                GlassButton(
-                    text = if (existingSlot != null) "تحديث الحصة" else "تثبيت في الجدول",
-                    enabled = selectedSubject != null,
-                    onClick = {
-                        selectedSubject?.let { s ->
-                            onSave(s.id, s.name, s.icon, s.colorHex, startTime, endTime)
-                        }
-                    },
-                    modifier = Modifier.weight(2f)
-                )
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+        )
     }
 }
 

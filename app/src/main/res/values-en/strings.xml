@@ -283,4 +283,5 @@
     <string name="hub_role_center_required_badge">Requires Class Moderator or higher</string>
     <string name="hub_role_center_request_upgrade">Request a role upgrade from your profile</string>
     <string name="group_members_scroll_hint">Scroll within this list to see the remaining members and their actions ↓</string>
+    <string name="sticky_sheet_scroll_hint">Scroll to see more details; actions stay visible below</string>
 </resources>
